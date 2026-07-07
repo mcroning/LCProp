@@ -1,0 +1,20 @@
+[project]
+name = "lcprop"
+version = "0.1.0"
+description = "Optical beam propagation in liquid crystal media"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+]
+
+[project.optional-dependencies]
+gpu = ["cupy-cuda12x"]
+gui = ["PySide6", "pyqtgraph"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
