@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QTextEdit, QTabWidget, QVBoxLayout, QWidget
 
-from lcprop.gui.views import ImagePane, LongitudinalPane
+from lcprop.gui.views import ImagePane, LongitudinalPane, CurvePane
 
 
 class Workspace(QWidget):
@@ -20,6 +20,9 @@ class Workspace(QWidget):
 
         self.longitudinal_pane = LongitudinalPane()
         self.tabs.addTab(self.longitudinal_pane, "Longitudinal")
+
+        self.curve_pane = CurvePane()
+        self.tabs.addTab(self.curve_pane, "Curves")
 
         self.diagnostics_view = QTextEdit()
         self.diagnostics_view.setReadOnly(True)
@@ -42,8 +45,11 @@ class Workspace(QWidget):
     def set_run_data(self, run_data) -> None:
         self.image_pane.set_run_data(run_data)
         self.longitudinal_pane.set_run_data(run_data)
+        self.curve_pane.set_run_data(run_data)
 
-        if self.longitudinal_pane.field_selector.count() > 0:
+        if self.curve_pane.curve_selector.count() > 0 and not run_data.fields:
+            self.tabs.setCurrentWidget(self.curve_pane)
+        elif self.longitudinal_pane.field_selector.count() > 0:
             self.tabs.setCurrentWidget(self.longitudinal_pane)
         else:
             self.tabs.setCurrentWidget(self.image_pane)
