@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
 )
 
+from lcprop.products.data_model import to_run_data
 from lcprop.core.requests import StaticRunRequest, OutputOptions
 from lcprop.runners.local import LocalRunner
 from lcprop.gui.panels import (
@@ -96,6 +97,9 @@ class LCPropMainWindow(QWidget):
 
             runner_result = self.runner.run_static(req)
             result = runner_result.result
+
+            run_data = to_run_data(result)
+            self.results_panel.set_run_data(run_data)
 
             self.results_panel.append_console("")
             self.results_panel.append_console(runner_result.message)

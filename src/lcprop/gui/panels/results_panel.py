@@ -1,24 +1,24 @@
-from PySide6.QtWidgets import QLabel, QTextEdit, QVBoxLayout, QWidget
+from __future__ import annotations
+
+from PySide6.QtWidgets import QVBoxLayout, QWidget
+
+from lcprop.gui.workspace import Workspace
 
 
 class ResultsPanel(QWidget):
+    """Thin panel wrapper around Workspace."""
+
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-
-        self.request_summary = QTextEdit()
-        self.request_summary.setReadOnly(True)
-
-        self.output = QTextEdit()
-        self.output.setReadOnly(True)
-
-        layout.addWidget(QLabel("Request summary"))
-        layout.addWidget(self.request_summary)
-        layout.addWidget(QLabel("Run console"))
-        layout.addWidget(self.output)
+        self.workspace = Workspace()
+        layout.addWidget(self.workspace)
 
     def set_request_summary(self, text: str) -> None:
-        self.request_summary.setPlainText(text)
+        self.workspace.set_request_summary(text)
 
     def append_console(self, text: str) -> None:
-        self.output.append(text)
+        self.workspace.append_console(text)
+
+    def set_run_data(self, run_data) -> None:
+        self.workspace.set_run_data(run_data)
