@@ -29,3 +29,15 @@ def test_local_runner_static_smoke():
     assert result.kind == "static"
     assert result.result.A_final.shape == (1, 64, 64)
     assert result.result.theta_final.shape == (64, 64)
+
+
+def test_gui_request_description_contains_key_fields():
+    app = QApplication.instance() or QApplication([])
+    win = LCPropMainWindow()
+    req = win.build_request()
+    text = win.describe_request(req)
+
+    assert "Experiment: Static propagation" in text
+    assert "Runner: Local CPU" in text
+    assert "Beam: P=1" in text
+    assert "Workflow: fixed_theta" in text
