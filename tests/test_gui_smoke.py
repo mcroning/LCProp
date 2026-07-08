@@ -40,4 +40,4 @@ def test_gui_request_description_contains_key_fields():
     assert "Experiment: Static propagation" in text
     assert "Runner: Local CPU" in text
     assert "Beam: P=1" in text
-    assert "Workflow: fixed_theta" in text
+    assert "Workflow: local_self_consistent" in text

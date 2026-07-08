@@ -11,7 +11,8 @@ class SolverPanel(QWidget):
         form = QFormLayout()
 
         self.workflow = QComboBox()
-        self.workflow.addItems(["fixed_theta", "local_self_consistent"])
+        self.workflow.addItems(["local_self_consistent", "fixed_theta"])
+        self.workflow.setCurrentText("local_self_consistent")
         self.max_iterations = spin_box(1, 1000, 3)
         self.Nt = spin_box(1, 100000, 2)
         self.dt = spin_box(1, 1000000, 750)
@@ -23,6 +24,12 @@ class SolverPanel(QWidget):
 
         layout.addLayout(form)
         layout.addStretch(1)
+
+    def set_experiment_mode(self, experiment: str) -> None:
+        """Show only controls relevant to the selected experiment."""
+        is_td = experiment == "Time-dependent propagation"
+        self.workflow.setEnabled(not is_td)
+        self.max_iterations.setEnabled(not is_td)
 
     def solver(self) -> StaticSolverOptions:
         if self.workflow.currentText() == "fixed_theta":

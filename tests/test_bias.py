@@ -1,8 +1,9 @@
 import numpy as np
 
-from lcprop.core.context import GridSpec, BiasSpec
+from lcprop.core.context import GridSpec, BiasSpec, LCMaterial
 from lcprop.core.grid import make_grid
-from lcprop.lc.bias import build_cosine_bias_2d, stack_theta, build_bias
+from lcprop.lc.bias_cosine import build_cosine_bias_2d
+from lcprop.lc.bias import stack_theta, build_bias
 
 
 def test_cosine_bias_shape_and_boundary_rows():
@@ -38,8 +39,8 @@ def test_stack_theta_shape():
 def test_build_bias_result():
     grid = make_grid(GridSpec(Nx=16, Ny=8, dz_um=5.0, z_length_um=50.0))
     bias = BiasSpec(theta_bc=0.1)
-
-    result = build_bias(bias, grid)
+    material = LCMaterial()
+    result = build_bias(bias, grid, material)
 
     assert result.theta_2d.shape == (16, 8)
     assert result.theta_stack.shape == (10, 16, 8)

@@ -257,11 +257,18 @@ class RunData:
 def _geometry_from_grid_summary(grid_summary: dict) -> Geometry:
     nx = int(grid_summary["Nx"])
     ny = int(grid_summary["Ny"])
-    nz = int(grid_summary.get("Nz", 1))
-
+    # Some result objects historically omitted/staled Nz; use physical length as a fallback.
     dx = float(grid_summary["dx_um"])
     dy = float(grid_summary["dy_um"])
     dz = float(grid_summary.get("dz_um", 1.0))
+
+    nz_from_summary = int(grid_summary.get("Nz", 0) or 0)
+    z_length_um = grid_summary.get("z_length_um")
+    if z_length_um is not None and dz > 0.0:
+        nz_from_length = max(1, int(round(float(z_length_um) / dz)))
+    else:
+        nz_from_length = 0
+    nz = max(nz_from_summary, nz_from_length, 1)
 
     x = (np.arange(nx) - 0.5 * (nx - 1)) * dx
     y = (np.arange(ny) - 0.5 * (ny - 1)) * dy

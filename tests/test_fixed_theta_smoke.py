@@ -42,7 +42,8 @@ def test_one_slice_fixed_theta_smoke():
     )
 
     grid = make_grid(request.grid)
-    bias = build_bias(request.bias, grid)
+    material = LCMaterial()
+    bias = build_bias(request.bias, grid, material)
     launch = build_launch(request.beams, grid)
 
     A = launch.A0.copy()

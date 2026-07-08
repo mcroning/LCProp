@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
 )
 
 from lcprop.products.data_model import to_run_data
-from lcprop.core.requests import StaticRunRequest, TimeDependentRunRequest, OutputOptions
 from lcprop.runners.local import LocalRunner
 from lcprop.gui.panels import (
     ExperimentPanel,
@@ -30,6 +29,8 @@ class LCPropMainWindow(QWidget):
         super().__init__()
         self.runner = LocalRunner()
         self.setWindowTitle("LCProp")
+        # Default to a wide scientific-visualization layout.
+        self.setMinimumSize(1200, 760)
 
         root = QVBoxLayout(self)
 
@@ -62,9 +63,12 @@ class LCPropMainWindow(QWidget):
         self.tabs.addTab(self.results_panel, "Results")
         self.experiment_panel.experimentChanged.connect(self.update_run_button)
         self.update_run_button()   
+        self.resize(1450, 900)
 
     def update_run_button(self) -> None:
-        self.run_button.setText(f"Run {self.experiment_panel.current_experiment()}")
+        experiment = self.experiment_panel.current_experiment()
+        self.run_button.setText(f"Run {experiment}")
+        self.solver_panel.set_experiment_mode(experiment)
 
     def build_request(self) -> StaticRunRequest:
         return StaticRunRequest(

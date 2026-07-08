@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QTextEdit, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QTextEdit, QSplitter, QTabWidget, QVBoxLayout, QWidget
 
 from lcprop.gui.views import ImagePane, LongitudinalPane, CurvePane
 
@@ -16,10 +17,25 @@ class Workspace(QWidget):
         layout.addWidget(self.tabs)
 
         self.image_pane = ImagePane()
-        self.tabs.addTab(self.image_pane, "Images")
-
         self.longitudinal_pane = LongitudinalPane()
-        self.tabs.addTab(self.longitudinal_pane, "Longitudinal")
+
+        self.fields_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.fields_splitter.addWidget(self.image_pane)
+        self.fields_splitter.addWidget(self.longitudinal_pane)
+        self.fields_splitter.setStretchFactor(0, 3)
+        self.fields_splitter.setStretchFactor(1, 4)
+        self.fields_splitter.setSizes([420, 560])
+        self.tabs.addTab(self.fields_splitter, "Fields")
+
+        self.image_pane.positionSelected.connect(
+            self._image_position_selected
+        )
+        self.longitudinal_pane.cutChanged.connect(
+            self._longitudinal_cut_changed
+        )
+        self.longitudinal_pane.guidesVisibilityChanged.connect(
+            self._guides_visibility_changed
+        )
 
         self.curve_pane = CurvePane()
         self.tabs.addTab(self.curve_pane, "Curves")
@@ -42,17 +58,30 @@ class Workspace(QWidget):
     def append_console(self, text: str) -> None:
         self.console.append(text)
 
+    def _image_position_selected(self, ix: int, iy: int) -> None:
+        self.longitudinal_pane.set_cut_indices(ix, iy)
+
+    def _longitudinal_cut_changed(self, ix: int, iy: int) -> None:
+        self.image_pane.set_crosshair(ix, iy)
+
+    def _guides_visibility_changed(self, visible: bool) -> None:
+        if visible:
+            self.image_pane.set_crosshair(
+                self.longitudinal_pane.x_cut_slider.value(),
+                self.longitudinal_pane.y_cut_slider.value(),
+            )
+        else:
+            self.image_pane.clear_crosshair()
+
     def set_run_data(self, run_data) -> None:
         self.image_pane.set_run_data(run_data)
         self.longitudinal_pane.set_run_data(run_data)
         self.curve_pane.set_run_data(run_data)
 
-        if self.curve_pane.curve_selector.count() > 0 and not run_data.fields:
+        if run_data.fields:
+            self.tabs.setCurrentWidget(self.fields_splitter)
+        elif self.curve_pane.curve_selector.count() > 0:
             self.tabs.setCurrentWidget(self.curve_pane)
-        elif self.longitudinal_pane.field_selector.count() > 0:
-            self.tabs.setCurrentWidget(self.longitudinal_pane)
-        else:
-            self.tabs.setCurrentWidget(self.image_pane)
 
         self.diagnostics_view.setPlainText(self._format_diagnostics(run_data))
 
