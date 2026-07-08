@@ -10,6 +10,38 @@ from lcprop.core.backend import asnumpy
 from lcprop.optics.splitstep import total_intensity
 
 
+
+@dataclass(frozen=True)
+class Geometry:
+    """Physical coordinate vectors for a run."""
+
+    x: Any | None = None
+    y: Any | None = None
+    z: Any | None = None
+    units: str = "um"
+
+    def extent_xy(self):
+        if self.x is None or self.y is None:
+            return None
+        x = np.asarray(self.x)
+        y = np.asarray(self.y)
+        return [float(x[0]), float(x[-1]), float(y[0]), float(y[-1])]
+
+    def extent_zx(self):
+        if self.z is None or self.x is None:
+            return None
+        z = np.asarray(self.z)
+        x = np.asarray(self.x)
+        return [float(z[0]), float(z[-1]), float(x[0]), float(x[-1])]
+
+    def extent_zy(self):
+        if self.z is None or self.y is None:
+            return None
+        z = np.asarray(self.z)
+        y = np.asarray(self.y)
+        return [float(z[0]), float(z[-1]), float(y[0]), float(y[-1])]
+
+
 @dataclass(frozen=True)
 class FieldData:
     key: str
@@ -150,9 +182,28 @@ class DiagnosticCollection:
 @dataclass(frozen=True)
 class RunData:
     workflow: str
+    geometry: Geometry = field(default_factory=Geometry)
     fields: FieldCollection = field(default_factory=FieldCollection)
     curves: CurveCollection = field(default_factory=CurveCollection)
     diagnostics: DiagnosticCollection = field(default_factory=DiagnosticCollection)
+
+
+
+
+def _geometry_from_grid_summary(grid_summary: dict) -> Geometry:
+    nx = int(grid_summary["Nx"])
+    ny = int(grid_summary["Ny"])
+    nz = int(grid_summary.get("Nz", 1))
+
+    dx = float(grid_summary["dx_um"])
+    dy = float(grid_summary["dy_um"])
+    dz = float(grid_summary.get("dz_um", 1.0))
+
+    x = (np.arange(nx) - 0.5 * (nx - 1)) * dx
+    y = (np.arange(ny) - 0.5 * (ny - 1)) * dy
+    z = np.arange(nz) * dz
+
+    return Geometry(x=x, y=y, z=z, units="um")
 
 
 def _intensity_from_A(A, *, coherent: bool = False):
@@ -162,6 +213,7 @@ def _intensity_from_A(A, *, coherent: bool = False):
 def from_static_result(result) -> RunData:
     return RunData(
         workflow="static",
+        geometry=_geometry_from_grid_summary(result.grid_summary),
         fields=FieldCollection([
             ("intensity", FieldData("intensity", "Intensity", _intensity_from_A(result.A_final), ("x", "y"), "intensity", {"x": "um", "y": "um"})),
             ("theta", FieldData("theta", "Theta", asnumpy(result.theta_final), ("x", "y"), "theta", {"x": "um", "y": "um", "theta": "rad"})),
@@ -183,11 +235,17 @@ def from_static_result(result) -> RunData:
 
 
 def from_timedependent_result(result) -> RunData:
+    theta_stack = asnumpy(result.theta_final)
+    theta_bias = asnumpy(result.theta_bias)
+    delta_theta_stack = theta_stack - theta_bias[None, :, :]
+
     return RunData(
         workflow="timedependent",
+        geometry=_geometry_from_grid_summary(result.grid_summary),
         fields=FieldCollection([
+            ("delta_theta_stack", FieldData("delta_theta_stack", "Delta theta stack", delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um", "theta": "rad"}, "longitudinal")),
+            ("theta_stack", FieldData("theta_stack", "Theta stack", theta_stack, ("z", "x", "y"), "theta", {"z": "um", "x": "um", "y": "um", "theta": "rad"}, "longitudinal")),
             ("final_intensity", FieldData("final_intensity", "Final intensity", _intensity_from_A(result.A_final), ("x", "y"), "intensity", {"x": "um", "y": "um"})),
-            ("theta_stack", FieldData("theta_stack", "Theta stack", asnumpy(result.theta_final), ("z", "x", "y"), "theta", {"z": "um", "x": "um", "y": "um", "theta": "rad"}, "longitudinal")),
         ]),
         diagnostics=DiagnosticCollection([
             ("summary", DiagnosticData(
@@ -291,6 +349,7 @@ __all__ = [
     "FieldCollection",
     "CurveCollection",
     "DiagnosticCollection",
+    "Geometry",
     "RunData",
     "from_static_result",
     "from_timedependent_result",

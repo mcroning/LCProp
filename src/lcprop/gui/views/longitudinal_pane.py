@@ -70,8 +70,8 @@ class LongitudinalPane(QWidget):
         ix = nx // 2
         iy = ny // 2
 
-        xz = data[:, :, iy].T
-        yz = data[:, ix, :].T
+        xz = data[:, :, iy]   # (z, x)
+        yz = data[:, ix, :]    # (z, y)
 
         xz_field = FieldData(
             key=f"{field.key}_xz",
@@ -93,5 +93,5 @@ class LongitudinalPane(QWidget):
             default_view="image",
         )
 
-        self.xz_view.set_field(xz_field)
-        self.yz_view.set_field(yz_field)
+        self.xz_view.set_field(xz_field, extent=self._run_data.geometry.extent_zx())
+        self.yz_view.set_field(yz_field, extent=self._run_data.geometry.extent_zy())

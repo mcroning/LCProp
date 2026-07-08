@@ -26,6 +26,18 @@ CouplingMode = Literal[
 ]
 
 
+
+
+Precision = Literal["float32", "float64"]
+
+
+@dataclass(frozen=True)
+class RuntimeOptions:
+    """Numerical execution options shared by workflows."""
+
+    precision: Precision = "float64"
+
+
 @dataclass(frozen=True)
 class StaticWorkflowOptions:
     """
@@ -95,6 +107,7 @@ class StaticRunRequest:
     beams: BeamStack
     solver: StaticSolverOptions
     output: OutputOptions
+    runtime: RuntimeOptions = RuntimeOptions()
 
 
 @dataclass(frozen=True)
@@ -120,3 +133,4 @@ class TimeDependentRunRequest:
     beams: BeamStack
     solver: TimeDependentSolverOptions
     output: OutputOptions
+    runtime: RuntimeOptions = RuntimeOptions()

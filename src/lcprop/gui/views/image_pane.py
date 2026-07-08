@@ -44,4 +44,8 @@ class ImagePane(QWidget):
         if key is None:
             return
 
-        self.image_view.set_field(self._run_data.fields[key])
+        field = self._run_data.fields[key]
+        extent = None
+        if field.axes == ("x", "y"):
+            extent = self._run_data.geometry.extent_xy()
+        self.image_view.set_field(field, extent=extent)

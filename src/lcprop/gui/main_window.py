@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from lcprop.products.data_model import to_run_data
-from lcprop.core.requests import StaticRunRequest, OutputOptions
+from lcprop.core.requests import StaticRunRequest, TimeDependentRunRequest, OutputOptions
 from lcprop.runners.local import LocalRunner
 from lcprop.gui.panels import (
     ExperimentPanel,
@@ -23,7 +23,7 @@ from lcprop.gui.panels import (
     SolverPanel,
     ResultsPanel,
 )
-
+from lcprop.core.requests import StaticRunRequest, TimeDependentRunRequest, OutputOptions, RuntimeOptions
 
 class LCPropMainWindow(QWidget):
     def __init__(self):
@@ -38,7 +38,7 @@ class LCPropMainWindow(QWidget):
         header.addStretch(1)
         header.addWidget(QLabel(f"Runner: {self.runner.name}"))
 
-        self.run_button = QPushButton("Run static")
+        self.run_button = QPushButton()
         self.run_button.clicked.connect(self.run_static_clicked)
         header.addWidget(self.run_button)
 
@@ -60,6 +60,11 @@ class LCPropMainWindow(QWidget):
         self.tabs.addTab(self.grid_panel, "Grid")
         self.tabs.addTab(self.solver_panel, "Solver")
         self.tabs.addTab(self.results_panel, "Results")
+        self.experiment_panel.experimentChanged.connect(self.update_run_button)
+        self.update_run_button()   
+
+    def update_run_button(self) -> None:
+        self.run_button.setText(f"Run {self.experiment_panel.current_experiment()}")
 
     def build_request(self) -> StaticRunRequest:
         return StaticRunRequest(
@@ -71,10 +76,21 @@ class LCPropMainWindow(QWidget):
             output=OutputOptions(),
         )
 
-    def describe_request(self, req: StaticRunRequest) -> str:
+    def build_timedependent_request(self) -> TimeDependentRunRequest:
+        return TimeDependentRunRequest(
+            grid=self.grid_panel.grid(),
+            material=self.physics_panel.material(),
+            bias=self.physics_panel.bias(),
+            beams=self.beam_panel.beams(),
+            solver=self.solver_panel.td_solver(),
+            output=OutputOptions(),
+            runtime=RuntimeOptions(precision="float64"),
+        )
+
+    def describe_request(self, req) -> str:
         ch = req.beams.channels[0]
         return "\n".join([
-            "Experiment: Static propagation",
+            f"Experiment: {self.experiment_panel.current_experiment()}",
             f"Runner: {self.runner.name}",
             f"Grid: {req.grid.Nx} × {req.grid.Ny}, Nz≈{round(req.grid.z_length_um / req.grid.dz_um)}",
             f"Aperture: x={req.grid.x_aperture_um:g} µm, y={req.grid.y_aperture_um:g} µm",
@@ -87,15 +103,25 @@ class LCPropMainWindow(QWidget):
 
     def run_static_clicked(self):
         self.run_button.setEnabled(False)
+        self.run_button.setText("Running…")
         self.tabs.setCurrentWidget(self.results_panel)
 
         try:
-            req = self.build_request()
+            experiment = self.experiment_panel.current_experiment()
+            if experiment == "Time-dependent propagation":
+                req = self.build_timedependent_request()
+                run_label = "time-dependent workflow"
+                runner_result_fn = self.runner.run_timedependent
+            else:
+                req = self.build_request()
+                run_label = "static workflow"
+                runner_result_fn = self.runner.run_static
+
             self.results_panel.set_request_summary(self.describe_request(req))
-            self.results_panel.append_console(f"Running static workflow with {self.runner.name}...")
+            self.results_panel.append_console(f"Running {run_label} with {self.runner.name}...")
             QApplication.processEvents()
 
-            runner_result = self.runner.run_static(req)
+            runner_result = runner_result_fn(req)
             result = runner_result.result
 
             run_data = to_run_data(result)
@@ -104,7 +130,7 @@ class LCPropMainWindow(QWidget):
             self.results_panel.append_console("")
             self.results_panel.append_console(runner_result.message)
             self.results_panel.append_console("Run complete")
-            self.results_panel.append_console(f"method: {result.method}")
+            self.results_panel.append_console(f"method: {getattr(result, 'method', runner_result.kind)}")
             self.results_panel.append_console(
                 "Nx, Ny, Nz: "
                 f"{result.grid_summary['Nx']}, "
@@ -127,3 +153,4 @@ class LCPropMainWindow(QWidget):
 
         finally:
             self.run_button.setEnabled(True)
+            self.update_run_button()

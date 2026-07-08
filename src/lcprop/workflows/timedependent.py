@@ -23,6 +23,7 @@ def run_timedependent(request: TimeDependentRunRequest) -> TimeDependentRunResul
         beams=request.beams,
         solver=StaticSolverOptions(workflow=request.solver.workflow),
         output=request.output,
+        runtime=request.runtime,
     )
 
     runtime = build_runtime_components(
@@ -66,6 +67,7 @@ def run_timedependent(request: TimeDependentRunRequest) -> TimeDependentRunResul
     return TimeDependentRunResult(
         A_final=td.A_last,
         theta_final=td.theta,
+        theta_bias=runtime.bias.theta_2d,
         power_initial=power_initial,
         power_final=power_final,
         grid_summary=runtime.grid.summary(),

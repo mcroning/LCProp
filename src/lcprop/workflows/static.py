@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from lcprop.core.requests import StaticRunRequest
 from lcprop.core.results import StaticRunResult
 from lcprop.core.grid import make_grid
@@ -31,9 +33,9 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
     request.bias.validate()
     request.beams.validate()
 
-    grid = make_grid(request.grid)
+    grid = make_grid(request.grid, real_dtype=np.float64 if request.runtime.precision == "float64" else np.float32)
     bias = build_bias(request.bias, grid)
-    launch = build_launch(request.beams, grid)
+    launch = build_launch(request.beams, grid, complex_dtype=np.complex128 if request.runtime.precision == "float64" else np.complex64)
 
     A0 = launch.A0.copy()
     power_initial = total_power(A0, grid)

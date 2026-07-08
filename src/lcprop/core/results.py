@@ -28,6 +28,7 @@ class TimeDependentRunResult:
 
     A_final: Any
     theta_final: Any
+    theta_bias: Any
 
     power_initial: float
     power_final: float
