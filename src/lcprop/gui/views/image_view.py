@@ -34,6 +34,7 @@ class ImageView(FigureCanvasQTAgg):
             origin="lower",
             aspect="auto",
             extent=extent,
+            cmap=getattr(field, "colormap", "viridis"),
         )
 
         self.ax.set_title(field.display_name)
@@ -43,6 +44,9 @@ class ImageView(FigureCanvasQTAgg):
             self.ax.set_ylabel(_label_with_unit(field.axes[1], field.units))
 
         self.colorbar = self.figure.colorbar(self.image, ax=self.ax)
+        value_unit = getattr(field, "value_unit", "")
+        if value_unit:
+            self.colorbar.set_label(value_unit)
         self.figure.tight_layout()
         self.draw_idle()
 

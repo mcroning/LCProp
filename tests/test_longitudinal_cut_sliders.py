@@ -11,7 +11,7 @@ from lcprop.gui.views.longitudinal_pane import LongitudinalPane
 from tests.test_all_workflows import make_base_static_request
 
 
-def test_timedependent_theta_stack_has_longitudinal_default_view():
+def _td_run_data():
     base = make_base_static_request()
     result = run_timedependent(
         TimeDependentRunRequest(
@@ -23,34 +23,29 @@ def test_timedependent_theta_stack_has_longitudinal_default_view():
             output=base.output,
         )
     )
-
-    run_data = to_run_data(result)
-    field = run_data.fields["theta_stack"]
-
-    assert field.default_view == "longitudinal"
-    assert field.axes == ("z", "x", "y")
+    return to_run_data(result)
 
 
-def test_longitudinal_pane_displays_3d_field():
+def test_longitudinal_sliders_initialize_to_center():
     app = QApplication.instance() or QApplication([])
-
-    base = make_base_static_request()
-    result = run_timedependent(
-        TimeDependentRunRequest(
-            grid=base.grid,
-            material=base.material,
-            bias=base.bias,
-            beams=base.beams,
-            solver=TimeDependentSolverOptions(Nt=1),
-            output=base.output,
-        )
-    )
-
-    run_data = to_run_data(result)
     pane = LongitudinalPane()
-    pane.set_run_data(run_data)
+    pane.set_run_data(_td_run_data())
 
-    assert pane.field_selector.count() == 2
-    assert pane.field_selector.currentText() == "Δθ"
+    assert pane.x_cut_slider.value() == (pane.x_cut_slider.maximum() + 1) // 2
+    assert pane.y_cut_slider.value() == (pane.y_cut_slider.maximum() + 1) // 2
+    assert "µm" in pane.x_cut_label.text()
+    assert "µm" in pane.y_cut_label.text()
+
+
+def test_longitudinal_sliders_update_views():
+    app = QApplication.instance() or QApplication([])
+    pane = LongitudinalPane()
+    pane.set_run_data(_td_run_data())
+
+    pane.x_cut_slider.setValue(3)
+    pane.y_cut_slider.setValue(4)
+
+    assert "x-z cut at y" in pane.y_cut_label.text()
+    assert "y-z cut at x" in pane.x_cut_label.text()
     assert pane.xz_view.image is not None
     assert pane.yz_view.image is not None

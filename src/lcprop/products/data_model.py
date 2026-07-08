@@ -20,26 +20,58 @@ class Geometry:
     z: Any | None = None
     units: str = "um"
 
-    def extent_xy(self):
-        if self.x is None or self.y is None:
+    def dx(self) -> float | None:
+        return self.spacing("x")
+
+    def dy(self) -> float | None:
+        return self.spacing("y")
+
+    def dz(self) -> float | None:
+        return self.spacing("z")
+
+    def spacing(self, axis: str) -> float | None:
+        coord = self.coord(axis)
+        if coord is None or coord.size < 2:
             return None
-        x = np.asarray(self.x)
-        y = np.asarray(self.y)
-        return [float(x[0]), float(x[-1]), float(y[0]), float(y[-1])]
+        return float(coord[1] - coord[0])
+
+    def coord(self, axis: str):
+        if axis not in ("x", "y", "z"):
+            raise ValueError(f"Unknown coordinate axis: {axis}")
+        value = getattr(self, axis)
+        if value is None:
+            return None
+        return np.asarray(value)
+
+    def value(self, axis: str, index: int) -> float:
+        coord = self.coord(axis)
+        if coord is None:
+            return float(index)
+        if index < 0 or index >= coord.size:
+            return float(index)
+        return float(coord[index])
+
+    def nearest_index(self, axis: str, value: float) -> int:
+        coord = self.coord(axis)
+        if coord is None or coord.size == 0:
+            return int(round(value))
+        return int(np.argmin(np.abs(coord - value)))
+
+    def extent(self, horizontal: str, vertical: str):
+        h = self.coord(horizontal)
+        v = self.coord(vertical)
+        if h is None or v is None:
+            return None
+        return [float(h[0]), float(h[-1]), float(v[0]), float(v[-1])]
+
+    def extent_xy(self):
+        return self.extent("x", "y")
 
     def extent_zx(self):
-        if self.z is None or self.x is None:
-            return None
-        z = np.asarray(self.z)
-        x = np.asarray(self.x)
-        return [float(z[0]), float(z[-1]), float(x[0]), float(x[-1])]
+        return self.extent("z", "x")
 
     def extent_zy(self):
-        if self.z is None or self.y is None:
-            return None
-        z = np.asarray(self.z)
-        y = np.asarray(self.y)
-        return [float(z[0]), float(z[-1]), float(y[0]), float(y[-1])]
+        return self.extent("z", "y")
 
 
 @dataclass(frozen=True)
@@ -51,6 +83,9 @@ class FieldData:
     kind: str
     units: dict[str, str] = field(default_factory=dict)
     default_view: str = "image"
+    quantity: str = ""
+    value_unit: str = ""
+    colormap: str = "viridis"
 
 
 @dataclass(frozen=True)
@@ -69,6 +104,35 @@ class DiagnosticData:
     key: str
     display_name: str
     values: dict[str, Any]
+
+
+
+
+def make_field(
+    key: str,
+    display_name: str,
+    data: Any,
+    axes: tuple[str, ...],
+    kind: str,
+    units: dict[str, str] | None = None,
+    default_view: str = "image",
+    *,
+    quantity: str = "",
+    value_unit: str = "",
+    colormap: str = "viridis",
+) -> FieldData:
+    return FieldData(
+        key=key,
+        display_name=display_name,
+        data=data,
+        axes=axes,
+        kind=kind,
+        units={} if units is None else units,
+        default_view=default_view,
+        quantity=quantity,
+        value_unit=value_unit,
+        colormap=colormap,
+    )
 
 
 class FieldCollection:
@@ -243,9 +307,9 @@ def from_timedependent_result(result) -> RunData:
         workflow="timedependent",
         geometry=_geometry_from_grid_summary(result.grid_summary),
         fields=FieldCollection([
-            ("delta_theta_stack", FieldData("delta_theta_stack", "Delta theta stack", delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um", "theta": "rad"}, "longitudinal")),
-            ("theta_stack", FieldData("theta_stack", "Theta stack", theta_stack, ("z", "x", "y"), "theta", {"z": "um", "x": "um", "y": "um", "theta": "rad"}, "longitudinal")),
-            ("final_intensity", FieldData("final_intensity", "Final intensity", _intensity_from_A(result.A_final), ("x", "y"), "intensity", {"x": "um", "y": "um"})),
+            ("delta_theta_stack", make_field("delta_theta_stack", "Δθ", delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
+            ("theta_stack", make_field("theta_stack", "θ", theta_stack, ("z", "x", "y"), "theta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
+            ("final_intensity", make_field("final_intensity", "Final intensity", _intensity_from_A(result.A_final), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="intensity", value_unit="mW/um²")),
         ]),
         diagnostics=DiagnosticCollection([
             ("summary", DiagnosticData(
