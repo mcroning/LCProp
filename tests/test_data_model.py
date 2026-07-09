@@ -16,7 +16,7 @@ def test_static_result_to_run_data():
     result = run_static(make_base_static_request())
     data = from_static_result(result)
     assert data.workflow == "static"
-    assert data.fields["intensity"].data.shape == (24, 24)
+    assert data.fields["final_intensity"].data.shape == (24, 24)
     assert data.fields["theta"].data.shape == (24, 24)
 
 
@@ -49,7 +49,7 @@ def test_soliton_result_to_run_data():
     )
     data = from_soliton_result(result)
     assert data.workflow == "soliton"
-    assert "intensity" in data.fields
+    assert "final_intensity" in data.fields
     assert "summary" in data.diagnostics
 
 

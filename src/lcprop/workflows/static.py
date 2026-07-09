@@ -104,6 +104,7 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
         n_steps=n_steps,
         method=request.solver.workflow.strategy,
         warnings=warnings,
+        theta_bias=bias.theta_2d,
     )
 
 

@@ -13,11 +13,17 @@ class SolverPanel(QWidget):
         self.workflow = QComboBox()
         self.workflow.addItems(["local_self_consistent", "fixed_theta"])
         self.workflow.setCurrentText("local_self_consistent")
+        self.soliton_mode_selector = QComboBox()
+        self.soliton_mode_selector.addItem("Fundamental (00)", "00")
+        self.soliton_mode_selector.addItem("Dipole X (10)", "10")
+        self.soliton_mode_selector.addItem("Dipole Y (01)", "01")
+        self.soliton_mode_selector.addItem("Quadrupole (11)", "11")
         self.max_iterations = spin_box(1, 1000, 3)
         self.Nt = spin_box(1, 100000, 2)
         self.dt = spin_box(1, 1000000, 750)
 
         form.addRow("Static workflow", self.workflow)
+        form.addRow("Soliton mode", self.soliton_mode_selector)
         form.addRow("Max iterations", self.max_iterations)
         form.addRow("TD Nt", self.Nt)
         form.addRow("TD dt × 1e6", self.dt)
@@ -30,6 +36,12 @@ class SolverPanel(QWidget):
         is_td = experiment == "Time-dependent propagation"
         self.workflow.setEnabled(not is_td)
         self.max_iterations.setEnabled(not is_td)
+        is_soliton = experiment in {"Soliton", "Soliton existence curve"}
+        self.soliton_mode_selector.setEnabled(is_soliton)
+
+    def soliton_mode(self) -> str:
+        """Return the selected soliton mode code."""
+        return str(self.soliton_mode_selector.currentData())
 
     def solver(self) -> StaticSolverOptions:
         if self.workflow.currentText() == "fixed_theta":

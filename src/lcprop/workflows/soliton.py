@@ -20,6 +20,7 @@ from lcprop.workflows.runtime import build_runtime_components
 @dataclass(frozen=True)
 class SolitonRequest:
     base: StaticRunRequest
+    mode: str = "00"
     max_outer: int = 100
     theta_steps_per_outer: int = 50
     field_mix: float = 0.5
@@ -36,6 +37,11 @@ class SolitonRequest:
         self.base.material.validate()
         self.base.bias.validate()
         self.base.beams.validate()
+        allowed_modes = {"00", "10", "01", "11", "custom"}
+        if _canonical_mode(self.mode) not in allowed_modes:
+            raise ValueError(
+                f"mode must be one of {sorted(allowed_modes)} or TEM aliases, got {self.mode!r}"
+            )
         if self.max_outer < 1:
             raise ValueError("max_outer must be >= 1")
         if self.theta_steps_per_outer < 1:
@@ -49,6 +55,7 @@ class SolitonRequest:
 @dataclass
 class SolitonResult:
     kind: str = "SolitonResult"
+    mode: str = "00"
     metrics: dict = field(default_factory=dict)
     samples: list[dict] = field(default_factory=list)
     A: Any | None = None
@@ -89,6 +96,111 @@ def _prepare_initial_theta(initial_theta, bias, *, xp):
         if theta.shape != bias.theta_2d.shape:
             raise ValueError(f"initial_theta shape {theta.shape} does not match {bias.theta_2d.shape}")
     return theta
+
+
+def _canonical_mode(mode: str) -> str:
+    mode = str(mode).upper()
+    aliases = {
+        "TEM00": "00",
+        "TEM10": "10",
+        "TEM01": "01",
+        "TEM11": "11",
+        "CUSTOM": "custom",
+    }
+    return aliases.get(mode, mode)
+
+
+def _mode_seed_factor(grid, beams, mode: str, *, xp):
+    """Return the Hermite-like seed factor for the requested transverse mode."""
+    mode = _canonical_mode(mode)
+    if mode in ("00", "custom"):
+        return None
+
+    if not beams.channels:
+        return None
+
+    ch0 = beams.channels[0]
+    wx = max(1e-300, float(getattr(ch0, "waist_x_um", 1.0)))
+    wy = max(1e-300, float(getattr(ch0, "waist_y_um", wx)))
+
+    X = grid.x_um[:, None]
+    Y = grid.y_um[None, :]
+
+    if mode == "10":
+        return X / wx
+    if mode == "01":
+        return Y / wy
+    if mode == "11":
+        return (X / wx) * (Y / wy)
+    return None
+
+
+def _apply_mode_seed(A, *, grid, beams, mode: str, xp):
+    """Apply the legacy Hermite-like nodal seed to an initial optical field."""
+    factor = _mode_seed_factor(grid, beams, mode, xp=xp)
+    if factor is None:
+        return A
+    if A.ndim == 2:
+        return A * factor
+    return A * factor[None, :, :]
+
+
+def _sym_x_even(F):
+    return 0.5 * (F + F[..., ::-1, :])
+
+
+def _sym_x_odd(F):
+    return 0.5 * (F - F[..., ::-1, :])
+
+
+def _sym_y_even(F):
+    return 0.5 * (F + F[..., :, ::-1])
+
+
+def _sym_y_odd(F):
+    return 0.5 * (F - F[..., :, ::-1])
+
+
+def _project_field_parity(A, mode: str):
+    """Project optical field onto the requested x/y parity family."""
+    mode = _canonical_mode(mode)
+    if mode == "custom":
+        return A
+    if mode == "00":
+        return _sym_y_even(_sym_x_even(A))
+    if mode == "10":
+        return _sym_y_even(_sym_x_odd(A))
+    if mode == "01":
+        return _sym_y_odd(_sym_x_even(A))
+    if mode == "11":
+        return _sym_y_odd(_sym_x_odd(A))
+    return A
+
+
+def _project_theta_parity(theta, mode: str):
+    """Project director field onto the even symmetry implied by intensity."""
+    mode = _canonical_mode(mode)
+    if mode == "custom":
+        return theta
+    # For scalar LC response, theta is driven by intensity and remains even
+    # across every axis in which the optical field has a fixed parity.
+    return _sym_y_even(_sym_x_even(theta))
+
+
+def _project_mode_parity(A, theta, mode: str, *, grid, target_power: float, coherent: bool, theta_clamp, theta_bc: float, xp):
+    """Project A/theta onto the selected mode family and restore constraints."""
+    mode = _canonical_mode(mode)
+    if mode == "custom":
+        return A, theta
+
+    A = _project_field_parity(A, mode)
+    A = _normalize_power(A, target_power=target_power, grid=grid, coherent=coherent, xp=xp)
+
+    theta = _project_theta_parity(theta, mode)
+    theta = xp.clip(theta, float(theta_clamp[0]), float(theta_clamp[1]))
+    theta[0, :] = float(theta_bc)
+    theta[-1, :] = float(theta_bc)
+    return A, theta
 
 
 def _field_difference(A, B, *, grid, xp) -> tuple[float, float]:
@@ -174,7 +286,29 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
         coherent=coherent,
         xp=xp,
     )
+    if request.initial_A is None:
+        A = _apply_mode_seed(
+            A,
+            grid=grid,
+            beams=request.base.beams,
+            mode=request.mode,
+            xp=xp,
+        )
+        A = _normalize_power(A, target_power=target_power, grid=grid, coherent=coherent, xp=xp)
+
     theta = _prepare_initial_theta(request.initial_theta, runtime.bias, xp=xp)
+
+    A, theta = _project_mode_parity(
+        A,
+        theta,
+        request.mode,
+        grid=grid,
+        target_power=target_power,
+        coherent=coherent,
+        theta_clamp=runtime.bias.theta_clamp,
+        theta_bc=request.base.bias.theta_bc,
+        xp=xp,
+    )
 
     n_ref = float(asnumpy(compute_neff(
         theta,
@@ -275,6 +409,18 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
         intensity = total_intensity(A, coherent=coherent, xp=xp)
         theta = relax_theta(theta, intensity)
 
+        A, theta = _project_mode_parity(
+            A,
+            theta,
+            request.mode,
+            grid=grid,
+            target_power=target_power,
+            coherent=coherent,
+            theta_clamp=runtime.bias.theta_clamp,
+            theta_bc=request.base.bias.theta_bc,
+            xp=xp,
+        )
+
         A_end = propagate(A, theta)
         A_end = _normalize_power(A_end, target_power=target_power, grid=grid, coherent=coherent, xp=xp)
 
@@ -285,6 +431,18 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
 
         A = (1.0 - float(request.field_mix)) * A + float(request.field_mix) * A_candidate
         A = _normalize_power(A, target_power=target_power, grid=grid, coherent=coherent, xp=xp)
+
+        A, theta = _project_mode_parity(
+            A,
+            theta,
+            request.mode,
+            grid=grid,
+            target_power=target_power,
+            coherent=coherent,
+            theta_clamp=runtime.bias.theta_clamp,
+            theta_bc=request.base.bias.theta_bc,
+            xp=xp,
+        )
 
         field_rel, overlap_abs = _field_difference(A_prev, A, grid=grid, xp=xp)
 
@@ -369,6 +527,7 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
         "theta_mix": float(request.theta_mix),
         "converged": bool(converged),
         "target_power": float(target_power),
+        "mode": _canonical_mode(request.mode),
         "b": float(runtime.b),
         "bi": float(runtime.bi),
         "n_ref": float(n_ref),
@@ -381,6 +540,7 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
 
     return SolitonResult(
         metrics=metrics,
+        mode=request.mode,
         samples=history,
         A=A,
         theta=theta,

@@ -18,7 +18,7 @@ def test_image_pane_lists_2d_fields():
     pane.set_run_data(run_data)
 
     assert pane.field_selector.count() >= 2
-    assert pane.field_selector.itemText(0) == "Intensity"
+    assert pane.field_selector.itemText(0) == "Output Plane Intensity"
     assert pane.image_view.image is not None
 
 
@@ -30,9 +30,9 @@ def test_image_pane_can_switch_to_theta():
     pane.set_run_data(run_data)
 
     for i in range(pane.field_selector.count()):
-        if pane.field_selector.itemText(i) == "Theta":
+        if pane.field_selector.itemText(i) == "Output Plane Theta":
             pane.field_selector.setCurrentIndex(i)
             break
 
-    assert pane.field_selector.currentText() == "Theta"
+    assert pane.field_selector.currentText() == "Output Plane Theta"
     assert pane.image_view.image is not None

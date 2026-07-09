@@ -23,6 +23,12 @@ class CurvePane(QWidget):
 
     def set_run_data(self, run_data) -> None:
         self._run_data = run_data
+        self._summary = None
+        if run_data is not None:
+            try:
+                self._summary = run_data.diagnostics["summary"].values
+            except Exception:
+                self._summary = None
         self.curve_selector.blockSignals(True)
         self.curve_selector.clear()
 
@@ -43,4 +49,20 @@ class CurvePane(QWidget):
         if key is None:
             return
 
-        self.curve_view.set_curve(self._run_data.curves[key])
+        curve = self._run_data.curves[key]
+
+        title = curve.display_name
+        if self._summary is not None:
+            mode = self._summary.get("mode")
+            sweep_parameter = self._summary.get("parameter")
+            if sweep_parameter == "power_mW":
+                sweep_parameter = "Power"
+            elif isinstance(sweep_parameter, str):
+                sweep_parameter = sweep_parameter.replace("_", " ").title()
+
+            if sweep_parameter:
+                title = f"{title} vs {sweep_parameter}"
+            if mode:
+                title = f"{title} (Mode {mode})"
+
+        self.curve_view.set_curve(curve, title=title)

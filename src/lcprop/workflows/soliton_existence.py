@@ -8,6 +8,7 @@ from typing import Literal
 from lcprop.core.requests import StaticRunRequest
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.workflows.soliton import SolitonRequest, SolitonResult, run_soliton
+from lcprop.workflows.sweep import ParameterSweepRequest, run_parameter_sweep
 
 
 ExistenceSolver = Literal["soliton"]
@@ -16,6 +17,7 @@ ExistenceSolver = Literal["soliton"]
 @dataclass(frozen=True)
 class SolitonExistenceRequest:
     base: StaticRunRequest
+    mode: str = "00"
     powers_mW: tuple[float, ...] = (0.1, 0.2, 0.5, 1.0, 2.0)
     continuation: bool = True
     solver: ExistenceSolver = "soliton"
@@ -34,6 +36,12 @@ class SolitonExistenceRequest:
         self.base.material.validate()
         self.base.bias.validate()
         self.base.beams.validate()
+
+        allowed_modes = {"00", "10", "01", "11", "custom"}
+        if self.mode not in allowed_modes:
+            raise ValueError(
+                f"mode must be one of {sorted(allowed_modes)}, got {self.mode!r}"
+            )
 
         if self.solver != "soliton":
             raise ValueError("solver must be 'soliton'")
@@ -55,6 +63,7 @@ class SolitonExistenceRequest:
 @dataclass
 class SolitonExistenceResult:
     kind: str = "SolitonExistenceResult"
+    mode: str = "00"
     metrics: dict = field(default_factory=dict)
     samples: list[dict] = field(default_factory=list)
     results: list[SolitonResult] = field(default_factory=list)
@@ -93,6 +102,7 @@ def _run_one_soliton(
     return run_soliton(
         SolitonRequest(
             base=static_req,
+            mode=request.mode,
             max_outer=int(request.soliton_max_outer),
             theta_steps_per_outer=int(request.theta_steps_per_outer),
             field_mix=float(request.field_mix),
@@ -110,52 +120,57 @@ def _run_one_soliton(
 def run_soliton_existence(request: SolitonExistenceRequest) -> SolitonExistenceResult:
     request.validate()
 
+    base_soliton = SolitonRequest(
+        base=request.base,
+        mode=request.mode,
+        max_outer=int(request.soliton_max_outer),
+        theta_steps_per_outer=int(request.theta_steps_per_outer),
+        field_mix=float(request.field_mix),
+        theta_mix=float(request.theta_mix),
+        tol_field=float(request.tol_field),
+        tol_theta=float(request.tol_theta),
+        tol_residual_rms=float(request.tol_residual_rms),
+        tol_residual_max=float(request.tol_residual_max),
+    )
+
+    sweep_result = run_parameter_sweep(ParameterSweepRequest(
+        experiment="soliton",
+        parameter="power_mW",
+        values=tuple(float(p) for p in request.powers_mW),
+        base=base_soliton,
+        continuation=bool(request.continuation),
+        execution="sequential",
+    ))
+
     rows: list[dict] = []
-    results: list[SolitonResult] = []
-
-    previous_A = None
-    previous_theta = None
-
-    for i, requested_power in enumerate(request.powers_mW):
-        static_req = make_static_request_for_power(request.base, float(requested_power))
-        use_continuation = bool(request.continuation and previous_theta is not None)
-
-        res = _run_one_soliton(
-            request,
-            static_req,
-            initial_A=previous_A if use_continuation else None,
-            initial_theta=previous_theta if use_continuation else None,
-        )
-
-        previous_A = res.A
-        previous_theta = res.theta
-        results.append(res)
-
-        row = {
+    for i, row in enumerate(sweep_result.samples):
+        prev_power = None if i == 0 else float(request.powers_mW[i - 1])
+        requested_power = float(request.powers_mW[i])
+        converted = dict(row)
+        converted.update({
             "i": int(i),
             "solver": request.solver,
-            "requested_power_mW": float(requested_power),
-            "seed_power_mW": None if i == 0 else float(request.powers_mW[i - 1]),
-            "converged": bool(res.converged),
-            "continuation_used": bool(use_continuation),
+            "mode": request.mode,
+            "requested_power_mW": requested_power,
+            "seed_power_mW": prev_power,
+            "continuation_used": bool(request.continuation and i > 0),
             "continuation_direction": (
-                "up" if i == 0 or requested_power >= request.powers_mW[i - 1] else "down"
+                "up" if i == 0 or requested_power >= float(request.powers_mW[i - 1]) else "down"
             ),
-            "used_initial_A": bool(res.metrics.get("used_initial_A", False)),
-            "used_initial_theta": bool(res.metrics.get("used_initial_theta", False)),
-        }
-
-        row.update(res.metrics)
-        row["output_power_mW"] = float(res.metrics.get("power", res.metrics.get("target_power", 0.0)))
-        rows.append(row)
+        })
+        res = sweep_result.results[i]
+        converted.update(res.metrics)
+        converted["output_power_mW"] = float(res.metrics.get("power", res.metrics.get("target_power", 0.0)))
+        rows.append(converted)
 
     metrics: dict = {
         "num_points": len(rows),
         "power_min_mW": float(min(request.powers_mW)),
         "power_max_mW": float(max(request.powers_mW)),
-        "converged_count": int(sum(1 for r in results if r.converged)),
+        "converged_count": int(sum(1 for r in sweep_result.results if r.converged)),
         "continuation": bool(request.continuation),
         "solver": request.solver,
+        "mode": request.mode,
     }
 
     if rows:
@@ -169,8 +184,9 @@ def run_soliton_existence(request: SolitonExistenceRequest) -> SolitonExistenceR
 
     return SolitonExistenceResult(
         metrics=metrics,
+        mode=request.mode,
         samples=rows,
-        results=results,
+        results=list(sweep_result.results),
     )
 
 

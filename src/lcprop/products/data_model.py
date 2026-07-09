@@ -277,18 +277,44 @@ def _geometry_from_grid_summary(grid_summary: dict) -> Geometry:
     return Geometry(x=x, y=y, z=z, units="um")
 
 
+
 def _intensity_from_A(A, *, coherent: bool = False):
     return asnumpy(total_intensity(A, coherent=coherent))
 
 
+def _as_zxy_stack(field, geometry: Geometry):
+    data = asnumpy(field)
+    if data.ndim == 3:
+        return data
+    if data.ndim != 2:
+        raise ValueError(f"Expected 2-D or 3-D field, got shape {data.shape}")
+    nz = 1 if geometry.z is None else len(np.asarray(geometry.z))
+    return np.repeat(data[None, :, :], nz, axis=0)
+
+
+
 def from_static_result(result) -> RunData:
+    geometry = _geometry_from_grid_summary(result.grid_summary)
+    theta_2d = asnumpy(result.theta_final)
+    theta_stack = _as_zxy_stack(result.theta_final, geometry)
+
+    fields = []
+    theta_bias = getattr(result, "theta_bias", None)
+    if theta_bias is not None:
+        theta_bias_2d = asnumpy(theta_bias)
+        delta_theta_stack = theta_stack - theta_bias_2d[None, :, :]
+        fields.append(("delta_theta_stack", make_field("delta_theta_stack", "Δθ", delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")))
+
+    fields.extend([
+        ("theta_stack", make_field("theta_stack", "θ", theta_stack, ("z", "x", "y"), "theta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
+        ("final_intensity", make_field("final_intensity", "Output Plane Intensity", _intensity_from_A(result.A_final), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="intensity", value_unit="mW/um²")),
+        ("theta", make_field("theta", "Output Plane Theta", theta_2d, ("x", "y"), "theta", {"x": "um", "y": "um"}, quantity="theta", value_unit="rad")),
+    ])
+
     return RunData(
         workflow="static",
-        geometry=_geometry_from_grid_summary(result.grid_summary),
-        fields=FieldCollection([
-            ("intensity", FieldData("intensity", "Intensity", _intensity_from_A(result.A_final), ("x", "y"), "intensity", {"x": "um", "y": "um"})),
-            ("theta", FieldData("theta", "Theta", asnumpy(result.theta_final), ("x", "y"), "theta", {"x": "um", "y": "um", "theta": "rad"})),
-        ]),
+        geometry=geometry,
+        fields=FieldCollection(fields),
         diagnostics=DiagnosticCollection([
             ("summary", DiagnosticData(
                 "summary",
@@ -316,7 +342,7 @@ def from_timedependent_result(result) -> RunData:
         fields=FieldCollection([
             ("delta_theta_stack", make_field("delta_theta_stack", "Δθ", delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
             ("theta_stack", make_field("theta_stack", "θ", theta_stack, ("z", "x", "y"), "theta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
-            ("final_intensity", make_field("final_intensity", "Final intensity", _intensity_from_A(result.A_final), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="intensity", value_unit="mW/um²")),
+            ("final_intensity", make_field("final_intensity", "Output Plane Intensity", _intensity_from_A(result.A_final), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="intensity", value_unit="mW/um²")),
         ]),
         diagnostics=DiagnosticCollection([
             ("summary", DiagnosticData(
@@ -335,14 +361,37 @@ def from_timedependent_result(result) -> RunData:
 
 
 def from_soliton_result(result) -> RunData:
+    grid_summary = result.metrics.get("grid")
+    if grid_summary is None:
+        A = asnumpy(result.A)
+        nx, ny = A.shape[-2], A.shape[-1]
+        grid_summary = {
+            "Nx": nx,
+            "Ny": ny,
+            "Nz": 1,
+            "dx_um": 1.0,
+            "dy_um": 1.0,
+            "dz_um": 1.0,
+        }
+    geometry = _geometry_from_grid_summary(grid_summary)
+
+    theta_2d = asnumpy(result.theta)
+    intensity = asnumpy(result.intensity)
+
+    fields = [
+        ("final_intensity", make_field("final_intensity", "Output Plane Intensity", intensity, ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="intensity", value_unit="mW/um²")),
+        ("theta", make_field("theta", "Output Plane Theta", theta_2d, ("x", "y"), "theta", {"x": "um", "y": "um"}, quantity="theta", value_unit="rad")),
+    ]
+
     curves = CurveCollection()
-    if result.history:
-        outer = np.asarray([r["outer"] for r in result.history])
+    history = getattr(result, "history", None) or getattr(result, "samples", None) or []
+    if history:
+        outer = np.asarray([r["outer"] for r in history])
         curves.add("residual_rms", CurveData(
             "residual_rms",
             "Residual RMS",
             outer,
-            np.asarray([r.get("residual_rms", np.nan) for r in result.history]),
+            np.asarray([r.get("residual_rms", np.nan) for r in history]),
             "outer",
             "residual_rms",
         ))
@@ -350,55 +399,94 @@ def from_soliton_result(result) -> RunData:
             "beta_history",
             "Beta history",
             outer,
-            np.asarray([r.get("beta", np.nan) for r in result.history]),
+            np.asarray([r.get("beta", np.nan) for r in history]),
             "outer",
             "beta",
         ))
 
+    summary = dict(result.metrics)
+    summary["mode"] = getattr(result, "mode", "00")
+
     return RunData(
         workflow="soliton",
-        fields=FieldCollection([
-            ("intensity", FieldData("intensity", "Intensity", asnumpy(result.intensity), ("x", "y"), "intensity", {"x": "um", "y": "um"})),
-            ("theta", FieldData("theta", "Theta", asnumpy(result.theta), ("x", "y"), "theta", {"x": "um", "y": "um", "theta": "rad"})),
-        ]),
+        geometry=geometry,
+        fields=FieldCollection(fields),
         curves=curves,
         diagnostics=DiagnosticCollection([
-            ("summary", DiagnosticData("summary", "Summary", dict(result.metrics)))
+            ("summary", DiagnosticData("summary", "Summary", summary))
         ]),
     )
 
 
+
+
 def from_soliton_existence_result(result) -> RunData:
-    rows = result.samples
+    rows = list(getattr(result, "samples", []) or [])
     curves = CurveCollection()
 
     if rows:
-        P = np.asarray([r.get("requested_power_mW", np.nan) for r in rows])
+        P = np.asarray([
+            r.get("requested_power_mW", r.get("value", np.nan))
+            for r in rows
+        ], dtype=float)
         for key, label in [
             ("beta", "Beta"),
             ("theta_max", "Theta max"),
             ("Imax", "Imax"),
             ("residual_rms", "Residual RMS"),
+            ("residual_max", "Residual max"),
+            ("field_rel", "Field relative change"),
+            ("overlap_abs", "Mode overlap"),
+            ("dtheta_rms", "Theta update RMS"),
+            ("elapsed_s", "Elapsed time"),
+            ("converged", "Converged"),
         ]:
+            y = np.asarray([r.get(key, np.nan) for r in rows], dtype=float)
             curves.add(key, CurveData(
                 key,
                 label,
                 P,
-                np.asarray([r.get(key, np.nan) for r in rows]),
+                y,
                 "P",
                 key,
                 {"P": "mW"},
             ))
 
+    summary = dict(getattr(result, "metrics", {}) or {})
+    summary.setdefault("n_rows", len(rows))
+    summary.setdefault("kind", getattr(result, "kind", type(result).__name__))
+    summary.setdefault("mode", getattr(result, "mode", summary.get("mode", "00")))
+
     return RunData(
         workflow="soliton_existence",
         curves=curves,
         diagnostics=DiagnosticCollection([
-            ("summary", DiagnosticData("summary", "Summary", dict(result.metrics))),
+            ("summary", DiagnosticData("summary", "Summary", summary)),
             ("table", DiagnosticData("table", "Samples", {"rows": rows})),
         ]),
     )
 
+
+# Conversion for generic parameter sweep result, reusing soliton existence result logic.
+def from_parameter_sweep_result(result) -> RunData:
+    """Convert a generic parameter sweep result into GUI products."""
+    run_data = from_soliton_existence_result(result)
+
+    if getattr(result, "results", None):
+        field_data = from_soliton_result(result.results[-1])
+        fields = field_data.fields
+        geometry = field_data.geometry
+    else:
+        fields = run_data.fields
+        geometry = run_data.geometry
+
+    return RunData(
+        workflow="parameter_sweep",
+        geometry=geometry,
+        fields=fields,
+        curves=run_data.curves,
+        diagnostics=run_data.diagnostics,
+    )
 
 def to_run_data(result) -> RunData:
     name = type(result).__name__
@@ -410,6 +498,8 @@ def to_run_data(result) -> RunData:
         return from_soliton_result(result)
     if name == "SolitonExistenceResult":
         return from_soliton_existence_result(result)
+    if name == "ParameterSweepResult":
+        return from_parameter_sweep_result(result)
     raise TypeError(f"Unsupported result type: {name}")
 
 
@@ -426,5 +516,6 @@ __all__ = [
     "from_timedependent_result",
     "from_soliton_result",
     "from_soliton_existence_result",
+    "from_parameter_sweep_result",
     "to_run_data",
 ]

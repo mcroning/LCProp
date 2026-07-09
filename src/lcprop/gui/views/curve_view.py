@@ -15,14 +15,14 @@ class CurveView(FigureCanvasQTAgg):
         self.ax = self.figure.add_subplot(111)
         self.line = None
 
-    def set_curve(self, curve) -> None:
+    def set_curve(self, curve, title: str | None = None) -> None:
         x = np.asarray(curve.x)
         y = np.asarray(curve.y)
 
         self.ax.clear()
         (self.line,) = self.ax.plot(x, y, marker="o")
 
-        self.ax.set_title(curve.display_name)
+        self.ax.set_title(title if title is not None else curve.display_name)
         self.ax.set_xlabel(_label_with_unit(curve.x_label, curve.units))
         self.ax.set_ylabel(_label_with_unit(curve.y_label, curve.units))
         self.ax.grid(True)
