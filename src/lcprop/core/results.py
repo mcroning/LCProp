@@ -31,6 +31,7 @@ class TimeDependentRunResult:
     theta_final: Any
     theta_bias: Any
 
+
     power_initial: float
     power_final: float
 
@@ -40,5 +41,7 @@ class TimeDependentRunResult:
 
     Nt: int
     method: str
-
+    A_initial: Any | None = None
+    theta_initial: Any | None = None
+    initial_intensity_stack: Any | None = None
     warnings: tuple[str, ...] = field(default_factory=tuple)

@@ -305,6 +305,7 @@ def from_static_result(result) -> RunData:
         delta_theta_stack = theta_stack - theta_bias_2d[None, :, :]
         fields.append(("delta_theta_stack", make_field("delta_theta_stack", "Δθ", delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")))
 
+
     fields.extend([
         ("theta_stack", make_field("theta_stack", "θ", theta_stack, ("z", "x", "y"), "theta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
         ("final_intensity", make_field("final_intensity", "Output Plane Intensity", _intensity_from_A(result.A_final), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="intensity", value_unit="mW/um²")),
@@ -336,14 +337,47 @@ def from_timedependent_result(result) -> RunData:
     theta_bias = asnumpy(result.theta_bias)
     delta_theta_stack = theta_stack - theta_bias[None, :, :]
 
+    fields = []
+
+    theta_initial = getattr(result, "theta_initial", None)
+    if theta_initial is not None:
+        theta_initial_stack = asnumpy(theta_initial)
+        initial_delta_theta_stack = theta_initial_stack - theta_bias[None, :, :]
+        fields.extend([
+            ("initial_delta_theta_stack", make_field("initial_delta_theta_stack", "Initial Δθ", initial_delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
+            ("initial_theta_stack", make_field("initial_theta_stack", "Initial θ", theta_initial_stack, ("z", "x", "y"), "theta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
+        ])
+
+    A_initial = getattr(result, "A_initial", None)
+    if A_initial is not None:
+        fields.append(("initial_intensity", make_field("initial_intensity", "Initial Intensity", _intensity_from_A(A_initial), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="intensity", value_unit="mW/um²")))
+    initial_intensity_stack = getattr(result, "initial_intensity_stack", None)
+    if initial_intensity_stack is not None:
+        fields.append((
+            "initial_intensity_stack",
+            make_field(
+                "initial_intensity_stack",
+                "Initial TD Source Intensity",
+                asnumpy(initial_intensity_stack),
+                ("z", "x", "y"),
+                "intensity",
+                {"z": "um", "x": "um", "y": "um"},
+                "longitudinal",
+                quantity="intensity",
+                value_unit="mW/um²",
+            ),
+        ))
+
+    fields.extend([
+        ("delta_theta_stack", make_field("delta_theta_stack", "Final Δθ", delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
+        ("theta_stack", make_field("theta_stack", "Final θ", theta_stack, ("z", "x", "y"), "theta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
+        ("final_intensity", make_field("final_intensity", "Output Plane Intensity", _intensity_from_A(result.A_final), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="intensity", value_unit="mW/um²")),
+    ])
+
     return RunData(
         workflow="timedependent",
         geometry=_geometry_from_grid_summary(result.grid_summary),
-        fields=FieldCollection([
-            ("delta_theta_stack", make_field("delta_theta_stack", "Δθ", delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
-            ("theta_stack", make_field("theta_stack", "θ", theta_stack, ("z", "x", "y"), "theta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
-            ("final_intensity", make_field("final_intensity", "Output Plane Intensity", _intensity_from_A(result.A_final), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="intensity", value_unit="mW/um²")),
-        ]),
+        fields=FieldCollection(fields),
         diagnostics=DiagnosticCollection([
             ("summary", DiagnosticData(
                 "summary",
@@ -354,6 +388,9 @@ def from_timedependent_result(result) -> RunData:
                     "Nt": result.Nt,
                     "method": result.method,
                     "grid": result.grid_summary,
+                    "has_initial_A": A_initial is not None,
+                    "has_initial_theta": theta_initial is not None,
+                    "has_initial_td_source": initial_intensity_stack is not None,
                 },
             ))
         ]),
@@ -432,6 +469,7 @@ def from_soliton_existence_result(result) -> RunData:
         for key, label in [
             ("beta", "Beta"),
             ("theta_max", "Theta max"),
+            
             ("Imax", "Imax"),
             ("residual_rms", "Residual RMS"),
             ("residual_max", "Residual max"),

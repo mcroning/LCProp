@@ -8,6 +8,8 @@ from lcprop.optics.launch import total_power
 from lcprop.algorithms.td_zmarch import TDZMarchControls, run_td_zmarch
 from lcprop.workflows.runtime import (
     build_runtime_components,
+    initial_A_field,
+    initial_theta_field,
     make_td_optics_step,
     make_zcoupled_theta_step,
 )
@@ -24,6 +26,8 @@ def run_timedependent(request: TimeDependentRunRequest) -> TimeDependentRunResul
         solver=StaticSolverOptions(workflow=request.solver.workflow),
         output=request.output,
         runtime=request.runtime,
+        initial_A=request.initial_A,
+        initial_theta=request.initial_theta,
     )
 
     runtime = build_runtime_components(
@@ -32,12 +36,19 @@ def run_timedependent(request: TimeDependentRunRequest) -> TimeDependentRunResul
         mobility=1.0,
     )
 
-    A0 = runtime.launch.A0.copy()
-    theta0 = runtime.bias.theta_stack.copy()
+    A0 = initial_A_field(runtime)
+    theta2d = initial_theta_field(runtime)
+    theta0 = runtime.grid.xp.repeat(theta2d[None, :, :], runtime.grid.Nz, axis=0)
 
     power_initial = total_power(A0, runtime.grid)
 
     optics_step = make_td_optics_step(runtime)
+
+    A_probe = A0.copy()
+    initial_intensity_stack = runtime.grid.xp.empty_like(theta0)
+    for k in range(runtime.grid.Nz):
+        A_probe, I_mid = optics_step(A_probe, theta0[k], k)
+        initial_intensity_stack[k] = I_mid
 
     theta_step = make_zcoupled_theta_step(
         runtime,
@@ -67,6 +78,9 @@ def run_timedependent(request: TimeDependentRunRequest) -> TimeDependentRunResul
     return TimeDependentRunResult(
         A_final=td.A_last,
         theta_final=td.theta,
+        A_initial=A0,
+        theta_initial=theta0,
+        initial_intensity_stack=initial_intensity_stack,
         theta_bias=runtime.bias.theta_2d,
         power_initial=power_initial,
         power_final=power_final,

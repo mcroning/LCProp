@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from lcprop.core.context import GridSpec, LCMaterial, BiasSpec
 from lcprop.core.beams import BeamStack
@@ -108,6 +108,8 @@ class StaticRunRequest:
     solver: StaticSolverOptions
     output: OutputOptions
     runtime: RuntimeOptions = RuntimeOptions()
+    initial_A: Any | None = None
+    initial_theta: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -134,3 +136,5 @@ class TimeDependentRunRequest:
     solver: TimeDependentSolverOptions
     output: OutputOptions
     runtime: RuntimeOptions = RuntimeOptions()
+    initial_A: Any | None = None
+    initial_theta: Any | None = None

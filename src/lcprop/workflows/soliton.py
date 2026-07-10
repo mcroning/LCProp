@@ -25,10 +25,10 @@ class SolitonRequest:
     theta_steps_per_outer: int = 50
     field_mix: float = 0.5
     theta_mix: float = 1.0
-    tol_field: float = 1e-6
+    tol_field: float = 1e-4
     tol_theta: float = 1e-5
-    tol_residual_rms: float = 5e-2
-    tol_residual_max: float = 2e-1
+    tol_residual_rms: float = 5e-3
+    tol_residual_max: float = 5e-2
     initial_A: Any | None = None
     initial_theta: Any | None = None
 
@@ -526,6 +526,7 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
         "field_mix": float(request.field_mix),
         "theta_mix": float(request.theta_mix),
         "converged": bool(converged),
+        "convergence_status": "converged" if converged else "max_outer_reached",
         "target_power": float(target_power),
         "mode": _canonical_mode(request.mode),
         "b": float(runtime.b),

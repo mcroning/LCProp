@@ -67,3 +67,62 @@ def test_parameter_sweep_rejects_unsupported_parameter():
         assert "parameter='power_mW'" in str(exc)
     else:
         raise AssertionError("Expected ValueError")
+
+
+# Additional tests for parallel execution and validation
+def test_parameter_sweep_parallel_soliton_power_smoke():
+    base = SolitonRequest(
+        base=make_base_static_request(),
+        mode="00",
+        max_outer=2,
+        theta_steps_per_outer=2,
+        field_mix=0.25,
+        tol_residual_rms=1e9,
+        tol_residual_max=1e9,
+    )
+    request = ParameterSweepRequest(
+        experiment="soliton",
+        parameter="power_mW",
+        values=(0.05, 0.08),
+        base=base,
+        continuation=False,
+        execution="parallel",
+        max_workers=2,
+    )
+
+    result = run_parameter_sweep(request)
+
+    assert result.kind == "ParameterSweepResult"
+    assert result.experiment == "soliton"
+    assert result.parameter == "power_mW"
+    assert result.values == (0.05, 0.08)
+    assert result.continuation is False
+    assert result.execution == "parallel"
+    assert result.metrics["execution"] == "parallel"
+    assert result.metrics["max_workers"] == 2
+    assert result.metrics["n_points"] == 2
+    assert len(result.results) == 2
+    assert len(result.samples) == 2
+    assert [sample["requested_power_mW"] for sample in result.samples] == [0.05, 0.08]
+    assert result.results[0].mode == "00"
+    assert result.results[1].mode == "00"
+
+
+def test_parameter_sweep_rejects_parallel_continuation():
+    base = SolitonRequest(base=make_base_static_request())
+    request = ParameterSweepRequest(
+        experiment="soliton",
+        parameter="power_mW",
+        values=(0.05, 0.08),
+        base=base,
+        continuation=True,
+        execution="parallel",
+        max_workers=2,
+    )
+
+    try:
+        request.validate()
+    except ValueError as exc:
+        assert "Continuation sweeps must be executed sequentially" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")

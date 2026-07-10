@@ -20,6 +20,8 @@ class SweepPanel(QWidget):
 
         self.execution = QComboBox()
         self.execution.addItem("Sequential", "sequential")
+        self.execution.addItem("Parallel", "parallel")
+        self.continuation.toggled.connect(self._continuation_changed)
 
         form.addRow("Sweep parameter", self.parameter)
         form.addRow("Values", self.values)
@@ -28,6 +30,7 @@ class SweepPanel(QWidget):
 
         layout.addLayout(form)
         layout.addStretch(1)
+        self._continuation_changed(self.continuation.isChecked())
 
     def sweep_parameter(self) -> str:
         return str(self.parameter.currentData())
@@ -49,3 +52,13 @@ class SweepPanel(QWidget):
 
     def sweep_execution(self) -> str:
         return str(self.execution.currentData())
+
+    def _continuation_changed(self, checked: bool) -> None:
+        """Parallel sweeps are only valid for independent, non-continuation runs."""
+        parallel_index = self.execution.findData("parallel")
+        if parallel_index < 0:
+            return
+        parallel_item = self.execution.model().item(parallel_index)
+        parallel_item.setEnabled(not checked)
+        if checked and self.execution.currentData() == "parallel":
+            self.execution.setCurrentIndex(self.execution.findData("sequential"))

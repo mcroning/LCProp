@@ -64,6 +64,30 @@ class RuntimeComponents:
     cn: CNOperator
 
 
+def initial_A_field(components: RuntimeComponents):
+    """Return the optical initial condition for workflows using runtime components."""
+    A0 = components.launch.A0
+    initial_A = getattr(components.request, "initial_A", None)
+    if initial_A is None:
+        return A0.copy()
+    A = components.grid.xp.asarray(initial_A, dtype=A0.dtype).copy()
+    if A.shape != A0.shape:
+        raise ValueError(f"initial_A shape {A.shape} does not match launch field shape {A0.shape}")
+    return A
+
+
+def initial_theta_field(components: RuntimeComponents):
+    """Return the theta initial condition for workflows using runtime components."""
+    theta0 = components.bias.theta_2d
+    initial_theta = getattr(components.request, "initial_theta", None)
+    if initial_theta is None:
+        return theta0.copy()
+    theta = components.grid.xp.asarray(initial_theta, dtype=theta0.dtype).copy()
+    if theta.shape != theta0.shape:
+        raise ValueError(f"initial_theta shape {theta.shape} does not match bias field shape {theta0.shape}")
+    return theta
+
+
 def build_runtime_components(
     request: StaticRunRequest,
     *,
@@ -125,7 +149,7 @@ def initial_theta_intensity(components: RuntimeComponents):
     """Return effective theta-driving intensity for the launch field."""
 
     return weighted_theta_intensity(
-        components.launch.A0,
+        initial_A_field(components),
         components.launch.theta_weights,
         coherent=components.coherent,
         xp=components.grid.xp,
@@ -182,7 +206,7 @@ def make_static_optics_update(components: RuntimeComponents):
     xp = grid.xp
 
     def optics_update(A_unused, theta, outer):
-        A = components.launch.A0.copy()
+        A = initial_A_field(components)
         I_mid = initial_theta_intensity(components)
 
         for _ in range(grid.Nz):

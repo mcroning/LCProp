@@ -37,7 +37,10 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
     bias = build_bias(request.bias, grid, request.material)
     launch = build_launch(request.beams, grid, complex_dtype=np.complex128 if request.runtime.precision == "float64" else np.complex64)
 
-    A0 = launch.A0.copy()
+    A0 = launch.A0.copy() if request.initial_A is None else grid.xp.asarray(request.initial_A, dtype=launch.A0.dtype).copy()
+    if A0.shape != launch.A0.shape:
+        raise ValueError(f"initial_A shape {A0.shape} does not match launch field shape {launch.A0.shape}")
+
     power_initial = total_power(A0, grid)
 
     wavelength_um = float(request.beams.channels[0].wavelength_um)
@@ -71,7 +74,9 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
 
     else:
         A = A0.copy()
-        theta = bias.theta_2d
+        theta = bias.theta_2d.copy() if request.initial_theta is None else grid.xp.asarray(request.initial_theta, dtype=bias.theta_2d.dtype).copy()
+        if theta.shape != bias.theta_2d.shape:
+            raise ValueError(f"initial_theta shape {theta.shape} does not match bias field shape {bias.theta_2d.shape}")
 
         for _ in range(grid.Nz):
             advance_slice(
@@ -122,8 +127,13 @@ def _run_static_relax_mode(
     """Self-consistency loop using migrated static_relax + Picard CN step."""
 
     xp = grid.xp
-    theta0 = bias.theta_2d.copy()
-    A0 = launch.A0.copy()
+    theta0 = bias.theta_2d.copy() if request.initial_theta is None else xp.asarray(request.initial_theta, dtype=bias.theta_2d.dtype).copy()
+    if theta0.shape != bias.theta_2d.shape:
+        raise ValueError(f"initial_theta shape {theta0.shape} does not match bias field shape {bias.theta_2d.shape}")
+
+    A0 = launch.A0.copy() if request.initial_A is None else xp.asarray(request.initial_A, dtype=launch.A0.dtype).copy()
+    if A0.shape != launch.A0.shape:
+        raise ValueError(f"initial_A shape {A0.shape} does not match launch field shape {launch.A0.shape}")
 
     intensity0 = weighted_theta_intensity(
         A0,

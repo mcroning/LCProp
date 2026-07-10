@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dataclasses import replace
 
 import traceback
 
@@ -10,6 +11,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QLabel,
     QTabWidget,
+    QCheckBox,
 )
 
 from lcprop.products.data_model import to_run_data
@@ -31,6 +33,7 @@ class LCPropMainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.runner = LocalRunner()
+        self.last_soliton_result = None
         self.setWindowTitle("LCProp")
         # Default to a wide scientific-visualization layout.
         self.setMinimumSize(1200, 760)
@@ -41,6 +44,11 @@ class LCPropMainWindow(QWidget):
         header.addWidget(QLabel("LCProp"))
         header.addStretch(1)
         header.addWidget(QLabel(f"Runner: {self.runner.name}"))
+
+        self.use_last_soliton = QCheckBox("Start from last soliton")
+        self.use_last_soliton.setEnabled(False)
+        self.use_last_soliton.setVisible(False)
+        header.addWidget(self.use_last_soliton)
 
         self.run_button = QPushButton()
         self.run_button.clicked.connect(self.run_static_clicked)
@@ -75,6 +83,7 @@ class LCPropMainWindow(QWidget):
         self.run_button.setText(f"Run {experiment}")
         self.solver_panel.set_experiment_mode(experiment)
         self._update_sweep_tab(experiment)
+        self._update_initial_condition_controls(experiment)
 
     def _update_sweep_tab(self, experiment: str) -> None:
         sweep_enabled = experiment == "Soliton existence curve"
@@ -82,8 +91,27 @@ class LCPropMainWindow(QWidget):
         if not sweep_enabled and self.tabs.currentIndex() == self.sweep_tab_index:
             self.tabs.setCurrentWidget(self.experiment_panel)
 
-    def build_request(self) -> StaticRunRequest:
-        return StaticRunRequest(
+    def _update_initial_condition_controls(self, experiment: str) -> None:
+        visible = experiment in {"Static propagation", "Time-dependent propagation"}
+        enabled = visible and self.last_soliton_result is not None
+        self.use_last_soliton.setVisible(visible)
+        self.use_last_soliton.setEnabled(enabled)
+        if not enabled:
+            self.use_last_soliton.setChecked(False)
+
+    def _maybe_apply_last_soliton(self, req, *, allow: bool):
+        if not allow or not self.use_last_soliton.isChecked():
+            return req
+        if self.last_soliton_result is None:
+            return req
+        return replace(
+            req,
+            initial_A=self.last_soliton_result.A,
+            initial_theta=self.last_soliton_result.theta,
+        )
+
+    def build_request(self, *, allow_last_soliton: bool = True) -> StaticRunRequest:
+        req = StaticRunRequest(
             grid=self.grid_panel.grid(),
             material=self.physics_panel.material(),
             bias=self.physics_panel.bias(),
@@ -91,9 +119,10 @@ class LCPropMainWindow(QWidget):
             solver=self.solver_panel.solver(),
             output=OutputOptions(),
         )
+        return self._maybe_apply_last_soliton(req, allow=allow_last_soliton)
 
     def build_timedependent_request(self) -> TimeDependentRunRequest:
-        return TimeDependentRunRequest(
+        req = TimeDependentRunRequest(
             grid=self.grid_panel.grid(),
             material=self.physics_panel.material(),
             bias=self.physics_panel.bias(),
@@ -102,16 +131,17 @@ class LCPropMainWindow(QWidget):
             output=OutputOptions(),
             runtime=RuntimeOptions(precision="float64"),
         )
+        return self._maybe_apply_last_soliton(req, allow=True)
 
     def build_soliton_request(self) -> SolitonRequest:
         return SolitonRequest(
-            base=self.build_request(),
+            base=self.build_request(allow_last_soliton=False),
             mode=self.solver_panel.soliton_mode(),
         )
 
     def build_soliton_existence_request(self) -> ParameterSweepRequest:
         base = SolitonRequest(
-            base=self.build_request(),
+            base=self.build_request(allow_last_soliton=False),
             mode=self.solver_panel.soliton_mode(),
         )
 
@@ -143,6 +173,7 @@ class LCPropMainWindow(QWidget):
             f"Bias: V={base_req.bias.V_bias:g} V, theta_bc={base_req.bias.theta_bc:g} rad",
             f"Beam: P={ch.power_mW:g} mW, waist={ch.waist_x_um:g} µm, λ={ch.wavelength_um:g} µm",
             f"Workflow: {base_req.solver.workflow.strategy}",
+            f"Initial condition: {'last soliton' if getattr(base_req, 'initial_A', None) is not None or getattr(base_req, 'initial_theta', None) is not None else 'default launch'}",
         ]
 
         mode = getattr(req, "mode", None)
@@ -206,6 +237,9 @@ class LCPropMainWindow(QWidget):
 
             runner_result = runner_result_fn(req)
             result = runner_result.result
+            if type(result).__name__ == "SolitonResult":
+                self.last_soliton_result = result
+                self.results_panel.append_console("Saved this soliton as the current in-memory initial condition.")
             run_data = to_run_data(result)
             self.results_panel.set_run_data(run_data)
 

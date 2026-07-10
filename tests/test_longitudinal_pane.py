@@ -50,7 +50,7 @@ def test_longitudinal_pane_displays_3d_field():
     pane = LongitudinalPane()
     pane.set_run_data(run_data)
 
-    assert pane.field_selector.count() == 2
-    assert pane.field_selector.currentText() == "Δθ"
+    assert pane.field_selector.count() == 5
+    assert pane.field_selector.currentText() == "Initial Δθ"
     assert pane.xz_view.image is not None
     assert pane.yz_view.image is not None
