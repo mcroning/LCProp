@@ -31,6 +31,11 @@ class SolitonRequest:
     tol_residual_max: float = 5e-2
     initial_A: Any | None = None
     initial_theta: Any | None = None
+    refine_transverse: bool = False
+    transverse_max_outer: int = 100
+    transverse_theta_steps_per_outer: int = 50
+    transverse_field_mix: float = 0.5
+    transverse_theta_mix: float = 0.5
 
     def validate(self) -> None:
         self.base.grid.validate()
@@ -50,6 +55,14 @@ class SolitonRequest:
             raise ValueError("field_mix must be in (0, 1]")
         if not (0.0 < self.theta_mix <= 1.0):
             raise ValueError("theta_mix must be in (0, 1]")
+        if self.transverse_max_outer < 1:
+            raise ValueError("transverse_max_outer must be >= 1")
+        if self.transverse_theta_steps_per_outer < 1:
+            raise ValueError("transverse_theta_steps_per_outer must be >= 1")
+        if not (0.0 < self.transverse_field_mix <= 1.0):
+            raise ValueError("transverse_field_mix must be in (0, 1]")
+        if not (0.0 < self.transverse_theta_mix <= 1.0):
+            raise ValueError("transverse_theta_mix must be in (0, 1]")
 
 
 @dataclass

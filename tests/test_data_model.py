@@ -73,3 +73,20 @@ def test_soliton_existence_result_to_run_data():
 def test_to_run_data_dispatch():
     data = to_run_data(run_static(make_base_static_request()))
     assert data.workflow == "static"
+
+
+def test_soliton_transverse_refinement_options_validate():
+    req = SolitonRequest(
+        base=make_base_static_request(),
+        refine_transverse=True,
+        transverse_max_outer=12,
+        transverse_theta_steps_per_outer=7,
+        transverse_field_mix=0.4,
+        transverse_theta_mix=0.6,
+    )
+
+    req.validate()
+
+    assert req.refine_transverse is True
+    assert req.transverse_max_outer == 12
+    assert req.transverse_theta_steps_per_outer == 7

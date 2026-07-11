@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QComboBox, QFormLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QFormLayout, QVBoxLayout, QWidget
 
 from lcprop.core.requests import StaticSolverOptions, StaticWorkflowOptions, TimeDependentSolverOptions
 from lcprop.gui.panels.helpers import spin_box
@@ -18,12 +18,17 @@ class SolverPanel(QWidget):
         self.soliton_mode_selector.addItem("Dipole X (10)", "10")
         self.soliton_mode_selector.addItem("Dipole Y (01)", "01")
         self.soliton_mode_selector.addItem("Quadrupole (11)", "11")
+        self.refine_transverse_checkbox = QCheckBox(
+            "Refine with transverse eigensolver"
+        )
+        self.refine_transverse_checkbox.setChecked(False)
         self.max_iterations = spin_box(1, 1000, 3)
         self.Nt = spin_box(1, 100000, 2)
         self.dt = spin_box(1, 1000000, 750)
 
         form.addRow("Static workflow", self.workflow)
         form.addRow("Soliton mode", self.soliton_mode_selector)
+        form.addRow(self.refine_transverse_checkbox)
         form.addRow("Max iterations", self.max_iterations)
         form.addRow("TD Nt", self.Nt)
         form.addRow("TD dt × 1e6", self.dt)
@@ -38,10 +43,15 @@ class SolverPanel(QWidget):
         self.max_iterations.setEnabled(not is_td)
         is_soliton = experiment in {"Soliton", "Soliton existence curve"}
         self.soliton_mode_selector.setEnabled(is_soliton)
+        self.refine_transverse_checkbox.setEnabled(experiment == "Soliton")
 
     def soliton_mode(self) -> str:
         """Return the selected soliton mode code."""
         return str(self.soliton_mode_selector.currentData())
+
+    def refine_transverse(self) -> bool:
+        """Return whether single-soliton transverse refinement is enabled."""
+        return self.refine_transverse_checkbox.isChecked()
 
     def solver(self) -> StaticSolverOptions:
         if self.workflow.currentText() == "fixed_theta":

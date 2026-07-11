@@ -137,6 +137,7 @@ class LCPropMainWindow(QWidget):
         return SolitonRequest(
             base=self.build_request(allow_last_soliton=False),
             mode=self.solver_panel.soliton_mode(),
+            refine_transverse=self.solver_panel.refine_transverse(),
         )
 
     def build_soliton_existence_request(self) -> ParameterSweepRequest:

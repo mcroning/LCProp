@@ -41,3 +41,17 @@ def test_gui_request_description_contains_key_fields():
     assert "Runner: Local CPU" in text
     assert "Beam: P=1" in text
     assert "Workflow: local_self_consistent" in text
+
+
+def test_gui_builds_optional_transverse_refinement_request():
+    app = QApplication.instance() or QApplication([])
+    win = LCPropMainWindow()
+    win.solver_panel.refine_transverse_checkbox.setChecked(True)
+
+    req = win.build_soliton_request()
+
+    assert req.refine_transverse is True
+    assert req.transverse_max_outer == 100
+    assert req.transverse_theta_steps_per_outer == 50
+    assert req.transverse_field_mix == 0.5
+    assert req.transverse_theta_mix == 0.5
