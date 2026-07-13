@@ -29,6 +29,7 @@ from typing import Any
 
 import numpy as np
 
+from lcprop.core.beams import normalize_coherence_groups
 from lcprop.core.derived import compute_neff
 
 Array = Any
@@ -74,6 +75,7 @@ def total_intensity(
     A: Array,
     *,
     coherent: bool = False,
+    coherence_groups: tuple[str, ...] | list[str] | None = None,
     xp: Any | None = None,
 ) -> Array:
     """Return total intensity from a channel stack.
@@ -82,16 +84,26 @@ def total_intensity(
     ----------
     coherent
         If False, return ``sum_c |A_c|^2``. If True, return
-        ``|sum_c A_c|^2``.
+        ``|sum_c A_c|^2``. Retained for backward compatibility when
+        ``coherence_groups`` is not supplied.
+    coherence_groups
+        Per-channel group names. Channels in each group are summed as fields;
+        the resulting group intensities are then summed.
     """
 
     xp = _xp_from(A, xp=xp)
     if A.ndim != 3:
         raise ValueError("A must have shape (Nch, Nx, Ny)")
 
-    if coherent:
-        return xp.abs(xp.sum(A, axis=0)) ** 2
-    return xp.sum(channel_intensities(A, xp=xp), axis=0)
+    groups = _coherence_group_indices(
+        A.shape[0],
+        coherent=coherent,
+        coherence_groups=coherence_groups,
+    )
+    intensity = xp.zeros_like(xp.abs(A[0]) ** 2)
+    for _, group_field in _coherent_group_fields(A, groups, xp=xp):
+        intensity = intensity + xp.abs(group_field) ** 2
+    return intensity
 
 
 def weighted_theta_intensity(
@@ -99,28 +111,75 @@ def weighted_theta_intensity(
     weights: Array | None = None,
     *,
     coherent: bool = False,
+    coherence_groups: tuple[str, ...] | list[str] | None = None,
     xp: Any | None = None,
 ) -> Array:
     """Return effective plain intensity for theta algorithms.
 
     The theta algorithms expect plain intensity and multiply by ``bi``
-    internally. For equal optical couplings, pass ``weights=None``. For
-    channel-dependent coupling, pass weights with shape ``(Nch,)`` such as
-    ``bi_c / bi_ref``.
+    internally. ``weights`` are relative optical-coupling multipliers, such as
+    ``bi_c / bi_ref``; they weight intensity, not field amplitude. Coherently
+    interfering channels must therefore have equal weights within their group.
     """
 
     xp = _xp_from(A, weights, xp=xp)
 
     if weights is None:
-        return total_intensity(A, coherent=coherent, xp=xp)
+        return total_intensity(
+            A,
+            coherent=coherent,
+            coherence_groups=coherence_groups,
+            xp=xp,
+        )
 
-    if coherent:
-        raise ValueError("weighted coherent intensity is ambiguous; combine channels upstream")
-
-    I_c = channel_intensities(A, xp=xp)
-    if weights.ndim != 1 or weights.shape[0] != I_c.shape[0]:
+    weights = xp.asarray(weights)
+    if weights.ndim != 1 or weights.shape[0] != A.shape[0]:
         raise ValueError("weights must have shape (Nch,)")
-    return xp.sum(weights[:, None, None] * I_c, axis=0)
+
+    groups = _coherence_group_indices(
+        A.shape[0],
+        coherent=coherent,
+        coherence_groups=coherence_groups,
+    )
+    intensity = xp.zeros_like(xp.abs(A[0]) ** 2)
+    for group_name, group_field in _coherent_group_fields(A, groups, xp=xp):
+        indices = groups[group_name]
+        group_weights = weights[list(indices)]
+        equal = xp.all(group_weights == group_weights[0])
+        if not bool(equal.item() if hasattr(equal, "item") else equal):
+            raise ValueError(
+                f"theta_weights must be equal within coherent group {group_name!r}; "
+                f"got {group_weights.tolist()}"
+            )
+        intensity = intensity + group_weights[0] * xp.abs(group_field) ** 2
+    return intensity
+
+
+def _coherence_group_indices(
+    n_channels: int,
+    *,
+    coherent: bool,
+    coherence_groups: tuple[str, ...] | list[str] | None,
+) -> dict[str, tuple[int, ...]]:
+    """Map normalized coherence names to their channel indices."""
+
+    names = normalize_coherence_groups(
+        n_channels,
+        coherent=coherent,
+        coherence_groups=coherence_groups,
+    )
+
+    grouped: dict[str, list[int]] = {}
+    for index, name in enumerate(names):
+        grouped.setdefault(name, []).append(index)
+    return {name: tuple(indices) for name, indices in grouped.items()}
+
+
+def _coherent_group_fields(A: Array, groups: dict[str, tuple[int, ...]], *, xp: Any):
+    """Yield each group name and its coherently summed field."""
+
+    for group_name, indices in groups.items():
+        yield group_name, xp.sum(A[list(indices)], axis=0)
 
 
 def neff_from_theta(theta: Array, *, ne: float, no: float, xp: Any | None = None) -> Array:
@@ -249,6 +308,7 @@ def advance_slice_with_midintensity(
     no: float,
     Nsub: int = 1,
     coherent: bool = False,
+    coherence_groups: tuple[str, ...] | list[str] | None = None,
     theta_weights: Array | None = None,
     xp: Any | None = None,
 ) -> tuple[Array, Array, Array, Array]:
@@ -272,6 +332,7 @@ def advance_slice_with_midintensity(
         A,
         theta_weights,
         coherent=coherent,
+        coherence_groups=coherence_groups,
         xp=xp,
     )
 
@@ -292,6 +353,7 @@ def advance_slice_with_midintensity(
         A,
         theta_weights,
         coherent=coherent,
+        coherence_groups=coherence_groups,
         xp=xp,
     )
 

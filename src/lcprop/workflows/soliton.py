@@ -82,21 +82,50 @@ def _target_power(beams) -> float:
     return float(sum(float(ch.power_mW) for ch in beams.channels))
 
 
-def _normalize_power(A, *, target_power: float, grid, coherent: bool, xp):
-    I = total_intensity(A, coherent=coherent, xp=xp)
+def _normalize_power(
+    A,
+    *,
+    target_power: float,
+    grid,
+    coherent: bool,
+    xp,
+    coherence_groups=None,
+):
+    I = total_intensity(
+        A,
+        coherent=coherent,
+        coherence_groups=coherence_groups,
+        xp=xp,
+    )
     p = xp.sum(I) * float(grid.dx_um) * float(grid.dy_um)
     scale = xp.sqrt(float(target_power) / (p + xp.asarray(1e-300, dtype=p.dtype)))
     return A * scale
 
 
-def _prepare_initial_A(initial_A, launch, *, grid, target_power: float, coherent: bool, xp):
+def _prepare_initial_A(
+    initial_A,
+    launch,
+    *,
+    grid,
+    target_power: float,
+    coherent: bool,
+    xp,
+    coherence_groups=None,
+):
     if initial_A is None:
         A = launch.A0.copy()
     else:
         A = xp.asarray(initial_A, dtype=launch.A0.dtype).copy()
         if A.shape != launch.A0.shape:
             raise ValueError(f"initial_A shape {A.shape} does not match {launch.A0.shape}")
-    return _normalize_power(A, target_power=target_power, grid=grid, coherent=coherent, xp=xp)
+    return _normalize_power(
+        A,
+        target_power=target_power,
+        grid=grid,
+        coherent=coherent,
+        coherence_groups=coherence_groups,
+        xp=xp,
+    )
 
 
 def _prepare_initial_theta(initial_theta, bias, *, xp):
@@ -200,14 +229,33 @@ def _project_theta_parity(theta, mode: str):
     return _sym_y_even(_sym_x_even(theta))
 
 
-def _project_mode_parity(A, theta, mode: str, *, grid, target_power: float, coherent: bool, theta_clamp, theta_bc: float, xp):
+def _project_mode_parity(
+    A,
+    theta,
+    mode: str,
+    *,
+    grid,
+    target_power: float,
+    coherent: bool,
+    theta_clamp,
+    theta_bc: float,
+    xp,
+    coherence_groups=None,
+):
     """Project A/theta onto the selected mode family and restore constraints."""
     mode = _canonical_mode(mode)
     if mode == "custom":
         return A, theta
 
     A = _project_field_parity(A, mode)
-    A = _normalize_power(A, target_power=target_power, grid=grid, coherent=coherent, xp=xp)
+    A = _normalize_power(
+        A,
+        target_power=target_power,
+        grid=grid,
+        coherent=coherent,
+        coherence_groups=coherence_groups,
+        xp=xp,
+    )
 
     theta = _project_theta_parity(theta, mode)
     theta = xp.clip(theta, float(theta_clamp[0]), float(theta_clamp[1]))
@@ -290,6 +338,7 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
 
     target_power = _target_power(request.base.beams)
     coherent = runtime.coherent
+    coherence_groups = runtime.coherence_groups
 
     A = _prepare_initial_A(
         request.initial_A,
@@ -297,6 +346,7 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
         grid=grid,
         target_power=target_power,
         coherent=coherent,
+        coherence_groups=coherence_groups,
         xp=xp,
     )
     if request.initial_A is None:
@@ -307,7 +357,14 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
             mode=request.mode,
             xp=xp,
         )
-        A = _normalize_power(A, target_power=target_power, grid=grid, coherent=coherent, xp=xp)
+        A = _normalize_power(
+            A,
+            target_power=target_power,
+            grid=grid,
+            coherent=coherent,
+            coherence_groups=coherence_groups,
+            xp=xp,
+        )
 
     theta = _prepare_initial_theta(request.initial_theta, runtime.bias, xp=xp)
 
@@ -318,6 +375,7 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
         grid=grid,
         target_power=target_power,
         coherent=coherent,
+        coherence_groups=coherence_groups,
         theta_clamp=runtime.bias.theta_clamp,
         theta_bc=request.base.bias.theta_bc,
         xp=xp,
@@ -413,13 +471,13 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
     synchronize(xp)
     t0 = _time.perf_counter()
 
-    intensity = total_intensity(A, coherent=coherent, xp=xp)
+    intensity = total_intensity(A, coherent=coherent, coherence_groups=coherence_groups, xp=xp)
 
     for outer in range(int(request.max_outer)):
         A_prev = A.copy()
         theta_prev = theta.copy()
 
-        intensity = total_intensity(A, coherent=coherent, xp=xp)
+        intensity = total_intensity(A, coherent=coherent, coherence_groups=coherence_groups, xp=xp)
         theta = relax_theta(theta, intensity)
 
         A, theta = _project_mode_parity(
@@ -429,13 +487,21 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
             grid=grid,
             target_power=target_power,
             coherent=coherent,
+            coherence_groups=coherence_groups,
             theta_clamp=runtime.bias.theta_clamp,
             theta_bc=request.base.bias.theta_bc,
             xp=xp,
         )
 
         A_end = propagate(A, theta)
-        A_end = _normalize_power(A_end, target_power=target_power, grid=grid, coherent=coherent, xp=xp)
+        A_end = _normalize_power(
+            A_end,
+            target_power=target_power,
+            grid=grid,
+            coherent=coherent,
+            coherence_groups=coherence_groups,
+            xp=xp,
+        )
 
         dxdy = float(grid.dx_um) * float(grid.dy_um)
         ov = xp.sum(xp.conj(A) * A_end) * dxdy
@@ -443,7 +509,14 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
         A_candidate = A_end * xp.exp(-1j * phase)
 
         A = (1.0 - float(request.field_mix)) * A + float(request.field_mix) * A_candidate
-        A = _normalize_power(A, target_power=target_power, grid=grid, coherent=coherent, xp=xp)
+        A = _normalize_power(
+            A,
+            target_power=target_power,
+            grid=grid,
+            coherent=coherent,
+            coherence_groups=coherence_groups,
+            xp=xp,
+        )
 
         A, theta = _project_mode_parity(
             A,
@@ -452,6 +525,7 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
             grid=grid,
             target_power=target_power,
             coherent=coherent,
+            coherence_groups=coherence_groups,
             theta_clamp=runtime.bias.theta_clamp,
             theta_bc=request.base.bias.theta_bc,
             xp=xp,
@@ -463,7 +537,7 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
         dtheta_rms = float(asnumpy(xp.sqrt(xp.mean(dtheta * dtheta))))
         dtheta_max = float(asnumpy(xp.max(xp.abs(dtheta))))
 
-        intensity = total_intensity(A, coherent=coherent, xp=xp)
+        intensity = total_intensity(A, coherent=coherent, coherence_groups=coherence_groups, xp=xp)
 
         resid = residual_theta_static(
             theta,
@@ -512,7 +586,7 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
     synchronize(xp)
     elapsed = _time.perf_counter() - t0
 
-    intensity = total_intensity(A, coherent=coherent, xp=xp)
+    intensity = total_intensity(A, coherent=coherent, coherence_groups=coherence_groups, xp=xp)
     metrics = intensity_metrics(intensity, grid)
     metrics.update(residual_theta_static(
         theta,

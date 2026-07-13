@@ -33,11 +33,13 @@ class LaunchResult:
     theta_weights: Array
     wavelengths_um: Array
     coherence: str
+    coherence_groups: tuple[str, ...]
 
     def summary(self) -> dict:
         return {
             "Nch": int(self.A0.shape[0]),
             "coherence": self.coherence,
+            "coherence_groups": list(self.coherence_groups),
             "wavelengths_um": [float(x) for x in np.asarray(_to_numpy(self.wavelengths_um)).ravel()],
             "theta_weights": [float(x) for x in np.asarray(_to_numpy(self.theta_weights)).ravel()],
         }
@@ -122,6 +124,7 @@ def build_launch(
         theta_weights=theta_weights,
         wavelengths_um=wavelengths_um,
         coherence=beams.coherence,
+        coherence_groups=beams.coherence_groups,
     )
 
 

@@ -278,8 +278,22 @@ def _geometry_from_grid_summary(grid_summary: dict) -> Geometry:
 
 
 
-def _intensity_from_A(A, *, coherent: bool = False):
-    return asnumpy(total_intensity(A, coherent=coherent))
+def _intensity_from_A(A, *, coherent: bool = False, coherence_groups=None):
+    return asnumpy(
+        total_intensity(
+            A,
+            coherent=coherent,
+            coherence_groups=coherence_groups,
+        )
+    )
+
+
+def _result_coherence(result) -> tuple[bool, tuple[str, ...] | None]:
+    """Return legacy and grouped coherence metadata from a workflow result."""
+
+    summary = getattr(result, "launch_summary", {})
+    groups = summary.get("coherence_groups")
+    return summary.get("coherence") == "coherent", None if groups is None else tuple(groups)
 
 
 def _as_zxy_stack(field, geometry: Geometry):
@@ -297,6 +311,7 @@ def from_static_result(result) -> RunData:
     geometry = _geometry_from_grid_summary(result.grid_summary)
     theta_2d = asnumpy(result.theta_final)
     theta_stack = _as_zxy_stack(result.theta_final, geometry)
+    coherent, coherence_groups = _result_coherence(result)
 
     fields = []
     theta_bias = getattr(result, "theta_bias", None)
@@ -308,7 +323,7 @@ def from_static_result(result) -> RunData:
 
     fields.extend([
         ("theta_stack", make_field("theta_stack", "θ", theta_stack, ("z", "x", "y"), "theta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
-        ("final_intensity", make_field("final_intensity", "Output Plane Intensity", _intensity_from_A(result.A_final), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="intensity", value_unit="mW/um²")),
+        ("final_intensity", make_field("final_intensity", "Output Plane Intensity", _intensity_from_A(result.A_final, coherent=coherent, coherence_groups=coherence_groups), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="intensity", value_unit="mW/um²")),
         ("theta", make_field("theta", "Output Plane Theta", theta_2d, ("x", "y"), "theta", {"x": "um", "y": "um"}, quantity="theta", value_unit="rad")),
     ])
 
@@ -336,6 +351,7 @@ def from_timedependent_result(result) -> RunData:
     theta_stack = asnumpy(result.theta_final)
     theta_bias = asnumpy(result.theta_bias)
     delta_theta_stack = theta_stack - theta_bias[None, :, :]
+    coherent, coherence_groups = _result_coherence(result)
 
     fields = []
 
@@ -350,7 +366,7 @@ def from_timedependent_result(result) -> RunData:
 
     A_initial = getattr(result, "A_initial", None)
     if A_initial is not None:
-        fields.append(("initial_intensity", make_field("initial_intensity", "Initial Intensity", _intensity_from_A(A_initial), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="intensity", value_unit="mW/um²")))
+        fields.append(("initial_intensity", make_field("initial_intensity", "Initial Intensity", _intensity_from_A(A_initial, coherent=coherent, coherence_groups=coherence_groups), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="intensity", value_unit="mW/um²")))
     initial_intensity_stack = getattr(result, "initial_intensity_stack", None)
     if initial_intensity_stack is not None:
         fields.append((
@@ -371,7 +387,7 @@ def from_timedependent_result(result) -> RunData:
     fields.extend([
         ("delta_theta_stack", make_field("delta_theta_stack", "Final Δθ", delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
         ("theta_stack", make_field("theta_stack", "Final θ", theta_stack, ("z", "x", "y"), "theta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
-        ("final_intensity", make_field("final_intensity", "Output Plane Intensity", _intensity_from_A(result.A_final), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="intensity", value_unit="mW/um²")),
+        ("final_intensity", make_field("final_intensity", "Output Plane Intensity", _intensity_from_A(result.A_final, coherent=coherent, coherence_groups=coherence_groups), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="intensity", value_unit="mW/um²")),
     ])
 
     return RunData(

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
@@ -31,6 +32,96 @@ def test_total_intensity_incoherent_vs_coherent():
     assert np.allclose(I_coh, 4.0)
 
 
+def test_one_coherence_group_reproduces_legacy_coherent_intensity():
+    A = np.asarray(
+        [
+            [[1.0 + 2.0j, 0.5 - 1.0j]],
+            [[-0.25 + 0.5j, 2.0 + 0.25j]],
+        ]
+    )
+
+    grouped = total_intensity(A, coherence_groups=("laser", "laser"))
+    legacy = total_intensity(A, coherent=True)
+
+    assert np.allclose(grouped, legacy)
+
+
+def test_explicit_identical_groups_override_legacy_incoherent_stack_flag():
+    stack = BeamStack(
+        channels=(
+            BeamChannel(name="a", coherence_group="A"),
+            BeamChannel(name="b", coherence_group="A"),
+        ),
+        coherence="incoherent",
+    )
+    A = np.ones((2, 2, 2), dtype=np.complex64)
+
+    assert stack.coherence_groups == ("A", "A")
+    assert np.allclose(
+        total_intensity(A, coherence_groups=stack.coherence_groups),
+        4.0,
+    )
+
+
+def test_distinct_coherence_groups_reproduce_legacy_incoherent_intensity():
+    A = np.asarray(
+        [
+            [[1.0 + 2.0j, 0.5 - 1.0j]],
+            [[-0.25 + 0.5j, 2.0 + 0.25j]],
+        ]
+    )
+
+    grouped = total_intensity(A, coherence_groups=("laser_a", "laser_b"))
+    legacy = total_intensity(A, coherent=False)
+
+    assert np.allclose(grouped, legacy)
+
+
+def test_mixed_grouped_intensity_matches_explicit_formula():
+    A = np.asarray(
+        [
+            [[1.0 + 1.0j, 2.0 - 0.5j]],
+            [[0.5 - 0.25j, -1.0 + 2.0j]],
+            [[3.0 + 0.5j, 0.25 + 0.75j]],
+        ]
+    )
+
+    actual = total_intensity(A, coherence_groups=("A", "A", "B"))
+    expected = np.abs(A[0] + A[1]) ** 2 + np.abs(A[2]) ** 2
+
+    assert np.allclose(actual, expected)
+
+
+def test_grouped_intensity_is_independent_of_channel_order():
+    A = np.asarray(
+        [
+            [[1.0 + 1.0j, 2.0 - 0.5j]],
+            [[0.5 - 0.25j, -1.0 + 2.0j]],
+            [[3.0 + 0.5j, 0.25 + 0.75j]],
+        ]
+    )
+    groups = ("A", "A", "B")
+    permutation = [2, 0, 1]
+
+    original = total_intensity(A, coherence_groups=groups)
+    reordered = total_intensity(
+        A[permutation],
+        coherence_groups=tuple(groups[index] for index in permutation),
+    )
+
+    assert np.allclose(reordered, original)
+
+
+def test_single_channel_grouped_behavior_is_unchanged():
+    A = np.asarray([[[1.0 + 2.0j, -0.5j]]])
+
+    expected = np.abs(A[0]) ** 2
+
+    assert np.allclose(total_intensity(A), expected)
+    assert np.allclose(total_intensity(A, coherent=True), expected)
+    assert np.allclose(total_intensity(A, coherence_groups=("laser",)), expected)
+
+
 def test_weighted_theta_intensity():
     A = np.ones((2, 4, 5), dtype=np.complex64)
     weights = np.asarray([1.0, 3.0], dtype=np.float32)
@@ -38,6 +129,35 @@ def test_weighted_theta_intensity():
     I = weighted_theta_intensity(A, weights)
 
     assert np.allclose(I, 4.0)
+
+
+def test_weighted_grouped_theta_intensity_applies_one_weight_per_group():
+    A = np.ones((3, 2, 2), dtype=np.complex64)
+    weights = np.asarray([2.0, 2.0, 3.0], dtype=np.float32)
+
+    actual = weighted_theta_intensity(
+        A,
+        weights,
+        coherence_groups=("A", "A", "B"),
+    )
+
+    assert np.allclose(actual, 2.0 * np.abs(A[0] + A[1]) ** 2 + 3.0 * np.abs(A[2]) ** 2)
+
+
+def test_weighted_grouped_theta_intensity_rejects_unequal_intragroup_weights():
+    A = np.ones((2, 2, 2), dtype=np.complex64)
+    weights = np.asarray([1.0, 2.0], dtype=np.float32)
+
+    with pytest.raises(ValueError) as exc_info:
+        weighted_theta_intensity(
+            A,
+            weights,
+            coherence_groups=("laser", "laser"),
+        )
+
+    assert str(exc_info.value) == (
+        "theta_weights must be equal within coherent group 'laser'; got [1.0, 2.0]"
+    )
 
 
 def test_linear_hop_preserves_power():

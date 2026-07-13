@@ -59,6 +59,7 @@ class RuntimeComponents:
     wavelength_um: float
     n_ref: float
     coherent: bool
+    coherence_groups: tuple[str, ...]
 
     kernel: Any
     cn: CNOperator
@@ -107,7 +108,8 @@ def build_runtime_components(
 
     wavelength_um = float(request.beams.channels[0].wavelength_um)
     n_ref = float(request.material.no)
-    coherent = launch.coherence == "coherent"
+    coherence_groups = launch.coherence_groups
+    coherent = len(set(coherence_groups)) == 1
 
     kernel = linear_kernel(
         grid.fxy2_um,
@@ -140,6 +142,7 @@ def build_runtime_components(
         wavelength_um=wavelength_um,
         n_ref=n_ref,
         coherent=coherent,
+        coherence_groups=coherence_groups,
         kernel=kernel,
         cn=CNOperator(s=s, off=off, diag=diag, lam_y=lam_y),
     )
@@ -152,6 +155,7 @@ def initial_theta_intensity(components: RuntimeComponents):
         initial_A_field(components),
         components.launch.theta_weights,
         coherent=components.coherent,
+        coherence_groups=components.coherence_groups,
         xp=components.grid.xp,
     )
 
@@ -220,6 +224,7 @@ def make_static_optics_update(components: RuntimeComponents):
                 ne=components.request.material.ne,
                 no=components.request.material.no,
                 coherent=components.coherent,
+                coherence_groups=components.coherence_groups,
                 theta_weights=components.launch.theta_weights,
                 xp=xp,
             )
@@ -246,6 +251,7 @@ def make_td_optics_step(components: RuntimeComponents):
             ne=components.request.material.ne,
             no=components.request.material.no,
             coherent=components.coherent,
+            coherence_groups=components.coherence_groups,
             theta_weights=components.launch.theta_weights,
             xp=xp,
         )

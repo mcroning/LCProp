@@ -54,8 +54,6 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
         xp=grid.xp,
     )
 
-    coherent = launch.coherence == "coherent"
-
     if request.solver.workflow.strategy == "local_self_consistent":
         result = _run_static_relax_mode(
             request=request,
@@ -65,7 +63,6 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
             kernel=kernel,
             wavelength_um=wavelength_um,
             n_ref=n_ref,
-            coherent=coherent,
         )
         A = result.A
         theta = result.theta
@@ -122,7 +119,6 @@ def _run_static_relax_mode(
     kernel,
     wavelength_um: float,
     n_ref: float,
-    coherent: bool,
 ):
     """Self-consistency loop using migrated static_relax + Picard CN step."""
 
@@ -138,7 +134,7 @@ def _run_static_relax_mode(
     intensity0 = weighted_theta_intensity(
         A0,
         launch.theta_weights,
-        coherent=coherent,
+        coherence_groups=launch.coherence_groups,
         xp=xp,
     )
 
@@ -189,7 +185,7 @@ def _run_static_relax_mode(
                 n_ref=n_ref,
                 ne=request.material.ne,
                 no=request.material.no,
-                coherent=coherent,
+                coherence_groups=launch.coherence_groups,
                 theta_weights=launch.theta_weights,
                 xp=xp,
             )

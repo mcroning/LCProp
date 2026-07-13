@@ -5,6 +5,34 @@ from typing import Literal
 
 CoherenceMode = Literal["incoherent", "coherent"]
 
+# Reserved internal migration sentinel; user-defined coherence groups must not
+# use this value.
+LEGACY_COHERENCE_GROUP = "__lcprop_legacy__"
+
+
+def normalize_coherence_groups(
+    n_channels: int,
+    *,
+    coherent: bool,
+    coherence_groups: tuple[str, ...] | list[str] | None = None,
+) -> tuple[str, ...]:
+    """Normalize legacy coherence or validate explicit per-channel groups."""
+
+    if n_channels < 1:
+        raise ValueError("at least one beam channel is required")
+
+    if coherence_groups is None:
+        if coherent:
+            return tuple("__lcprop_coherent__" for _ in range(n_channels))
+        return tuple(f"__lcprop_channel_{index}__" for index in range(n_channels))
+
+    if len(coherence_groups) != n_channels:
+        raise ValueError("coherence_groups must have length Nch")
+    groups = tuple(coherence_groups)
+    if any(not isinstance(group, str) or not group.strip() for group in groups):
+        raise ValueError("coherence_groups must contain non-empty strings")
+    return groups
+
 
 @dataclass(frozen=True)
 class BeamChannel:
@@ -27,6 +55,7 @@ class BeamChannel:
     phase_rad: float = 0.0
 
     theta_weight: float = 1.0
+    coherence_group: str = LEGACY_COHERENCE_GROUP
 
     def validate(self) -> None:
         if self.wavelength_um <= 0.0:
@@ -37,6 +66,8 @@ class BeamChannel:
             raise ValueError("waists must be positive")
         if self.theta_weight < 0.0:
             raise ValueError("theta_weight must be nonnegative")
+        if not isinstance(self.coherence_group, str) or not self.coherence_group.strip():
+            raise ValueError("coherence_group must be non-empty")
 
 
 @dataclass(frozen=True)
@@ -59,6 +90,49 @@ class BeamStack:
         for ch in self.channels:
             ch.validate()
 
+        # Resolve once during validation so partially migrated stacks fail at
+        # the model boundary instead of silently changing optical semantics.
+        self.coherence_groups
+
     @property
     def Nch(self) -> int:
         return len(self.channels)
+
+    @property
+    def coherence_groups(self) -> tuple[str, ...]:
+        """Return normalized per-channel coherence groups.
+
+        Channels that retain the legacy default are migrated from the
+        stack-wide mode: a coherent stack gets one shared group, while an
+        incoherent stack gets one distinct group per channel. Once any channel
+        has an explicit group, all channels must have explicit groups.
+        """
+
+        groups = tuple(ch.coherence_group for ch in self.channels)
+        legacy = tuple(group == LEGACY_COHERENCE_GROUP for group in groups)
+
+        if all(legacy):
+            return normalize_coherence_groups(
+                len(groups),
+                coherent=self.coherence == "coherent",
+            )
+
+        if any(legacy):
+            raise ValueError(
+                "coherence_group migration is incomplete: either leave all channels "
+                "at the legacy default or assign every channel an explicit group"
+            )
+
+        return normalize_coherence_groups(
+            len(groups),
+            coherent=self.coherence == "coherent",
+            coherence_groups=groups,
+        )
+
+
+__all__ = [
+    "BeamChannel",
+    "BeamStack",
+    "CoherenceMode",
+    "normalize_coherence_groups",
+]

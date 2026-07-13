@@ -44,6 +44,7 @@ def test_build_runtime_components_smoke():
     assert components.grid.Nx == 32
     assert components.grid.Nz == 4
     assert components.launch.A0.shape == (1, 32, 32)
+    assert components.coherence_groups == components.launch.coherence_groups
     assert components.bias.theta_stack.shape == (4, 32, 32)
     assert components.b > 0.0
     assert components.bi > 0.0
