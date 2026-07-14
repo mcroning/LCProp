@@ -5,7 +5,7 @@ from lcprop.workflows.runtime import (
     build_runtime_components,
     initial_theta_intensity,
     make_picard_theta_relax,
-    make_static_optics_update,
+    make_global_uniform_theta_iteration,
     make_td_optics_step,
     make_zcoupled_theta_step,
 )
@@ -60,7 +60,7 @@ def test_builder_callbacks_smoke():
     theta1 = theta_relax(components.bias.theta_2d, I0, 1)
     assert theta1.shape == (32, 32)
 
-    optics_update = make_static_optics_update(components)
+    optics_update = make_global_uniform_theta_iteration(components)
     A2, I2 = optics_update(components.launch.A0, theta1, 1)
     assert A2.shape == (1, 32, 32)
     assert I2.shape == (32, 32)

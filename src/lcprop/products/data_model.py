@@ -309,8 +309,8 @@ def _as_zxy_stack(field, geometry: Geometry):
 
 def from_static_result(result) -> RunData:
     geometry = _geometry_from_grid_summary(result.grid_summary)
-    theta_2d = asnumpy(result.theta_final)
     theta_stack = _as_zxy_stack(result.theta_final, geometry)
+    theta_2d = theta_stack[-1]
     coherent, coherence_groups = _result_coherence(result)
 
     fields = []

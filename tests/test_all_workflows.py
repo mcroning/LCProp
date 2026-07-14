@@ -84,7 +84,7 @@ def test_static_local_self_consistent_workflow_public_api():
     result = run_static(req)
 
     assert result.A_final.shape == (1, 24, 24)
-    assert result.theta_final.shape == (24, 24)
+    assert result.theta_final.shape == (2, 24, 24)
     assert result.method == "local_self_consistent"
     assert_finite_array(result.A_final)
     assert_finite_array(result.theta_final)

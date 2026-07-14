@@ -198,12 +198,12 @@ def make_picard_theta_relax(
     return theta_relax
 
 
-def make_static_optics_update(components: RuntimeComponents):
-    """Return optics_update(A, theta, outer) callback for static relax.
+def make_global_uniform_theta_iteration(components: RuntimeComponents):
+    """Return the legacy one-theta-for-all-z optics iteration.
 
-    The static self-consistency loop restarts optical propagation from the
-    entrance launch field each outer iteration and returns the final field and
-    the last midpoint intensity.
+    This helper intentionally restarts from the entrance field and applies one
+    uniform 2-D theta field through every z slice. It is retained for explicit
+    global iteration experiments; it does not implement local self-consistency.
     """
 
     grid = components.grid

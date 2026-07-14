@@ -55,19 +55,20 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
     )
 
     if request.solver.workflow.strategy == "local_self_consistent":
-        result = _run_static_relax_mode(
+        result = _run_local_self_consistent_zmarch(
             request=request,
             grid=grid,
             bias=bias,
             launch=launch,
+            A0=A0,
             kernel=kernel,
             wavelength_um=wavelength_um,
             n_ref=n_ref,
         )
         A = result.A
-        theta = result.theta
+        theta = result.theta_stack
         warnings = ()
-        n_steps = result.outer_steps * grid.Nz
+        n_steps = result.relax_steps
 
     else:
         A = A0.copy()
@@ -110,33 +111,39 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
     )
 
 
-def _run_static_relax_mode(
+class _StaticZMarchResult:
+    """Internal result for the slice-local static z march."""
+
+    def __init__(self, *, A, theta_stack, relax_steps: int):
+        self.A = A
+        self.theta_stack = theta_stack
+        self.relax_steps = int(relax_steps)
+
+
+def _run_local_self_consistent_zmarch(
     *,
     request: StaticRunRequest,
     grid,
     bias,
     launch,
+    A0,
     kernel,
     wavelength_um: float,
     n_ref: float,
 ):
-    """Self-consistency loop using migrated static_relax + Picard CN step."""
+    """Relax theta locally and carry the optical field forward through z."""
 
     xp = grid.xp
     theta0 = bias.theta_2d.copy() if request.initial_theta is None else xp.asarray(request.initial_theta, dtype=bias.theta_2d.dtype).copy()
-    if theta0.shape != bias.theta_2d.shape:
-        raise ValueError(f"initial_theta shape {theta0.shape} does not match bias field shape {bias.theta_2d.shape}")
-
-    A0 = launch.A0.copy() if request.initial_A is None else xp.asarray(request.initial_A, dtype=launch.A0.dtype).copy()
-    if A0.shape != launch.A0.shape:
-        raise ValueError(f"initial_A shape {A0.shape} does not match launch field shape {launch.A0.shape}")
-
-    intensity0 = weighted_theta_intensity(
-        A0,
-        launch.theta_weights,
-        coherence_groups=launch.coherence_groups,
-        xp=xp,
-    )
+    if theta0.shape == (grid.Nz, grid.Nx, grid.Ny):
+        theta_seed = theta0[0].copy()
+    elif theta0.shape == bias.theta_2d.shape:
+        theta_seed = theta0.copy()
+    else:
+        raise ValueError(
+            f"initial_theta shape {theta0.shape} does not match "
+            f"{bias.theta_2d.shape} or {(grid.Nz, grid.Nx, grid.Ny)}"
+        )
 
     b = resolved_b(request.material, request.bias)
     bi = resolved_bi(request.grid, request.material, request.beams)
@@ -171,13 +178,30 @@ def _run_static_relax_mode(
             xp=xp,
         )
 
-    def optics_update(A_unused, theta, outer):
-        A = A0.copy()
-        I_mid = intensity0
+    controls = StaticRelaxControls(
+        max_outer=request.solver.max_iterations,
+        observer_stride=1,
+    )
 
-        for _ in range(grid.Nz):
-            A, _, _, I_mid = advance_slice_with_midintensity(
-                A,
+    theta_stack = xp.empty(
+        (grid.Nz, grid.Nx, grid.Ny),
+        dtype=bias.theta_2d.dtype,
+    )
+    A = A0.copy()
+    relax_steps = 0
+
+    for k in range(grid.Nz):
+        A_slice_in = A.copy()
+        intensity_in = weighted_theta_intensity(
+            A_slice_in,
+            launch.theta_weights,
+            coherence_groups=launch.coherence_groups,
+            xp=xp,
+        )
+
+        def propagate_slice(A_trial_unused, theta, outer):
+            A_trial, _, _, I_mid = advance_slice_with_midintensity(
+                A_slice_in.copy(),
                 theta,
                 kernel=kernel,
                 dz=grid.dz_um,
@@ -189,19 +213,24 @@ def _run_static_relax_mode(
                 theta_weights=launch.theta_weights,
                 xp=xp,
             )
+            return A_trial, I_mid
 
-        return A, I_mid
+        slice_result = run_static_relax(
+            theta_seed,
+            A_slice_in,
+            intensity_in,
+            theta_relax=theta_relax,
+            optics_update=propagate_slice,
+            controls=controls,
+        )
 
-    controls = StaticRelaxControls(
-        max_outer=request.solver.max_iterations,
-        observer_stride=1,
-    )
+        theta_stack[k] = slice_result.theta
+        theta_seed = slice_result.theta.copy()
+        A = slice_result.A
+        relax_steps += slice_result.outer_steps
 
-    return run_static_relax(
-        theta0,
-        A0,
-        intensity0,
-        theta_relax=theta_relax,
-        optics_update=optics_update,
-        controls=controls,
+    return _StaticZMarchResult(
+        A=A,
+        theta_stack=theta_stack,
+        relax_steps=relax_steps,
     )

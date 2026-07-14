@@ -43,7 +43,7 @@ def test_run_static_relax_workflow_smoke():
     result = run_static(request)
 
     assert result.A_final.shape == (1, 32, 32)
-    assert result.theta_final.shape == (32, 32)
+    assert result.theta_final.shape == (4, 32, 32)
     assert result.n_steps == 8
     assert result.method == "local_self_consistent"
     assert np.isfinite(np.asarray(result.A_final)).all()
