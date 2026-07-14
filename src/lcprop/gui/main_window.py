@@ -205,6 +205,16 @@ class LCPropMainWindow(QWidget):
             f"Initial condition: {'last soliton' if getattr(base_req, 'initial_A', None) is not None or getattr(base_req, 'initial_theta', None) is not None else 'default launch'}",
         ]
 
+        if hasattr(base_req.solver, "resolved_static_max_iterations"):
+            lines.extend([
+                f"Static max optical passes: {base_req.solver.resolved_static_max_iterations}",
+                f"Static residual RMS tolerance: {base_req.solver.static_residual_rms_tol}",
+                f"Static residual max tolerance: {base_req.solver.static_residual_max_tol}",
+                f"Static Δθ RMS tolerance: {base_req.solver.resolved_delta_theta_rms_tol}",
+                f"Static Δθ max tolerance: {base_req.solver.resolved_delta_theta_max_tol}",
+                f"Record static iteration history: {base_req.solver.record_iteration_history}",
+            ])
+
         mode = getattr(req, "mode", None)
         if mode is not None:
             lines.append(f"Soliton mode: {mode}")
@@ -299,9 +309,21 @@ class LCPropMainWindow(QWidget):
             )
 
         if hasattr(result, "power_initial"):
-            self.results_panel.append_console(f"power_initial: {result.power_initial:.8g}")
+            self.results_panel.append_console(
+                f"normalized_field_integral_initial: {result.power_initial:.8g}"
+            )
         if hasattr(result, "power_final"):
-            self.results_panel.append_console(f"power_final:   {result.power_final:.8g}")
+            self.results_panel.append_console(
+                f"normalized_field_integral_final:   {result.power_final:.8g}"
+            )
+        if getattr(result, "physical_power_initial_mW", None) is not None:
+            self.results_panel.append_console(
+                f"physical_power_initial_mW: {result.physical_power_initial_mW:.8g}"
+            )
+        if getattr(result, "physical_power_final_mW", None) is not None:
+            self.results_panel.append_console(
+                f"physical_power_final_mW:   {result.physical_power_final_mW:.8g}"
+            )
 
         A = getattr(result, "A_final", getattr(result, "A", None))
         theta = getattr(result, "theta_final", getattr(result, "theta", None))
@@ -310,6 +332,35 @@ class LCPropMainWindow(QWidget):
         if theta is not None:
             self.results_panel.append_console(f"theta shape:   {theta.shape}")
 
+        slice_summaries = tuple(getattr(result, "slice_summaries", ()) or ())
+        if slice_summaries:
+            converged_count = sum(item.converged for item in slice_summaries)
+            worst_index = int(result.worst_slice_index)
+            worst = slice_summaries[worst_index]
+            self.results_panel.append_console("static convergence:")
+            self.results_panel.append_console(
+                f"  converged slices: {converged_count} / {len(slice_summaries)}"
+            )
+            self.results_panel.append_console(
+                f"  max final residual RMS: {result.max_final_residual_rms:.8g}"
+            )
+            self.results_panel.append_console(
+                f"  median final residual RMS: {result.median_final_residual_rms:.8g}"
+            )
+            self.results_panel.append_console(
+                f"  max final residual max: {result.max_final_residual_max:.8g}"
+            )
+            self.results_panel.append_console(
+                f"  worst slice: {worst.z_index} (z={worst.z_um:g} µm)"
+            )
+            self.results_panel.append_console(
+                "  maximum iterations used: "
+                f"{max(item.relaxation_iterations for item in slice_summaries)}"
+            )
+            self.results_panel.append_console(
+                f"  maximum theta: {max(item.theta_max for item in slice_summaries):.8g}"
+            )
+
         mode = getattr(result, "mode", None)
         if mode is not None:
             self.results_panel.append_console(f"mode:          {mode}")
@@ -317,7 +368,7 @@ class LCPropMainWindow(QWidget):
         metrics = getattr(result, "metrics", None)
         if metrics:
             self.results_panel.append_console("metrics:")
-            for key in ["converged", "beta", "target_power", "final_residual_rms", "final_residual_max", "n_points", "converged_count"]:
+            for key in ["converged", "beta", "physical_power_mW", "normalized_field_integral", "final_residual_rms", "final_residual_max", "n_points", "converged_count"]:
                 if key in metrics:
                     self.results_panel.append_console(f"  {key}: {metrics[key]}")
 

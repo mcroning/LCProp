@@ -10,7 +10,7 @@ The intensity arguments are plain optical intensities; this module applies
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from .thomas import solve_const_offdiag_batched
 
@@ -24,6 +24,7 @@ from .theta_cn import (
 )
 
 Array = Any
+IterationObserver = Callable[[int, Array, Array], None]
 
 
 def _xp_from(*arrays: Array, xp: Any | None = None):
@@ -63,6 +64,7 @@ def cn_trapezoid_picard_step(
     tol_update: float = 1e-6,
     clamp: tuple[float, float] | None = None,
     tridiag_solver=solve_const_offdiag_batched,
+    iteration_observer: IterationObserver | None = None,
     xp: Any | None = None,
 ) -> Array:
     """Trapezoid/Picard corrected CN theta step.
@@ -121,8 +123,10 @@ def cn_trapezoid_picard_step(
         tridiag_solver=tridiag_solver,
         xp=xp,
     )
+    if iteration_observer is not None:
+        iteration_observer(1, theta, guess)
 
-    for _ in range(int(max_iter)):
+    for iteration in range(2, int(max_iter) + 2):
         N_guess = theta_drive(guess, I_pic, b=b, bi=bi, xp=xp).astype(dtype, copy=False)
 
         rhs = rhs_base + half_dt_over_m * N_guess
@@ -136,6 +140,8 @@ def cn_trapezoid_picard_step(
 
         update = new - guess
         rms_update = _to_float(xp.sqrt(xp.mean(update * update)), xp)
+        if iteration_observer is not None:
+            iteration_observer(iteration, guess, new)
         guess = new
 
         if rms_update < float(tol_update):
@@ -144,4 +150,4 @@ def cn_trapezoid_picard_step(
     return guess
 
 
-__all__ = ["cn_trapezoid_picard_step"]
+__all__ = ["IterationObserver", "cn_trapezoid_picard_step"]

@@ -130,9 +130,10 @@ def run_static_relax(
         if optics_update is not None:
             A, intensity = optics_update(A, theta, outer)
 
-        info = {"outer": outer}
+        info = {"outer": outer, "A": A, "intensity": intensity}
         converged = bool(conv(theta, theta_prev, info))
         info["converged"] = converged
+        stop = converged or bool(info.get("stop", False))
         history.append(info)
 
         if observer is not None and outer % int(controls.observer_stride) == 0:
@@ -147,13 +148,13 @@ def run_static_relax(
                 }
             )
 
-        if converged:
+        if stop:
             return StaticRelaxResult(
                 theta=theta,
                 A=A,
                 intensity=intensity,
                 outer_steps=outer,
-                converged=True,
+                converged=converged,
                 history=history,
             )
 

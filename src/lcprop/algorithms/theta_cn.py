@@ -231,6 +231,93 @@ def theta_drive(
     return (float(b) + float(bi) * intensity) * xp.sin(2.0 * theta)
 
 
+def static_director_residual(
+    theta: Array,
+    intensity: Array,
+    *,
+    b: float,
+    bi: float,
+    dx: float,
+    dy: float,
+    xp: Any | None = None,
+) -> Array:
+    """Return the canonical static director-equation residual.
+
+    The residual is
+
+    ``laplacian(theta) + (b + bi * intensity) * sin(2 * theta)``.
+
+    It uses the solver's centered dimensionless x stencil on interior
+    Dirichlet rows and its periodic-y stencil. Prescribed x-boundary rows are
+    set to zero and are excluded by :func:`static_director_residual_metrics`.
+    """
+
+    xp = _xp_from(theta, intensity, xp=xp)
+    if theta.ndim != 2 or intensity.ndim != 2:
+        raise ValueError("theta and intensity must have shape (Nx, Ny)")
+    if theta.shape != intensity.shape:
+        raise ValueError("theta and intensity shapes must match")
+
+    # Evaluate diagnostics in float64, matching the trusted strict-static
+    # residual while retaining the solver's exact stencil and coordinates.
+    theta_residual = theta.astype(xp.float64, copy=False)
+    intensity_residual = intensity.astype(xp.float64, copy=False)
+    lap = laplacian_dirichletx_periody(
+        theta_residual,
+        dx,
+        dy,
+        xp=xp,
+    )
+    residual = lap + theta_drive(
+        theta_residual,
+        intensity_residual,
+        b=b,
+        bi=bi,
+        xp=xp,
+    )
+    residual = residual.copy()
+    residual[0, :] = 0.0
+    residual[-1, :] = 0.0
+    return residual
+
+
+def static_director_residual_metrics(
+    theta: Array,
+    intensity: Array,
+    *,
+    b: float,
+    bi: float,
+    dx: float,
+    dy: float,
+    xp: Any | None = None,
+) -> dict[str, float]:
+    """Return interior RMS and maximum norms of the canonical residual."""
+
+    xp = _xp_from(theta, intensity, xp=xp)
+    residual = static_director_residual(
+        theta,
+        intensity,
+        b=b,
+        bi=bi,
+        dx=dx,
+        dy=dy,
+        xp=xp,
+    )
+    interior = residual[1:-1, :]
+    if interior.size == 0:
+        raise ValueError("static residual requires at least one interior x row")
+
+    rms = xp.sqrt(xp.mean(interior * interior))
+    maximum = xp.max(xp.abs(interior))
+    if hasattr(xp, "asnumpy"):
+        rms = xp.asnumpy(rms)
+        maximum = xp.asnumpy(maximum)
+    return {
+        "residual_rms": float(rms),
+        "residual_max": float(maximum),
+    }
+
+
 def cn_predictor_step(
     theta: Array,
     intensity: Array,
@@ -286,5 +373,7 @@ __all__ = [
     "laplacian_dirichletx_periody",
     "solve_dirichletx_periody",
     "theta_drive",
+    "static_director_residual",
+    "static_director_residual_metrics",
     "cn_predictor_step",
 ]

@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 
 from lcprop.core.backend import asnumpy
+from lcprop.algorithms.theta_cn import static_director_residual_metrics
 
 Array = Any
 
@@ -20,11 +21,16 @@ def scalar_float(x: Any) -> float:
     return float(asnumpy(x))
 
 
-def total_power(I: Array, grid: Any) -> float:
-    """Return integral I dx dy for a 2-D intensity."""
+def normalized_field_integral(I: Array, grid: Any) -> float:
+    """Return the dimensionless normalized intensity integral."""
     xp = grid.xp
     p = xp.sum(I) * float(grid.dx_um) * float(grid.dy_um)
     return scalar_float(p)
+
+
+def total_power(I: Array, grid: Any) -> float:
+    """Compatibility alias for :func:`normalized_field_integral`."""
+    return normalized_field_integral(I, grid)
 
 
 def centroid(I: Array, grid: Any) -> tuple[float, float]:
@@ -53,7 +59,7 @@ def intensity_metrics(I: Array, grid: Any) -> dict[str, float]:
     xc, yc = centroid(I, grid)
     sx, sy = rms_widths(I, grid)
     return {
-        "power": total_power(I, grid),
+        "normalized_field_integral": normalized_field_integral(I, grid),
         "Imax": scalar_float(xp.max(I)),
         "sx_um": sx,
         "sy_um": sy,
@@ -97,41 +103,22 @@ def residual_theta_static(
     theta_bc: float,
     xp: Any | None = None,
 ) -> dict[str, float]:
-    """Return residual metrics for static theta equation.
-
-    Residual is evaluated on interior x rows:
-
-        lap(theta) + (b + bi I) sin(2 theta)
-
-    This is a diagnostic only; it is not used by the algorithms.
-    """
-    if xp is None:
-        xp = getattr(grid := None, "xp", np)  # harmless fallback
-        if type(theta).__module__.split(".")[0] == "cupy":
-            import cupy as cp  # type: ignore
-
-            xp = cp
-
-    lap = xp.zeros_like(theta)
-    yp = xp.roll(theta, -1, axis=1)
-    ym = xp.roll(theta, +1, axis=1)
-
-    lap[1:-1, :] = (
-        (theta[2:, :] - 2.0 * theta[1:-1, :] + theta[:-2, :]) / (float(dx) * float(dx))
-        + (yp[1:-1, :] - 2.0 * theta[1:-1, :] + ym[1:-1, :]) / (float(dy) * float(dy))
+    """Compatibility wrapper for the canonical static residual metrics."""
+    return static_director_residual_metrics(
+        theta,
+        intensity,
+        b=b,
+        bi=bi,
+        dx=dx,
+        dy=dy,
+        xp=xp,
     )
-
-    R = lap + (float(b) + float(bi) * intensity) * xp.sin(2.0 * theta)
-    Ri = R[1:-1, :]
-    return {
-        "residual_rms": scalar_float(xp.sqrt(xp.mean(Ri * Ri))),
-        "residual_max": scalar_float(xp.max(xp.abs(Ri))),
-    }
 
 
 __all__ = [
     "Array",
     "scalar_float",
+    "normalized_field_integral",
     "total_power",
     "centroid",
     "rms_widths",

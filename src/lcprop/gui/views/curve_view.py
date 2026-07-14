@@ -25,6 +25,11 @@ class CurveView(FigureCanvasQTAgg):
         self.ax.set_title(title if title is not None else curve.display_name)
         self.ax.set_xlabel(_label_with_unit(curve.x_label, curve.units))
         self.ax.set_ylabel(_label_with_unit(curve.y_label, curve.units))
+        requested_scale = getattr(curve, "y_scale", "linear")
+        if requested_scale == "log" and y.size > 0 and np.all(y > 0.0):
+            self.ax.set_yscale("log")
+        else:
+            self.ax.set_yscale("linear")
         self.ax.grid(True)
 
         self.figure.tight_layout()

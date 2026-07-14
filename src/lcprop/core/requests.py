@@ -81,6 +81,12 @@ class StaticSolverOptions:
     max_iterations: int = 100
     tolerance_rms: Optional[float] = None
     tolerance_max: Optional[float] = None
+    static_residual_rms_tol: Optional[float] = None
+    static_residual_max_tol: Optional[float] = None
+    static_delta_theta_rms_tol: Optional[float] = None
+    static_delta_theta_max_tol: Optional[float] = None
+    static_max_iterations: Optional[int] = None
+    record_iteration_history: bool = True
 
     @property
     def method(self) -> str:
@@ -90,6 +96,27 @@ class StaticSolverOptions:
         Prefer workflow.strategy in new code.
         """
         return self.workflow.strategy
+
+    @property
+    def resolved_static_max_iterations(self) -> int:
+        """Return the explicit static limit, falling back to the legacy field."""
+        if self.static_max_iterations is not None:
+            return int(self.static_max_iterations)
+        return int(self.max_iterations)
+
+    @property
+    def resolved_delta_theta_rms_tol(self) -> Optional[float]:
+        """Map legacy ``tolerance_rms`` deliberately to theta-update RMS."""
+        if self.static_delta_theta_rms_tol is not None:
+            return float(self.static_delta_theta_rms_tol)
+        return None if self.tolerance_rms is None else float(self.tolerance_rms)
+
+    @property
+    def resolved_delta_theta_max_tol(self) -> Optional[float]:
+        """Map legacy ``tolerance_max`` deliberately to theta-update max."""
+        if self.static_delta_theta_max_tol is not None:
+            return float(self.static_delta_theta_max_tol)
+        return None if self.tolerance_max is None else float(self.tolerance_max)
 
 
 @dataclass(frozen=True)
