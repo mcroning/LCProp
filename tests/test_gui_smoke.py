@@ -28,7 +28,7 @@ def test_local_runner_static_smoke():
 
     assert result.kind == "static"
     assert result.result.A_final.shape == (1, 64, 64)
-    assert result.result.theta_final.shape == (64, 64)
+    assert result.result.theta_final.shape == (150, 64, 64)
 
 
 def test_gui_request_description_contains_key_fields():
@@ -39,7 +39,8 @@ def test_gui_request_description_contains_key_fields():
 
     assert "Experiment: Static propagation" in text
     assert "Runner: Local CPU" in text
-    assert "Beam: P=1" in text
+    assert "Beams: 1 enabled, total P=1 mW" in text
+    assert "First enabled beam: beam, P=1 mW" in text
     assert "Workflow: local_self_consistent" in text
 
 

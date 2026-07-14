@@ -61,8 +61,11 @@ class LCPropMainWindow(QWidget):
 
         self.experiment_panel = ExperimentPanel()
         self.physics_panel = PhysicsPanel()
-        self.beam_panel = BeamPanel()
         self.grid_panel = GridPanel()
+        self.beam_panel = BeamPanel(
+            x_aperture_um=self.grid_panel.x_aperture_um.value(),
+            y_aperture_um=self.grid_panel.y_aperture_um.value(),
+        )
         self.solver_panel = SolverPanel()
         self.sweep_panel = SweepPanel()
         self.results_panel = ResultsPanel()
@@ -75,8 +78,20 @@ class LCPropMainWindow(QWidget):
         self.sweep_tab_index = self.tabs.addTab(self.sweep_panel, "Sweep")
         self.tabs.addTab(self.results_panel, "Results")
         self.experiment_panel.experimentChanged.connect(self.update_run_button)
+        self.grid_panel.x_aperture_um.valueChanged.connect(
+            self._sync_beam_aperture
+        )
+        self.grid_panel.y_aperture_um.valueChanged.connect(
+            self._sync_beam_aperture
+        )
         self.update_run_button()   
         self.resize(1450, 900)
+
+    def _sync_beam_aperture(self) -> None:
+        self.beam_panel.set_aperture(
+            self.grid_panel.x_aperture_um.value(),
+            self.grid_panel.y_aperture_um.value(),
+        )
 
     def update_run_button(self) -> None:
         experiment = self.experiment_panel.current_experiment()
@@ -163,7 +178,15 @@ class LCPropMainWindow(QWidget):
 
     def describe_request(self, req) -> str:
         base_req = self._base_static_request(req)
-        ch = base_req.beams.channels[0]
+        channels = base_req.beams.channels
+        first_channel = channels[0]
+        total_power_mW = sum(channel.power_mW for channel in channels)
+        wavelengths = tuple(
+            dict.fromkeys(channel.wavelength_um for channel in channels)
+        )
+        coherence_groups = tuple(
+            dict.fromkeys(channel.coherence_group for channel in channels)
+        )
         lines = [
             f"Experiment: {self.experiment_panel.current_experiment()}",
             f"Runner: {self.runner.name}",
@@ -172,7 +195,12 @@ class LCPropMainWindow(QWidget):
             f"z length: {base_req.grid.z_length_um:g} µm, dz={base_req.grid.dz_um:g} µm",
             f"Material: ne={base_req.material.ne:g}, no={base_req.material.no:g}, K={base_req.material.K:g}, Δε={base_req.material.delta_epsilon:g}",
             f"Bias: V={base_req.bias.V_bias:g} V, theta_bc={base_req.bias.theta_bc:g} rad",
-            f"Beam: P={ch.power_mW:g} mW, waist={ch.waist_x_um:g} µm, λ={ch.wavelength_um:g} µm",
+            f"Beams: {len(channels)} enabled, total P={total_power_mW:g} mW",
+            "Wavelengths: " + ", ".join(f"{value:g} µm" for value in wavelengths),
+            "Lasers/coherence groups: " + ", ".join(coherence_groups),
+            f"First enabled beam: {first_channel.name}, P={first_channel.power_mW:g} mW, "
+            f"waists=({first_channel.waist_x_um:g}, {first_channel.waist_y_um:g}) µm, "
+            f"λ={first_channel.wavelength_um:g} µm",
             f"Workflow: {base_req.solver.workflow.strategy}",
             f"Initial condition: {'last soliton' if getattr(base_req, 'initial_A', None) is not None or getattr(base_req, 'initial_theta', None) is not None else 'default launch'}",
         ]
