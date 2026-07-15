@@ -176,7 +176,8 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
             "The transverse eigensoliton solver currently supports exactly one optical channel"
         )
 
-    target_power = _target_power(request.base.beams)
+    physical_power_mW = _target_power(request.base.beams)
+    target_power = 1.0
     coherent = runtime.coherent
 
     A = _prepare_initial_A(
@@ -494,7 +495,9 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
             "theta_mix": float(request.theta_mix),
             "converged": bool(converged),
             "convergence_status": "converged" if converged else "max_outer_reached",
-            "target_power": float(target_power),
+            "target_power_mW": float(physical_power_mW),
+            "physical_power_mW": float(physical_power_mW),
+            "normalized_field_integral_target": float(target_power),
             "mode": _canonical_mode(request.mode),
             "solver": "transverse_eigen",
             "b": float(runtime.b),

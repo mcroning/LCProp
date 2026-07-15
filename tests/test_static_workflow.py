@@ -38,5 +38,8 @@ def test_run_static_fixed_theta_workflow():
     assert result.theta_final.shape == (64, 64)
     assert result.n_steps == 10
     assert np.isclose(result.power_final, result.power_initial, rtol=1e-5)
+    assert np.isclose(result.power_initial, 1.0, rtol=1e-6)
+    assert np.isclose(result.physical_power_initial_mW, 1.0, rtol=1e-6)
+    assert np.isclose(result.physical_power_final_mW, 1.0, rtol=1e-5)
     assert result.grid_summary["Nz"] == 10
     assert "fixed prepared theta" in result.warnings[0]

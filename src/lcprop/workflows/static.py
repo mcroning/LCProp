@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 
 from lcprop.core.requests import StaticRunRequest
@@ -24,11 +26,6 @@ from lcprop.optics.splitstep import (
     advance_slice,
     advance_slice_with_midintensity,
     total_intensity,
-    weighted_theta_intensity,
-)
-from lcprop.algorithms.static_relax import (
-    StaticRelaxControls,
-    run_static_relax,
 )
 from lcprop.algorithms.theta_cn import prepare_cn_operator
 from lcprop.algorithms.theta_cn import static_director_residual_metrics
@@ -42,6 +39,11 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
     request.material.validate()
     request.bias.validate()
     request.beams.validate()
+    if request.solver.workflow.strategy == "local_self_consistent":
+        if request.solver.static_max_relax_iterations < 1:
+            raise ValueError("static_max_relax_iterations must be >= 1")
+        if request.solver.resolved_static_max_coupled_passes < 1:
+            raise ValueError("static_max_coupled_passes must be >= 1")
 
     grid = make_grid(request.grid, real_dtype=np.float64 if request.runtime.precision == "float64" else np.float32)
     bias = build_bias(request.bias, grid, request.material)
@@ -81,6 +83,7 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
         A = result.A
         theta = result.theta_stack
         intensity_stack = result.intensity_stack
+        theta_intensity_stack = result.theta_intensity_stack
         iteration_records = result.iteration_records
         slice_summaries = result.slice_summaries
         warnings = ()
@@ -126,6 +129,7 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
         n_steps = grid.Nz
         iteration_records = ()
         slice_summaries = ()
+        theta_intensity_stack = None
 
     if slice_summaries:
         final_residual_rms = np.asarray(
@@ -179,8 +183,12 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
         method=request.solver.workflow.strategy,
         physical_power_initial_mW=physical_power_initial_mW,
         physical_power_final_mW=physical_power_final_mW,
+        coupling_summary={
+            "bi_um2": float(resolved_bi(request.grid, request.material, request.beams)),
+        },
         A_initial=A0,
         intensity_stack=intensity_stack,
+        theta_intensity_stack=theta_intensity_stack,
         iteration_records=iteration_records,
         slice_summaries=slice_summaries,
         all_slices_converged=all_slices_converged,
@@ -203,6 +211,7 @@ class _StaticZMarchResult:
         A,
         theta_stack,
         intensity_stack,
+        theta_intensity_stack,
         relax_steps: int,
         iteration_records,
         slice_summaries,
@@ -210,6 +219,7 @@ class _StaticZMarchResult:
         self.A = A
         self.theta_stack = theta_stack
         self.intensity_stack = intensity_stack
+        self.theta_intensity_stack = theta_intensity_stack
         self.relax_steps = int(relax_steps)
         self.iteration_records = tuple(iteration_records)
         self.slice_summaries = tuple(slice_summaries)
@@ -255,8 +265,6 @@ def _run_local_self_consistent_zmarch(
 
     iteration_records: list[StaticIterationRecord] = []
     slice_summaries: list[StaticSliceSummary] = []
-    relaxation_iterations = [0 for _ in range(grid.Nz)]
-
     residual_rms_tol = request.solver.static_residual_rms_tol
     residual_max_tol = request.solver.static_residual_max_tol
     delta_rms_tol = request.solver.resolved_delta_theta_rms_tol
@@ -287,96 +295,6 @@ def _run_local_self_consistent_zmarch(
             checks.append(max_value <= float(max_tol))
         return bool(checks) and all(checks)
 
-    def theta_relax(theta, intensity, outer):
-        z_index = current_z_index
-
-        def record_picard_iteration(iteration, theta_previous, theta_new):
-            relaxation_iterations[z_index] += 1
-            residual = static_director_residual_metrics(
-                theta_new,
-                intensity,
-                b=b,
-                bi=bi,
-                dx=grid.du,
-                dy=grid.dv,
-                xp=xp,
-            )
-            delta_rms, delta_max = update_metrics(theta_new, theta_previous)
-            theta_min = scalar(xp.min(theta_new))
-            theta_max = scalar(xp.max(theta_new))
-            intensity_peak = scalar(xp.max(intensity))
-            intensity_integral = scalar(xp.sum(intensity)) * grid.dx_um * grid.dy_um
-            finite = all(
-                np.isfinite(value)
-                for value in (
-                    residual["residual_rms"],
-                    residual["residual_max"],
-                    delta_rms,
-                    delta_max,
-                    theta_min,
-                    theta_max,
-                    intensity_peak,
-                    intensity_integral,
-                )
-            )
-            converged = finite and (
-                criteria_met(
-                    residual["residual_rms"],
-                    residual["residual_max"],
-                    residual_rms_tol,
-                    residual_max_tol,
-                )
-                or criteria_met(
-                    delta_rms,
-                    delta_max,
-                    delta_rms_tol,
-                    delta_max_tol,
-                )
-            )
-            if request.solver.record_iteration_history:
-                iteration_records.append(
-                    StaticIterationRecord(
-                        z_index=z_index,
-                        z_um=float(z_index * grid.dz_um),
-                        optical_pass=int(outer),
-                        relax_iteration=int(iteration),
-                        residual_rms=float(residual["residual_rms"]),
-                        residual_max=float(residual["residual_max"]),
-                        delta_theta_rms=delta_rms,
-                        delta_theta_max=delta_max,
-                        theta_min=theta_min,
-                        theta_max=theta_max,
-                        intensity_peak=intensity_peak,
-                        normalized_intensity_integral=float(intensity_integral),
-                        converged=bool(converged),
-                    )
-                )
-
-        return cn_trapezoid_picard_step(
-            theta,
-            intensity,
-            intensity,
-            b=b,
-            bi=bi,
-            dt=0.01,
-            mobility=1.0,
-            dx=grid.du,
-            dy=grid.dv,
-            s=s,
-            off=off,
-            diag=diag,
-            max_iter=4,
-            tol_update=1e-6,
-            clamp=(request.bias.theta_min, request.bias.theta_max),
-            iteration_observer=record_picard_iteration,
-            xp=xp,
-        )
-
-    controls = StaticRelaxControls(
-        max_outer=request.solver.resolved_static_max_iterations,
-        observer_stride=1,
-    )
-
     theta_stack = xp.empty(
         (grid.Nz, grid.Nx, grid.Ny),
         dtype=bias.theta_2d.dtype,
@@ -385,21 +303,17 @@ def _run_local_self_consistent_zmarch(
         (grid.Nz, grid.Nx, grid.Ny),
         dtype=grid.real_dtype,
     )
+    theta_intensity_stack = xp.empty(
+        (grid.Nz, grid.Nx, grid.Ny),
+        dtype=grid.real_dtype,
+    )
     A = A0.copy()
     relax_steps = 0
-    current_z_index = 0
 
     for k in range(grid.Nz):
-        current_z_index = k
         A_slice_in = A.copy()
-        intensity_in = weighted_theta_intensity(
-            A_slice_in,
-            launch.theta_weights,
-            coherence_groups=launch.coherence_groups,
-            xp=xp,
-        )
 
-        def propagate_slice(A_trial_unused, theta, outer):
+        def optical_midpoint(theta):
             A_trial, _, _, I_mid = advance_slice_with_midintensity(
                 A_slice_in.copy(),
                 theta,
@@ -415,107 +329,206 @@ def _run_local_self_consistent_zmarch(
             )
             return A_trial, I_mid
 
-        def convergence(theta, theta_previous, info):
-            residual = static_director_residual_metrics(
-                theta,
-                info["intensity"],
-                b=b,
-                bi=bi,
-                dx=grid.du,
-                dy=grid.dv,
-                xp=xp,
-            )
-            delta_rms, delta_max = update_metrics(theta, theta_previous)
-            theta_min = scalar(xp.min(theta))
-            theta_max = scalar(xp.max(theta))
-            values = (
-                residual["residual_rms"],
-                residual["residual_max"],
-                delta_rms,
-                delta_max,
-                theta_min,
-                theta_max,
-            )
-            info.update(
-                residual_rms=float(residual["residual_rms"]),
-                residual_max=float(residual["residual_max"]),
-                delta_theta_rms=delta_rms,
-                delta_theta_max=delta_max,
-                theta_min=theta_min,
-                theta_max=theta_max,
-            )
-            if not all(np.isfinite(value) for value in values):
-                info["termination_reason"] = "nonfinite_value"
-                info["stop"] = True
-                return False
-            if criteria_met(
-                residual["residual_rms"],
-                residual["residual_max"],
-                residual_rms_tol,
-                residual_max_tol,
-            ):
-                info["termination_reason"] = "residual_tolerance"
-                return True
-            if criteria_met(
-                delta_rms,
-                delta_max,
-                delta_rms_tol,
-                delta_max_tol,
-            ):
-                info["termination_reason"] = "update_tolerance"
-                return True
-            return False
-
-        slice_result = run_static_relax(
-            theta_seed,
-            A_slice_in,
-            intensity_in,
-            theta_relax=theta_relax,
-            optics_update=propagate_slice,
-            controls=controls,
-            convergence=convergence,
+        theta = theta_seed.copy()
+        A_trial, midpoint_intensity = optical_midpoint(theta)
+        total_relax_iterations = 0
+        coupled_passes = 0
+        converged = False
+        termination_reason = "maximum_coupled_passes"
+        final_delta_rms = 0.0
+        final_delta_max = 0.0
+        final_residual = static_director_residual_metrics(
+            theta,
+            midpoint_intensity,
+            b=b,
+            bi=bi,
+            dx=grid.du,
+            dy=grid.dv,
+            xp=xp,
         )
 
-        if slice_result.history:
-            final_info = slice_result.history[-1]
-        else:
-            residual = static_director_residual_metrics(
-                slice_result.theta,
-                slice_result.intensity,
+        for coupled_pass in range(
+            1,
+            request.solver.resolved_static_max_coupled_passes + 1,
+        ):
+            coupled_passes = coupled_pass
+            last_record_index = None
+            finite = True
+
+            for relax_iteration in range(
+                1,
+                int(request.solver.static_max_relax_iterations) + 1,
+            ):
+                theta_previous = theta.copy()
+                theta = cn_trapezoid_picard_step(
+                    theta,
+                    midpoint_intensity,
+                    midpoint_intensity,
+                    b=b,
+                    bi=bi,
+                    dt=0.01,
+                    mobility=1.0,
+                    dx=grid.du,
+                    dy=grid.dv,
+                    s=s,
+                    off=off,
+                    diag=diag,
+                    max_iter=4,
+                    tol_update=1e-6,
+                    clamp=(request.bias.theta_min, request.bias.theta_max),
+                    xp=xp,
+                )
+                total_relax_iterations += 1
+                final_delta_rms, final_delta_max = update_metrics(
+                    theta,
+                    theta_previous,
+                )
+                residual_before = static_director_residual_metrics(
+                    theta,
+                    midpoint_intensity,
+                    b=b,
+                    bi=bi,
+                    dx=grid.du,
+                    dy=grid.dv,
+                    xp=xp,
+                )
+                final_residual = residual_before
+                theta_min = scalar(xp.min(theta))
+                theta_max = scalar(xp.max(theta))
+                intensity_peak = scalar(xp.max(midpoint_intensity))
+                intensity_integral = (
+                    scalar(xp.sum(midpoint_intensity))
+                    * grid.dx_um
+                    * grid.dy_um
+                )
+                finite = all(
+                    np.isfinite(value)
+                    for value in (
+                        residual_before["residual_rms"],
+                        residual_before["residual_max"],
+                        final_delta_rms,
+                        final_delta_max,
+                        theta_min,
+                        theta_max,
+                        intensity_peak,
+                        intensity_integral,
+                    )
+                )
+                if request.solver.record_iteration_history:
+                    iteration_records.append(
+                        StaticIterationRecord(
+                            z_index=k,
+                            z_um=float(k * grid.dz_um),
+                            optical_pass=coupled_pass,
+                            coupled_pass=coupled_pass,
+                            relax_iteration=relax_iteration,
+                            residual_rms=float(residual_before["residual_rms"]),
+                            residual_max=float(residual_before["residual_max"]),
+                            delta_theta_rms=final_delta_rms,
+                            delta_theta_max=final_delta_max,
+                            theta_min=theta_min,
+                            theta_max=theta_max,
+                            intensity_peak=intensity_peak,
+                            normalized_intensity_integral=float(intensity_integral),
+                            converged=False,
+                            residual_before_refresh_rms=float(
+                                residual_before["residual_rms"]
+                            ),
+                            residual_before_refresh_max=float(
+                                residual_before["residual_max"]
+                            ),
+                        )
+                    )
+                    last_record_index = len(iteration_records) - 1
+
+                if not finite:
+                    termination_reason = "nonfinite_value"
+                    break
+                if criteria_met(
+                    residual_before["residual_rms"],
+                    residual_before["residual_max"],
+                    residual_rms_tol,
+                    residual_max_tol,
+                ):
+                    break
+                if criteria_met(
+                    final_delta_rms,
+                    final_delta_max,
+                    delta_rms_tol,
+                    delta_max_tol,
+                ):
+                    break
+
+            if not finite:
+                break
+
+            # Acceptance always uses an optical midpoint recomputed from the
+            # newly relaxed theta. A pre-refresh residual can end the inner
+            # solve, but can never accept the coupled pair.
+            A_trial, midpoint_intensity = optical_midpoint(theta)
+            final_residual = static_director_residual_metrics(
+                theta,
+                midpoint_intensity,
                 b=b,
                 bi=bi,
                 dx=grid.du,
                 dy=grid.dv,
                 xp=xp,
             )
-            final_info = {
-                **residual,
-                "delta_theta_rms": 0.0,
-                "delta_theta_max": 0.0,
-                "theta_min": scalar(xp.min(slice_result.theta)),
-                "theta_max": scalar(xp.max(slice_result.theta)),
-            }
-        termination_reason = final_info.get("termination_reason")
-        if termination_reason is None:
-            termination_reason = "maximum_iterations"
+            finite = all(
+                np.isfinite(value)
+                for value in (
+                    final_residual["residual_rms"],
+                    final_residual["residual_max"],
+                    scalar(xp.min(theta)),
+                    scalar(xp.max(theta)),
+                )
+            )
+            converged = finite and criteria_met(
+                final_residual["residual_rms"],
+                final_residual["residual_max"],
+                residual_rms_tol,
+                residual_max_tol,
+            )
+            if last_record_index is not None:
+                iteration_records[last_record_index] = replace(
+                    iteration_records[last_record_index],
+                    converged=converged,
+                    residual_after_refresh_rms=float(
+                        final_residual["residual_rms"]
+                    ),
+                    residual_after_refresh_max=float(
+                        final_residual["residual_max"]
+                    ),
+                )
+            if not finite:
+                termination_reason = "nonfinite_value"
+                break
+            if converged:
+                termination_reason = "residual_tolerance"
+                break
+
+        theta_min = scalar(xp.min(theta))
+        theta_max = scalar(xp.max(theta))
         slice_summaries.append(
             StaticSliceSummary(
                 z_index=k,
                 z_um=float(k * grid.dz_um),
-                optical_passes=int(slice_result.outer_steps),
-                relaxation_iterations=int(relaxation_iterations[k]),
-                final_residual_rms=float(final_info["residual_rms"]),
-                final_residual_max=float(final_info["residual_max"]),
-                final_delta_theta_rms=float(final_info["delta_theta_rms"]),
-                final_delta_theta_max=float(final_info["delta_theta_max"]),
-                theta_min=float(final_info["theta_min"]),
-                theta_max=float(final_info["theta_max"]),
-                converged=bool(slice_result.converged),
-                termination_reason=str(termination_reason),
+                optical_passes=coupled_passes,
+                relaxation_iterations=total_relax_iterations,
+                final_residual_rms=float(final_residual["residual_rms"]),
+                final_residual_max=float(final_residual["residual_max"]),
+                final_delta_theta_rms=final_delta_rms,
+                final_delta_theta_max=final_delta_max,
+                theta_min=theta_min,
+                theta_max=theta_max,
+                converged=converged,
+                termination_reason=termination_reason,
             )
         )
 
-        theta_stack[k] = slice_result.theta
+        theta_stack[k] = theta
+        theta_intensity_stack[k] = midpoint_intensity
         intensity_stack[k] = 0.5 * (
             total_intensity(
                 A_slice_in,
@@ -523,19 +536,20 @@ def _run_local_self_consistent_zmarch(
                 xp=xp,
             )
             + total_intensity(
-                slice_result.A,
+                A_trial,
                 coherence_groups=launch.coherence_groups,
                 xp=xp,
             )
         )
-        theta_seed = slice_result.theta.copy()
-        A = slice_result.A
-        relax_steps += slice_result.outer_steps
+        theta_seed = theta.copy()
+        A = A_trial
+        relax_steps += coupled_passes
 
     return _StaticZMarchResult(
         A=A,
         theta_stack=theta_stack,
         intensity_stack=intensity_stack,
+        theta_intensity_stack=theta_intensity_stack,
         relax_steps=relax_steps,
         iteration_records=iteration_records,
         slice_summaries=slice_summaries,

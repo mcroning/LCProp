@@ -9,6 +9,8 @@ from lcprop.algorithms.theta_cn import (
 )
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import BiasSpec, GridSpec, LCMaterial
+from lcprop.core.derived import resolved_b
+from lcprop.core.grid import make_grid
 from lcprop.core.requests import (
     OutputOptions,
     StaticRunRequest,
@@ -16,7 +18,9 @@ from lcprop.core.requests import (
     StaticWorkflowOptions,
 )
 from lcprop.products.data_model import from_static_result
+from lcprop.lc.coupling import resolved_bi
 from lcprop.workflows.static import run_static
+import lcprop.workflows.static as static_workflow
 
 
 def _workflow() -> StaticWorkflowOptions:
@@ -29,11 +33,16 @@ def _workflow() -> StaticWorkflowOptions:
 
 
 def _request(**solver_updates) -> StaticRunRequest:
-    solver = StaticSolverOptions(
+    solver_options = dict(
         workflow=_workflow(),
-        max_iterations=2,
-        **solver_updates,
+        max_iterations=99,
+        static_max_coupled_passes=2,
+        static_max_relax_iterations=2,
+        static_residual_rms_tol=0.0,
+        static_residual_max_tol=0.0,
     )
+    solver_options.update(solver_updates)
+    solver = StaticSolverOptions(**solver_options)
     return StaticRunRequest(
         grid=GridSpec(
             Nx=16,
@@ -109,9 +118,9 @@ def test_legacy_static_tolerances_map_only_to_update_criteria():
 
     assert options.resolved_delta_theta_rms_tol == 1.0e-4
     assert options.resolved_delta_theta_max_tol == 2.0e-4
-    assert options.resolved_static_max_iterations == 7
-    assert options.static_residual_rms_tol is None
-    assert options.static_residual_max_tol is None
+    assert options.resolved_static_max_coupled_passes == 3
+    assert options.static_residual_rms_tol == 0.005
+    assert options.static_residual_max_tol == 0.02
 
 
 def test_static_iteration_records_are_ordered_and_summarized():
@@ -121,7 +130,7 @@ def test_static_iteration_records_are_ordered_and_summarized():
     assert [item.z_index for item in result.slice_summaries] == [0, 1, 2]
     assert result.iteration_records
     ordering = [
-        (item.z_index, item.optical_pass, item.relax_iteration)
+        (item.z_index, item.coupled_pass, item.relax_iteration)
         for item in result.iteration_records
     ]
     assert ordering == sorted(ordering)
@@ -131,7 +140,7 @@ def test_static_iteration_records_are_ordered_and_summarized():
         assert summary.relaxation_iterations == len(records)
         assert summary.optical_passes == 2
         assert summary.converged is False
-        assert summary.termination_reason == "maximum_iterations"
+        assert summary.termination_reason == "maximum_coupled_passes"
 
 
 def test_static_residual_tolerance_is_explicit_and_can_converge():
@@ -151,7 +160,7 @@ def test_static_residual_tolerance_is_explicit_and_can_converge():
     assert all(item.optical_passes == 1 for item in result.slice_summaries)
 
 
-def test_static_update_tolerance_is_distinct_from_residual_tolerance():
+def test_static_update_tolerance_cannot_replace_residual_acceptance():
     result = run_static(
         _request(
             static_delta_theta_rms_tol=1.0e9,
@@ -159,17 +168,19 @@ def test_static_update_tolerance_is_distinct_from_residual_tolerance():
         )
     )
 
-    assert result.all_slices_converged is True
+    assert result.all_slices_converged is False
     assert all(
-        item.termination_reason == "update_tolerance"
+        item.termination_reason == "maximum_coupled_passes"
         for item in result.slice_summaries
     )
+    assert all(item.relaxation_iterations == 2 for item in result.slice_summaries)
 
 
 def test_static_maximum_iterations_above_tolerance_is_not_converged():
     result = run_static(
         _request(
-            static_max_iterations=1,
+            static_max_coupled_passes=1,
+            static_max_relax_iterations=1,
             static_residual_rms_tol=0.0,
             static_residual_max_tol=0.0,
         )
@@ -178,7 +189,7 @@ def test_static_maximum_iterations_above_tolerance_is_not_converged():
     assert result.all_slices_converged is False
     assert all(not item.converged for item in result.slice_summaries)
     assert all(
-        item.termination_reason == "maximum_iterations"
+        item.termination_reason == "maximum_coupled_passes"
         for item in result.slice_summaries
     )
 
@@ -206,6 +217,70 @@ def test_static_history_disabled_keeps_slice_summaries():
     assert all(item.relaxation_iterations > 0 for item in result.slice_summaries)
     assert "static_convergence" in data.diagnostics
     assert "static_iteration_history" not in data.diagnostics
+
+
+def test_final_residual_matches_returned_theta_and_refreshed_midpoint():
+    request = _request(static_max_coupled_passes=1)
+    result = run_static(request)
+    grid = make_grid(request.grid)
+    b = resolved_b(request.material, request.bias)
+    bi = resolved_bi(request.grid, request.material, request.beams)
+
+    assert result.theta_intensity_stack is not None
+    for k, summary in enumerate(result.slice_summaries):
+        independent = static_director_residual_metrics(
+            np.asarray(result.theta_final[k]),
+            np.asarray(result.theta_intensity_stack[k]),
+            b=b,
+            bi=bi,
+            dx=grid.du,
+            dy=grid.dv,
+        )
+        assert summary.final_residual_rms == independent["residual_rms"]
+        assert summary.final_residual_max == independent["residual_max"]
+
+
+def test_convergence_is_not_accepted_from_stale_midpoint(monkeypatch):
+    optical_calls = 0
+
+    def changing_midpoint(A, theta, **kwargs):
+        nonlocal optical_calls
+        marker = optical_calls % 3
+        optical_calls += 1
+        intensity = np.full(theta.shape, float(marker), dtype=float)
+        return A.copy(), intensity.copy(), intensity.copy(), intensity
+
+    def marker_residual(theta, intensity, **kwargs):
+        value = 0.0 if float(np.mean(intensity)) == 0.0 else 1.0
+        return {"residual_rms": value, "residual_max": value}
+
+    monkeypatch.setattr(
+        static_workflow,
+        "advance_slice_with_midintensity",
+        changing_midpoint,
+    )
+    monkeypatch.setattr(
+        static_workflow,
+        "static_director_residual_metrics",
+        marker_residual,
+    )
+    result = run_static(
+        _request(
+            static_max_coupled_passes=2,
+            static_max_relax_iterations=1,
+            static_residual_rms_tol=0.5,
+            static_residual_max_tol=0.5,
+        )
+    )
+
+    assert result.all_slices_converged is False
+    assert all(item.optical_passes == 2 for item in result.slice_summaries)
+    first_pass_records = [
+        item for item in result.iteration_records if item.coupled_pass == 1
+    ]
+    assert all(item.residual_before_refresh_rms == 0.0 for item in first_pass_records)
+    assert all(item.residual_after_refresh_rms == 1.0 for item in first_pass_records)
+    assert all(not item.converged for item in first_pass_records)
 
 
 def test_static_results_diagnostics_and_curves_match_summaries():

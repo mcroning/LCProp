@@ -205,9 +205,10 @@ class LCPropMainWindow(QWidget):
             f"Initial condition: {'last soliton' if getattr(base_req, 'initial_A', None) is not None or getattr(base_req, 'initial_theta', None) is not None else 'default launch'}",
         ]
 
-        if hasattr(base_req.solver, "resolved_static_max_iterations"):
+        if hasattr(base_req.solver, "resolved_static_max_coupled_passes"):
             lines.extend([
-                f"Static max optical passes: {base_req.solver.resolved_static_max_iterations}",
+                f"Static max coupled passes: {base_req.solver.resolved_static_max_coupled_passes}",
+                f"Static max relax iterations/pass: {base_req.solver.static_max_relax_iterations}",
                 f"Static residual RMS tolerance: {base_req.solver.static_residual_rms_tol}",
                 f"Static residual max tolerance: {base_req.solver.static_residual_max_tol}",
                 f"Static Δθ RMS tolerance: {base_req.solver.resolved_delta_theta_rms_tol}",

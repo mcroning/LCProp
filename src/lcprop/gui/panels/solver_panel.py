@@ -29,7 +29,7 @@ class SolverPanel(QWidget):
         form.addRow("Static workflow", self.workflow)
         form.addRow("Soliton mode", self.soliton_mode_selector)
         form.addRow(self.refine_transverse_checkbox)
-        form.addRow("Max iterations", self.max_iterations)
+        form.addRow("Max coupled passes", self.max_iterations)
         form.addRow("TD Nt", self.Nt)
         form.addRow("TD dt × 1e6", self.dt)
 
@@ -72,6 +72,7 @@ class SolverPanel(QWidget):
         return StaticSolverOptions(
             workflow=workflow,
             max_iterations=self.max_iterations.value(),
+            static_max_coupled_passes=self.max_iterations.value(),
         )
 
 

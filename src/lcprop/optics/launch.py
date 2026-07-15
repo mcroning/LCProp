@@ -30,6 +30,9 @@ class LaunchResult:
     """Prepared multichannel optical launch."""
 
     A0: Array
+    physical_powers_mW: Array
+    power_fractions: Array
+    physical_total_power_mW: float
     theta_weights: Array
     wavelengths_um: Array
     coherence: str
@@ -40,6 +43,10 @@ class LaunchResult:
             "Nch": int(self.A0.shape[0]),
             "coherence": self.coherence,
             "coherence_groups": list(self.coherence_groups),
+            "physical_channel_powers_mW": [float(x) for x in np.asarray(_to_numpy(self.physical_powers_mW)).ravel()],
+            "physical_total_power_mW": float(self.physical_total_power_mW),
+            "power_fractions": [float(x) for x in np.asarray(_to_numpy(self.power_fractions)).ravel()],
+            "field_normalization": "sum_channel_integrals_equals_one",
             "wavelengths_um": [float(x) for x in np.asarray(_to_numpy(self.wavelengths_um)).ravel()],
             "theta_weights": [float(x) for x in np.asarray(_to_numpy(self.theta_weights)).ravel()],
         }
@@ -56,8 +63,19 @@ def _to_numpy(a: Any) -> np.ndarray:
     return np.asarray(a)
 
 
-def gaussian_channel(ch, grid: RuntimeGrid, *, complex_dtype: Any) -> Array:
-    """Return one normalized Gaussian channel on ``grid``."""
+def gaussian_channel(
+    ch,
+    grid: RuntimeGrid,
+    *,
+    power_fraction: float,
+    complex_dtype: Any,
+) -> Array:
+    """Return a Gaussian whose intensity integral is ``power_fraction``.
+
+    ``BeamChannel.power_mW`` remains physical request metadata. It is converted
+    to a normalized channel fraction by :func:`build_launch`; physical power is
+    not embedded in the optical field amplitude.
+    """
 
     xp = grid.xp
     X = grid.x_um[:, None]
@@ -81,13 +99,14 @@ def gaussian_channel(ch, grid: RuntimeGrid, *, complex_dtype: Any) -> Array:
 
     amp = amp.astype(complex_dtype, copy=False)
 
-    # Normalize so integral |A|^2 dx dy equals channel power.
+    # Normalize the transverse shape density in 1/um^2. A zero-power channel is
+    # permitted by the beam model and becomes a deterministic zero field.
     dxdy = float(grid.dx_um) * float(grid.dy_um)
     p0 = xp.sum(xp.abs(amp) ** 2) * dxdy
-    if float(ch.power_mW) == 0.0:
+    if float(power_fraction) == 0.0:
         amp = xp.zeros_like(amp)
     else:
-        amp = amp * xp.sqrt(float(ch.power_mW) / p0)
+        amp = amp * xp.sqrt(float(power_fraction) / p0)
 
     return amp.astype(complex_dtype, copy=False)
 
@@ -103,9 +122,23 @@ def build_launch(
     beams.validate()
     xp = grid.xp
 
+    physical_powers_mW = xp.asarray(
+        [float(ch.power_mW) for ch in beams.channels],
+        dtype=grid.real_dtype,
+    )
+    physical_total_power_mW = float(sum(float(ch.power_mW) for ch in beams.channels))
+    if physical_total_power_mW <= 0.0:
+        raise ValueError("beam stack total physical power must be positive")
+    power_fractions = physical_powers_mW / physical_total_power_mW
+
     fields = [
-        gaussian_channel(ch, grid, complex_dtype=complex_dtype)
-        for ch in beams.channels
+        gaussian_channel(
+            ch,
+            grid,
+            power_fraction=float(power_fractions[index]),
+            complex_dtype=complex_dtype,
+        )
+        for index, ch in enumerate(beams.channels)
     ]
 
     A0 = xp.stack(fields, axis=0).astype(complex_dtype, copy=False)
@@ -121,6 +154,9 @@ def build_launch(
 
     return LaunchResult(
         A0=A0,
+        physical_powers_mW=physical_powers_mW,
+        power_fractions=power_fractions,
+        physical_total_power_mW=physical_total_power_mW,
         theta_weights=theta_weights,
         wavelengths_um=wavelengths_um,
         coherence=beams.coherence,
@@ -128,11 +164,35 @@ def build_launch(
     )
 
 
-def total_power(A0: Array, grid: RuntimeGrid) -> float:
-    """Return integral sum_c |A_c|^2 dx dy."""
+def normalized_power(A0: Array, grid: RuntimeGrid) -> float:
+    """Return the normalized channel integral ``sum_c integral |A_c|^2``."""
     xp = grid.xp
     p = xp.sum(xp.abs(A0) ** 2) * float(grid.dx_um) * float(grid.dy_um)
     return float(_to_numpy(p))
+
+
+def channel_power_integrals(A0: Array, grid: RuntimeGrid) -> np.ndarray:
+    """Return normalized per-channel field integrals, independent of coherence."""
+    xp = grid.xp
+    values = xp.sum(xp.abs(A0) ** 2, axis=(-2, -1)) * float(grid.dx_um) * float(grid.dy_um)
+    return np.asarray(_to_numpy(values), dtype=float)
+
+
+def reconstructed_physical_powers_mW(
+    A0: Array,
+    grid: RuntimeGrid,
+    launch: LaunchResult,
+) -> np.ndarray:
+    """Reconstruct per-channel physical powers from normalized field integrals."""
+    return channel_power_integrals(A0, grid) * float(launch.physical_total_power_mW)
+
+
+def total_power(A0: Array, grid: RuntimeGrid) -> float:
+    """Compatibility alias for :func:`normalized_power`.
+
+    This value is a dimensionless normalized field integral, not milliwatts.
+    """
+    return normalized_power(A0, grid)
 
 
 __all__ = [
@@ -140,5 +200,8 @@ __all__ = [
     "LaunchResult",
     "gaussian_channel",
     "build_launch",
+    "channel_power_integrals",
+    "normalized_power",
+    "reconstructed_physical_powers_mW",
     "total_power",
 ]

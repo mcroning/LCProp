@@ -130,6 +130,8 @@ def test_soliton_workflow_public_api():
     assert result.theta.shape == (24, 24)
     assert "beta" in result.metrics
     assert "theta_max" in result.metrics
+    assert np.isclose(result.metrics["normalized_field_integral"], 1.0, rtol=1e-6)
+    assert result.metrics["physical_power_mW"] == 0.05
     assert_finite_array(result.A)
     assert_finite_array(result.theta)
 

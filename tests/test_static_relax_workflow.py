@@ -36,6 +36,10 @@ def test_run_static_relax_workflow_smoke():
                 coupling="self_consistent",
             ),
             max_iterations=2,
+            static_max_coupled_passes=2,
+            static_max_relax_iterations=2,
+            static_residual_rms_tol=0.0,
+            static_residual_max_tol=0.0,
         ),
         output=OutputOptions(),
     )
@@ -48,4 +52,9 @@ def test_run_static_relax_workflow_smoke():
     assert result.method == "local_self_consistent"
     assert np.isfinite(np.asarray(result.A_final)).all()
     assert np.isfinite(np.asarray(result.theta_final)).all()
-    assert result.power_final > 0.0
+    assert np.isclose(result.power_initial, 1.0, rtol=1e-6)
+    assert np.isclose(result.power_final, 1.0, rtol=1e-5)
+    assert np.isclose(result.physical_power_initial_mW, 0.1, rtol=1e-6)
+    assert result.launch_summary["field_normalization"] == (
+        "sum_channel_integrals_equals_one"
+    )

@@ -176,8 +176,8 @@ def test_polish_soliton_preserves_basic_properties():
     assert polished.A.shape == seed.A.shape
     assert polished.theta.shape == seed.theta.shape
     assert polished.intensity.shape == seed.intensity.shape
-    assert polished.metrics["target_power"] == pytest.approx(
-        seed.metrics["target_power"], rel=1e-12
+    assert polished.metrics["target_power_mW"] == pytest.approx(
+        seed.metrics["target_power_mW"], rel=1e-12
     )
     assert polished.mode == seed.mode
     assert "optical_residual" in polished.metrics

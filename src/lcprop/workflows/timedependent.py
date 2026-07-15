@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from lcprop.core.requests import TimeDependentRunRequest, StaticRunRequest, StaticSolverOptions
 from lcprop.core.results import TimeDependentRunResult
-from lcprop.optics.launch import total_power
+from lcprop.optics.launch import normalized_power, reconstructed_physical_powers_mW
+from lcprop.optics.splitstep import total_intensity
 from lcprop.algorithms.td_zmarch import TDZMarchControls, run_td_zmarch
 from lcprop.workflows.runtime import (
     build_runtime_components,
@@ -40,15 +41,30 @@ def run_timedependent(request: TimeDependentRunRequest) -> TimeDependentRunResul
     theta2d = initial_theta_field(runtime)
     theta0 = runtime.grid.xp.repeat(theta2d[None, :, :], runtime.grid.Nz, axis=0)
 
-    power_initial = total_power(A0, runtime.grid)
+    power_initial = normalized_power(A0, runtime.grid)
+    physical_power_initial_mW = float(
+        reconstructed_physical_powers_mW(A0, runtime.grid, runtime.launch).sum()
+    )
 
     optics_step = make_td_optics_step(runtime)
 
     A_probe = A0.copy()
     initial_intensity_stack = runtime.grid.xp.empty_like(theta0)
+    initial_source_intensity_stack = runtime.grid.xp.empty_like(theta0)
     for k in range(runtime.grid.Nz):
+        intensity_before = total_intensity(
+            A_probe,
+            coherence_groups=runtime.coherence_groups,
+            xp=runtime.grid.xp,
+        )
         A_probe, I_mid = optics_step(A_probe, theta0[k], k)
-        initial_intensity_stack[k] = I_mid
+        intensity_after = total_intensity(
+            A_probe,
+            coherence_groups=runtime.coherence_groups,
+            xp=runtime.grid.xp,
+        )
+        initial_intensity_stack[k] = 0.5 * (intensity_before + intensity_after)
+        initial_source_intensity_stack[k] = I_mid
 
     theta_step = make_zcoupled_theta_step(
         runtime,
@@ -65,15 +81,41 @@ def run_timedependent(request: TimeDependentRunRequest) -> TimeDependentRunResul
         observer_stride_t=1,
     )
 
+    final_intensity_stack = initial_intensity_stack.copy()
+    final_source_intensity_stack = initial_source_intensity_stack.copy()
+
+    def observed_optics_step(A, theta, k):
+        intensity_before = total_intensity(
+            A,
+            coherence_groups=runtime.coherence_groups,
+            xp=runtime.grid.xp,
+        )
+        A_next, I_mid = optics_step(A, theta, k)
+        intensity_after = total_intensity(
+            A_next,
+            coherence_groups=runtime.coherence_groups,
+            xp=runtime.grid.xp,
+        )
+        final_intensity_stack[k] = 0.5 * (intensity_before + intensity_after)
+        final_source_intensity_stack[k] = I_mid
+        return A_next, I_mid
+
     td = run_td_zmarch(
         theta0,
         A0,
-        optics_step=optics_step,
+        optics_step=observed_optics_step,
         theta_step=theta_step,
         controls=controls,
     )
 
-    power_final = total_power(td.A_last, runtime.grid)
+    power_final = normalized_power(td.A_last, runtime.grid)
+    physical_power_final_mW = float(
+        reconstructed_physical_powers_mW(
+            td.A_last,
+            runtime.grid,
+            runtime.launch,
+        ).sum()
+    )
 
     return TimeDependentRunResult(
         A_final=td.A_last,
@@ -81,6 +123,9 @@ def run_timedependent(request: TimeDependentRunRequest) -> TimeDependentRunResul
         A_initial=A0,
         theta_initial=theta0,
         initial_intensity_stack=initial_intensity_stack,
+        final_intensity_stack=final_intensity_stack,
+        initial_source_intensity_stack=initial_source_intensity_stack,
+        final_source_intensity_stack=final_source_intensity_stack,
         theta_bias=runtime.bias.theta_2d,
         power_initial=power_initial,
         power_final=power_final,
@@ -89,5 +134,7 @@ def run_timedependent(request: TimeDependentRunRequest) -> TimeDependentRunResul
         bias_summary=runtime.bias.summary(),
         Nt=td.steps,
         method=request.solver.workflow.strategy,
+        physical_power_initial_mW=physical_power_initial_mW,
+        physical_power_final_mW=physical_power_final_mW,
         warnings=(),
     )

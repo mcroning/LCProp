@@ -36,6 +36,9 @@ class Workspace(QWidget):
         self.longitudinal_pane.guidesVisibilityChanged.connect(
             self._guides_visibility_changed
         )
+        self.longitudinal_pane.zPlaneChanged.connect(
+            self.image_pane.set_z_index
+        )
 
         self.curve_pane = CurvePane()
         self.tabs.addTab(self.curve_pane, "Curves")

@@ -11,6 +11,7 @@ from lcprop.gui.views.image_view import ImageView
 
 class LongitudinalPane(QWidget):
     cutChanged = Signal(int, int)
+    zPlaneChanged = Signal(int)
     guidesVisibilityChanged = Signal(bool)
     """Viewer for longitudinal x-z and y-z cuts from 3-D fields.
 
@@ -74,11 +75,13 @@ class LongitudinalPane(QWidget):
         """Clicking an x-z view changes the selected x index for the y-z cut."""
         self._iz = int(iz)
         self.set_cut_indices(ix, self._iy)
+        self.zPlaneChanged.emit(self._iz)
 
     def _yz_position_selected(self, iz: int, iy: int) -> None:
         """Clicking a y-z view changes the selected y index for the x-z cut."""
         self._iz = int(iz)
         self.set_cut_indices(self._ix, iy)
+        self.zPlaneChanged.emit(self._iz)
 
     def _show_guides_changed(self, checked: bool) -> None:
         self._show_guides = bool(checked)

@@ -1,3 +1,5 @@
+import numpy as np
+
 from lcprop.core.requests import TimeDependentRunRequest, TimeDependentSolverOptions
 from lcprop.products.data_model import (
     from_static_result,
@@ -16,8 +18,37 @@ def test_static_result_to_run_data():
     result = run_static(make_base_static_request())
     data = from_static_result(result)
     assert data.workflow == "static"
-    assert data.fields["final_intensity"].data.shape == (24, 24)
-    assert data.fields["theta"].data.shape == (24, 24)
+    image_fields = [field for field in data.fields.values() if field.data.ndim == 2]
+    volume_fields = [field for field in data.fields.values() if field.data.ndim == 3]
+    assert [field.display_name for field in image_fields] == [
+        "Input Plane Intensity",
+        "Output Plane Intensity",
+        "Input Plane Δθ",
+        "Output Plane Δθ",
+    ]
+    assert [field.display_name for field in volume_fields] == ["Intensity", "Δθ"]
+    assert "theta" not in data.fields
+    assert "theta_stack" not in data.fields
+
+    expected_input = np.sum(np.abs(np.asarray(result.A_initial)) ** 2, axis=0)
+    expected_output = np.sum(np.abs(np.asarray(result.A_final)) ** 2, axis=0)
+    expected_delta = (
+        np.asarray(result.theta_final)[None, :, :]
+        - np.asarray(result.theta_bias)[None, :, :]
+    )
+    assert np.allclose(data.fields["input_intensity"].data, expected_input)
+    assert np.allclose(data.fields["final_intensity"].data, expected_output)
+    assert np.allclose(data.fields["input_delta_theta"].data, expected_delta[0])
+    assert np.allclose(data.fields["output_delta_theta"].data, expected_delta[-1])
+    assert np.allclose(data.fields["delta_theta_stack"].data, expected_delta)
+    assert np.max(np.abs(np.diff(data.fields["intensity_stack"].data, axis=0))) > 0.0
+    assert data.fields["input_intensity"].value_unit == "1/µm²"
+    assert data.fields["intensity_stack"].value_unit == "1/µm²"
+    assert data.fields["output_delta_theta"].value_unit == "rad"
+    summary = data.diagnostics["summary"].values
+    assert summary["normalized_field_integral_initial"] == result.power_initial
+    assert summary["physical_power_initial_mW"] == 0.05
+    assert "power_initial" not in summary
 
 
 def test_timedependent_result_to_run_data():
@@ -34,7 +65,38 @@ def test_timedependent_result_to_run_data():
     )
     data = from_timedependent_result(result)
     assert data.workflow == "timedependent"
-    assert data.fields["theta_stack"].data.ndim == 3
+    image_fields = [field for field in data.fields.values() if field.data.ndim == 2]
+    volume_fields = [field for field in data.fields.values() if field.data.ndim == 3]
+    expected_labels = [
+        "Initial Intensity",
+        "Final Intensity",
+        "Initial Δθ",
+        "Final Δθ",
+    ]
+    assert [field.display_name for field in image_fields] == expected_labels
+    assert [field.display_name for field in volume_fields] == expected_labels
+    assert all(
+        name not in [field.display_name for field in data.fields.values()]
+        for name in ("Initial θ", "Final θ", "Initial TD Source Intensity")
+    )
+
+    initial_delta = np.asarray(result.theta_initial) - np.asarray(result.theta_bias)[None]
+    final_delta = np.asarray(result.theta_final) - np.asarray(result.theta_bias)[None]
+    selected_z = final_delta.shape[0] // 2
+    assert np.allclose(data.fields["initial_delta_theta"].data, initial_delta[selected_z])
+    assert np.allclose(data.fields["final_delta_theta"].data, final_delta[selected_z])
+    assert np.allclose(data.fields["initial_delta_theta_stack"].data, initial_delta)
+    assert np.allclose(data.fields["final_delta_theta_stack"].data, final_delta)
+    assert np.array_equal(
+        data.fields["initial_intensity_stack"].data,
+        np.asarray(result.initial_intensity_stack),
+    )
+    assert np.array_equal(
+        data.fields["final_intensity_stack"].data,
+        np.asarray(result.final_intensity_stack),
+    )
+    assert data.fields["final_intensity"].value_unit == "1/µm²"
+    assert data.fields["final_delta_theta_stack"].value_unit == "rad"
 
 
 def test_soliton_result_to_run_data():

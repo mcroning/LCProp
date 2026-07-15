@@ -81,11 +81,12 @@ class StaticSolverOptions:
     max_iterations: int = 100
     tolerance_rms: Optional[float] = None
     tolerance_max: Optional[float] = None
-    static_residual_rms_tol: Optional[float] = None
-    static_residual_max_tol: Optional[float] = None
+    static_residual_rms_tol: Optional[float] = 5.0e-3
+    static_residual_max_tol: Optional[float] = 2.0e-2
     static_delta_theta_rms_tol: Optional[float] = None
     static_delta_theta_max_tol: Optional[float] = None
-    static_max_iterations: Optional[int] = None
+    static_max_relax_iterations: int = 200
+    static_max_coupled_passes: int = 3
     record_iteration_history: bool = True
 
     @property
@@ -98,11 +99,9 @@ class StaticSolverOptions:
         return self.workflow.strategy
 
     @property
-    def resolved_static_max_iterations(self) -> int:
-        """Return the explicit static limit, falling back to the legacy field."""
-        if self.static_max_iterations is not None:
-            return int(self.static_max_iterations)
-        return int(self.max_iterations)
+    def resolved_static_max_coupled_passes(self) -> int:
+        """Return the explicit local optical/director coupled-pass limit."""
+        return int(self.static_max_coupled_passes)
 
     @property
     def resolved_delta_theta_rms_tol(self) -> Optional[float]:

@@ -54,4 +54,10 @@ def test_run_timedependent_smoke():
     assert result.Nt == 2
     assert np.isfinite(np.asarray(result.A_final)).all()
     assert np.isfinite(np.asarray(result.theta_final)).all()
-    assert result.power_final > 0.0
+    assert np.isclose(result.power_initial, 1.0, rtol=1e-6)
+    assert np.isclose(result.power_final, 1.0, rtol=1e-5)
+    assert np.isclose(result.physical_power_initial_mW, 0.1, rtol=1e-6)
+    assert np.isclose(result.physical_power_final_mW, 0.1, rtol=1e-5)
+    assert result.launch_summary["field_normalization"] == (
+        "sum_channel_integrals_equals_one"
+    )

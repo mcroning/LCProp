@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
+import numpy as np
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QComboBox, QVBoxLayout, QWidget
 
@@ -14,6 +18,7 @@ class ImagePane(QWidget):
     def __init__(self):
         super().__init__()
         self._run_data = None
+        self._z_index = None
 
         layout = QVBoxLayout(self)
 
@@ -27,6 +32,8 @@ class ImagePane(QWidget):
 
     def set_run_data(self, run_data) -> None:
         self._run_data = run_data
+        z = getattr(run_data.geometry, "z", None)
+        self._z_index = None if z is None else len(z) // 2
         self.field_selector.blockSignals(True)
         self.field_selector.clear()
 
@@ -48,11 +55,25 @@ class ImagePane(QWidget):
         if key is None:
             return
 
-        field = self._run_data.fields[key]
+        field = self._field_at_selected_z(self._run_data.fields[key])
         extent = None
         if field.axes == ("x", "y"):
             extent = self._run_data.geometry.extent_xy()
         self.image_view.set_field(field, extent=extent)
+
+    def set_z_index(self, index: int) -> None:
+        """Select the z slice used by 2-D fields derived from a volume."""
+        self._z_index = int(index)
+        self._field_changed(self.field_selector.currentIndex())
+
+    def _field_at_selected_z(self, field):
+        source_key = getattr(field, "source_volume_key", None)
+        if source_key is None or self._z_index is None:
+            return field
+        source = self._run_data.fields[source_key]
+        volume = np.asarray(source.data)
+        iz = min(max(self._z_index, 0), volume.shape[0] - 1)
+        return replace(field, data=volume[iz])
 
     def set_crosshair(self, ix: int, iy: int) -> None:
         """Move the image crosshair to LCProp (x,y) indices."""

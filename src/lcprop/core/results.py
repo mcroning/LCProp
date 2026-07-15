@@ -9,6 +9,7 @@ class StaticIterationRecord:
     z_index: int
     z_um: float
     optical_pass: int
+    coupled_pass: int
     relax_iteration: int
     residual_rms: float
     residual_max: float
@@ -19,6 +20,10 @@ class StaticIterationRecord:
     intensity_peak: float
     normalized_intensity_integral: float
     converged: bool
+    residual_before_refresh_rms: float | None = None
+    residual_before_refresh_max: float | None = None
+    residual_after_refresh_rms: float | None = None
+    residual_after_refresh_max: float | None = None
 
 
 @dataclass(frozen=True)
@@ -64,8 +69,10 @@ class StaticRunResult:
 
     physical_power_initial_mW: float | None = None
     physical_power_final_mW: float | None = None
+    coupling_summary: dict[str, float] = field(default_factory=dict)
     A_initial: Any | None = None
     intensity_stack: Any | None = None
+    theta_intensity_stack: Any | None = None
     iteration_records: tuple[StaticIterationRecord, ...] = field(default_factory=tuple)
     slice_summaries: tuple[StaticSliceSummary, ...] = field(default_factory=tuple)
     all_slices_converged: bool | None = None

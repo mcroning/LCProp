@@ -60,6 +60,8 @@ class RuntimeComponents:
     n_ref: float
     coherent: bool
     coherence_groups: tuple[str, ...]
+    physical_total_power_mW: float
+    power_fractions: Any
 
     kernel: Any
     cn: CNOperator
@@ -143,6 +145,8 @@ def build_runtime_components(
         n_ref=n_ref,
         coherent=coherent,
         coherence_groups=coherence_groups,
+        physical_total_power_mW=launch.physical_total_power_mW,
+        power_fractions=launch.power_fractions,
         kernel=kernel,
         cn=CNOperator(s=s, off=off, diag=diag, lam_y=lam_y),
     )

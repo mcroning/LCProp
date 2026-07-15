@@ -1,3 +1,5 @@
+import numpy as np
+
 from lcprop.core.context import GridSpec, LCMaterial, BiasSpec
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.requests import StaticRunRequest, StaticSolverOptions, OutputOptions
@@ -45,6 +47,8 @@ def test_build_runtime_components_smoke():
     assert components.grid.Nz == 4
     assert components.launch.A0.shape == (1, 32, 32)
     assert components.coherence_groups == components.launch.coherence_groups
+    assert components.physical_total_power_mW == 0.1
+    assert np.allclose(components.power_fractions, [1.0])
     assert components.bias.theta_stack.shape == (4, 32, 32)
     assert components.b > 0.0
     assert components.bi > 0.0

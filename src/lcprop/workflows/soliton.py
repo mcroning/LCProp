@@ -91,13 +91,12 @@ def _normalize_power(
     xp,
     coherence_groups=None,
 ):
-    I = total_intensity(
-        A,
-        coherent=coherent,
-        coherence_groups=coherence_groups,
-        xp=xp,
-    )
-    p = xp.sum(I) * float(grid.dx_um) * float(grid.dy_um)
+    """Normalize the sum of per-channel integrals, not grouped interference.
+
+    The normalized field integral is independent of coherent cross terms;
+    physical total power remains in ``runtime.bi``.
+    """
+    p = xp.sum(xp.abs(A) ** 2) * float(grid.dx_um) * float(grid.dy_um)
     scale = xp.sqrt(float(target_power) / (p + xp.asarray(1e-300, dtype=p.dtype)))
     return A * scale
 
@@ -336,7 +335,8 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
     grid = runtime.grid
     xp = grid.xp
 
-    target_power = _target_power(request.base.beams)
+    physical_power_mW = _target_power(request.base.beams)
+    target_power = 1.0
     coherent = runtime.coherent
     coherence_groups = runtime.coherence_groups
 
@@ -614,7 +614,9 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
         "theta_mix": float(request.theta_mix),
         "converged": bool(converged),
         "convergence_status": "converged" if converged else "max_outer_reached",
-        "target_power": float(target_power),
+        "target_power_mW": float(physical_power_mW),
+        "physical_power_mW": float(physical_power_mW),
+        "normalized_field_integral_target": float(target_power),
         "mode": _canonical_mode(request.mode),
         "b": float(runtime.b),
         "bi": float(runtime.bi),

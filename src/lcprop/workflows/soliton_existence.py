@@ -160,7 +160,9 @@ def run_soliton_existence(request: SolitonExistenceRequest) -> SolitonExistenceR
         })
         res = sweep_result.results[i]
         converted.update(res.metrics)
-        converted["output_power_mW"] = float(res.metrics.get("power", res.metrics.get("target_power", 0.0)))
+        converted["output_power_mW"] = float(
+            res.metrics.get("physical_power_mW", res.metrics.get("target_power_mW", 0.0))
+        )
         rows.append(converted)
 
     metrics: dict = {
