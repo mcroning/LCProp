@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -75,13 +76,20 @@ def test_exact_gui_offaxis_run_plots_current_final_intensity(monkeypatch):
     captured = {}
     original_runner = window.runner.run_static
 
-    def capture_runner(run_request):
+    def capture_runner(run_request, **kwargs):
         captured["request"] = run_request
-        captured["runner_result"] = original_runner(run_request)
+        captured["runner_result"] = original_runner(run_request, **kwargs)
         return captured["runner_result"]
 
     monkeypatch.setattr(window.runner, "run_static", capture_runner)
     window.run_static_clicked()
+    deadline = time.monotonic() + 240.0
+    while window._background_running:
+        app.processEvents()
+        if time.monotonic() >= deadline:
+            raise AssertionError("timed out waiting for background static run")
+        time.sleep(0.002)
+    app.processEvents()
 
     assert captured["request"] == request
     result = captured["runner_result"].result

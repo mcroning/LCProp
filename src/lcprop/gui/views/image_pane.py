@@ -5,7 +5,7 @@ from dataclasses import replace
 import numpy as np
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QComboBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QLabel, QVBoxLayout, QWidget
 
 from lcprop.gui.views.image_view import ImageView
 
@@ -19,10 +19,20 @@ class ImagePane(QWidget):
         super().__init__()
         self._run_data = None
         self._z_index = None
+        self._scale_limits: dict[str, tuple[float, float]] = {}
 
         layout = QVBoxLayout(self)
 
+        self.td_time_label = QLabel()
+        self.td_time_label.setVisible(False)
+        layout.addWidget(self.td_time_label)
+
         self.field_selector = QComboBox()
+        self.field_selector.setMinimumWidth(285)
+        self.field_selector.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.field_selector.setMinimumContentsLength(32)
         self.field_selector.currentIndexChanged.connect(self._field_changed)
         layout.addWidget(self.field_selector)
 
@@ -44,8 +54,17 @@ class ImagePane(QWidget):
         self.field_selector.blockSignals(False)
 
         if self.field_selector.count() > 0:
-            self.field_selector.setCurrentIndex(0)
-            self._field_changed(0)
+            default_index = 0
+            if run_data.workflow in {"static", "timedependent"}:
+                final_index = self.field_selector.findData("final_intensity")
+                if final_index >= 0:
+                    default_index = final_index
+            self.field_selector.setCurrentIndex(default_index)
+            self._field_changed(default_index)
+
+    def set_td_time_indicator(self, text: str | None) -> None:
+        self.td_time_label.setText("" if text is None else text)
+        self.td_time_label.setVisible(text is not None)
 
     def _field_changed(self, index: int) -> None:
         if self._run_data is None or index < 0:
@@ -59,7 +78,34 @@ class ImagePane(QWidget):
         extent = None
         if field.axes == ("x", "y"):
             extent = self._run_data.geometry.extent_xy()
-        self.image_view.set_field(field, extent=extent)
+        vmin, vmax = self._limits_for_field(field)
+        self.image_view.set_field(
+            field,
+            extent=extent,
+            vmin=vmin,
+            vmax=vmax,
+        )
+
+    def reset_color_scales(self) -> None:
+        """Start deterministic autoscaling for a fresh run."""
+
+        self._scale_limits.clear()
+
+    def _limits_for_field(self, field) -> tuple[float, float]:
+        kind = str(getattr(field, "kind", "field"))
+        limits = self._scale_limits.get(kind)
+        if limits is not None:
+            return limits
+        data = np.asarray(field.data)
+        vmin = float(np.nanmin(data))
+        vmax = float(np.nanmax(data))
+        if vmin == vmax:
+            padding = max(abs(vmin) * 1e-12, 1e-15)
+            vmin -= padding
+            vmax += padding
+        limits = (vmin, vmax)
+        self._scale_limits[kind] = limits
+        return limits
 
     def set_z_index(self, index: int) -> None:
         """Select the z slice used by 2-D fields derived from a volume."""

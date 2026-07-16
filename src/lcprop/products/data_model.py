@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Iterator
 
 import numpy as np
@@ -254,6 +254,8 @@ class RunData:
     fields: FieldCollection = field(default_factory=FieldCollection)
     curves: CurveCollection = field(default_factory=CurveCollection)
     diagnostics: DiagnosticCollection = field(default_factory=DiagnosticCollection)
+    longitudinal_enabled: bool = True
+    longitudinal_message: str | None = None
 
 
 
@@ -324,6 +326,38 @@ def _as_zxy_stack(field, geometry: Geometry):
 def from_static_result(result) -> RunData:
     geometry = _geometry_from_grid_summary(result.grid_summary)
     theta_stack = _as_zxy_stack(result.theta_final, geometry)
+    if theta_stack.shape[0] == 0:
+        coherent, coherence_groups = _result_coherence(result)
+        A_initial = getattr(result, "A_initial", None)
+        if A_initial is None:
+            raise ValueError("static result does not contain the input optical field")
+        geometry = replace(geometry, z=np.asarray(geometry.z)[:0])
+        return RunData(
+            workflow="static",
+            geometry=geometry,
+            fields=FieldCollection([
+                ("input_intensity", make_field(
+                    "input_intensity", "Input Plane Intensity",
+                    _intensity_from_A(
+                        A_initial,
+                        coherent=coherent,
+                        coherence_groups=coherence_groups,
+                    ),
+                    ("x", "y"), "intensity", {"x": "um", "y": "um"},
+                    quantity="normalized_intensity", value_unit="1/µm²",
+                )),
+            ]),
+            diagnostics=DiagnosticCollection([
+                ("summary", DiagnosticData("summary", "Summary", {
+                    "status": getattr(result, "status", "stopped"),
+                    "completed_slices": 0,
+                    "total_slices": getattr(result, "total_slices", 0),
+                    "z_reached_um": getattr(result, "z_reached_um", 0.0),
+                    "grid": result.grid_summary,
+                })),
+            ]),
+        )
+    geometry = replace(geometry, z=np.asarray(geometry.z)[: theta_stack.shape[0]])
     coherent, coherence_groups = _result_coherence(result)
     theta_bias_2d = asnumpy(result.theta_bias)
     delta_theta_stack = theta_stack - theta_bias_2d[None, :, :]
@@ -335,11 +369,18 @@ def from_static_result(result) -> RunData:
     if intensity_stack is None:
         raise ValueError("static result does not contain a z-dependent intensity volume")
 
+    stopped = getattr(result, "status", "completed") == "stopped"
+    final_intensity_label = (
+        "Intensity at current z" if stopped else "Output Plane Intensity"
+    )
+    final_delta_theta_label = (
+        "Δθ at current z" if stopped else "Output Plane Δθ"
+    )
     fields = [
         ("input_intensity", make_field("input_intensity", "Input Plane Intensity", _intensity_from_A(A_initial, coherent=coherent, coherence_groups=coherence_groups), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="normalized_intensity", value_unit="1/µm²")),
-        ("final_intensity", make_field("final_intensity", "Output Plane Intensity", _intensity_from_A(result.A_final, coherent=coherent, coherence_groups=coherence_groups), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="normalized_intensity", value_unit="1/µm²")),
+        ("final_intensity", make_field("final_intensity", final_intensity_label, _intensity_from_A(result.A_final, coherent=coherent, coherence_groups=coherence_groups), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="normalized_intensity", value_unit="1/µm²")),
         ("input_delta_theta", make_field("input_delta_theta", "Input Plane Δθ", delta_theta_stack[0], ("x", "y"), "theta_delta", {"x": "um", "y": "um"}, quantity="theta", value_unit="rad")),
-        ("output_delta_theta", make_field("output_delta_theta", "Output Plane Δθ", delta_theta_stack[-1], ("x", "y"), "theta_delta", {"x": "um", "y": "um"}, quantity="theta", value_unit="rad")),
+        ("output_delta_theta", make_field("output_delta_theta", final_delta_theta_label, delta_theta_stack[-1], ("x", "y"), "theta_delta", {"x": "um", "y": "um"}, quantity="theta", value_unit="rad")),
         ("intensity_stack", make_field("intensity_stack", "Intensity", asnumpy(intensity_stack), ("z", "x", "y"), "intensity", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="normalized_intensity", value_unit="1/µm²")),
         ("delta_theta_stack", make_field("delta_theta_stack", "Δθ", delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
     ]
@@ -387,6 +428,10 @@ def from_static_result(result) -> RunData:
         **_result_power_diagnostics(result),
         "method": result.method,
         "n_steps": result.n_steps,
+        "status": getattr(result, "status", "completed"),
+        "completed_slices": getattr(result, "completed_slices", theta_stack.shape[0]),
+        "total_slices": getattr(result, "total_slices", result.grid_summary.get("Nz")),
+        "z_reached_um": getattr(result, "z_reached_um", None),
         "intensity_volume_sampling": "accepted slice midpoint (average of entrance and exit plane intensities)",
         "grid": result.grid_summary,
         "all_slices_converged": getattr(result, "all_slices_converged", None),
@@ -427,7 +472,73 @@ def from_static_result(result) -> RunData:
     )
 
 
-def from_timedependent_result(result) -> RunData:
+def from_static_live_state(state: dict[str, Any]) -> RunData:
+    """Expose only the immutable input and latest completed static slice."""
+
+    geometry = _geometry_from_grid_summary(state["grid_summary"])
+    completed = int(state["completed_slices"])
+    geometry = replace(geometry, z=np.asarray(geometry.z)[:completed])
+    groups = tuple(state["launch_summary"].get("coherence_groups", ())) or None
+    bias = np.asarray(state["theta_bias"])
+    fields = FieldCollection([
+        ("input_intensity", make_field(
+            "input_intensity", "Input Plane Intensity",
+            _intensity_from_A(state["A_initial"], coherence_groups=groups),
+            ("x", "y"), "intensity", {"x": "um", "y": "um"},
+            quantity="normalized_intensity", value_unit="1/µm²",
+        )),
+        ("final_intensity", make_field(
+            "final_intensity", "Intensity at current z",
+            _intensity_from_A(state["A_current"], coherence_groups=groups),
+            ("x", "y"), "intensity", {"x": "um", "y": "um"},
+            quantity="normalized_intensity", value_unit="1/µm²",
+        )),
+        ("input_delta_theta", make_field(
+            "input_delta_theta", "Input Plane Δθ",
+            np.asarray(state["theta_input"]) - bias,
+            ("x", "y"), "theta_delta", {"x": "um", "y": "um"},
+            quantity="theta", value_unit="rad",
+        )),
+        ("output_delta_theta", make_field(
+            "output_delta_theta", "Δθ at current z",
+            np.asarray(state["theta_current"]) - bias,
+            ("x", "y"), "theta_delta", {"x": "um", "y": "um"},
+            quantity="theta", value_unit="rad",
+        )),
+    ])
+    return RunData(workflow="static", geometry=geometry, fields=fields)
+
+
+def _resolved_static_reference(static_reference, *, fallback=None):
+    reference = fallback if static_reference is None else static_reference
+    if reference is None:
+        raise ValueError(
+            "TD-from-static display requires its immutable static reference"
+        )
+    required = (
+        "intensity_stack",
+        "theta_stack",
+        "theta_bias",
+        "output_plane_intensity",
+    )
+    missing = [
+        name
+        for name in required
+        if name not in reference or reference[name] is None
+    ]
+    if missing:
+        raise ValueError(
+            "TD-from-static display reference is missing: " + ", ".join(missing)
+        )
+    return reference
+
+
+def from_timedependent_result(
+    result,
+    *,
+    td_from_static: bool = False,
+    static_reference=None,
+) -> RunData:
     geometry = _geometry_from_grid_summary(result.grid_summary)
     theta_stack = asnumpy(result.theta_final)
     theta_bias = asnumpy(result.theta_bias)
@@ -447,17 +558,115 @@ def from_timedependent_result(result) -> RunData:
     # The 2-D TD delta-theta products use the longitudinal pane's default
     # selected plane. The full volumes remain available for every z slice.
     selected_z_index = theta_stack.shape[0] // 2
+    stopped = getattr(result, "status", "completed") == "cancelled"
+    final_intensity_label = "Intensity at Stop" if stopped else "Final Intensity"
+    final_delta_theta_label = "Δθ at Stop" if stopped else "Final Δθ"
 
-    fields = [
+    if td_from_static:
+        reference = _resolved_static_reference(
+            static_reference,
+            fallback={
+                "intensity_stack": initial_intensity_stack,
+                "theta_stack": theta_initial,
+                "theta_bias": theta_bias,
+                "output_plane_intensity": getattr(
+                    result, "initial_output_plane_intensity", None
+                ),
+            },
+        )
+        static_intensity_stack = np.asarray(reference["intensity_stack"])
+        static_theta_stack = np.asarray(reference["theta_stack"])
+        static_bias = np.asarray(reference["theta_bias"])
+        static_delta_theta_stack = static_theta_stack - static_bias[None, :, :]
+        if static_intensity_stack.shape != theta_stack.shape:
+            raise ValueError(
+                "initial static intensity reference shape does not match TD grid"
+            )
+        if static_theta_stack.shape != theta_stack.shape:
+            raise ValueError(
+                "initial static theta reference shape does not match TD grid"
+            )
+        final_intensity_label = (
+            "Output Plane Intensity at Stop"
+            if stopped
+            else "Final Output Plane Intensity"
+        )
+        final_delta_theta_label = (
+            "Output Plane Δθ at Stop"
+            if stopped
+            else "Final Output Plane Δθ"
+        )
+        fields = [
+            ("initial_static_output_intensity", make_field(
+                "initial_static_output_intensity",
+                "Initial Static Output Plane Intensity",
+                np.asarray(reference["output_plane_intensity"]),
+                ("x", "y"), "intensity", {"x": "um", "y": "um"},
+                quantity="normalized_intensity", value_unit="1/µm²",
+            )),
+            ("final_intensity", make_field(
+                "final_intensity", final_intensity_label,
+                _intensity_from_A(
+                    result.A_final,
+                    coherent=coherent,
+                    coherence_groups=coherence_groups,
+                ),
+                ("x", "y"), "intensity", {"x": "um", "y": "um"},
+                quantity="normalized_intensity", value_unit="1/µm²",
+            )),
+            ("initial_static_output_delta_theta", make_field(
+                "initial_static_output_delta_theta",
+                "Initial Static Output Plane Δθ",
+                static_delta_theta_stack[-1],
+                ("x", "y"), "theta_delta", {"x": "um", "y": "um"},
+                quantity="theta", value_unit="rad",
+            )),
+            ("final_delta_theta", make_field(
+                "final_delta_theta", final_delta_theta_label,
+                delta_theta_stack[-1],
+                ("x", "y"), "theta_delta", {"x": "um", "y": "um"},
+                quantity="theta", value_unit="rad",
+            )),
+            ("initial_static_intensity_stack", make_field(
+                "initial_static_intensity_stack", "Initial Static Intensity",
+                static_intensity_stack, ("z", "x", "y"), "intensity",
+                {"z": "um", "x": "um", "y": "um"}, "longitudinal",
+                quantity="normalized_intensity", value_unit="1/µm²",
+            )),
+            ("initial_static_delta_theta_stack", make_field(
+                "initial_static_delta_theta_stack", "Initial Static Delta Theta",
+                static_delta_theta_stack, ("z", "x", "y"), "theta_delta",
+                {"z": "um", "x": "um", "y": "um"}, "longitudinal",
+                quantity="theta", value_unit="rad",
+            )),
+            ("final_intensity_stack", make_field(
+                "final_intensity_stack",
+                "Intensity at Stop" if stopped else "Final Intensity",
+                asnumpy(final_intensity_stack),
+                ("z", "x", "y"), "intensity",
+                {"z": "um", "x": "um", "y": "um"}, "longitudinal",
+                quantity="normalized_intensity", value_unit="1/µm²",
+            )),
+            ("final_delta_theta_stack", make_field(
+                "final_delta_theta_stack",
+                "Delta Theta at Stop" if stopped else "Final Delta Theta",
+                delta_theta_stack,
+                ("z", "x", "y"), "theta_delta",
+                {"z": "um", "x": "um", "y": "um"}, "longitudinal",
+                quantity="theta", value_unit="rad",
+            )),
+        ]
+    else:
+        fields = [
         ("initial_intensity", make_field("initial_intensity", "Initial Intensity", _intensity_from_A(A_initial, coherent=coherent, coherence_groups=coherence_groups), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="normalized_intensity", value_unit="1/µm²")),
-        ("final_intensity", make_field("final_intensity", "Final Intensity", _intensity_from_A(result.A_final, coherent=coherent, coherence_groups=coherence_groups), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="normalized_intensity", value_unit="1/µm²")),
+        ("final_intensity", make_field("final_intensity", final_intensity_label, _intensity_from_A(result.A_final, coherent=coherent, coherence_groups=coherence_groups), ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="normalized_intensity", value_unit="1/µm²")),
         ("initial_delta_theta", make_field("initial_delta_theta", "Initial Δθ", initial_delta_theta_stack[selected_z_index], ("x", "y"), "theta_delta", {"x": "um", "y": "um"}, quantity="theta", value_unit="rad", source_volume_key="initial_delta_theta_stack")),
-        ("final_delta_theta", make_field("final_delta_theta", "Final Δθ", delta_theta_stack[selected_z_index], ("x", "y"), "theta_delta", {"x": "um", "y": "um"}, quantity="theta", value_unit="rad", source_volume_key="final_delta_theta_stack")),
+        ("final_delta_theta", make_field("final_delta_theta", final_delta_theta_label, delta_theta_stack[selected_z_index], ("x", "y"), "theta_delta", {"x": "um", "y": "um"}, quantity="theta", value_unit="rad", source_volume_key="final_delta_theta_stack")),
         ("initial_intensity_stack", make_field("initial_intensity_stack", "Initial Intensity", asnumpy(initial_intensity_stack), ("z", "x", "y"), "intensity", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="normalized_intensity", value_unit="1/µm²")),
-        ("final_intensity_stack", make_field("final_intensity_stack", "Final Intensity", asnumpy(final_intensity_stack), ("z", "x", "y"), "intensity", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="normalized_intensity", value_unit="1/µm²")),
-        ("initial_delta_theta_stack", make_field("initial_delta_theta_stack", "Initial Δθ", initial_delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
-        ("final_delta_theta_stack", make_field("final_delta_theta_stack", "Final Δθ", delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
-    ]
+        ("final_intensity_stack", make_field("final_intensity_stack", "Intensity at Stop" if stopped else "Final Intensity", asnumpy(final_intensity_stack), ("z", "x", "y"), "intensity", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="normalized_intensity", value_unit="1/µm²")),
+        ("initial_delta_theta_stack", make_field("initial_delta_theta_stack", "Initial Delta Theta", initial_delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
+        ("final_delta_theta_stack", make_field("final_delta_theta_stack", "Delta Theta at Stop" if stopped else "Final Delta Theta", delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
+        ]
 
     return RunData(
         workflow="timedependent",
@@ -470,6 +679,17 @@ def from_timedependent_result(result) -> RunData:
                 {
                     **_result_power_diagnostics(result),
                     "Nt": result.Nt,
+                    "status": getattr(result, "status", "completed"),
+                    "completed_steps": getattr(result, "completed_steps", result.Nt),
+                    "requested_steps": getattr(result, "requested_steps", result.Nt),
+                    "current_time": getattr(result, "current_time", None),
+                    "current_time_semantics": "cumulative nondimensional TD simulation time",
+                    "segment_start_time": getattr(result, "segment_start_time", 0.0),
+                    "segment_elapsed_time": getattr(result, "segment_elapsed_time", None),
+                    "cumulative_time": getattr(result, "cumulative_time", getattr(result, "current_time", None)),
+                    "prior_completed_steps": getattr(result, "prior_completed_steps", 0),
+                    "segment_completed_steps": getattr(result, "segment_completed_steps", result.Nt),
+                    "cumulative_completed_steps": getattr(result, "cumulative_completed_steps", getattr(result, "completed_steps", result.Nt)),
                     "method": result.method,
                     "grid": result.grid_summary,
                     "has_initial_A": A_initial is not None,
@@ -477,10 +697,160 @@ def from_timedependent_result(result) -> RunData:
                     "transverse_delta_theta_z_index": selected_z_index,
                     "intensity_volume_sampling": "slice midpoint (average of entrance and exit plane intensities)",
                     "td_source_intensity_retained_on_result": getattr(result, "initial_source_intensity_stack", None) is not None,
+                    "initial_condition_source": (
+                        "static result" if td_from_static else "default or explicit TD state"
+                    ),
                 },
             ))
         ]),
     )
+
+
+def from_timedependent_live_state(
+    state: dict[str, Any],
+    *,
+    td_from_static: bool = False,
+    static_reference=None,
+) -> RunData:
+    """Expose the latest completed TD-step state without result construction."""
+
+    geometry = _geometry_from_grid_summary(state["grid_summary"])
+    groups = tuple(state["launch_summary"].get("coherence_groups", ())) or None
+    bias = np.asarray(state["theta_bias"])
+    theta_initial = np.asarray(state["theta_initial"])
+    theta_current = np.asarray(state["theta_current"])
+    iz = theta_current.shape[0] // 2
+    if td_from_static:
+        reference = _resolved_static_reference(
+            static_reference,
+            fallback={
+                "intensity_stack": state["initial_intensity_stack"],
+                "theta_stack": state["theta_initial"],
+                "theta_bias": state["theta_bias"],
+                "output_plane_intensity": state[
+                    "initial_output_plane_intensity"
+                ],
+            },
+        )
+        static_theta = np.asarray(reference["theta_stack"])
+        static_bias = np.asarray(reference["theta_bias"])
+        fields = FieldCollection([
+            ("initial_static_output_intensity", make_field(
+                "initial_static_output_intensity",
+                "Initial Static Output Plane Intensity",
+                np.asarray(reference["output_plane_intensity"]),
+                ("x", "y"), "intensity", {"x": "um", "y": "um"},
+                quantity="normalized_intensity", value_unit="1/µm²",
+            )),
+            ("final_intensity", make_field(
+                "final_intensity", "Current Output Plane Intensity",
+                np.asarray(state["output_plane_intensity"]),
+                ("x", "y"), "intensity", {"x": "um", "y": "um"},
+                quantity="normalized_intensity", value_unit="1/µm²",
+            )),
+            ("initial_static_output_delta_theta", make_field(
+                "initial_static_output_delta_theta",
+                "Initial Static Output Plane Δθ",
+                static_theta[-1] - static_bias,
+                ("x", "y"), "theta_delta", {"x": "um", "y": "um"},
+                quantity="theta", value_unit="rad",
+            )),
+            ("final_delta_theta", make_field(
+                "final_delta_theta", "Current Output Plane Δθ",
+                theta_current[-1] - bias,
+                ("x", "y"), "theta_delta", {"x": "um", "y": "um"},
+                quantity="theta", value_unit="rad",
+            )),
+            ("initial_static_intensity_stack", make_field(
+                "initial_static_intensity_stack", "Initial Static Intensity",
+                np.asarray(reference["intensity_stack"]),
+                ("z", "x", "y"), "intensity",
+                {"z": "um", "x": "um", "y": "um"}, "longitudinal",
+                quantity="normalized_intensity", value_unit="1/µm²",
+            )),
+            ("initial_static_delta_theta_stack", make_field(
+                "initial_static_delta_theta_stack", "Initial Static Delta Theta",
+                static_theta - static_bias[None, :, :],
+                ("z", "x", "y"), "theta_delta",
+                {"z": "um", "x": "um", "y": "um"}, "longitudinal",
+                quantity="theta", value_unit="rad",
+            )),
+            ("final_intensity_stack", make_field(
+                "final_intensity_stack", "Intensity at current t",
+                np.asarray(state["current_intensity_stack"]),
+                ("z", "x", "y"), "intensity",
+                {"z": "um", "x": "um", "y": "um"}, "longitudinal",
+                quantity="normalized_intensity", value_unit="1/µm²",
+            )),
+            ("final_delta_theta_stack", make_field(
+                "final_delta_theta_stack", "Delta Theta at current t",
+                theta_current - bias[None, :, :],
+                ("z", "x", "y"), "theta_delta",
+                {"z": "um", "x": "um", "y": "um"}, "longitudinal",
+                quantity="theta", value_unit="rad",
+            )),
+        ])
+        return RunData(
+            workflow="timedependent",
+            geometry=geometry,
+            fields=fields,
+        )
+
+    fields = FieldCollection([
+        ("initial_intensity", make_field(
+            "initial_intensity", "Initial Intensity",
+            _intensity_from_A(state["A_initial"], coherence_groups=groups),
+            ("x", "y"), "intensity", {"x": "um", "y": "um"},
+            quantity="normalized_intensity", value_unit="1/µm²",
+        )),
+        ("final_intensity", make_field(
+            "final_intensity", "Intensity at current t",
+            _intensity_from_A(state["A_current"], coherence_groups=groups),
+            ("x", "y"), "intensity", {"x": "um", "y": "um"},
+            quantity="normalized_intensity", value_unit="1/µm²",
+        )),
+        ("initial_delta_theta", make_field(
+            "initial_delta_theta", "Initial Δθ",
+            theta_initial[iz] - bias,
+            ("x", "y"), "theta_delta", {"x": "um", "y": "um"},
+            quantity="theta", value_unit="rad",
+        )),
+        ("final_delta_theta", make_field(
+            "final_delta_theta", "Δθ at current t",
+            theta_current[iz] - bias,
+            ("x", "y"), "theta_delta", {"x": "um", "y": "um"},
+            quantity="theta", value_unit="rad",
+        )),
+        ("initial_intensity_stack", make_field(
+            "initial_intensity_stack", "Initial Intensity",
+            np.asarray(state["initial_intensity_stack"]),
+            ("z", "x", "y"), "intensity",
+            {"z": "um", "x": "um", "y": "um"}, "longitudinal",
+            quantity="normalized_intensity", value_unit="1/µm²",
+        )),
+        ("initial_delta_theta_stack", make_field(
+            "initial_delta_theta_stack", "Initial Delta Theta",
+            theta_initial - bias[None, :, :],
+            ("z", "x", "y"), "theta_delta",
+            {"z": "um", "x": "um", "y": "um"}, "longitudinal",
+            quantity="theta", value_unit="rad",
+        )),
+        ("final_intensity_stack", make_field(
+            "final_intensity_stack", "Intensity at current t",
+            np.asarray(state["current_intensity_stack"]),
+            ("z", "x", "y"), "intensity",
+            {"z": "um", "x": "um", "y": "um"}, "longitudinal",
+            quantity="normalized_intensity", value_unit="1/µm²",
+        )),
+        ("final_delta_theta_stack", make_field(
+            "final_delta_theta_stack", "Delta Theta at current t",
+            theta_current - bias[None, :, :],
+            ("z", "x", "y"), "theta_delta",
+            {"z": "um", "x": "um", "y": "um"}, "longitudinal",
+            quantity="theta", value_unit="rad",
+        )),
+    ])
+    return RunData(workflow="timedependent", geometry=geometry, fields=fields)
 
 
 def from_soliton_result(result) -> RunData:
@@ -612,12 +982,16 @@ def from_parameter_sweep_result(result) -> RunData:
         diagnostics=run_data.diagnostics,
     )
 
-def to_run_data(result) -> RunData:
+def to_run_data(result, **kwargs) -> RunData:
     name = type(result).__name__
     if name == "StaticRunResult":
         return from_static_result(result)
     if name == "TimeDependentRunResult":
-        return from_timedependent_result(result)
+        return from_timedependent_result(result, **kwargs)
+    if kwargs:
+        raise TypeError(
+            f"display options are not supported for result type: {name}"
+        )
     if name == "SolitonResult":
         return from_soliton_result(result)
     if name == "SolitonExistenceResult":
@@ -637,7 +1011,9 @@ __all__ = [
     "Geometry",
     "RunData",
     "from_static_result",
+    "from_static_live_state",
     "from_timedependent_result",
+    "from_timedependent_live_state",
     "from_soliton_result",
     "from_soliton_existence_result",
     "from_parameter_sweep_result",

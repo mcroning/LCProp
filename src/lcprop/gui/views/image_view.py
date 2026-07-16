@@ -5,6 +5,7 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QSizePolicy
 
 
 class ImageView(FigureCanvasQTAgg):
@@ -17,15 +18,31 @@ class ImageView(FigureCanvasQTAgg):
 
     positionSelected = Signal(int, int)
 
-    def __init__(self):
+    def __init__(self, *, compact_vertical: bool = False):
         self.figure = Figure(figsize=(5, 5))
         super().__init__(self.figure)
+        self.setMinimumSize(360, 300)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         self.ax = None
         self.image = None
         self.colorbar = None
         self._field = None
         self._raw_shape = None
         self._extent = None
+        if compact_vertical:
+            # Longitudinal views share the available height. Raise the axes so
+            # tick labels and the z-axis label stay inside a short canvas.
+            self._axes_rect = (0.16, 0.23, 0.67, 0.67)
+            self._colorbar_rect = (0.87, 0.23, 0.035, 0.67)
+        else:
+            # The transverse pane is narrower than the longitudinal pane.
+            # Reserve a wider right gutter so colorbar ticks and units are not
+            # clipped at the minimum application width.
+            self._axes_rect = (0.13, 0.14, 0.63, 0.76)
+            self._colorbar_rect = (0.81, 0.14, 0.035, 0.76)
         self._vline = None
         self._hline = None
         self._crosshair_index = None
@@ -45,8 +62,11 @@ class ImageView(FigureCanvasQTAgg):
         self._raw_shape = raw.shape
         self._extent = extent
 
+        # Fixed axes rectangles reserve a stable title/label/colorbar footprint.
+        # Avoid tight_layout here: it changes the drawable geometry as text changes.
         self.figure.clear()
-        self.ax = self.figure.add_subplot(111)
+        self.ax = self.figure.add_axes(self._axes_rect)
+        colorbar_ax = self.figure.add_axes(self._colorbar_rect)
 
         self.image = self.ax.imshow(
             data,
@@ -71,9 +91,7 @@ class ImageView(FigureCanvasQTAgg):
 
         self.colorbar = self.figure.colorbar(
             self.image,
-            ax=self.ax,
-            fraction=0.035,
-            pad=0.025,
+            cax=colorbar_ax,
         )
         self.colorbar.ax.tick_params(labelsize=8)
         value_unit = getattr(field, "value_unit", "")
@@ -86,8 +104,6 @@ class ImageView(FigureCanvasQTAgg):
             ix, iy = self._crosshair_index
             self.set_crosshair(ix, iy, emit=False)
 
-        self.figure.tight_layout(pad=0.8)
-        self.figure.subplots_adjust(left=0.18)
         self.draw_idle()
 
     def set_crosshair(self, ix: int, iy: int, *, emit: bool = False) -> None:

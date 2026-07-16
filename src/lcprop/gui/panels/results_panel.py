@@ -20,5 +20,11 @@ class ResultsPanel(QWidget):
     def append_console(self, text: str) -> None:
         self.workspace.append_console(text)
 
+    def set_td_time_indicator(self, text: str | None) -> None:
+        self.workspace.set_td_time_indicator(text)
+
     def set_run_data(self, run_data) -> None:
         self.workspace.set_run_data(run_data)
+
+    def reset_field_color_scales(self) -> None:
+        self.workspace.reset_field_color_scales()

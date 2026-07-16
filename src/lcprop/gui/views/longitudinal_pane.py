@@ -3,7 +3,16 @@ from __future__ import annotations
 import numpy as np
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QSlider, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QSizePolicy,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
 
 from lcprop.products.data_model import FieldData
 from lcprop.gui.views.image_view import ImageView
@@ -20,6 +29,10 @@ class LongitudinalPane(QWidget):
 
     def __init__(self):
         super().__init__()
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         self._run_data = None
         self._current_vmin = None
         self._current_vmax = None
@@ -30,16 +43,27 @@ class LongitudinalPane(QWidget):
         self._show_guides = True
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
 
         self.no_data_label = QLabel("No longitudinal fields are available for this experiment.")
         self.no_data_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.no_data_label.hide()
 
         self.controls_widget = QWidget()
+        self.controls_widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         controls = QHBoxLayout(self.controls_widget)
         controls.setContentsMargins(0, 0, 0, 0)
         controls.addWidget(QLabel("3-D field"))
         self.field_selector = QComboBox()
+        self.field_selector.setMinimumWidth(285)
+        self.field_selector.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.field_selector.setMinimumContentsLength(32)
         self.field_selector.currentIndexChanged.connect(self._field_changed)
         controls.addWidget(self.field_selector)
         self.show_guides = QCheckBox("Show selection guides")
@@ -49,25 +73,47 @@ class LongitudinalPane(QWidget):
         controls.addStretch(1)
         layout.addWidget(self.controls_widget)
 
+        self.xz_row = QWidget()
+        self.xz_row.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        xz_layout = QVBoxLayout(self.xz_row)
+        xz_layout.setContentsMargins(0, 0, 0, 0)
+        xz_layout.setSpacing(2)
+
         self.y_cut_label = QLabel("x-z cut at center y")
         self.y_cut_slider = QSlider(Qt.Orientation.Horizontal)
         self.y_cut_slider.valueChanged.connect(self._cut_changed)
-        layout.addWidget(self.y_cut_label)
-        layout.addWidget(self.y_cut_slider)
+        xz_layout.addWidget(self.y_cut_label)
+        xz_layout.addWidget(self.y_cut_slider)
 
-        self.xz_view = ImageView()
-        layout.addWidget(self.xz_view)
+        self.xz_view = ImageView(compact_vertical=True)
+        self.xz_view.setMinimumSize(300, 180)
+        xz_layout.addWidget(self.xz_view, 1)
         self.xz_view.positionSelected.connect(self._xz_position_selected)
+        layout.addWidget(self.xz_row, 1)
+
+        self.yz_row = QWidget()
+        self.yz_row.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        yz_layout = QVBoxLayout(self.yz_row)
+        yz_layout.setContentsMargins(0, 0, 0, 0)
+        yz_layout.setSpacing(2)
 
         self.x_cut_label = QLabel("y-z cut at center x")
         self.x_cut_slider = QSlider(Qt.Orientation.Horizontal)
         self.x_cut_slider.valueChanged.connect(self._cut_changed)
-        layout.addWidget(self.x_cut_label)
-        layout.addWidget(self.x_cut_slider)
+        yz_layout.addWidget(self.x_cut_label)
+        yz_layout.addWidget(self.x_cut_slider)
 
-        self.yz_view = ImageView()
-        layout.addWidget(self.yz_view)
+        self.yz_view = ImageView(compact_vertical=True)
+        self.yz_view.setMinimumSize(300, 180)
+        yz_layout.addWidget(self.yz_view, 1)
         self.yz_view.positionSelected.connect(self._yz_position_selected)
+        layout.addWidget(self.yz_row, 1)
 
         layout.addWidget(self.no_data_label)
 
@@ -89,42 +135,63 @@ class LongitudinalPane(QWidget):
         self.guidesVisibilityChanged.emit(self._show_guides)
 
     def set_run_data(self, run_data) -> None:
+        previous_key = self.field_selector.currentData()
         self._run_data = run_data
         self.field_selector.blockSignals(True)
         self.field_selector.clear()
 
-        for key, field in run_data.fields.items():
-            data = np.asarray(field.data)
-            if data.ndim == 3 and field.axes == ("z", "x", "y"):
-                self.field_selector.addItem(field.display_name, key)
+        if getattr(run_data, "longitudinal_enabled", True):
+            for key, field in run_data.fields.items():
+                data = np.asarray(field.data)
+                if data.ndim == 3 and field.axes == ("z", "x", "y"):
+                    self.field_selector.addItem(field.display_name, key)
+                    self.field_selector.setItemData(
+                        self.field_selector.count() - 1,
+                        "Snapshot axes: z, x, y; selected TD time is a parameter.",
+                        Qt.ItemDataRole.ToolTipRole,
+                    )
 
         has_fields = self.field_selector.count() > 0
 
         self.controls_widget.setVisible(has_fields)
         for widget in (
-            self.y_cut_label,
-            self.y_cut_slider,
-            self.xz_view,
-            self.x_cut_label,
-            self.x_cut_slider,
-            self.yz_view,
+            self.xz_row,
+            self.yz_row,
         ):
             widget.setVisible(has_fields)
 
+        message = getattr(run_data, "longitudinal_message", None)
+        self.no_data_label.setText(
+            message
+            or "No longitudinal fields are available for this experiment."
+        )
         self.no_data_label.setVisible(not has_fields)
 
         if not has_fields:
-# in longitudinal_pane.py
-            self.xz_view.setVisible(False)
-            self.yz_view.setVisible(False)
             self._current_vmin = None
             self._current_vmax = None
             self.field_selector.blockSignals(False)
             return
 
         self.field_selector.blockSignals(False)
-        self.field_selector.setCurrentIndex(0)
-        self._field_changed(0)
+        default_index = 0
+        if run_data.workflow == "timedependent":
+            final_index = -1
+            if previous_key in {
+                "final_intensity_stack",
+                "final_delta_theta_stack",
+            }:
+                final_index = self.field_selector.findData(previous_key)
+            if final_index < 0:
+                final_index = self.field_selector.findData("final_intensity_stack")
+            if final_index < 0:
+                final_index = self.field_selector.findData(
+                    "final_delta_theta_stack"
+                )
+            if final_index >= 0:
+                default_index = final_index
+        self.field_selector.setCurrentIndex(default_index)
+        self._field_changed(default_index)
 
     def _field_changed(self, index: int) -> None:
         if self._run_data is None or index < 0:

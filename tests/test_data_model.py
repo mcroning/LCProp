@@ -74,7 +74,13 @@ def test_timedependent_result_to_run_data():
         "Final Δθ",
     ]
     assert [field.display_name for field in image_fields] == expected_labels
-    assert [field.display_name for field in volume_fields] == expected_labels
+    assert [field.display_name for field in volume_fields] == [
+        "Initial Intensity",
+        "Final Intensity",
+        "Initial Delta Theta",
+        "Final Delta Theta",
+    ]
+    assert all(field.axes == ("z", "x", "y") for field in volume_fields)
     assert all(
         name not in [field.display_name for field in data.fields.values()]
         for name in ("Initial θ", "Final θ", "Initial TD Source Intensity")
@@ -97,6 +103,13 @@ def test_timedependent_result_to_run_data():
     )
     assert data.fields["final_intensity"].value_unit == "1/µm²"
     assert data.fields["final_delta_theta_stack"].value_unit == "rad"
+    summary = data.diagnostics["summary"].values
+    assert summary["segment_start_time"] == 0.0
+    assert summary["segment_elapsed_time"] == result.segment_elapsed_time
+    assert summary["cumulative_time"] == result.cumulative_time
+    assert summary["prior_completed_steps"] == 0
+    assert summary["segment_completed_steps"] == 1
+    assert summary["cumulative_completed_steps"] == 1
 
 
 def test_soliton_result_to_run_data():
