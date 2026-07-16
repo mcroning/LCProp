@@ -99,6 +99,7 @@ class CurveData:
     y_label: str
     units: dict[str, str] = field(default_factory=dict)
     y_scale: str = "linear"
+    series_labels: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -533,6 +534,49 @@ def _resolved_static_reference(static_reference, *, fallback=None):
     return reference
 
 
+def _timedependent_width_curves(
+    times,
+    x_widths,
+    y_widths,
+) -> CurveCollection:
+    """Build cumulative-time transverse RMS-width products."""
+
+    cumulative_time = np.asarray(times, dtype=float)
+    sigma_x = np.asarray(x_widths, dtype=float)
+    sigma_y = np.asarray(y_widths, dtype=float)
+    curves = CurveCollection()
+    if not (
+        cumulative_time.size
+        and cumulative_time.size == sigma_x.size == sigma_y.size
+    ):
+        return curves
+    curves.add(
+        "beam_x_rms_width",
+        CurveData(
+            "beam_x_rms_width",
+            "Beam x RMS width",
+            cumulative_time,
+            sigma_x,
+            "Cumulative TD time",
+            "x RMS width",
+            {"Cumulative TD time": "", "x RMS width": "µm"},
+        ),
+    )
+    curves.add(
+        "beam_y_rms_width",
+        CurveData(
+            "beam_y_rms_width",
+            "Beam y RMS width",
+            cumulative_time,
+            sigma_y,
+            "Cumulative TD time",
+            "y RMS width",
+            {"Cumulative TD time": "", "y RMS width": "µm"},
+        ),
+    )
+    return curves
+
+
 def from_timedependent_result(
     result,
     *,
@@ -668,10 +712,16 @@ def from_timedependent_result(
         ("final_delta_theta_stack", make_field("final_delta_theta_stack", "Delta Theta at Stop" if stopped else "Final Delta Theta", delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
         ]
 
+    width_curves = _timedependent_width_curves(
+        getattr(result, "width_times", ()),
+        getattr(result, "beam_x_rms_width_um", ()),
+        getattr(result, "beam_y_rms_width_um", ()),
+    )
     return RunData(
         workflow="timedependent",
         geometry=geometry,
         fields=FieldCollection(fields),
+        curves=width_curves,
         diagnostics=DiagnosticCollection([
             ("summary", DiagnosticData(
                 "summary",
@@ -697,9 +747,22 @@ def from_timedependent_result(
                     "transverse_delta_theta_z_index": selected_z_index,
                     "intensity_volume_sampling": "slice midpoint (average of entrance and exit plane intensities)",
                     "td_source_intensity_retained_on_result": getattr(result, "initial_source_intensity_stack", None) is not None,
-                    "initial_condition_source": (
-                        "static result" if td_from_static else "default or explicit TD state"
+                    "beam_width_history_sampling": (
+                        "initial state plus every recorded completed TD step"
                     ),
+                    "beam_width_recording_stride": getattr(
+                        result, "width_recording_stride", 1
+                    ),
+                    "beam_width_time_axis": "cumulative nondimensional TD time",
+                    "initial_condition_source": (
+                        "static result"
+                        if td_from_static
+                        else getattr(result, "provenance", {}).get(
+                            "initial_source_kind",
+                            "default or explicit TD state",
+                        )
+                    ),
+                    "provenance": getattr(result, "provenance", {}),
                 },
             ))
         ]),
@@ -719,6 +782,11 @@ def from_timedependent_live_state(
     bias = np.asarray(state["theta_bias"])
     theta_initial = np.asarray(state["theta_initial"])
     theta_current = np.asarray(state["theta_current"])
+    width_curves = _timedependent_width_curves(
+        state.get("width_times", ()),
+        state.get("beam_x_rms_width_um", ()),
+        state.get("beam_y_rms_width_um", ()),
+    )
     iz = theta_current.shape[0] // 2
     if td_from_static:
         reference = _resolved_static_reference(
@@ -794,6 +862,7 @@ def from_timedependent_live_state(
             workflow="timedependent",
             geometry=geometry,
             fields=fields,
+            curves=width_curves,
         )
 
     fields = FieldCollection([
@@ -850,7 +919,12 @@ def from_timedependent_live_state(
             quantity="theta", value_unit="rad",
         )),
     ])
-    return RunData(workflow="timedependent", geometry=geometry, fields=fields)
+    return RunData(
+        workflow="timedependent",
+        geometry=geometry,
+        fields=fields,
+        curves=width_curves,
+    )
 
 
 def from_soliton_result(result) -> RunData:
@@ -871,8 +945,13 @@ def from_soliton_result(result) -> RunData:
     theta_2d = asnumpy(result.theta)
     intensity = asnumpy(result.intensity)
 
+    intensity_label = (
+        "Soliton result at Stop"
+        if getattr(result, "status", "completed") == "stopped"
+        else "Completed soliton result"
+    )
     fields = [
-        ("final_intensity", make_field("final_intensity", "Normalized Intensity", intensity, ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="normalized_intensity", value_unit="1/um²")),
+        ("final_intensity", make_field("final_intensity", intensity_label, intensity, ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="normalized_intensity", value_unit="1/um²")),
         ("theta", make_field("theta", "Output Plane Theta", theta_2d, ("x", "y"), "theta", {"x": "um", "y": "um"}, quantity="theta", value_unit="rad")),
     ]
 
@@ -925,7 +1004,6 @@ def from_soliton_existence_result(result) -> RunData:
         for key, label in [
             ("beta", "Beta"),
             ("theta_max", "Theta max"),
-            
             ("Imax", "Imax"),
             ("residual_rms", "Residual RMS"),
             ("residual_max", "Residual max"),
@@ -945,6 +1023,20 @@ def from_soliton_existence_result(result) -> RunData:
                 key,
                 {"P": "mW"},
             ))
+        widths = np.column_stack((
+            np.asarray([r.get("sx_um", np.nan) for r in rows], dtype=float),
+            np.asarray([r.get("sy_um", np.nan) for r in rows], dtype=float),
+        ))
+        curves.add("transverse_rms_widths", CurveData(
+            "transverse_rms_widths",
+            "xs and ys",
+            P,
+            widths,
+            "P",
+            "RMS width",
+            {"P": "mW", "RMS width": "µm"},
+            series_labels=("xs", "ys"),
+        ))
 
     summary = dict(getattr(result, "metrics", {}) or {})
     summary.setdefault("n_rows", len(rows))
@@ -964,22 +1056,80 @@ def from_soliton_existence_result(result) -> RunData:
 # Conversion for generic parameter sweep result, reusing soliton existence result logic.
 def from_parameter_sweep_result(result) -> RunData:
     """Convert a generic parameter sweep result into GUI products."""
-    run_data = from_soliton_existence_result(result)
+    rows = [dict(row) for row in (getattr(result, "samples", ()) or ())]
+    metrics_by_index = {
+        int(member.requested_index): member.result.metrics
+        for member in (getattr(result, "members", ()) or ())
+        if member.status == "completed" and member.result is not None
+    }
+    for position, row in enumerate(rows):
+        metrics = metrics_by_index.get(int(row.get("i", position)))
+        if metrics is None:
+            results = getattr(result, "results", ()) or ()
+            if position < len(results):
+                metrics = getattr(results[position], "metrics", {})
+        if metrics is None:
+            continue
+        for key in ("sx_um", "sy_um"):
+            if row.get(key) is None:
+                row[key] = metrics.get(key)
 
-    if getattr(result, "results", None):
-        field_data = from_soliton_result(result.results[-1])
-        fields = field_data.fields
-        geometry = field_data.geometry
-    else:
-        fields = run_data.fields
-        geometry = run_data.geometry
+    curve_result = replace(result, samples=rows)
+    run_data = from_soliton_existence_result(curve_result)
+    fields = FieldCollection()
+    geometry = run_data.geometry
+    member_rows = []
+    for member in getattr(result, "members", ()):
+        member_rows.append({
+            "requested_index": member.requested_index,
+            "requested_power_mW": member.requested_power_mW,
+            "status": member.status,
+            "converged": member.converged,
+            "beta": member.beta,
+            "residual_rms": member.residual_rms,
+            "residual_max": member.residual_max,
+            "error_text": member.error_text,
+            "completion_order": member.completion_order,
+        })
+        if member.status != "completed" or member.result is None:
+            continue
+        field_data = from_soliton_result(member.result)
+        if geometry.x is None:
+            geometry = field_data.geometry
+        intensity = field_data.fields.get("final_intensity")
+        if intensity is None:
+            continue
+        power_text = np.format_float_positional(
+            float(member.requested_power_mW),
+            precision=12,
+            trim="-",
+        )
+        key = f"sweep_{member.requested_index}_intensity"
+        fields.add(
+            key,
+            replace(
+                intensity,
+                key=key,
+                display_name=f"Soliton at {power_text} mW",
+            ),
+        )
+
+    diagnostics = run_data.diagnostics
+    diagnostics.add(
+        "members",
+        DiagnosticData(
+            "members",
+            "Sweep members",
+            {"rows": member_rows},
+        ),
+    )
 
     return RunData(
         workflow="parameter_sweep",
         geometry=geometry,
         fields=fields,
         curves=run_data.curves,
-        diagnostics=run_data.diagnostics,
+        diagnostics=diagnostics,
     )
 
 def to_run_data(result, **kwargs) -> RunData:

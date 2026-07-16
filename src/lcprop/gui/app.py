@@ -8,6 +8,7 @@ from lcprop.gui.main_window import LCPropMainWindow
 def main() -> int:
     app = QApplication(sys.argv)
     win = LCPropMainWindow()
+    app.aboutToQuit.connect(win.shutdown_background_run)
     win.resize(760, 760)
     win.show()
     return app.exec()

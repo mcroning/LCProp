@@ -16,6 +16,7 @@ from lcprop.workflows.soliton_trans import polish_soliton
 
 class LocalRunner:
     name = "Local CPU"
+    supports_parallel_sweeps = True
 
     def run_static(self, request, **kwargs) -> RunnerResult:
         result = run_static(request, **kwargs)
@@ -55,12 +56,12 @@ class LocalRunner:
     def validate_timedependent_continuation(self, request, checkpoint) -> None:
         validate_timedependent_continuation(request, checkpoint)
 
-    def run_soliton(self, request) -> RunnerResult:
-        seed = run_soliton(request)
+    def run_soliton(self, request, **kwargs) -> RunnerResult:
+        seed = run_soliton(request, **kwargs)
         result = seed
-        message = "Completed locally"
+        message = "Stopped locally" if seed.status == "stopped" else "Completed locally"
 
-        if request.refine_transverse:
+        if request.refine_transverse and seed.status != "stopped":
             polish_request = replace(
                 request,
                 theta_steps_per_outer=request.transverse_theta_steps_per_outer,
@@ -71,6 +72,7 @@ class LocalRunner:
                 max_outer=request.transverse_max_outer,
                 field_mix=request.transverse_field_mix,
                 theta_mix=request.transverse_theta_mix,
+                **kwargs,
             )
             message = "Completed locally with transverse refinement"
 
@@ -83,9 +85,10 @@ class LocalRunner:
             "Completed locally",
         )
 
-    def run_parameter_sweep(self, request) -> RunnerResult:
+    def run_parameter_sweep(self, request, **kwargs) -> RunnerResult:
+        result = run_parameter_sweep(request, **kwargs)
         return RunnerResult(
             "parameter_sweep",
-            run_parameter_sweep(request),
-            "Completed locally",
+            result,
+            "Stopped locally" if result.status == "stopped" else "Completed locally",
         )

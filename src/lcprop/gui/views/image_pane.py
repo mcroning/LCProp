@@ -10,6 +10,37 @@ from PySide6.QtWidgets import QComboBox, QLabel, QVBoxLayout, QWidget
 from lcprop.gui.views.image_view import ImageView
 
 
+ROBUST_INTENSITY_PERCENTILE = 99.5
+
+
+def display_limits(field) -> tuple[float, float]:
+    """Return finite display-only limits without changing stored field data."""
+
+    data = np.asarray(field.data)
+    finite = data[np.isfinite(data)]
+    if str(getattr(field, "kind", "field")) == "intensity":
+        positive = finite[finite > 0.0]
+        if positive.size == 0:
+            return 0.0, 1.0
+        # Ignore a tiny hot-pixel tail so the beam body remains visible.
+        vmax = float(np.percentile(positive, ROBUST_INTENSITY_PERCENTILE))
+        if not np.isfinite(vmax) or vmax <= 0.0:
+            vmax = float(np.max(positive))
+        if not np.isfinite(vmax) or vmax <= 0.0:
+            vmax = 1.0
+        return 0.0, vmax
+
+    if finite.size == 0:
+        return 0.0, 1.0
+    vmin = float(np.min(finite))
+    vmax = float(np.max(finite))
+    if vmin == vmax:
+        padding = max(abs(vmin) * 1e-12, 1e-15)
+        vmin -= padding
+        vmax += padding
+    return vmin, vmax
+
+
 class ImagePane(QWidget):
     """Field browser for 2-D image fields."""
 
@@ -93,17 +124,7 @@ class ImagePane(QWidget):
 
     def _limits_for_field(self, field) -> tuple[float, float]:
         kind = str(getattr(field, "kind", "field"))
-        limits = self._scale_limits.get(kind)
-        if limits is not None:
-            return limits
-        data = np.asarray(field.data)
-        vmin = float(np.nanmin(data))
-        vmax = float(np.nanmax(data))
-        if vmin == vmax:
-            padding = max(abs(vmin) * 1e-12, 1e-15)
-            vmin -= padding
-            vmax += padding
-        limits = (vmin, vmax)
+        limits = display_limits(field)
         self._scale_limits[kind] = limits
         return limits
 

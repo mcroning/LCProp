@@ -26,9 +26,6 @@ class ImageView(FigureCanvasQTAgg):
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
-        self.ax = None
-        self.image = None
-        self.colorbar = None
         self._field = None
         self._raw_shape = None
         self._extent = None
@@ -43,6 +40,21 @@ class ImageView(FigureCanvasQTAgg):
             # clipped at the minimum application width.
             self._axes_rect = (0.13, 0.14, 0.63, 0.76)
             self._colorbar_rect = (0.81, 0.14, 0.035, 0.76)
+        self.ax = self.figure.add_axes(self._axes_rect)
+        colorbar_ax = self.figure.add_axes(self._colorbar_rect)
+        self.image = self.ax.imshow(
+            np.zeros((2, 2)),
+            origin="lower",
+            aspect="auto",
+            interpolation="nearest",
+            vmin=0.0,
+            vmax=1.0,
+        )
+        self.colorbar = self.figure.colorbar(self.image, cax=colorbar_ax)
+        self.ax.tick_params(axis="both", labelsize=8)
+        self.ax.xaxis.label.set_size(9)
+        self.ax.yaxis.label.set_size(9)
+        self.colorbar.ax.tick_params(labelsize=8)
         self._vline = None
         self._hline = None
         self._crosshair_index = None
@@ -62,44 +74,35 @@ class ImageView(FigureCanvasQTAgg):
         self._raw_shape = raw.shape
         self._extent = extent
 
-        # Fixed axes rectangles reserve a stable title/label/colorbar footprint.
-        # Avoid tight_layout here: it changes the drawable geometry as text changes.
-        self.figure.clear()
-        self.ax = self.figure.add_axes(self._axes_rect)
-        colorbar_ax = self.figure.add_axes(self._colorbar_rect)
-
-        self.image = self.ax.imshow(
-            data,
-            origin="lower",
-            aspect=_image_aspect(field),
-            extent=extent,
-            cmap=getattr(field, "colormap", "viridis"),
-            interpolation="nearest",
-            vmin=vmin,
-            vmax=vmax,
+        # Figure, axes, image, and colorbar are created once. Live updates only
+        # replace artist data and text, preserving the fixed axes rectangles.
+        resolved_extent = (
+            (-0.5, raw.shape[0] - 0.5, -0.5, raw.shape[1] - 0.5)
+            if extent is None
+            else tuple(float(value) for value in extent)
         )
+        display_extent = _nondegenerate_extent(resolved_extent)
+        self.image.set_data(data)
+        self.image.set_extent(display_extent)
+        self.image.set_cmap(getattr(field, "colormap", "viridis"))
+        self.image.set_clim(vmin=vmin, vmax=vmax)
+        self.ax.set_aspect(_image_aspect(field))
+        self.ax.set_xlim(display_extent[0], display_extent[1])
+        self.ax.set_ylim(display_extent[2], display_extent[3])
 
         self.ax.set_title(field.display_name, fontsize=10, pad=4)
 
         if len(field.axes) >= 2:
             self.ax.set_xlabel(_label_with_unit(field.axes[0], field.units))
             self.ax.set_ylabel(_label_with_unit(field.axes[1], field.units))
-            self.ax.xaxis.label.set_size(9)
-            self.ax.yaxis.label.set_size(9)
+        else:
+            self.ax.set_xlabel("")
+            self.ax.set_ylabel("")
 
-        self.ax.tick_params(axis="both", labelsize=8)
-
-        self.colorbar = self.figure.colorbar(
-            self.image,
-            cax=colorbar_ax,
-        )
-        self.colorbar.ax.tick_params(labelsize=8)
+        self.colorbar.update_normal(self.image)
         value_unit = getattr(field, "value_unit", "")
-        if value_unit:
-            self.colorbar.set_label(value_unit, fontsize=9)
+        self.colorbar.set_label(value_unit, fontsize=9)
 
-        self._vline = None
-        self._hline = None
         if self._crosshair_index is not None:
             ix, iy = self._crosshair_index
             self.set_crosshair(ix, iy, emit=False)
@@ -181,6 +184,17 @@ def _index_to_extent_value(index: int, n: int, lo: float, hi: float) -> float:
     if n <= 1:
         return 0.5 * (lo + hi)
     return lo + (hi - lo) * (float(index) / float(n - 1))
+
+
+def _nondegenerate_extent(extent) -> tuple[float, float, float, float]:
+    xmin, xmax, ymin, ymax = extent
+    if xmin == xmax:
+        xmin -= 0.5
+        xmax += 0.5
+    if ymin == ymax:
+        ymin -= 0.5
+        ymax += 0.5
+    return xmin, xmax, ymin, ymax
 
 
 def _extent_value_to_index(value: float, n: int, lo: float, hi: float) -> int:

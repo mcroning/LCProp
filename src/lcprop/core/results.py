@@ -129,3 +129,8 @@ class TimeDependentRunResult:
     cumulative_time: float = 0.0
     checkpoint: Any | None = None
     warnings: tuple[str, ...] = field(default_factory=tuple)
+    provenance: dict[str, Any] = field(default_factory=dict)
+    width_times: tuple[float, ...] = field(default_factory=tuple)
+    beam_x_rms_width_um: tuple[float, ...] = field(default_factory=tuple)
+    beam_y_rms_width_um: tuple[float, ...] = field(default_factory=tuple)
+    width_recording_stride: int = 1

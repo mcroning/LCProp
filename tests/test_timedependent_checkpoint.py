@@ -173,6 +173,24 @@ def test_continuation_matches_uninterrupted_run(tmp_path):
     np.testing.assert_allclose(resumed.A_final, uninterrupted.A_final)
 
 
+def test_in_memory_continuation_appends_cumulative_width_history():
+    request = _request(steps=2)
+    first = run_timedependent(request)
+    resumed = continue_timedependent(request, first.checkpoint, 3)
+
+    assert first.width_times == pytest.approx(
+        [0.0, request.solver.dt, 2 * request.solver.dt]
+    )
+    assert resumed.width_times[: len(first.width_times)] == pytest.approx(
+        first.width_times
+    )
+    assert resumed.width_times == pytest.approx(
+        [request.solver.dt * step for step in range(6)]
+    )
+    assert len(resumed.beam_x_rms_width_um) == 6
+    assert len(resumed.beam_y_rms_width_um) == 6
+
+
 def test_continuation_rejects_incompatible_grid():
     request = _request(steps=1)
     first = run_timedependent(request)

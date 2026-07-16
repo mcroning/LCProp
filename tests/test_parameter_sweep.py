@@ -1,10 +1,14 @@
 
 
+import numpy as np
+
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import BiasSpec, GridSpec, LCMaterial
 from lcprop.core.requests import OutputOptions, StaticRunRequest, StaticSolverOptions
+from lcprop.products.data_model import to_run_data
 from lcprop.workflows.soliton import SolitonRequest
 from lcprop.workflows.sweep import ParameterSweepRequest, run_parameter_sweep
+from lcprop.workflows.sweep import resolved_worker_count
 
 
 def make_base_static_request() -> StaticRunRequest:
@@ -50,6 +54,17 @@ def test_parameter_sweep_soliton_power_smoke():
     assert result.samples[1]["requested_power_mW"] == 0.08
     assert result.results[0].mode == "00"
     assert result.results[1].mode == "00"
+    assert [sample["sx_um"] for sample in result.samples] == [
+        member.metrics["sx_um"] for member in result.results
+    ]
+    assert [sample["sy_um"] for sample in result.samples] == [
+        member.metrics["sy_um"] for member in result.results
+    ]
+
+    run_data = to_run_data(result)
+    widths = run_data.curves["transverse_rms_widths"]
+    assert np.isfinite(widths.y).all()
+    assert widths.y.shape == (2, 2)
 
 
 def test_parameter_sweep_rejects_unsupported_parameter():
@@ -126,3 +141,58 @@ def test_parameter_sweep_rejects_parallel_continuation():
         assert "Continuation sweeps must be executed sequentially" in str(exc)
     else:
         raise AssertionError("Expected ValueError")
+
+
+def test_resolved_parallel_worker_count_respects_jobs_config_and_cpus():
+    assert resolved_worker_count(6, 6, available_logical_cpus=10) == 6
+    assert resolved_worker_count(6, 2, available_logical_cpus=10) == 2
+    assert resolved_worker_count(2, 6, available_logical_cpus=10) == 2
+
+
+def test_six_power_process_sweep_uses_more_than_two_workers_and_keeps_order():
+    base = SolitonRequest(
+        base=make_base_static_request(),
+        max_outer=1,
+        theta_steps_per_outer=1,
+    )
+    values = (0.01, 0.02, 0.03, 0.04, 0.05, 0.06)
+    request = ParameterSweepRequest(
+        experiment="soliton",
+        parameter="power_mW",
+        values=values,
+        base=base,
+        continuation=False,
+        execution="parallel",
+        max_workers=6,
+    )
+
+    result = run_parameter_sweep(request)
+
+    assert result.metrics["executor_class"] == "ProcessPoolExecutor"
+    assert result.metrics["resolved_worker_count"] == 6
+    assert result.metrics["submitted_futures"] == 6
+    assert result.metrics["maximum_active_futures"] == 6
+    assert [member.requested_power_mW for member in result.members] == list(values)
+    assert [sample["requested_power_mW"] for sample in result.samples] == list(values)
+
+
+def test_two_worker_process_sweep_limits_observed_concurrency_to_two():
+    base = SolitonRequest(
+        base=make_base_static_request(),
+        max_outer=1,
+        theta_steps_per_outer=1,
+    )
+    request = ParameterSweepRequest(
+        experiment="soliton",
+        parameter="power_mW",
+        values=(0.01, 0.02, 0.03, 0.04, 0.05, 0.06),
+        base=base,
+        continuation=False,
+        execution="parallel",
+        max_workers=2,
+    )
+
+    result = run_parameter_sweep(request)
+
+    assert result.metrics["resolved_worker_count"] == 2
+    assert result.metrics["maximum_active_futures"] == 2

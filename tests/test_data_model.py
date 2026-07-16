@@ -110,6 +110,18 @@ def test_timedependent_result_to_run_data():
     assert summary["prior_completed_steps"] == 0
     assert summary["segment_completed_steps"] == 1
     assert summary["cumulative_completed_steps"] == 1
+    assert list(data.curves.keys()) == [
+        "beam_x_rms_width",
+        "beam_y_rms_width",
+    ]
+    x_curve = data.curves["beam_x_rms_width"]
+    y_curve = data.curves["beam_y_rms_width"]
+    assert x_curve.display_name == "Beam x RMS width"
+    assert y_curve.display_name == "Beam y RMS width"
+    assert x_curve.x_label == "Cumulative TD time"
+    assert x_curve.units["x RMS width"] == "µm"
+    assert y_curve.units["y RMS width"] == "µm"
+    np.testing.assert_allclose(x_curve.x, result.width_times)
 
 
 def test_soliton_result_to_run_data():
@@ -142,7 +154,19 @@ def test_soliton_existence_result_to_run_data():
     data = from_soliton_existence_result(result)
     assert data.workflow == "soliton_existence"
     assert "beta" in data.curves
+    assert "transverse_rms_widths" in data.curves
     assert len(data.curves["beta"].x) == 2
+    widths = data.curves["transverse_rms_widths"]
+    np.testing.assert_allclose(
+        widths.y[:, 0],
+        [row["sx_um"] for row in result.samples],
+    )
+    np.testing.assert_allclose(
+        widths.y[:, 1],
+        [row["sy_um"] for row in result.samples],
+    )
+    assert widths.units["RMS width"] == "µm"
+    assert widths.series_labels == ("xs", "ys")
 
 
 def test_to_run_data_dispatch():

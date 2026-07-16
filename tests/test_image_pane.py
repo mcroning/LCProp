@@ -7,9 +7,9 @@ import numpy as np
 from PySide6.QtWidgets import QApplication
 
 from lcprop.core.requests import TimeDependentRunRequest, TimeDependentSolverOptions
-from lcprop.products.data_model import FieldCollection, to_run_data
+from lcprop.products.data_model import FieldCollection, FieldData, to_run_data
 from lcprop.workflows import run_static, run_timedependent
-from lcprop.gui.views.image_pane import ImagePane
+from lcprop.gui.views.image_pane import ImagePane, display_limits
 from tests.test_all_workflows import make_base_static_request
 
 
@@ -98,7 +98,7 @@ def _replace_field_data(run_data, key, data):
     )
 
 
-def test_image_pane_geometry_and_kind_scales_are_stable_until_reset():
+def test_image_pane_geometry_is_stable_while_clim_updates():
     app = QApplication.instance() or QApplication([])
     run_data = to_run_data(run_static(make_base_static_request()))
     pane = ImagePane()
@@ -108,29 +108,61 @@ def test_image_pane_geometry_and_kind_scales_are_stable_until_reset():
     app.processEvents()
 
     initial_size = pane.image_view.size()
+    initial_axes = pane.image_view.ax.get_position().bounds
+    initial_colorbar = pane.image_view.colorbar.ax.get_position().bounds
+    initial_ax_object = pane.image_view.ax
+    initial_colorbar_object = pane.image_view.colorbar
     intensity_limits = pane.image_view.image.get_clim()
-    updated = _replace_field_data(
-        run_data,
-        "final_intensity",
-        np.asarray(run_data.fields["final_intensity"].data) * 3.0,
-    )
-    pane.set_run_data(updated)
-    app.processEvents()
-    assert pane.image_view.size() == initial_size
-    assert pane.image_view.image.get_clim() == intensity_limits
+    for factor in (2.0, 3.0, 0.5):
+        updated = _replace_field_data(
+            run_data,
+            "final_intensity",
+            np.asarray(run_data.fields["final_intensity"].data) * factor,
+        )
+        pane.set_run_data(updated)
+        app.processEvents()
+        assert pane.image_view.size() == initial_size
+        assert pane.image_view.ax.get_position().bounds == initial_axes
+        assert pane.image_view.colorbar.ax.get_position().bounds == initial_colorbar
+        assert pane.image_view.ax is initial_ax_object
+        assert pane.image_view.colorbar is initial_colorbar_object
 
-    delta_index = pane.field_selector.findData("output_delta_theta")
-    pane.field_selector.setCurrentIndex(delta_index)
-    app.processEvents()
-    assert pane.image_view.size() == initial_size
-    assert "intensity" in pane._scale_limits
-    assert "theta_delta" in pane._scale_limits
-    assert pane._scale_limits["intensity"] != pane._scale_limits["theta_delta"]
-
-    pane.reset_color_scales()
-    pane.set_run_data(updated)
     assert pane.image_view.image.get_clim() != intensity_limits
     pane.close()
+
+
+def test_robust_intensity_limits_clip_single_hot_pixel():
+    data = np.ones((100, 100))
+    data[50, 50] = 1.0e9
+    field = FieldData(
+        "intensity",
+        "Intensity",
+        data,
+        ("x", "y"),
+        "intensity",
+    )
+
+    vmin, vmax = display_limits(field)
+
+    assert vmin == 0.0
+    assert vmax == 1.0
+    assert vmax < data.max()
+
+
+def test_all_zero_intensity_has_finite_nonzero_display_range():
+    field = FieldData(
+        "intensity",
+        "Intensity",
+        np.zeros((8, 9)),
+        ("x", "y"),
+        "intensity",
+    )
+
+    vmin, vmax = display_limits(field)
+
+    assert vmin == 0.0
+    assert np.isfinite(vmax)
+    assert vmax > 0.0
 
 
 def test_field_dropdown_is_wide_enough_for_normal_labels():

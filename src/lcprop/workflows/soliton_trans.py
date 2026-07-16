@@ -44,6 +44,7 @@ from lcprop.workflows.soliton import (
     residual_theta_static,
     solve_const_offdiag_batched,
 )
+from lcprop.core.execution import RunProgress
 
 
 def _project_field_parity_numpy(field: np.ndarray, mode: str) -> np.ndarray:
@@ -156,7 +157,12 @@ def _request_value(request: SolitonRequest, name: str, default):
     return getattr(request, name, default)
 
 
-def run_soliton(request: SolitonRequest) -> SolitonResult:
+def run_soliton(
+    request: SolitonRequest,
+    *,
+    cancellation_token=None,
+    progress_callback=None,
+) -> SolitonResult:
     """Solve the coupled stationary transverse LC/optical problem."""
     request.validate()
 
@@ -267,11 +273,15 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
 
     history: list[dict] = []
     converged = False
+    stopped = False
     beta = float("nan")
     optical_residual = float("inf")
     t0 = _time.perf_counter()
 
     for outer in range(int(request.max_outer)):
+        if cancellation_token is not None and cancellation_token.is_cancelled():
+            stopped = True
+            break
         A_prev = A.copy()
         theta_prev = theta.copy()
 
@@ -355,6 +365,37 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
         row["theta_max"] = float(asnumpy(xp.max(theta)))
         history.append(row)
 
+        if progress_callback is not None:
+            progress_callback(
+                RunProgress(
+                    workflow="soliton",
+                    status="running",
+                    completed_units=len(history),
+                    total_units=int(request.max_outer),
+                    current_coordinate=float(len(history)),
+                    coordinate_name="refinement iteration",
+                    coordinate_unit="",
+                    elapsed_wall_time=_time.perf_counter() - t0,
+                    latest_field_state=SolitonResult(
+                        metrics={**row, "convergence_status": "running"},
+                        mode=request.mode,
+                        samples=list(history),
+                        A=asnumpy(A).copy(),
+                        theta=asnumpy(theta).copy(),
+                        intensity=asnumpy(intensity).copy(),
+                        history=list(history),
+                        converged=False,
+                        status="running",
+                        completed_iterations=len(history),
+                        total_iterations=int(request.max_outer),
+                        request=request,
+                        usable_as_initial_condition=True,
+                    ),
+                    checkpoint_available=True,
+                    diagnostics=dict(row),
+                )
+            )
+
         if (
             field_rel < float(request.tol_field)
             and dtheta_rms < float(request.tol_theta)
@@ -381,9 +422,15 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
     final_coupled_polish_cycles = 0
 
     for final_coupled_polish_cycles in range(1, 6):
+        if cancellation_token is not None and cancellation_token.is_cancelled():
+            stopped = True
+            break
         intensity = total_intensity(A, coherent=coherent, xp=xp)
 
         for _ in range(10000):
+            if cancellation_token is not None and cancellation_token.is_cancelled():
+                stopped = True
+                break
             theta_new = theta_step(
                 theta,
                 intensity,
@@ -408,6 +455,9 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
             final_theta_polish_steps += 1
             if final_theta_update_rms < 1e-9:
                 break
+
+        if stopped:
+            break
 
         A_np, beta, optical_residual = _transverse_eigenpair(
             A,
@@ -494,7 +544,11 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
             "field_mix": float(request.field_mix),
             "theta_mix": float(request.theta_mix),
             "converged": bool(converged),
-            "convergence_status": "converged" if converged else "max_outer_reached",
+            "convergence_status": (
+                "stopped"
+                if stopped
+                else ("converged" if converged else "max_outer_reached")
+            ),
             "target_power_mW": float(physical_power_mW),
             "physical_power_mW": float(physical_power_mW),
             "normalized_field_integral_target": float(target_power),
@@ -523,6 +577,11 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
         intensity=intensity,
         history=history,
         converged=converged,
+        status="stopped" if stopped else "completed",
+        completed_iterations=len(history),
+        total_iterations=int(request.max_outer),
+        request=request,
+        usable_as_initial_condition=bool(history),
     )
 
 
@@ -533,6 +592,8 @@ def polish_soliton(
     max_outer: int | None = None,
     field_mix: float | None = None,
     theta_mix: float | None = None,
+    cancellation_token=None,
+    progress_callback=None,
 ) -> SolitonResult:
     """Polish an existing soliton with the dz-independent transverse solver."""
     updates = {
@@ -546,7 +607,11 @@ def polish_soliton(
     if theta_mix is not None:
         updates["theta_mix"] = float(theta_mix)
 
-    return run_soliton(replace(request, **updates))
+    return run_soliton(
+        replace(request, **updates),
+        cancellation_token=cancellation_token,
+        progress_callback=progress_callback,
+    )
 
 
 __all__ = ["SolitonRequest", "SolitonResult", "run_soliton", "polish_soliton"]

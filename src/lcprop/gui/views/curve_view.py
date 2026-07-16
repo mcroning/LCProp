@@ -14,13 +14,20 @@ class CurveView(FigureCanvasQTAgg):
         super().__init__(self.figure)
         self.ax = self.figure.add_subplot(111)
         self.line = None
+        self.lines = []
 
     def set_curve(self, curve, title: str | None = None) -> None:
         x = np.asarray(curve.x)
         y = np.asarray(curve.y)
 
         self.ax.clear()
-        (self.line,) = self.ax.plot(x, y, marker="o")
+        self.lines = list(self.ax.plot(x, y, marker="o"))
+        self.line = self.lines[0] if self.lines else None
+        series_labels = tuple(getattr(curve, "series_labels", ()))
+        if series_labels and len(series_labels) == len(self.lines):
+            for line, label in zip(self.lines, series_labels):
+                line.set_label(label)
+            self.ax.legend()
 
         self.ax.set_title(title if title is not None else curve.display_name)
         self.ax.set_xlabel(_label_with_unit(curve.x_label, curve.units))

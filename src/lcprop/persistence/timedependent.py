@@ -41,6 +41,10 @@ class TimeDependentCheckpoint:
     status: CheckpointStatus
     schema_version: int = TD_CHECKPOINT_SCHEMA_VERSION
     workflow: Literal["timedependent"] = "timedependent"
+    width_times: tuple[float, ...] = ()
+    beam_x_rms_width_um: tuple[float, ...] = ()
+    beam_y_rms_width_um: tuple[float, ...] = ()
+    width_recording_stride: int = 1
 
 
 def _request_to_dict(request: TimeDependentRunRequest) -> dict[str, Any]:

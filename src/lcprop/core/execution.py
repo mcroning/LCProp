@@ -40,6 +40,7 @@ class RunProgress:
     latest_field_state: Any | None = None
     checkpoint_available: bool = False
     message: str = ""
+    diagnostics: dict[str, Any] | None = None
 
     # TD compatibility/accounting names remain cumulative across continuations.
     completed_step: int = 0

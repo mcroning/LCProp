@@ -15,6 +15,7 @@ from lcprop.core.results import TimeDependentRunResult
 from lcprop.persistence.timedependent import TimeDependentCheckpoint
 from lcprop.optics.launch import normalized_power, reconstructed_physical_powers_mW
 from lcprop.optics.splitstep import total_intensity
+from lcprop.products.diagnostics import rms_widths
 from lcprop.algorithms.td_zmarch import TDZMarchControls, run_td_zmarch
 from lcprop.workflows.runtime import (
     build_runtime_components,
@@ -65,6 +66,7 @@ def run_timedependent(
     _requested_steps_total: int | None = None,
     _cumulative_start_time: float = 0.0,
     _checkpoint_request: TimeDependentRunRequest | None = None,
+    _prior_width_history=None,
 ) -> TimeDependentRunResult:
     """Run a time-dependent LC propagation workflow."""
 
@@ -130,6 +132,25 @@ def run_timedependent(
         coherence_groups=runtime.coherence_groups,
         xp=runtime.grid.xp,
     )
+    if _prior_width_history is None:
+        initial_sx, initial_sy = rms_widths(
+            initial_output_plane_intensity, runtime.grid
+        )
+        width_times = [float(_cumulative_start_time)]
+        beam_x_rms_width_um = [initial_sx]
+        beam_y_rms_width_um = [initial_sy]
+    else:
+        prior_times, prior_x, prior_y = _prior_width_history
+        width_times = [float(value) for value in prior_times]
+        beam_x_rms_width_um = [float(value) for value in prior_x]
+        beam_y_rms_width_um = [float(value) for value in prior_y]
+        if not width_times:
+            initial_sx, initial_sy = rms_widths(
+                initial_output_plane_intensity, runtime.grid
+            )
+            width_times.append(float(_cumulative_start_time))
+            beam_x_rms_width_um.append(initial_sx)
+            beam_y_rms_width_um.append(initial_sy)
 
     theta_step = make_zcoupled_theta_step(
         runtime,
@@ -160,8 +181,6 @@ def run_timedependent(
         latest_theta[state["k"]] = state["theta_k"]
 
     def completed_step(step: int) -> None:
-        if progress_callback is None:
-            return
         # Reuse the same observational optical reconstruction as final-result
         # construction. It does not feed back into the accepted TD state.
         A_display, current_intensity_stack, _ = recorded_optical_state(
@@ -175,6 +194,12 @@ def run_timedependent(
         cumulative_step = _completed_steps_offset + step
         segment_elapsed_time = step * float(request.solver.dt)
         cumulative_time = _cumulative_start_time + segment_elapsed_time
+        sx_um, sy_um = rms_widths(output_plane_intensity, runtime.grid)
+        width_times.append(float(cumulative_time))
+        beam_x_rms_width_um.append(sx_um)
+        beam_y_rms_width_um.append(sy_um)
+        if progress_callback is None:
+            return
         progress_callback(
             RunProgress(
                 workflow="timedependent",
@@ -205,6 +230,12 @@ def run_timedependent(
                     "grid_summary": runtime.grid.summary(),
                     "launch_summary": runtime.launch.summary(),
                     "current_time": cumulative_time,
+                    "width_times": tuple(width_times),
+                    "beam_x_rms_width_um": tuple(beam_x_rms_width_um),
+                    "beam_y_rms_width_um": tuple(beam_y_rms_width_um),
+                    "width_recording_stride": int(
+                        controls.observer_stride_t
+                    ),
                 },
                 checkpoint_available=True,
                 message="TD step completed",
@@ -273,6 +304,10 @@ def run_timedependent(
         theta_dtype=str(td.theta.dtype),
         A0_dtype=str(A0.dtype),
         status=status,
+        width_times=tuple(width_times),
+        beam_x_rms_width_um=tuple(beam_x_rms_width_um),
+        beam_y_rms_width_um=tuple(beam_y_rms_width_um),
+        width_recording_stride=int(controls.observer_stride_t),
     )
 
     return TimeDependentRunResult(
@@ -309,6 +344,10 @@ def run_timedependent(
         warnings=("time-dependent run cancelled at a completed-step boundary",)
         if td.cancelled
         else (),
+        width_times=tuple(width_times),
+        beam_x_rms_width_um=tuple(beam_x_rms_width_um),
+        beam_y_rms_width_um=tuple(beam_y_rms_width_um),
+        width_recording_stride=int(controls.observer_stride_t),
     )
 
 
@@ -384,6 +423,11 @@ def continue_timedependent(
         _requested_steps_total=checkpoint.completed_steps + int(additional_steps),
         _cumulative_start_time=checkpoint.current_time,
         _checkpoint_request=checkpoint.request,
+        _prior_width_history=(
+            checkpoint.width_times,
+            checkpoint.beam_x_rms_width_um,
+            checkpoint.beam_y_rms_width_um,
+        ),
     )
 
 

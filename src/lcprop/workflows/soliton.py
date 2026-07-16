@@ -15,6 +15,7 @@ from lcprop.algorithms.theta_picard import cn_trapezoid_picard_step
 from lcprop.algorithms.thomas import solve_const_offdiag_batched
 from lcprop.products.diagnostics import intensity_metrics, residual_theta_static
 from lcprop.workflows.runtime import build_runtime_components
+from lcprop.core.execution import RunProgress
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,11 @@ class SolitonResult:
     intensity: Any | None = None
     history: list[dict] = field(default_factory=list)
     converged: bool = False
+    status: str = "completed"
+    completed_iterations: int = 0
+    total_iterations: int = 0
+    request: Any | None = None
+    usable_as_initial_condition: bool = False
 
 
 def _target_power(beams) -> float:
@@ -328,7 +334,12 @@ def rayleigh_beta(A, theta, beta_symbol, *, grid, ne: float, no: float, n_ref: f
     return float(asnumpy(xp.real(num / den)))
 
 
-def run_soliton(request: SolitonRequest) -> SolitonResult:
+def run_soliton(
+    request: SolitonRequest,
+    *,
+    cancellation_token=None,
+    progress_callback=None,
+) -> SolitonResult:
     request.validate()
 
     runtime = build_runtime_components(request.base, theta_dt=7.5e-4, mobility=1.0)
@@ -467,6 +478,7 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
 
     history: list[dict] = []
     converged = False
+    stopped = False
 
     synchronize(xp)
     t0 = _time.perf_counter()
@@ -474,6 +486,9 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
     intensity = total_intensity(A, coherent=coherent, coherence_groups=coherence_groups, xp=xp)
 
     for outer in range(int(request.max_outer)):
+        if cancellation_token is not None and cancellation_token.is_cancelled():
+            stopped = True
+            break
         A_prev = A.copy()
         theta_prev = theta.copy()
 
@@ -574,6 +589,38 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
         row["theta_max"] = float(asnumpy(xp.max(theta)))
         history.append(row)
 
+        if progress_callback is not None:
+            partial = SolitonResult(
+                metrics={**row, "convergence_status": "running"},
+                mode=request.mode,
+                samples=list(history),
+                A=asnumpy(A).copy(),
+                theta=asnumpy(theta).copy(),
+                intensity=asnumpy(intensity).copy(),
+                history=list(history),
+                converged=False,
+                status="running",
+                completed_iterations=len(history),
+                total_iterations=int(request.max_outer),
+                request=request,
+                usable_as_initial_condition=True,
+            )
+            progress_callback(
+                RunProgress(
+                    workflow="soliton",
+                    status="running",
+                    completed_units=len(history),
+                    total_units=int(request.max_outer),
+                    current_coordinate=float(len(history)),
+                    coordinate_name="iteration",
+                    coordinate_unit="",
+                    elapsed_wall_time=_time.perf_counter() - t0,
+                    latest_field_state=partial,
+                    checkpoint_available=True,
+                    diagnostics=dict(row),
+                )
+            )
+
         if (
             field_rel < float(request.tol_field)
             and dtheta_rms < float(request.tol_theta)
@@ -613,7 +660,9 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
         "field_mix": float(request.field_mix),
         "theta_mix": float(request.theta_mix),
         "converged": bool(converged),
-        "convergence_status": "converged" if converged else "max_outer_reached",
+        "convergence_status": (
+            "stopped" if stopped else ("converged" if converged else "max_outer_reached")
+        ),
         "target_power_mW": float(physical_power_mW),
         "physical_power_mW": float(physical_power_mW),
         "normalized_field_integral_target": float(target_power),
@@ -637,6 +686,11 @@ def run_soliton(request: SolitonRequest) -> SolitonResult:
         intensity=intensity,
         history=history,
         converged=converged,
+        status="stopped" if stopped else "completed",
+        completed_iterations=len(history),
+        total_iterations=int(request.max_outer),
+        request=request,
+        usable_as_initial_condition=bool(history),
     )
 
 

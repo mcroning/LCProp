@@ -30,6 +30,15 @@ from lcprop.products.data_model import (
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.runners.local import LocalRunner
 from lcprop.gui.workers import WorkflowWorker
+from lcprop.gui.retained_results import (
+    ExperimentFamily,
+    RetainedResult,
+    RetainedResults,
+    TDInitialSourceMode,
+    WorkflowKind,
+    soliton_result_incompatibility,
+    source_incompatibility,
+)
 from lcprop.gui.panels import (
     ExperimentPanel,
     PhysicsPanel,
@@ -48,7 +57,9 @@ class LCPropMainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.runner = LocalRunner()
+        self.retained_results = RetainedResults()
         self.last_soliton_result = None
+        self.last_soliton_existence_result = None
         self.last_timedependent_checkpoint = None
         self.last_timedependent_result = None
         self.last_timedependent_progress = None
@@ -56,9 +67,13 @@ class LCPropMainWindow(QWidget):
         self.last_static_checkpoint = None
         self.last_static_result = None
         self._active_td_from_static = False
+        self._active_td_source_mode = TDInitialSourceMode.BEAM_LAUNCH
+        self._active_td_soliton_source = None
         self._td_static_reference = None
         self._last_td_progress_thread = None
         self._background_running = False
+        self._active_workflow = None
+        self._active_request = None
         self.run_status = "idle"
         self._td_thread = None
         self._td_worker = None
@@ -76,15 +91,46 @@ class LCPropMainWindow(QWidget):
         header.addStretch(1)
         header.addWidget(QLabel(f"Runner: {self.runner.name}"))
 
-        self.use_last_soliton = QCheckBox("Start from last soliton")
+        self.td_initial_condition_label = QLabel("Initial condition:")
+        self.td_initial_condition_label.setVisible(False)
+        header.addWidget(self.td_initial_condition_label)
+        self.td_initial_condition_selector = QComboBox()
+        self.td_initial_condition_selector.addItem(
+            "Beam pane launch", TDInitialSourceMode.BEAM_LAUNCH
+        )
+        self.td_initial_condition_selector.addItem(
+            "Last standard static result",
+            TDInitialSourceMode.STANDARD_STATIC,
+        )
+        self.td_initial_condition_selector.addItem(
+            "Selected soliton result",
+            TDInitialSourceMode.SOLITON_RESULT,
+        )
+        self.td_initial_condition_selector.setVisible(False)
+        self.td_initial_condition_selector.currentIndexChanged.connect(
+            self._td_initial_source_mode_changed
+        )
+        header.addWidget(self.td_initial_condition_selector)
+
+        # Hidden compatibility shims for older callers. The combo box above is
+        # the sole authoritative source-mode control.
+        self.use_last_soliton = QCheckBox("Start TD from a soliton result")
         self.use_last_soliton.setEnabled(False)
         self.use_last_soliton.setVisible(False)
-        header.addWidget(self.use_last_soliton)
+        self.soliton_source_label = QLabel("Soliton source:")
+        self.soliton_source_label.setVisible(False)
+        header.addWidget(self.soliton_source_label)
+        self.soliton_source_selector = QComboBox()
+        self.soliton_source_selector.setMinimumContentsLength(24)
+        self.soliton_source_selector.setVisible(False)
+        self.soliton_source_selector.currentIndexChanged.connect(
+            self._soliton_source_changed
+        )
+        header.addWidget(self.soliton_source_selector)
 
         self.use_last_static = QCheckBox("Start TD from last static result")
         self.use_last_static.setEnabled(False)
         self.use_last_static.setVisible(False)
-        header.addWidget(self.use_last_static)
 
         self.run_button = QPushButton()
         self.run_button.clicked.connect(self.run_static_clicked)
@@ -114,7 +160,11 @@ class LCPropMainWindow(QWidget):
             y_aperture_um=self.grid_panel.y_aperture_um.value(),
         )
         self.solver_panel = SolverPanel()
-        self.sweep_panel = SweepPanel()
+        self.sweep_panel = SweepPanel(
+            parallel_available=bool(
+                getattr(self.runner, "supports_parallel_sweeps", False)
+            )
+        )
         self.results_panel = ResultsPanel()
 
         self.tabs.addTab(self.experiment_panel, "Experiment")
@@ -132,6 +182,12 @@ class LCPropMainWindow(QWidget):
             self._sync_beam_aperture
         )
         self._connect_continuation_invalidation_signals()
+        self.use_last_soliton.toggled.connect(
+            self._legacy_soliton_source_toggled
+        )
+        self.use_last_static.toggled.connect(
+            self._legacy_static_source_toggled
+        )
         self.update_run_button()   
         self.resize(1450, 900)
 
@@ -169,6 +225,13 @@ class LCPropMainWindow(QWidget):
         self.solver_panel.set_experiment_mode(experiment)
         self._update_sweep_tab(experiment)
         self._update_initial_condition_controls(experiment)
+        if experiment == "Time-dependent propagation":
+            available, reason = self._td_source_mode_availability()
+            self.run_button.setEnabled(available)
+            self.run_button.setToolTip("" if available else reason)
+        else:
+            self.run_button.setEnabled(True)
+            self.run_button.setToolTip("")
 
     def _connect_continuation_invalidation_signals(self) -> None:
         """Invalidate a retained TD checkpoint as soon as its request changes."""
@@ -188,8 +251,6 @@ class LCPropMainWindow(QWidget):
                 widget.toggled.connect(self._configuration_changed)
             for widget in panel.findChildren(QLineEdit):
                 widget.editingFinished.connect(self._configuration_changed)
-        self.use_last_soliton.toggled.connect(self._configuration_changed)
-        self.use_last_static.toggled.connect(self._configuration_changed)
 
     def _td_checkpoint_matches_current_request(self, checkpoint) -> bool:
         try:
@@ -202,16 +263,18 @@ class LCPropMainWindow(QWidget):
 
     def _configuration_changed(self, *_args) -> None:
         checkpoint = self.last_timedependent_checkpoint
-        if checkpoint is None or self._background_running:
+        if self._background_running:
             return
-        try:
-            request = self.build_timedependent_request()
-            self.runner.validate_timedependent_continuation(request, checkpoint)
-        except Exception as exc:
-            self.last_timedependent_checkpoint = None
-            self.results_panel.append_console(
-                f"Continuation invalidated: {exc}"
-            )
+        if checkpoint is not None:
+            try:
+                request = self.build_timedependent_request()
+                self.runner.validate_timedependent_continuation(request, checkpoint)
+            except Exception as exc:
+                self.last_timedependent_checkpoint = None
+                self.retained_results.last_standard_td_checkpoint = None
+                self.results_panel.append_console(
+                    f"Continuation invalidated: {exc}"
+                )
         self.update_run_button()
 
     def _update_sweep_tab(self, experiment: str) -> None:
@@ -221,36 +284,248 @@ class LCPropMainWindow(QWidget):
             self.tabs.setCurrentWidget(self.experiment_panel)
 
     def _update_initial_condition_controls(self, experiment: str) -> None:
-        visible = experiment in {"Static propagation", "Time-dependent propagation"}
-        enabled = visible and self.last_soliton_result is not None
-        self.use_last_soliton.setVisible(visible)
-        self.use_last_soliton.setEnabled(enabled)
-        if not enabled:
-            self.use_last_soliton.setChecked(False)
-        self.use_last_static.setVisible(
-            experiment == "Time-dependent propagation"
+        self._adopt_legacy_retained_values()
+        is_td = experiment == "Time-dependent propagation"
+        td_request = self._build_timedependent_base_request() if is_td else None
+        self._refresh_soliton_source_selector()
+
+        source = self.retained_results.selected_soliton_source
+        soliton_reason = "Run or select a completed soliton first."
+        if is_td and source is not None:
+            mismatch = source_incompatibility(td_request, source.request)
+            if mismatch is None:
+                mismatch = soliton_result_incompatibility(
+                    td_request, source.result
+                )
+            valid_partial = bool(
+                getattr(
+                    source.result,
+                    "usable_as_initial_condition",
+                    getattr(source.result, "status", "completed")
+                    == "completed",
+                )
+            )
+            if mismatch is not None:
+                soliton_reason = (
+                    f"Selected soliton is incompatible with current {mismatch}."
+                )
+            elif not valid_partial:
+                soliton_reason = "Last stopped soliton has no accepted candidate."
+            else:
+                soliton_reason = ""
+
+        soliton_enabled = is_td and source is not None and not soliton_reason
+        has_sources = self.soliton_source_selector.count() > 0
+        self.td_initial_condition_label.setVisible(is_td)
+        self.td_initial_condition_selector.setVisible(is_td)
+        self.soliton_source_label.setVisible(is_td)
+        self.soliton_source_selector.setVisible(is_td)
+        self.soliton_source_selector.setEnabled(
+            is_td
+            and has_sources
+            and self.td_initial_source_mode()
+            is TDInitialSourceMode.SOLITON_RESULT
+        )
+        self.soliton_source_selector.setToolTip(
+            "Choose a retained single soliton or a completed member of the "
+            "latest existence sweep."
+            if has_sources
+            else "No retained soliton sources are available."
+        )
+
+        static_reason = "Run a completed standard static propagation first."
+        static_entry = self.retained_results.last_standard_static_result
+        if is_td and static_entry is not None:
+            try:
+                timedependent_state_from_static_result(static_entry.result, td_request)
+            except Exception as exc:
+                static_reason = str(exc)
+            else:
+                static_reason = ""
+        static_enabled = is_td and static_entry is not None and not static_reason
+        self._set_td_source_item_enabled(
+            TDInitialSourceMode.BEAM_LAUNCH,
+            True,
+            "Initialize from the current Beam pane and normal bias state.",
+        )
+        self._set_td_source_item_enabled(
+            TDInitialSourceMode.STANDARD_STATIC,
+            static_enabled,
+            static_reason
+            or "Initialize from the retained standard static result.",
+        )
+        self._set_td_source_item_enabled(
+            TDInitialSourceMode.SOLITON_RESULT,
+            soliton_enabled,
+            soliton_reason
+            or "Initialize from the selected retained soliton.",
+        )
+        self._sync_legacy_source_checkboxes()
+
+    def _adopt_legacy_retained_values(self) -> None:
+        """Keep direct attribute assignment compatible with older callers/tests."""
+
+        if (
+            self.last_static_result is not None
+            and self.retained_results.last_standard_static_result is None
+        ):
+            request = getattr(self.last_static_result, "request", None)
+            if request is not None:
+                self.retained_results.store(
+                    family=ExperimentFamily.STANDARD,
+                    workflow=WorkflowKind.STATIC,
+                    request=request,
+                    result=self.last_static_result,
+                )
+        if (
+            self.last_soliton_result is not None
+            and self.retained_results.last_soliton_result is None
+        ):
+            request = getattr(self.last_soliton_result, "request", None)
+            if request is not None:
+                self.retained_results.store(
+                    family=ExperimentFamily.SOLITON,
+                    workflow=WorkflowKind.SOLITON,
+                    request=request,
+                    result=self.last_soliton_result,
+                )
+
+    def td_initial_source_mode(self) -> TDInitialSourceMode:
+        mode = self.td_initial_condition_selector.currentData()
+        return (
+            TDInitialSourceMode.BEAM_LAUNCH
+            if mode is None
+            else TDInitialSourceMode(mode)
+        )
+
+    def _set_td_initial_source_mode(self, mode: TDInitialSourceMode) -> None:
+        index = self.td_initial_condition_selector.findData(mode)
+        if index >= 0:
+            self.td_initial_condition_selector.setCurrentIndex(index)
+
+    def _set_td_source_item_enabled(
+        self,
+        mode: TDInitialSourceMode,
+        enabled: bool,
+        tooltip: str,
+    ) -> None:
+        index = self.td_initial_condition_selector.findData(mode)
+        item = self.td_initial_condition_selector.model().item(index)
+        item.setEnabled(enabled)
+        item.setToolTip(tooltip)
+
+    def _td_source_mode_availability(self) -> tuple[bool, str]:
+        mode = self.td_initial_source_mode()
+        index = self.td_initial_condition_selector.findData(mode)
+        item = self.td_initial_condition_selector.model().item(index)
+        return bool(item.isEnabled()), str(item.toolTip() or "")
+
+    def _td_initial_source_mode_changed(self, *_args) -> None:
+        self._sync_legacy_source_checkboxes()
+        self._configuration_changed()
+
+    def _sync_legacy_source_checkboxes(self) -> None:
+        mode = self.td_initial_source_mode()
+        for checkbox, checked in (
+            (
+                self.use_last_soliton,
+                mode is TDInitialSourceMode.SOLITON_RESULT,
+            ),
+            (
+                self.use_last_static,
+                mode is TDInitialSourceMode.STANDARD_STATIC,
+            ),
+        ):
+            checkbox.blockSignals(True)
+            checkbox.setChecked(checked)
+            checkbox.blockSignals(False)
+        self.use_last_soliton.setEnabled(
+            self.td_initial_condition_selector.model()
+            .item(
+                self.td_initial_condition_selector.findData(
+                    TDInitialSourceMode.SOLITON_RESULT
+                )
+            )
+            .isEnabled()
+        )
+        self.use_last_soliton.setToolTip(
+            self.td_initial_condition_selector.model()
+            .item(
+                self.td_initial_condition_selector.findData(
+                    TDInitialSourceMode.SOLITON_RESULT
+                )
+            )
+            .toolTip()
         )
         self.use_last_static.setEnabled(
-            experiment == "Time-dependent propagation"
-            and self.last_static_result is not None
-            and getattr(self.last_static_result, "status", None) == "completed"
+            self.td_initial_condition_selector.model()
+            .item(
+                self.td_initial_condition_selector.findData(
+                    TDInitialSourceMode.STANDARD_STATIC
+                )
+            )
+            .isEnabled()
         )
-        if not self.use_last_static.isEnabled():
-            self.use_last_static.setChecked(False)
+        self.use_last_static.setToolTip(
+            self.td_initial_condition_selector.model()
+            .item(
+                self.td_initial_condition_selector.findData(
+                    TDInitialSourceMode.STANDARD_STATIC
+                )
+            )
+            .toolTip()
+        )
 
-    def _maybe_apply_last_soliton(self, req, *, allow: bool):
-        if not allow or not self.use_last_soliton.isChecked():
-            return req
-        if self.last_soliton_result is None:
-            return req
-        return replace(
-            req,
-            initial_A=self.last_soliton_result.A,
-            initial_theta=self.last_soliton_result.theta,
+    def _legacy_soliton_source_toggled(self, checked: bool) -> None:
+        if checked:
+            self._set_td_initial_source_mode(
+                TDInitialSourceMode.SOLITON_RESULT
+            )
+        elif self.td_initial_source_mode() is TDInitialSourceMode.SOLITON_RESULT:
+            self._set_td_initial_source_mode(TDInitialSourceMode.BEAM_LAUNCH)
+
+    def _legacy_static_source_toggled(self, checked: bool) -> None:
+        if checked:
+            self._set_td_initial_source_mode(
+                TDInitialSourceMode.STANDARD_STATIC
+            )
+        elif self.td_initial_source_mode() is TDInitialSourceMode.STANDARD_STATIC:
+            self._set_td_initial_source_mode(TDInitialSourceMode.BEAM_LAUNCH)
+
+    def _refresh_soliton_source_selector(self) -> None:
+        sources = self.retained_results.soliton_sources()
+        selected = self.retained_results.selected_soliton_source
+        selected_id = None if selected is None else selected.source_id
+        self.soliton_source_selector.blockSignals(True)
+        self.soliton_source_selector.clear()
+        for source in sources:
+            self.soliton_source_selector.addItem(source.label, source)
+        selected_index = -1
+        for index in range(self.soliton_source_selector.count()):
+            source = self.soliton_source_selector.itemData(index)
+            if source.source_id == selected_id:
+                selected_index = index
+                break
+        if selected_index < 0 and sources and selected_id is None:
+            selected_index = 0
+        self.soliton_source_selector.setCurrentIndex(selected_index)
+        self.soliton_source_selector.blockSignals(False)
+        self.retained_results.selected_soliton_source = (
+            None
+            if selected_index < 0
+            else self.soliton_source_selector.itemData(selected_index)
         )
+
+    def _soliton_source_changed(self, index: int) -> None:
+        self.retained_results.selected_soliton_source = (
+            None
+            if index < 0
+            else self.soliton_source_selector.itemData(index)
+        )
+        self._configuration_changed()
 
     def build_request(self, *, allow_last_soliton: bool = True) -> StaticRunRequest:
-        req = StaticRunRequest(
+        return StaticRunRequest(
             grid=self.grid_panel.grid(),
             material=self.physics_panel.material(),
             bias=self.physics_panel.bias(),
@@ -258,10 +533,9 @@ class LCPropMainWindow(QWidget):
             solver=self.solver_panel.solver(),
             output=OutputOptions(),
         )
-        return self._maybe_apply_last_soliton(req, allow=allow_last_soliton)
 
-    def build_timedependent_request(self) -> TimeDependentRunRequest:
-        req = TimeDependentRunRequest(
+    def _build_timedependent_base_request(self) -> TimeDependentRunRequest:
+        return TimeDependentRunRequest(
             grid=self.grid_panel.grid(),
             material=self.physics_panel.material(),
             bias=self.physics_panel.bias(),
@@ -270,13 +544,38 @@ class LCPropMainWindow(QWidget):
             output=OutputOptions(),
             runtime=RuntimeOptions(precision="float64"),
         )
-        req = self._maybe_apply_last_soliton(req, allow=True)
-        if self.use_last_static.isChecked():
-            if self.last_static_result is None:
+
+    def build_timedependent_request(self) -> TimeDependentRunRequest:
+        req = self._build_timedependent_base_request()
+        mode = self.td_initial_source_mode()
+        if mode is TDInitialSourceMode.BEAM_LAUNCH:
+            return req
+        if mode is TDInitialSourceMode.SOLITON_RESULT:
+            source = self.retained_results.selected_soliton_source
+            if source is None:
+                raise ValueError("no compatible soliton result is available")
+            mismatch = source_incompatibility(req, source.request)
+            if mismatch is None:
+                mismatch = soliton_result_incompatibility(req, source.result)
+            if mismatch is not None:
+                raise ValueError(
+                    f"cannot initialize TD from soliton: incompatible {mismatch}"
+                )
+            req = replace(
+                req,
+                beams=self._base_static_request(source.request).beams,
+                initial_A=source.result.A,
+                initial_theta=source.result.theta,
+            )
+        elif mode is TDInitialSourceMode.STANDARD_STATIC:
+            retained = self.retained_results.last_standard_static_result
+            if retained is None:
                 raise ValueError("no completed static result is available")
             req = timedependent_state_from_static_result(
-                self.last_static_result, req
+                retained.result, req
             )
+        else:
+            raise ValueError(f"unsupported TD initial-condition mode: {mode}")
         return req
 
     def build_soliton_request(self) -> SolitonRequest:
@@ -299,6 +598,7 @@ class LCPropMainWindow(QWidget):
             base=base,
             continuation=self.sweep_panel.use_continuation(),
             execution=self.sweep_panel.sweep_execution(),
+            max_workers=self.sweep_panel.sweep_worker_count(),
         )
 
     def _base_static_request(self, req):
@@ -333,11 +633,15 @@ class LCPropMainWindow(QWidget):
             f"waists=({first_channel.waist_x_um:g}, {first_channel.waist_y_um:g}) µm, "
             f"λ={first_channel.wavelength_um:g} µm",
             f"Workflow: {base_req.solver.workflow.strategy}",
-            f"Initial condition: {'last soliton' if getattr(base_req, 'initial_A', None) is not None or getattr(base_req, 'initial_theta', None) is not None else 'default launch'}",
+            "Initial condition: Beam pane launch",
         ]
 
-        if isinstance(req, TimeDependentRunRequest) and self.use_last_static.isChecked():
-            source = self.last_static_result
+        mode = self.td_initial_source_mode()
+        if (
+            isinstance(req, TimeDependentRunRequest)
+            and mode is TDInitialSourceMode.STANDARD_STATIC
+        ):
+            source = self.retained_results.last_standard_static_result.result
             lines[-1] = "Initial condition: static result"
             lines.extend([
                 f"Static source status: {source.status}",
@@ -348,6 +652,18 @@ class LCPropMainWindow(QWidget):
                 "Source residual summary: max RMS="
                 f"{source.max_final_residual_rms}",
             ])
+        elif (
+            isinstance(req, TimeDependentRunRequest)
+            and mode is TDInitialSourceMode.SOLITON_RESULT
+        ):
+            source = self.retained_results.selected_soliton_source
+            lines[-1] = f"Initial condition: {source.label}"
+            lines.append(f"Soliton source ID: {source.source_id}")
+            if source.sweep_id is not None:
+                lines.append(f"Source sweep ID: {source.sweep_id}")
+                lines.append(
+                    f"Source sweep power: {source.requested_power_mW:g} mW"
+                )
 
         if hasattr(base_req.solver, "resolved_static_max_coupled_passes"):
             lines.extend([
@@ -371,6 +687,9 @@ class LCPropMainWindow(QWidget):
             lines.append("Sweep values: " + ", ".join(f"{p:g}" for p in sweep_values))
             lines.append(f"Continuation: {getattr(req, 'continuation', False)}")
             lines.append(f"Execution: {getattr(req, 'execution', 'sequential')}")
+            lines.append(
+                f"Configured sweep workers: {getattr(req, 'max_workers', None)}"
+            )
         else:
             powers = getattr(req, "powers_mW", None)
             if powers is not None:
@@ -405,49 +724,32 @@ class LCPropMainWindow(QWidget):
     def run_static_clicked(self):
         if self._background_running:
             return
-        if self.experiment_panel.current_experiment() == "Time-dependent propagation":
+        experiment = self.experiment_panel.current_experiment()
+        if experiment == "Time-dependent propagation":
             self._start_timedependent_background()
             return
-        if self.experiment_panel.current_experiment() == "Static propagation":
+        if experiment == "Static propagation":
             self._start_static_background()
             return
-
-        self.run_button.setEnabled(False)
-        self.run_button.setText("Running…")
-        self.tabs.setCurrentWidget(self.results_panel)
-
         try:
-            experiment = self.experiment_panel.current_experiment()
-            try:
-                request_builder, runner_result_fn, run_label = self._experiment_dispatch()[experiment]
-            except KeyError as exc:
-                raise ValueError(f"Unsupported experiment: {experiment}") from exc
+            request_builder, runner_result_fn, _run_label = (
+                self._experiment_dispatch()[experiment]
+            )
             req = request_builder()
-
-            self.results_panel.set_request_summary(self.describe_request(req))
-            self.results_panel.append_console(f"Running {run_label} with {self.runner.name}...")
-            QApplication.processEvents()
-
-            runner_result = runner_result_fn(req)
-            result = runner_result.result
-            if type(result).__name__ == "SolitonResult":
-                self.last_soliton_result = result
-                self.results_panel.append_console("Saved this soliton as the current in-memory initial condition.")
-            run_data = to_run_data(result)
-            self.results_panel.set_run_data(run_data)
-
-            self.results_panel.append_console("")
-            self.results_panel.append_console(runner_result.message)
-            self.results_panel.append_console("Run complete")
-            self._append_result_summary(result, runner_result.kind)
-
         except Exception:
             self.results_panel.append_console("ERROR")
             self.results_panel.append_console(traceback.format_exc())
-
-        finally:
-            self.run_button.setEnabled(True)
-            self.update_run_button()
+            return
+        workflow = (
+            "soliton"
+            if experiment == "Soliton"
+            else "soliton_existence"
+        )
+        self._start_timedependent_background(
+            request=req,
+            runner_callable=runner_result_fn,
+            workflow=workflow,
+        )
 
     def _set_background_controls_enabled(self, enabled: bool) -> None:
         for panel in (
@@ -459,15 +761,24 @@ class LCPropMainWindow(QWidget):
             self.sweep_panel,
         ):
             panel.setEnabled(enabled)
+        self.td_initial_condition_selector.setEnabled(enabled)
         self.use_last_soliton.setEnabled(
-            enabled and self.last_soliton_result is not None
+            enabled and self.retained_results.selected_soliton_source is not None
+        )
+        self.soliton_source_selector.setEnabled(
+            enabled
+            and self.soliton_source_selector.isVisible()
+            and self.soliton_source_selector.count() > 0
+            and self.td_initial_source_mode()
+            is TDInitialSourceMode.SOLITON_RESULT
         )
         self.use_last_static.setEnabled(
             enabled
             and self.experiment_panel.current_experiment()
             == "Time-dependent propagation"
-            and self.last_static_result is not None
-            and self.last_static_result.status == "completed"
+            and self.retained_results.last_standard_static_result is not None
+            and self.retained_results.last_standard_static_result.result.status
+            == "completed"
         )
         experiment = self.experiment_panel.current_experiment()
         checkpoint = (
@@ -494,7 +805,11 @@ class LCPropMainWindow(QWidget):
         workflow: str = "timedependent",
     ) -> None:
         try:
-            req = self.build_timedependent_request() if request is None else request
+            req = (
+                self.build_timedependent_request()
+                if request is None
+                else request
+            )
             summary = self.describe_request(req)
         except Exception:
             self.results_panel.append_console("ERROR")
@@ -504,7 +819,7 @@ class LCPropMainWindow(QWidget):
         old_checkpoint = (
             self.last_timedependent_checkpoint
             if workflow == "timedependent"
-            else self.last_static_checkpoint
+            else self.last_static_checkpoint if workflow == "static" else None
         )
         if not is_continuation and old_checkpoint is not None:
             workflow_label = "TD" if workflow == "timedependent" else "static"
@@ -517,13 +832,24 @@ class LCPropMainWindow(QWidget):
                 self.last_static_checkpoint = None
 
         if workflow == "timedependent" and not is_continuation:
-            self._active_td_from_static = self.use_last_static.isChecked()
+            mode = self.td_initial_source_mode()
+            self._active_td_source_mode = mode
+            self._active_td_from_static = (
+                mode is TDInitialSourceMode.STANDARD_STATIC
+            )
+            self._active_td_soliton_source = (
+                self.retained_results.selected_soliton_source
+                if mode is TDInitialSourceMode.SOLITON_RESULT
+                else None
+            )
             self._td_static_reference = None
 
         if not is_continuation:
             self.results_panel.reset_field_color_scales()
 
         self._background_running = True
+        self._active_workflow = workflow
+        self._active_request = req
         self.run_status = "running"
         self.last_timedependent_progress = None
         self.last_run_progress = None
@@ -536,8 +862,18 @@ class LCPropMainWindow(QWidget):
         self.results_panel.append_console(
             f"Running {workflow} workflow with {self.runner.name}..."
         )
-        coordinate = "TD time" if workflow == "timedependent" else "Static z"
-        unit = "" if workflow == "timedependent" else " um"
+        if workflow == "timedependent" and self._active_td_soliton_source is not None:
+            source = self._active_td_soliton_source
+            self.results_panel.append_console(
+                f"TD soliton source: {source.label} [{source.source_id}]"
+            )
+        coordinate = {
+            "timedependent": "TD time",
+            "static": "Static z",
+            "soliton": "Soliton iteration",
+            "soliton_existence": "Completed powers",
+        }[workflow]
+        unit = " um" if workflow == "static" else ""
         self.results_panel.set_td_time_indicator(
             f"{coordinate}: {self._format_coordinate(cumulative_start_time)}{unit}"
         )
@@ -545,8 +881,13 @@ class LCPropMainWindow(QWidget):
         token = CancellationToken()
         thread = QThread(self)
         worker = WorkflowWorker(
-            (self.runner.run_timedependent if workflow == "timedependent" else self.runner.run_static)
-            if runner_callable is None else runner_callable,
+            (
+                self.runner.run_timedependent
+                if workflow == "timedependent"
+                else self.runner.run_static
+            )
+            if runner_callable is None
+            else runner_callable,
             req,
             token,
         )
@@ -701,7 +1042,17 @@ class LCPropMainWindow(QWidget):
                     static_reference=self._td_static_reference,
                 )
             )
-        progress_label = "TD" if progress.workflow == "timedependent" else "Static"
+        elif progress.workflow in {"soliton", "soliton_existence"}:
+            if progress.latest_field_state is not None:
+                self.results_panel.set_run_data(
+                    to_run_data(progress.latest_field_state)
+                )
+        progress_label = {
+            "timedependent": "TD",
+            "static": "Static",
+            "soliton": "Soliton",
+            "soliton_existence": "Existence sweep",
+        }.get(progress.workflow, progress.workflow)
         self.results_panel.set_td_time_indicator(
             f"{progress_label}: {progress.coordinate_name} = "
             f"{self._format_coordinate(progress.current_coordinate)}{unit}; "
@@ -717,12 +1068,34 @@ class LCPropMainWindow(QWidget):
                 f"{self._format_coordinate(progress.current_coordinate)}, "
                 f"elapsed={progress.elapsed_wall_time:.3f} s"
             )
-        else:
+        elif progress.workflow == "static":
             self.results_panel.append_console(
                 "Static progress: "
                 f"slices {progress.completed_units}/{progress.total_units}, "
                 f"z={self._format_coordinate(progress.current_coordinate)}{unit}, "
                 f"elapsed={progress.elapsed_wall_time:.3f} s"
+            )
+        elif progress.workflow == "soliton":
+            diagnostics = progress.diagnostics or {}
+            beta = diagnostics.get("beta")
+            beta_text = "" if beta is None else f", beta={beta:.6g}"
+            self.results_panel.set_td_time_indicator(
+                "Soliton: iteration "
+                f"{progress.completed_units}/{progress.total_units}; "
+                f"residual RMS={diagnostics.get('residual_rms', float('nan')):.3g}; "
+                f"residual max={diagnostics.get('residual_max', float('nan')):.3g}"
+                f"{beta_text}"
+            )
+        elif progress.workflow == "soliton_existence":
+            diagnostics = progress.diagnostics or {}
+            status = (
+                "converged" if diagnostics.get("converged") else "not converged"
+            )
+            self.results_panel.set_td_time_indicator(
+                "Existence sweep: "
+                f"{progress.completed_units}/{progress.total_units} powers; "
+                f"current={diagnostics.get('current_power_mW', float('nan')):g} mW; "
+                f"{status}"
             )
 
     _on_timedependent_progress = _on_workflow_progress
@@ -731,19 +1104,105 @@ class LCPropMainWindow(QWidget):
     def _on_timedependent_finished(self, runner_result) -> None:
         try:
             result = runner_result.result
+            if runner_result.kind == "timedependent":
+                provenance = {
+                    "initial_source_kind": self._active_td_source_mode.value,
+                    "source_result_id": None,
+                    "source_sweep_id": None,
+                    "source_member_index": None,
+                    "source_power_mW": None,
+                    "source_beta": None,
+                }
+                if self._active_td_soliton_source is not None:
+                    source = self._active_td_soliton_source
+                    provenance.update({
+                        "initial_source_kind": source.source_kind.value,
+                        "source_result_id": source.result_id,
+                        "source_sweep_id": source.sweep_id,
+                        "source_member_index": source.requested_index,
+                        "source_power_mW": source.requested_power_mW,
+                        "source_beta": source.beta,
+                    })
+                elif (
+                    self._active_td_source_mode
+                    is TDInitialSourceMode.STANDARD_STATIC
+                    and self.retained_results.last_standard_static_result
+                    is not None
+                ):
+                    provenance["source_result_id"] = (
+                        self.retained_results.last_standard_static_result.retained_id
+                    )
+                result = replace(
+                    result,
+                    provenance=provenance,
+                )
+                runner_result = replace(runner_result, result=result)
             if runner_result.kind == "static":
                 self.last_static_result = result
+                if result.status == "completed":
+                    self.retained_results.store(
+                        family=ExperimentFamily.STANDARD,
+                        workflow=WorkflowKind.STATIC,
+                        request=self._active_request,
+                        result=result,
+                    )
                 self.last_static_checkpoint = (
                     result.checkpoint if result.status == "stopped" else None
+                )
+                self.retained_results.last_standard_static_checkpoint = (
+                    None
+                    if self.last_static_checkpoint is None
+                    else RetainedResult(
+                        ExperimentFamily.STANDARD,
+                        WorkflowKind.STATIC,
+                        self._active_request,
+                        self.last_static_checkpoint,
+                    )
                 )
                 self.run_status = (
                     "stopped" if result.status == "stopped" else "completed"
                 )
-            else:
+            elif runner_result.kind == "timedependent":
                 self.last_timedependent_result = result
+                td_retained = self.retained_results.store(
+                    family=ExperimentFamily.STANDARD,
+                    workflow=WorkflowKind.TIMEDEPENDENT,
+                    request=self._active_request,
+                    result=result,
+                )
                 self.last_timedependent_checkpoint = result.checkpoint
+                self.retained_results.last_standard_td_checkpoint = td_retained
                 self.run_status = (
                     "stopped" if result.status == "cancelled" else "completed"
+                )
+            elif runner_result.kind == "soliton":
+                valid = (
+                    result.status == "completed"
+                    or result.completed_iterations > 0
+                )
+                if valid:
+                    self.last_soliton_result = result
+                    self.retained_results.store(
+                        family=ExperimentFamily.SOLITON,
+                        workflow=WorkflowKind.SOLITON,
+                        request=self._active_request,
+                        result=result,
+                    )
+                self.run_status = (
+                    "stopped" if result.status == "stopped" else "completed"
+                )
+            elif runner_result.kind in {
+                "parameter_sweep", "soliton_existence"
+            }:
+                self.last_soliton_existence_result = result
+                self.retained_results.store(
+                    family=ExperimentFamily.SOLITON,
+                    workflow=WorkflowKind.SOLITON_EXISTENCE,
+                    request=self._active_request,
+                    result=result,
+                )
+                self.run_status = (
+                    "stopped" if result.status == "stopped" else "completed"
                 )
             self._display_runner_result(runner_result)
             if runner_result.kind == "static":
@@ -755,18 +1214,42 @@ class LCPropMainWindow(QWidget):
                 self.results_panel.append_console(
                     "Run stopped" if result.status == "stopped" else "Run complete"
                 )
-            elif result.status == "cancelled":
+            elif runner_result.kind == "timedependent" and result.status == "cancelled":
                 self.results_panel.set_td_time_indicator(
                     "TD time at stop: "
                     f"{self._format_coordinate(result.checkpoint.current_time)}"
                 )
                 self.results_panel.append_console("Run cancelled")
-            else:
+            elif runner_result.kind == "timedependent":
                 self.results_panel.set_td_time_indicator(
                     "Final TD time: "
                     f"{self._format_coordinate(result.cumulative_time)}"
                 )
                 self.results_panel.append_console("Run complete")
+            elif runner_result.kind == "soliton":
+                label = (
+                    "Soliton result at Stop"
+                    if result.status == "stopped"
+                    else "Completed soliton result"
+                )
+                self.results_panel.set_td_time_indicator(label)
+                self.results_panel.append_console(label)
+            elif runner_result.kind in {
+                "parameter_sweep", "soliton_existence"
+            }:
+                prefix = (
+                    "Stopped soliton existence sweep"
+                    if result.status == "stopped"
+                    else "Completed soliton existence sweep"
+                )
+                label = (
+                    f"{prefix}: {result.completed_points}/{result.total_points}"
+                )
+                failed_count = int(result.metrics.get("failed_count", 0))
+                if failed_count:
+                    label += f"; failed members: {failed_count}"
+                self.results_panel.set_td_time_indicator(label)
+                self.results_panel.append_console(label)
         except Exception:
             self.results_panel.append_console("ERROR")
             self.results_panel.append_console(traceback.format_exc())
@@ -795,9 +1278,39 @@ class LCPropMainWindow(QWidget):
     def _finish_timedependent_background(self) -> None:
         self._background_running = False
         self._td_cancellation_token = None
+        self._active_workflow = None
+        self._active_request = None
+        self._active_td_source_mode = TDInitialSourceMode.BEAM_LAUNCH
+        self._active_td_soliton_source = None
         self.stop_button.setText("Stop")
         self._set_background_controls_enabled(True)
         self.update_run_button()
+
+    def shutdown_background_run(self, timeout_ms: int = 30000) -> bool:
+        """Cooperatively stop and join the centralized workflow thread."""
+
+        thread = self._td_thread
+        if thread is None or not thread.isRunning():
+            return True
+        if self._td_cancellation_token is not None:
+            self._td_cancellation_token.cancel()
+        self.run_status = "stopping"
+        thread.quit()
+        finished = thread.wait(timeout_ms)
+        if finished:
+            self._td_thread = None
+            self._td_worker = None
+            self._background_running = False
+        return bool(finished)
+
+    def closeEvent(self, event) -> None:
+        if self.shutdown_background_run():
+            event.accept()
+        else:
+            self.results_panel.append_console(
+                "Close delayed: workflow did not stop within the shutdown timeout."
+            )
+            event.ignore()
 
     def _display_runner_result(self, runner_result) -> None:
         result = runner_result.result
