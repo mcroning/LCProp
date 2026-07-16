@@ -61,6 +61,12 @@ class Workspace(QWidget):
     def append_console(self, text: str) -> None:
         self.console.append(text)
 
+    def set_td_time_indicator(self, text: str | None) -> None:
+        self.image_pane.set_td_time_indicator(text)
+
+    def reset_field_color_scales(self) -> None:
+        self.image_pane.reset_color_scales()
+
     def _image_position_selected(self, ix: int, iy: int) -> None:
         self.longitudinal_pane.set_cut_indices(ix, iy)
 
@@ -77,6 +83,42 @@ class Workspace(QWidget):
             self.image_pane.clear_crosshair()
 
     def set_run_data(self, run_data) -> None:
+        if run_data.workflow == "timedependent":
+            summary = run_data.diagnostics.get("summary")
+            values = {} if summary is None else summary.values
+            cumulative_time = values.get("cumulative_time")
+            if cumulative_time is not None:
+                prefix = (
+                    "TD time at stop: "
+                    if values.get("status") == "cancelled"
+                    else "Final TD time: "
+                )
+                self.set_td_time_indicator(
+                    prefix + f"{float(cumulative_time):.3f}"
+                )
+            else:
+                self.set_td_time_indicator(None)
+        elif run_data.workflow == "static":
+            summary = run_data.diagnostics.get("summary")
+            values = {} if summary is None else summary.values
+            coordinate = values.get("z_reached_um")
+            if coordinate is None:
+                self.set_td_time_indicator(None)
+            else:
+                prefix = (
+                    "z at stop: "
+                    if values.get("status") == "stopped"
+                    else "Final z: "
+                )
+                completed = values.get("completed_slices")
+                total = values.get("total_slices")
+                self.set_td_time_indicator(
+                    prefix
+                    + f"{float(coordinate):.3f} um; slices: {completed}/{total}"
+                )
+        else:
+            self.set_td_time_indicator(None)
+
         self.image_pane.set_run_data(run_data)
         self.longitudinal_pane.set_run_data(run_data)
         self.curve_pane.set_run_data(run_data)

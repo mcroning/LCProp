@@ -82,6 +82,12 @@ class StaticRunResult:
     max_final_residual_max: float | None = None
     worst_slice_index: int | None = None
     warnings: tuple[str, ...] = field(default_factory=tuple)
+    status: str = "completed"
+    completed_slices: int = 0
+    total_slices: int = 0
+    z_reached_um: float = 0.0
+    checkpoint: Any | None = None
+    request: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -108,6 +114,18 @@ class TimeDependentRunResult:
     theta_initial: Any | None = None
     initial_intensity_stack: Any | None = None
     final_intensity_stack: Any | None = None
+    initial_output_plane_intensity: Any | None = None
     initial_source_intensity_stack: Any | None = None
     final_source_intensity_stack: Any | None = None
+    status: str = "completed"
+    completed_steps: int = 0
+    requested_steps: int = 0
+    current_time: float = 0.0
+    prior_completed_steps: int = 0
+    segment_completed_steps: int = 0
+    cumulative_completed_steps: int = 0
+    segment_start_time: float = 0.0
+    segment_elapsed_time: float = 0.0
+    cumulative_time: float = 0.0
+    checkpoint: Any | None = None
     warnings: tuple[str, ...] = field(default_factory=tuple)

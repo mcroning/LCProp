@@ -35,6 +35,8 @@ OpticsStep = Callable[[Array, Array, int], tuple[Array, Array]]
 ThetaStep = Callable[[Array, Array, Array, Array, int], Array]
 HalfStep = Callable[[Array], Array]
 Observer = Callable[[dict[str, Any]], None]
+CancellationCheck = Callable[[], bool]
+StepObserver = Callable[[int], None]
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,8 @@ class TDZMarchResult:
     theta: Array
     A_last: Array
     steps: int
+    requested_steps: int
+    cancelled: bool
 
 
 def _validate_inputs(theta0: Array, A0: Array, controls: TDZMarchControls) -> None:
@@ -79,6 +83,8 @@ def run_td_zmarch(
     controls: TDZMarchControls,
     optics_half_step: Optional[HalfStep] = None,
     observer: Observer | None = None,
+    should_cancel: CancellationCheck | None = None,
+    step_observer: StepObserver | None = None,
 ) -> TDZMarchResult:
     """Run repeated z-passes with frozen-time theta references.
 
@@ -104,6 +110,12 @@ def run_td_zmarch(
     observer
         Optional callable receiving dictionaries with ``jt``, ``k``, ``A``,
         ``I_mid``, and ``theta_k``.
+    should_cancel
+        Optional cooperative cancellation check evaluated only at TD-step
+        boundaries, before starting the next complete z pass.
+    step_observer
+        Optional callable receiving the completed step count after a full z
+        pass has finished.
     """
 
     _validate_inputs(theta0, A0, controls)
@@ -112,7 +124,15 @@ def run_td_zmarch(
     A_last = A0.copy()
     Nz = int(theta.shape[0])
 
-    for jt in range(1, int(controls.Nt) + 1):
+    requested_steps = int(controls.Nt)
+    completed_steps = 0
+    cancelled = False
+
+    for jt in range(1, requested_steps + 1):
+        if should_cancel is not None and should_cancel():
+            cancelled = True
+            break
+
         theta_ref = theta.copy()
         A = A0.copy()
 
@@ -146,12 +166,23 @@ def run_td_zmarch(
             A = optics_half_step(A)
 
         A_last = A
+        completed_steps = jt
+        if step_observer is not None:
+            step_observer(completed_steps)
 
-    return TDZMarchResult(theta=theta, A_last=A_last, steps=int(controls.Nt))
+    return TDZMarchResult(
+        theta=theta,
+        A_last=A_last,
+        steps=completed_steps,
+        requested_steps=requested_steps,
+        cancelled=cancelled,
+    )
 
 
 __all__ = [
     "TDZMarchControls",
     "TDZMarchResult",
+    "CancellationCheck",
+    "StepObserver",
     "run_td_zmarch",
 ]

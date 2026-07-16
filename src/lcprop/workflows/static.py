@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from time import perf_counter
+from typing import Callable
 
 import numpy as np
 
 from lcprop.core.requests import StaticRunRequest
+from lcprop.core.backend import asnumpy
+from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.results import (
     StaticIterationRecord,
     StaticRunResult,
@@ -30,11 +34,26 @@ from lcprop.optics.splitstep import (
 from lcprop.algorithms.theta_cn import prepare_cn_operator
 from lcprop.algorithms.theta_cn import static_director_residual_metrics
 from lcprop.algorithms.theta_picard import cn_trapezoid_picard_step
+from lcprop.persistence.static import (
+    StaticCheckpoint,
+    static_request_fingerprint,
+    validate_static_checkpoint,
+)
 
 
-def run_static(request: StaticRunRequest) -> StaticRunResult:
+ProgressCallback = Callable[[RunProgress], None]
+
+
+def run_static(
+    request: StaticRunRequest,
+    *,
+    cancellation_token: CancellationToken | None = None,
+    progress_callback: ProgressCallback | None = None,
+    _checkpoint: StaticCheckpoint | None = None,
+) -> StaticRunResult:
     """Run a static propagation workflow."""
 
+    started_at = perf_counter()
     request.grid.validate()
     request.material.validate()
     request.bias.validate()
@@ -70,6 +89,41 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
     )
 
     if request.solver.workflow.strategy == "local_self_consistent":
+        live_input_theta = None
+
+        def emit_static_progress(
+            completed, A_next, theta_first, theta_latest, intensity_latest
+        ) -> None:
+            nonlocal live_input_theta
+            if progress_callback is None:
+                return
+            if live_input_theta is None:
+                live_input_theta = np.asarray(asnumpy(theta_first)).copy()
+            progress_callback(
+                RunProgress(
+                    workflow="static",
+                    status="running",
+                    completed_units=completed,
+                    total_units=grid.Nz,
+                    current_coordinate=float(completed * grid.dz_um),
+                    coordinate_name="z",
+                    coordinate_unit="um",
+                    elapsed_wall_time=perf_counter() - started_at,
+                    latest_field_state={
+                        "A_initial": np.asarray(asnumpy(A0)),
+                        "A_current": np.asarray(asnumpy(A_next)).copy(),
+                        "theta_current": np.asarray(asnumpy(theta_latest)).copy(),
+                        "theta_input": live_input_theta,
+                        "theta_bias": np.asarray(asnumpy(bias.theta_2d)),
+                        "grid_summary": grid.summary(),
+                        "launch_summary": launch.summary(),
+                        "completed_slices": completed,
+                    },
+                    checkpoint_available=True,
+                    message="Static z slice completed",
+                )
+            )
+
         result = _run_local_self_consistent_zmarch(
             request=request,
             grid=grid,
@@ -79,6 +133,15 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
             kernel=kernel,
             wavelength_um=wavelength_um,
             n_ref=n_ref,
+            checkpoint=_checkpoint,
+            should_cancel=(
+                None
+                if cancellation_token is None
+                else cancellation_token.is_cancelled
+            ),
+            step_observer=(
+                emit_static_progress if progress_callback is not None else None
+            ),
         )
         A = result.A
         theta = result.theta_stack
@@ -88,18 +151,42 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
         slice_summaries = result.slice_summaries
         warnings = ()
         n_steps = result.relax_steps
+        completed_slices = result.completed_slices
+        cancelled = result.cancelled
+        theta_seed = result.theta_seed
 
     else:
-        A = A0.copy()
+        if _checkpoint is None:
+            A = A0.copy()
+            start_slice = 0
+        else:
+            validate_static_checkpoint(_checkpoint)
+            if static_request_fingerprint(request) != _checkpoint.request_fingerprint:
+                raise ValueError("cannot continue static checkpoint with incompatible request")
+            A = grid.xp.asarray(_checkpoint.A_next, dtype=A0.dtype).copy()
+            start_slice = _checkpoint.next_slice_index
         intensity_stack = grid.xp.empty(
             (grid.Nz, grid.Nx, grid.Ny),
             dtype=grid.real_dtype,
         )
-        theta = bias.theta_2d.copy() if request.initial_theta is None else grid.xp.asarray(request.initial_theta, dtype=bias.theta_2d.dtype).copy()
+        theta = (
+            grid.xp.asarray(_checkpoint.theta_seed, dtype=bias.theta_2d.dtype).copy()
+            if _checkpoint is not None
+            else bias.theta_2d.copy() if request.initial_theta is None else grid.xp.asarray(request.initial_theta, dtype=bias.theta_2d.dtype).copy()
+        )
         if theta.shape != bias.theta_2d.shape:
             raise ValueError(f"initial_theta shape {theta.shape} does not match bias field shape {bias.theta_2d.shape}")
 
-        for k in range(grid.Nz):
+        if _checkpoint is not None:
+            intensity_stack[:start_slice] = grid.xp.asarray(
+                _checkpoint.intensity_stack
+            )
+        completed_slices = start_slice
+        cancelled = False
+        for k in range(start_slice, grid.Nz):
+            if cancellation_token is not None and cancellation_token.is_cancelled():
+                cancelled = True
+                break
             intensity_before = total_intensity(
                 A,
                 coherence_groups=launch.coherence_groups,
@@ -122,14 +209,43 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
                 xp=grid.xp,
             )
             intensity_stack[k] = 0.5 * (intensity_before + intensity_after)
+            completed_slices = k + 1
+            if progress_callback is not None:
+                progress_callback(
+                    RunProgress(
+                        workflow="static",
+                        status="running",
+                        completed_units=completed_slices,
+                        total_units=grid.Nz,
+                        current_coordinate=float(completed_slices * grid.dz_um),
+                        coordinate_name="z",
+                        coordinate_unit="um",
+                        elapsed_wall_time=perf_counter() - started_at,
+                        latest_field_state={
+                            "A_initial": np.asarray(asnumpy(A0)),
+                            "A_current": np.asarray(asnumpy(A)).copy(),
+                            "theta_current": np.asarray(asnumpy(theta)),
+                            "theta_input": np.asarray(asnumpy(theta)),
+                            "theta_bias": np.asarray(asnumpy(bias.theta_2d)),
+                            "grid_summary": grid.summary(),
+                            "launch_summary": launch.summary(),
+                            "completed_slices": completed_slices,
+                        },
+                        checkpoint_available=True,
+                        message="Static z slice completed",
+                    )
+                )
+
+        intensity_stack = intensity_stack[:completed_slices]
 
         warnings = (
             "static workflow currently uses fixed prepared theta; self-consistent static solve not enabled for this method",
         )
-        n_steps = grid.Nz
+        n_steps = completed_slices
         iteration_records = ()
         slice_summaries = ()
         theta_intensity_stack = None
+        theta_seed = theta
 
     if slice_summaries:
         final_residual_rms = np.asarray(
@@ -166,6 +282,40 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
         max_final_residual_max = None
         worst_slice_index = None
 
+    status = "stopped" if cancelled else "completed"
+    checkpoint_request = replace(request, initial_A=None, initial_theta=None)
+    theta_checkpoint_stack = (
+        np.asarray(asnumpy(theta)).copy()
+        if np.ndim(theta) == 3
+        else np.repeat(
+            np.asarray(asnumpy(theta))[None, :, :], completed_slices, axis=0
+        )
+    )
+    checkpoint = StaticCheckpoint(
+        request=checkpoint_request,
+        next_slice_index=completed_slices,
+        completed_slices=completed_slices,
+        z_reached_um=float(completed_slices * grid.dz_um),
+        A_next=np.asarray(asnumpy(A)).copy(),
+        theta_seed=np.asarray(asnumpy(theta_seed)).copy(),
+        theta_stack=theta_checkpoint_stack,
+        intensity_stack=np.asarray(asnumpy(intensity_stack)).copy(),
+        theta_intensity_stack=None
+        if theta_intensity_stack is None
+        else np.asarray(asnumpy(theta_intensity_stack)).copy(),
+        slice_summaries=tuple(slice_summaries),
+        iteration_records=tuple(iteration_records),
+        relax_steps=n_steps,
+        grid_summary=grid.summary(),
+        launch_summary=launch.summary(),
+        normalized_power_initial=float(power_initial),
+        physical_power_initial_mW=float(physical_power_initial_mW),
+        A_dtype=str(A.dtype),
+        theta_dtype=str(theta_seed.dtype),
+        status=status,
+        request_fingerprint=static_request_fingerprint(checkpoint_request),
+    )
+
     power_final = normalized_power(A, grid)
     physical_power_final_mW = float(
         reconstructed_physical_powers_mW(A, grid, launch).sum()
@@ -173,7 +323,11 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
 
     return StaticRunResult(
         A_final=A,
-        theta_final=theta,
+        theta_final=(
+            theta_checkpoint_stack
+            if cancelled and np.ndim(theta) == 2
+            else theta
+        ),
         power_initial=power_initial,
         power_final=power_final,
         grid_summary=grid.summary(),
@@ -199,6 +353,12 @@ def run_static(request: StaticRunRequest) -> StaticRunResult:
         worst_slice_index=worst_slice_index,
         warnings=warnings,
         theta_bias=bias.theta_2d,
+        status=status,
+        completed_slices=completed_slices,
+        total_slices=grid.Nz,
+        z_reached_um=float(completed_slices * grid.dz_um),
+        checkpoint=checkpoint,
+        request=checkpoint_request,
     )
 
 
@@ -215,6 +375,9 @@ class _StaticZMarchResult:
         relax_steps: int,
         iteration_records,
         slice_summaries,
+        completed_slices: int,
+        cancelled: bool,
+        theta_seed,
     ):
         self.A = A
         self.theta_stack = theta_stack
@@ -223,6 +386,9 @@ class _StaticZMarchResult:
         self.relax_steps = int(relax_steps)
         self.iteration_records = tuple(iteration_records)
         self.slice_summaries = tuple(slice_summaries)
+        self.completed_slices = int(completed_slices)
+        self.cancelled = bool(cancelled)
+        self.theta_seed = theta_seed
 
 
 def _run_local_self_consistent_zmarch(
@@ -235,20 +401,43 @@ def _run_local_self_consistent_zmarch(
     kernel,
     wavelength_um: float,
     n_ref: float,
+    checkpoint: StaticCheckpoint | None = None,
+    should_cancel=None,
+    step_observer=None,
 ):
     """Relax theta locally and carry the optical field forward through z."""
 
     xp = grid.xp
-    theta0 = bias.theta_2d.copy() if request.initial_theta is None else xp.asarray(request.initial_theta, dtype=bias.theta_2d.dtype).copy()
-    if theta0.shape == (grid.Nz, grid.Nx, grid.Ny):
-        theta_seed = theta0[0].copy()
-    elif theta0.shape == bias.theta_2d.shape:
-        theta_seed = theta0.copy()
+    if checkpoint is None:
+        theta0 = bias.theta_2d.copy() if request.initial_theta is None else xp.asarray(request.initial_theta, dtype=bias.theta_2d.dtype).copy()
+        if theta0.shape == (grid.Nz, grid.Nx, grid.Ny):
+            theta_seed = theta0[0].copy()
+        elif theta0.shape == bias.theta_2d.shape:
+            theta_seed = theta0.copy()
+        else:
+            raise ValueError(
+                f"initial_theta shape {theta0.shape} does not match "
+                f"{bias.theta_2d.shape} or {(grid.Nz, grid.Nx, grid.Ny)}"
+            )
+        start_slice = 0
+        A = A0.copy()
+        iteration_records: list[StaticIterationRecord] = []
+        slice_summaries: list[StaticSliceSummary] = []
+        relax_steps = 0
     else:
-        raise ValueError(
-            f"initial_theta shape {theta0.shape} does not match "
-            f"{bias.theta_2d.shape} or {(grid.Nz, grid.Nx, grid.Ny)}"
-        )
+        validate_static_checkpoint(checkpoint)
+        if static_request_fingerprint(request) != checkpoint.request_fingerprint:
+            raise ValueError("cannot continue static checkpoint with incompatible request")
+        start_slice = checkpoint.next_slice_index
+        if start_slice > grid.Nz:
+            raise ValueError("static checkpoint extends beyond requested grid")
+        A = xp.asarray(checkpoint.A_next, dtype=A0.dtype).copy()
+        theta_seed = xp.asarray(
+            checkpoint.theta_seed, dtype=bias.theta_2d.dtype
+        ).copy()
+        iteration_records = list(checkpoint.iteration_records)
+        slice_summaries = list(checkpoint.slice_summaries)
+        relax_steps = checkpoint.relax_steps
 
     b = resolved_b(request.material, request.bias)
     bi = resolved_bi(request.grid, request.material, request.beams)
@@ -263,8 +452,6 @@ def _run_local_self_consistent_zmarch(
         dtype=grid.real_dtype,
     )
 
-    iteration_records: list[StaticIterationRecord] = []
-    slice_summaries: list[StaticSliceSummary] = []
     residual_rms_tol = request.solver.static_residual_rms_tol
     residual_max_tol = request.solver.static_residual_max_tol
     delta_rms_tol = request.solver.resolved_delta_theta_rms_tol
@@ -307,10 +494,20 @@ def _run_local_self_consistent_zmarch(
         (grid.Nz, grid.Nx, grid.Ny),
         dtype=grid.real_dtype,
     )
-    A = A0.copy()
-    relax_steps = 0
+    if checkpoint is not None:
+        theta_stack[:start_slice] = xp.asarray(checkpoint.theta_stack)
+        intensity_stack[:start_slice] = xp.asarray(checkpoint.intensity_stack)
+        if checkpoint.theta_intensity_stack is not None:
+            theta_intensity_stack[:start_slice] = xp.asarray(
+                checkpoint.theta_intensity_stack
+            )
 
-    for k in range(grid.Nz):
+    cancelled = False
+    completed_slices = start_slice
+    for k in range(start_slice, grid.Nz):
+        if should_cancel is not None and should_cancel():
+            cancelled = True
+            break
         A_slice_in = A.copy()
 
         def optical_midpoint(theta):
@@ -544,6 +741,19 @@ def _run_local_self_consistent_zmarch(
         theta_seed = theta.copy()
         A = A_trial
         relax_steps += coupled_passes
+        completed_slices = k + 1
+        if step_observer is not None:
+            step_observer(
+                completed_slices,
+                A,
+                theta_stack[0],
+                theta,
+                intensity_stack[k],
+            )
+
+    theta_stack = theta_stack[:completed_slices]
+    intensity_stack = intensity_stack[:completed_slices]
+    theta_intensity_stack = theta_intensity_stack[:completed_slices]
 
     return _StaticZMarchResult(
         A=A,
@@ -553,4 +763,43 @@ def _run_local_self_consistent_zmarch(
         relax_steps=relax_steps,
         iteration_records=iteration_records,
         slice_summaries=slice_summaries,
+        completed_slices=completed_slices,
+        cancelled=cancelled,
+        theta_seed=theta_seed,
     )
+
+
+def validate_static_continuation(
+    request: StaticRunRequest, checkpoint: StaticCheckpoint
+) -> None:
+    """Raise when a static checkpoint cannot resume ``request`` exactly."""
+
+    validate_static_checkpoint(checkpoint)
+    if static_request_fingerprint(request) != checkpoint.request_fingerprint:
+        raise ValueError("cannot continue static checkpoint with incompatible request")
+
+
+def continue_static(
+    request: StaticRunRequest,
+    checkpoint: StaticCheckpoint,
+    *,
+    cancellation_token: CancellationToken | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> StaticRunResult:
+    """Continue from the next uncomputed static z slice."""
+
+    validate_static_continuation(request, checkpoint)
+    return run_static(
+        request,
+        cancellation_token=cancellation_token,
+        progress_callback=progress_callback,
+        _checkpoint=checkpoint,
+    )
+
+
+__all__ = [
+    "ProgressCallback",
+    "continue_static",
+    "run_static",
+    "validate_static_continuation",
+]
