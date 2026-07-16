@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from lcprop.adapters.launchplane import beam_stack_definition_to_lcprop
@@ -65,6 +66,23 @@ class BeamPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.launch_plane_widget)
         self.setMinimumSize(1000, 650)
+        self._initial_aperture_fit_queued = False
+        self._initial_aperture_fit_done = False
+
+    def showEvent(self, event) -> None:
+        """Fit once after Qt has assigned the embedded view its real size."""
+
+        super().showEvent(event)
+        if not self._initial_aperture_fit_done and not self._initial_aperture_fit_queued:
+            self._initial_aperture_fit_queued = True
+            QTimer.singleShot(0, self._fit_initial_aperture)
+
+    def _fit_initial_aperture(self) -> None:
+        self._initial_aperture_fit_queued = False
+        if self._initial_aperture_fit_done or not self.isVisible():
+            return
+        self.launch_plane_widget.view.fit_aperture()
+        self._initial_aperture_fit_done = True
 
     @property
     def beam_stack_definition(self) -> BeamStackDefinition:

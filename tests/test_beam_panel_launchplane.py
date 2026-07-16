@@ -38,6 +38,45 @@ def test_beam_panel_embeds_launchplane_with_lcprop_defaults(app):
     panel.close()
 
 
+def test_beam_panel_first_show_fits_current_aperture_once_without_moving_beams(
+    app,
+):
+    panel = BeamPanel(x_aperture_um=48.0, y_aperture_um=62.0)
+    stack_before = panel.beam_stack_definition
+    calls = []
+    original_fit = panel.launch_plane_widget.view.fit_aperture
+
+    def observed_fit():
+        calls.append(panel.launch_plane_widget.view.viewport().size())
+        original_fit()
+
+    panel.launch_plane_widget.view.fit_aperture = observed_fit
+    panel.resize(1100, 720)
+    panel.show()
+    app.processEvents()
+    app.processEvents()
+
+    assert len(calls) == 1
+    assert calls[0].width() > 0
+    assert calls[0].height() > 0
+    assert panel._initial_aperture_fit_done
+    assert panel.beam_stack_definition == stack_before
+
+    scene_rect = panel.launch_plane_widget.scene.sceneRect()
+    visible_rect = panel.launch_plane_widget.view.mapToScene(
+        panel.launch_plane_widget.view.viewport().rect()
+    ).boundingRect()
+    assert visible_rect.contains(scene_rect)
+    assert panel.launch_plane_definition.x_aperture_um == 48.0
+    assert panel.launch_plane_definition.y_aperture_um == 62.0
+
+    panel.hide()
+    panel.show()
+    app.processEvents()
+    assert len(calls) == 1
+    panel.close()
+
+
 def test_beam_panel_beams_adapts_fields_without_axis_swap(app):
     panel = BeamPanel()
     panel.set_beam_stack_definition(
