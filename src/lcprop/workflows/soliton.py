@@ -10,7 +10,8 @@ import time as _time
 from lcprop.core.requests import StaticRunRequest
 from lcprop.core.backend import asnumpy, synchronize
 from lcprop.core.derived import compute_neff
-from lcprop.optics.splitstep import advance_slice, linear_kernel, total_intensity
+from lcprop.optics.splitstep import advance_slice, total_intensity
+from lcprop.optics.substeps import build_optical_substep_kernel
 from lcprop.algorithms.theta_picard import cn_trapezoid_picard_step
 from lcprop.algorithms.thomas import solve_const_offdiag_batched
 from lcprop.products.diagnostics import intensity_metrics, residual_theta_static
@@ -408,20 +409,24 @@ def run_soliton(
 
     wavelength_um = runtime.wavelength_um
 
-    dn_max_est = 0.02
-    dz_opt_max_phi = 0.30
-    max_substeps = 16
-    phi_est = (2.0 * math.pi / wavelength_um) * float(grid.dz_um) * dn_max_est
-    Nsub = max(1, min(max_substeps, int(math.ceil(phi_est / dz_opt_max_phi))))
-    dz_sub = float(grid.dz_um) / Nsub
-
-    h_sub = linear_kernel(
+    optical_substeps, h_sub = build_optical_substep_kernel(
         grid.fxy2_um,
-        dz=dz_sub,
-        wavelength=wavelength_um,
+        dz_um=grid.dz_um,
+        propagation_wavelength_um=wavelength_um,
+        active_wavelengths_um=(
+            channel.wavelength_um
+            for channel in request.base.beams.channels
+        ),
         n_ref=n_ref,
+        enabled=request.base.runtime.optical_substeps_enabled,
+        dn_max_est=request.base.runtime.optical_dn_max_est,
+        max_phase_per_substep_rad=(
+            request.base.runtime.optical_max_phase_per_substep_rad
+        ),
+        max_substeps=request.base.runtime.optical_max_substeps,
         xp=xp,
     )
+    Nsub = optical_substeps.Nsub
 
     beta_symbol, _ = make_beta_symbol(
         grid,
@@ -584,6 +589,7 @@ def run_soliton(
             "dtheta_max": dtheta_max,
             "beta": beta,
             **resid,
+            **optical_substeps.diagnostics(),
         }
         row.update(intensity_metrics(intensity, grid))
         row["theta_max"] = float(asnumpy(xp.max(theta)))
@@ -671,6 +677,7 @@ def run_soliton(
         "bi": float(runtime.bi),
         "n_ref": float(n_ref),
         "Nsub": int(Nsub),
+        **optical_substeps.diagnostics(),
         "elapsed_s": float(elapsed),
         "theta_max": float(asnumpy(xp.max(theta))),
         "used_initial_A": bool(request.initial_A is not None),

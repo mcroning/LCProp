@@ -69,7 +69,7 @@ class StaticRunResult:
 
     physical_power_initial_mW: float | None = None
     physical_power_final_mW: float | None = None
-    coupling_summary: dict[str, float] = field(default_factory=dict)
+    coupling_summary: dict[str, Any] = field(default_factory=dict)
     A_initial: Any | None = None
     intensity_stack: Any | None = None
     theta_intensity_stack: Any | None = None
@@ -88,6 +88,7 @@ class StaticRunResult:
     z_reached_um: float = 0.0
     checkpoint: Any | None = None
     request: Any | None = None
+    provenance: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -25,9 +25,12 @@ from lcprop.lc.coupling import resolved_bi
 from lcprop.lc.bias import BiasResult, build_bias
 from lcprop.optics.launch import LaunchResult, build_launch
 from lcprop.optics.splitstep import (
-    linear_kernel,
     advance_slice_with_midintensity,
     weighted_theta_intensity,
+)
+from lcprop.optics.substeps import (
+    OpticalSubstepPlan,
+    build_optical_substep_kernel,
 )
 from lcprop.algorithms.theta_cn import prepare_cn_operator
 from lcprop.algorithms.theta_picard import cn_trapezoid_picard_step
@@ -64,6 +67,7 @@ class RuntimeComponents:
     power_fractions: Any
 
     kernel: Any
+    optical_substeps: OpticalSubstepPlan
     cn: CNOperator
 
 
@@ -103,6 +107,7 @@ def build_runtime_components(
     request.material.validate()
     request.bias.validate()
     request.beams.validate()
+    request.runtime.validate()
 
     grid = make_grid(request.grid, real_dtype=np.float64 if request.runtime.precision == "float64" else np.float32)
     bias = build_bias(request.bias, grid, request.material)
@@ -113,11 +118,20 @@ def build_runtime_components(
     coherence_groups = launch.coherence_groups
     coherent = len(set(coherence_groups)) == 1
 
-    kernel = linear_kernel(
+    optical_substeps, kernel = build_optical_substep_kernel(
         grid.fxy2_um,
-        dz=grid.dz_um,
-        wavelength=wavelength_um,
+        dz_um=grid.dz_um,
+        propagation_wavelength_um=wavelength_um,
+        active_wavelengths_um=(
+            channel.wavelength_um for channel in request.beams.channels
+        ),
         n_ref=n_ref,
+        enabled=request.runtime.optical_substeps_enabled,
+        dn_max_est=request.runtime.optical_dn_max_est,
+        max_phase_per_substep_rad=(
+            request.runtime.optical_max_phase_per_substep_rad
+        ),
+        max_substeps=request.runtime.optical_max_substeps,
         xp=grid.xp,
     )
 
@@ -148,6 +162,7 @@ def build_runtime_components(
         physical_total_power_mW=launch.physical_total_power_mW,
         power_fractions=launch.power_fractions,
         kernel=kernel,
+        optical_substeps=optical_substeps,
         cn=CNOperator(s=s, off=off, diag=diag, lam_y=lam_y),
     )
 
@@ -230,6 +245,7 @@ def make_global_uniform_theta_iteration(components: RuntimeComponents):
                 coherent=components.coherent,
                 coherence_groups=components.coherence_groups,
                 theta_weights=components.launch.theta_weights,
+                Nsub=components.optical_substeps.Nsub,
                 xp=xp,
             )
 
@@ -257,6 +273,7 @@ def make_td_optics_step(components: RuntimeComponents):
             coherent=components.coherent,
             coherence_groups=components.coherence_groups,
             theta_weights=components.launch.theta_weights,
+            Nsub=components.optical_substeps.Nsub,
             xp=xp,
         )
         return A, I_mid

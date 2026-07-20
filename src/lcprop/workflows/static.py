@@ -26,11 +26,11 @@ from lcprop.optics.launch import (
     reconstructed_physical_powers_mW,
 )
 from lcprop.optics.splitstep import (
-    linear_kernel,
     advance_slice,
     advance_slice_with_midintensity,
     total_intensity,
 )
+from lcprop.optics.substeps import build_optical_substep_kernel
 from lcprop.algorithms.theta_cn import prepare_cn_operator
 from lcprop.algorithms.theta_cn import static_director_residual_metrics
 from lcprop.algorithms.theta_picard import cn_trapezoid_picard_step
@@ -50,6 +50,7 @@ def run_static(
     cancellation_token: CancellationToken | None = None,
     progress_callback: ProgressCallback | None = None,
     _checkpoint: StaticCheckpoint | None = None,
+    _phase_screen_fn=None,
 ) -> StaticRunResult:
     """Run a static propagation workflow."""
 
@@ -58,6 +59,7 @@ def run_static(
     request.material.validate()
     request.bias.validate()
     request.beams.validate()
+    request.runtime.validate()
     if request.solver.workflow.strategy == "local_self_consistent":
         if request.solver.static_max_relax_iterations < 1:
             raise ValueError("static_max_relax_iterations must be >= 1")
@@ -80,11 +82,20 @@ def run_static(
     wavelength_um = float(request.beams.channels[0].wavelength_um)
     n_ref = float(request.material.no)
 
-    kernel = linear_kernel(
+    optical_substeps, kernel = build_optical_substep_kernel(
         grid.fxy2_um,
-        dz=grid.dz_um,
-        wavelength=wavelength_um,
+        dz_um=grid.dz_um,
+        propagation_wavelength_um=wavelength_um,
+        active_wavelengths_um=(
+            channel.wavelength_um for channel in request.beams.channels
+        ),
         n_ref=n_ref,
+        enabled=request.runtime.optical_substeps_enabled,
+        dn_max_est=request.runtime.optical_dn_max_est,
+        max_phase_per_substep_rad=(
+            request.runtime.optical_max_phase_per_substep_rad
+        ),
+        max_substeps=request.runtime.optical_max_substeps,
         xp=grid.xp,
     )
 
@@ -117,6 +128,7 @@ def run_static(
                         "theta_bias": np.asarray(asnumpy(bias.theta_2d)),
                         "grid_summary": grid.summary(),
                         "launch_summary": launch.summary(),
+                        "optical_diagnostics": optical_substeps.diagnostics(),
                         "completed_slices": completed,
                     },
                     checkpoint_available=True,
@@ -133,12 +145,14 @@ def run_static(
             kernel=kernel,
             wavelength_um=wavelength_um,
             n_ref=n_ref,
+            optical_Nsub=optical_substeps.Nsub,
             checkpoint=_checkpoint,
             should_cancel=(
                 None
                 if cancellation_token is None
                 else cancellation_token.is_cancelled
             ),
+            phase_screen_fn=_phase_screen_fn,
             step_observer=(
                 emit_static_progress if progress_callback is not None else None
             ),
@@ -201,6 +215,7 @@ def run_static(
                 n_ref=n_ref,
                 ne=request.material.ne,
                 no=request.material.no,
+                Nsub=optical_substeps.Nsub,
                 xp=grid.xp,
             )
             intensity_after = total_intensity(
@@ -229,6 +244,9 @@ def run_static(
                             "theta_bias": np.asarray(asnumpy(bias.theta_2d)),
                             "grid_summary": grid.summary(),
                             "launch_summary": launch.summary(),
+                            "optical_diagnostics": (
+                                optical_substeps.diagnostics()
+                            ),
                             "completed_slices": completed_slices,
                         },
                         checkpoint_available=True,
@@ -281,6 +299,12 @@ def run_static(
         rms_over_z_final_residual = None
         max_final_residual_max = None
         worst_slice_index = None
+
+    if optical_substeps.cap_reached:
+        warnings = (
+            *warnings,
+            "optical substep cap reached",
+        )
 
     status = "stopped" if cancelled else "completed"
     checkpoint_request = replace(request, initial_A=None, initial_theta=None)
@@ -339,6 +363,7 @@ def run_static(
         physical_power_final_mW=physical_power_final_mW,
         coupling_summary={
             "bi_um2": float(resolved_bi(request.grid, request.material, request.beams)),
+            **optical_substeps.diagnostics(),
         },
         A_initial=A0,
         intensity_stack=intensity_stack,
@@ -359,6 +384,7 @@ def run_static(
         z_reached_um=float(completed_slices * grid.dz_um),
         checkpoint=checkpoint,
         request=checkpoint_request,
+        provenance=optical_substeps.diagnostics(),
     )
 
 
@@ -401,8 +427,10 @@ def _run_local_self_consistent_zmarch(
     kernel,
     wavelength_um: float,
     n_ref: float,
+    optical_Nsub: int,
     checkpoint: StaticCheckpoint | None = None,
     should_cancel=None,
+    phase_screen_fn=None,
     step_observer=None,
 ):
     """Relax theta locally and carry the optical field forward through z."""
@@ -522,6 +550,7 @@ def _run_local_self_consistent_zmarch(
                 no=request.material.no,
                 coherence_groups=launch.coherence_groups,
                 theta_weights=launch.theta_weights,
+                Nsub=optical_Nsub,
                 xp=xp,
             )
             return A_trial, I_mid
@@ -740,6 +769,12 @@ def _run_local_self_consistent_zmarch(
         )
         theta_seed = theta.copy()
         A = A_trial
+        if phase_screen_fn is not None:
+            # Experimental private hook: apply one screen only after accepting
+            # the self-consistent optical/director slice. Applying it inside
+            # optical_midpoint() would incorrectly draw a new layer for every
+            # coupled trial within the same physical z step.
+            A = phase_screen_fn(A, k)
         relax_steps += coupled_passes
         completed_slices = k + 1
         if step_observer is not None:

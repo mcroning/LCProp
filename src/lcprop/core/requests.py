@@ -36,6 +36,20 @@ class RuntimeOptions:
     """Numerical execution options shared by workflows."""
 
     precision: Precision = "float64"
+    optical_substeps_enabled: bool = True
+    optical_dn_max_est: float = 0.02
+    optical_max_phase_per_substep_rad: float = 0.30
+    optical_max_substeps: int = 16
+
+    def validate(self) -> None:
+        if self.optical_dn_max_est < 0.0:
+            raise ValueError("optical_dn_max_est must be >= 0")
+        if self.optical_max_phase_per_substep_rad <= 0.0:
+            raise ValueError(
+                "optical_max_phase_per_substep_rad must be > 0"
+            )
+        if int(self.optical_max_substeps) < 1:
+            raise ValueError("optical_max_substeps must be >= 1")
 
 
 @dataclass(frozen=True)

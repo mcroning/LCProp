@@ -229,6 +229,9 @@ def run_timedependent(
                     "theta_bias": np.asarray(asnumpy(runtime.bias.theta_2d)),
                     "grid_summary": runtime.grid.summary(),
                     "launch_summary": runtime.launch.summary(),
+                    "optical_diagnostics": (
+                        runtime.optical_substeps.diagnostics()
+                    ),
                     "current_time": cumulative_time,
                     "width_times": tuple(width_times),
                     "beam_x_rms_width_um": tuple(beam_x_rms_width_um),
@@ -341,9 +344,19 @@ def run_timedependent(
         segment_elapsed_time=segment_elapsed_time,
         cumulative_time=current_time,
         checkpoint=checkpoint,
-        warnings=("time-dependent run cancelled at a completed-step boundary",)
-        if td.cancelled
-        else (),
+        warnings=(
+            *(
+                ("time-dependent run cancelled at a completed-step boundary",)
+                if td.cancelled
+                else ()
+            ),
+            *(
+                ("optical substep cap reached",)
+                if runtime.optical_substeps.cap_reached
+                else ()
+            ),
+        ),
+        provenance=runtime.optical_substeps.diagnostics(),
         width_times=tuple(width_times),
         beam_x_rms_width_um=tuple(beam_x_rms_width_um),
         beam_y_rms_width_um=tuple(beam_y_rms_width_um),
