@@ -95,14 +95,26 @@ def test_frozen_director_td_uses_shared_advance_and_preserves_tilt(monkeypatch):
         frozen_theta_factory,
     )
     shared_advance_calls = 0
+    prepared_advance_calls = 0
     original_advance = splitstep.advance_slice
+    original_prepared_advance = splitstep.advance_prepared_response
 
     def observed_advance(*args, **kwargs):
         nonlocal shared_advance_calls
         shared_advance_calls += 1
         return original_advance(*args, **kwargs)
 
+    def observed_prepared_advance(*args, **kwargs):
+        nonlocal prepared_advance_calls
+        prepared_advance_calls += 1
+        return original_prepared_advance(*args, **kwargs)
+
     monkeypatch.setattr(splitstep, "advance_slice", observed_advance)
+    monkeypatch.setattr(
+        splitstep,
+        "advance_prepared_response",
+        observed_prepared_advance,
+    )
 
     results = []
     trajectories = []
@@ -127,6 +139,7 @@ def test_frozen_director_td_uses_shared_advance_and_preserves_tilt(monkeypatch):
     # display reconstruction per TD update, and one final reconstruction.
     expected_calls_per_run = (2 * 3 + 2) * 30
     assert shared_advance_calls == 2 * expected_calls_per_run
+    assert prepared_advance_calls == shared_advance_calls
 
     reference, shifted = results
     np.testing.assert_allclose(

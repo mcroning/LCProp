@@ -12,6 +12,8 @@ from lcprop.optics.splitstep import (
     linear_kernel,
     hop_linear,
     nonlinear_phase,
+    advance_prepared_response,
+    advance_slice,
     advance_slice_with_midintensity,
 )
 
@@ -283,17 +285,134 @@ def test_advance_slice_with_midintensity_shapes():
     assert I_mid.shape == (32, 32)
 
 
-def test_advance_slice_uses_symmetric_nonlinear_splitting(monkeypatch):
+def test_lc_advance_wrapper_matches_prepared_response():
+    rng = np.random.default_rng(23)
+    A0 = (
+        rng.normal(size=(2, 12, 10))
+        + 1j * rng.normal(size=(2, 12, 10))
+    ).astype(np.complex128)
+    theta = np.linspace(0.05, 0.65, 120, dtype=np.float64).reshape(12, 10)
+    fxy2 = rng.uniform(0.0, 0.2, size=(12, 10))
+    dz = 7.5
+    Nsub = 3
+    wavelength = 0.633
+    n_ref = 1.5
+    kernel = linear_kernel(
+        fxy2,
+        dz=dz / Nsub,
+        wavelength=wavelength,
+        n_ref=n_ref,
+    )
+    half_step_response = nonlinear_phase(
+        theta,
+        dz=0.5 * dz / Nsub,
+        wavelength=wavelength,
+        n_ref=n_ref,
+        ne=1.7,
+        no=1.5,
+    )
+
+    wrapped = advance_slice(
+        A0.copy(),
+        theta,
+        kernel=kernel,
+        dz=dz,
+        wavelength=wavelength,
+        n_ref=n_ref,
+        ne=1.7,
+        no=1.5,
+        Nsub=Nsub,
+    )
+    prepared = advance_prepared_response(
+        A0.copy(),
+        kernel=kernel,
+        half_step_response=half_step_response,
+        Nsub=Nsub,
+    )
+
+    np.testing.assert_allclose(wrapped, prepared, rtol=0.0, atol=0.0)
+
+
+def test_prepared_shared_response_matches_explicit_channel_broadcast():
+    rng = np.random.default_rng(7)
+    A0 = (
+        rng.normal(size=(3, 8, 6)) + 1j * rng.normal(size=(3, 8, 6))
+    ).astype(np.complex128)
+    kernel = np.exp(1j * rng.normal(size=(8, 6)))
+    shared = np.exp(0.5j * rng.normal(size=(8, 6)))
+    per_channel = np.broadcast_to(shared, A0.shape).copy()
+
+    shared_result = advance_prepared_response(
+        A0.copy(), kernel=kernel, half_step_response=shared
+    )
+    broadcast_result = advance_prepared_response(
+        A0.copy(), kernel=kernel, half_step_response=per_channel
+    )
+
+    np.testing.assert_allclose(shared_result, broadcast_result, rtol=0.0, atol=0.0)
+
+
+def test_prepared_per_channel_response_is_channel_local():
+    A0 = np.ones((2, 4, 5), dtype=np.complex128)
+    kernel = np.ones((4, 5), dtype=np.complex128)
+    phases = np.asarray([0.3, -0.7])[:, None, None]
+    response = np.broadcast_to(np.exp(0.5j * phases), A0.shape).copy()
+
+    result = advance_prepared_response(
+        A0.copy(), kernel=kernel, half_step_response=response
+    )
+
+    np.testing.assert_allclose(result[0], np.exp(0.3j))
+    np.testing.assert_allclose(result[1], np.exp(-0.7j))
+
+
+def test_prepared_identity_response_reproduces_pure_linear_propagation():
+    rng = np.random.default_rng(11)
+    A0 = (
+        rng.normal(size=(2, 7, 9)) + 1j * rng.normal(size=(2, 7, 9))
+    ).astype(np.complex128)
+    kernel = np.exp(1j * rng.normal(size=(7, 9)))
+    identity_response = np.ones((7, 9), dtype=np.complex128)
+
+    expected = hop_linear(hop_linear(A0, kernel), kernel)
+    actual = advance_prepared_response(
+        A0.copy(),
+        kernel=kernel,
+        half_step_response=identity_response,
+        Nsub=2,
+    )
+
+    np.testing.assert_allclose(actual, expected, rtol=1e-14, atol=1e-14)
+
+
+def test_prepared_real_phase_response_preserves_power():
+    rng = np.random.default_rng(19)
+    A0 = (
+        rng.normal(size=(2, 16, 18)) + 1j * rng.normal(size=(2, 16, 18))
+    ).astype(np.complex128)
+    kernel = np.exp(1j * rng.normal(size=(16, 18)))
+    real_half_phase = rng.normal(size=(2, 16, 18))
+    response = np.exp(1j * real_half_phase)
+
+    result = advance_prepared_response(
+        A0.copy(),
+        kernel=kernel,
+        half_step_response=response,
+        Nsub=3,
+    )
+
+    assert np.sum(np.abs(result) ** 2) == pytest.approx(
+        np.sum(np.abs(A0) ** 2), rel=2e-15
+    )
+
+
+def test_prepared_response_uses_symmetric_strang_splitting(monkeypatch):
     A = np.ones((1, 2, 2), dtype=np.complex128)
-    theta = np.zeros((2, 2), dtype=float)
     kernel = np.ones((2, 2), dtype=np.complex128)
+    response = np.ones((2, 2), dtype=np.complex128)
     calls = []
 
-    def observed_phase(theta, *, dz, **kwargs):
-        calls.append(("phase", dz))
-        return np.ones_like(theta, dtype=np.complex128)
-
-    def observed_apply(A, phase, *, xp=None):
+    def observed_apply(A, response_screen, *, xp=None):
         calls.append(("apply", None))
         return A
 
@@ -301,29 +420,20 @@ def test_advance_slice_uses_symmetric_nonlinear_splitting(monkeypatch):
         calls.append(("linear", None))
         return A
 
-    monkeypatch.setattr("lcprop.optics.splitstep.nonlinear_phase", observed_phase)
     monkeypatch.setattr(
-        "lcprop.optics.splitstep.apply_nonlinear_phase_inplace",
+        "lcprop.optics.splitstep.apply_response_screen_inplace",
         observed_apply,
     )
     monkeypatch.setattr("lcprop.optics.splitstep.hop_linear_inplace", observed_hop)
 
-    from lcprop.optics.splitstep import advance_slice
-
-    advance_slice(
+    advance_prepared_response(
         A,
-        theta,
         kernel=kernel,
-        dz=10.0,
-        wavelength=0.633,
-        n_ref=1.5,
-        ne=1.7,
-        no=1.5,
+        half_step_response=response,
         Nsub=2,
     )
 
     assert calls == [
-        ("phase", 2.5),
         ("apply", None),
         ("linear", None),
         ("apply", None),

@@ -13,15 +13,20 @@ Optical fields are always channel stacks:
 A single beam is represented by ``Nch=1``. There is no scalar-field special
 case inside this module.
 
-The split-step ordering is symmetric for one optical substep:
+The material-neutral split-step ordering is symmetric for one optical substep:
 
     for substep:
-        apply half the nonlinear LC phase from theta
+        apply a prepared half-step optical response
         apply linear Fourier hop
-        apply half the nonlinear LC phase from theta
+        apply the prepared half-step optical response
 
-The caller decides how kernels, substeps, wavelengths, and reference indices
-are constructed.
+The prepared response is a multiplicative complex screen. It may be shared by
+all channels with shape ``(Nx, Ny)`` or supplied per channel with shape
+``(Nch, Nx, Ny)``. The caller decides how responses, kernels, substeps,
+wavelengths, and reference indices are constructed.
+
+The theta-based functions remain LC compatibility wrappers around this
+material-neutral advancement surface.
 """
 
 from __future__ import annotations
@@ -31,7 +36,6 @@ from typing import Any
 import numpy as np
 
 from lcprop.core.beams import normalize_coherence_groups
-from lcprop.core.derived import compute_neff
 
 Array = Any
 
@@ -189,8 +193,10 @@ def neff_from_theta(theta: Array, *, ne: float, no: float, xp: Any | None = None
     Compatibility wrapper around lcprop.core.derived.compute_neff.
     """
 
+    from lcprop.lc.optical_response import neff_from_theta as lc_neff_from_theta
+
     xp = _xp_from(theta, xp=xp)
-    return compute_neff(theta, ne=ne, no=no, xp=xp)
+    return lc_neff_from_theta(theta, ne=ne, no=no, xp=xp)
 
 
 def linear_kernel(
@@ -239,22 +245,118 @@ def nonlinear_phase(
     no: float,
     xp: Any | None = None,
 ) -> Array:
-    """Return LC nonlinear phase factor for one propagation step."""
+    """Compatibility wrapper for the LC optical-response phase screen."""
+
+    from lcprop.lc.optical_response import phase_screen_from_theta
 
     xp = _xp_from(theta, xp=xp)
-    k0 = 2.0 * np.pi / float(wavelength)
-    dn = neff_from_theta(theta, ne=ne, no=no, xp=xp) - float(n_ref)
-    return xp.exp(1j * k0 * float(dz) * dn)
+    return phase_screen_from_theta(
+        theta,
+        dz=dz,
+        wavelength=wavelength,
+        n_ref=n_ref,
+        ne=ne,
+        no=no,
+        xp=xp,
+    )
+
+
+def apply_response_screen_inplace(
+    A: Array,
+    response_screen: Array,
+    *,
+    xp: Any | None = None,
+) -> Array:
+    """Apply a prepared shared or per-channel optical response in place.
+
+    ``response_screen`` is a multiplicative complex screen for the optical
+    field. A two-dimensional screen is shared by all channels. A
+    three-dimensional screen must match the complete channel-stack shape.
+    """
+
+    xp = _xp_from(A, response_screen, xp=xp)
+    if A.ndim != 3:
+        raise ValueError("A must have shape (Nch, Nx, Ny)")
+
+    response_screen = xp.asarray(response_screen)
+    if response_screen.ndim == 2:
+        if response_screen.shape != A.shape[1:]:
+            raise ValueError(
+                "shared response_screen must have shape (Nx, Ny) matching A"
+            )
+        multiplier = response_screen[None, :, :]
+    elif response_screen.ndim == 3:
+        if response_screen.shape != A.shape:
+            raise ValueError(
+                "per-channel response_screen must have shape (Nch, Nx, Ny) "
+                "matching A"
+            )
+        multiplier = response_screen
+    else:
+        raise ValueError(
+            "response_screen must have shape (Nx, Ny) or (Nch, Nx, Ny)"
+        )
+
+    A[...] = A * multiplier
+    return A
+
+
+def advance_prepared_response(
+    A: Array,
+    *,
+    kernel: Array,
+    half_step_response: Array,
+    Nsub: int = 1,
+    xp: Any | None = None,
+) -> Array:
+    """Advance a channel stack using a prepared material response.
+
+    ``kernel`` is the full linear hop for one optical substep.
+    ``half_step_response`` is the multiplicative material-response screen for
+    one half substep. It may have shape ``(Nx, Ny)`` for a response shared by
+    all channels or ``(Nch, Nx, Ny)`` for per-channel responses.
+
+    The field is updated in place using symmetric Strang ordering and returned.
+    """
+
+    xp = _xp_from(A, kernel, half_step_response, xp=xp)
+    if A.ndim != 3:
+        raise ValueError("A must have shape (Nch, Nx, Ny)")
+    if kernel.ndim != 2 or kernel.shape != A.shape[1:]:
+        raise ValueError("kernel must have shape (Nx, Ny) matching A")
+    if int(Nsub) < 1:
+        raise ValueError("Nsub must be >= 1")
+
+    # Validate the response before mutating A, including when Nsub is one.
+    response = xp.asarray(half_step_response)
+    if response.ndim == 2:
+        if response.shape != A.shape[1:]:
+            raise ValueError(
+                "shared response_screen must have shape (Nx, Ny) matching A"
+            )
+    elif response.ndim == 3:
+        if response.shape != A.shape:
+            raise ValueError(
+                "per-channel response_screen must have shape (Nch, Nx, Ny) "
+                "matching A"
+            )
+    else:
+        raise ValueError(
+            "response_screen must have shape (Nx, Ny) or (Nch, Nx, Ny)"
+        )
+
+    for _ in range(int(Nsub)):
+        apply_response_screen_inplace(A, response, xp=xp)
+        hop_linear_inplace(A, kernel, xp=xp)
+        apply_response_screen_inplace(A, response, xp=xp)
+
+    return A
 
 
 def apply_nonlinear_phase_inplace(A: Array, phase: Array, *, xp: Any | None = None) -> Array:
-    """Multiply all channels by a common transverse phase."""
+    """Compatibility wrapper applying a shared or per-channel phase screen."""
 
-    xp = _xp_from(A, phase, xp=xp)
-    if A.ndim != 3:
-        raise ValueError("A must have shape (Nch, Nx, Ny)")
-    A[...] = A * phase[None, :, :]
-    return A
+    return apply_response_screen_inplace(A, phase, xp=xp)
 
 
 def advance_slice(
@@ -290,12 +392,13 @@ def advance_slice(
         no=no,
         xp=xp,
     )
-    for _ in range(int(Nsub)):
-        apply_nonlinear_phase_inplace(A, half_phase, xp=xp)
-        hop_linear_inplace(A, kernel, xp=xp)
-        apply_nonlinear_phase_inplace(A, half_phase, xp=xp)
-
-    return A
+    return advance_prepared_response(
+        A,
+        kernel=kernel,
+        half_step_response=half_phase,
+        Nsub=Nsub,
+        xp=xp,
+    )
 
 
 def advance_slice_with_midintensity(
@@ -373,6 +476,8 @@ __all__ = [
     "hop_linear",
     "hop_linear_inplace",
     "nonlinear_phase",
+    "apply_response_screen_inplace",
+    "advance_prepared_response",
     "apply_nonlinear_phase_inplace",
     "advance_slice",
     "advance_slice_with_midintensity",
