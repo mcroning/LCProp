@@ -127,6 +127,51 @@ def test_tilt_adds_phase_variation():
     assert not np.allclose(A0, A1)
 
 
+@pytest.mark.parametrize(
+    ("field_name", "requested_gradient", "axis"),
+    (
+        ("tilt_x_rad_per_um", 0.12, 0),
+        ("tilt_y_rad_per_um", -0.09, 1),
+    ),
+)
+def test_gaussian_channel_phase_gradient_matches_requested_tilt(
+    field_name, requested_gradient, axis
+):
+    grid = make_grid(
+        GridSpec(
+            Nx=128,
+            Ny=128,
+            x_aperture_um=80.0,
+            y_aperture_um=80.0,
+        ),
+        real_dtype=np.float64,
+    )
+    channel = BeamChannel(
+        waist_x_um=10.0,
+        waist_y_um=10.0,
+        **{field_name: requested_gradient},
+    )
+    field = build_launch(
+        BeamStack(channels=(channel,)), grid, complex_dtype=np.complex128
+    ).A0[0]
+
+    # Measure phase differences only where both adjacent samples have useful
+    # amplitude.  The chosen gradients are comfortably below Nyquist, so the
+    # principal phase difference is unambiguous.
+    if axis == 0:
+        product = field[1:, :] * np.conj(field[:-1, :])
+        adjacent_amplitude = np.minimum(np.abs(field[1:, :]), np.abs(field[:-1, :]))
+        spacing = grid.dx_um
+    else:
+        product = field[:, 1:] * np.conj(field[:, :-1])
+        adjacent_amplitude = np.minimum(np.abs(field[:, 1:]), np.abs(field[:, :-1]))
+        spacing = grid.dy_um
+    mask = adjacent_amplitude > 0.05 * np.max(np.abs(field))
+    measured_gradient = np.median(np.angle(product[mask]) / spacing)
+
+    assert measured_gradient == pytest.approx(requested_gradient, abs=1e-12)
+
+
 def test_coherent_group_interference_does_not_renormalize_channel_fractions():
     grid = make_grid(GridSpec(Nx=128, Ny=128))
     in_phase = BeamStack(

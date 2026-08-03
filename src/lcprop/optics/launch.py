@@ -75,6 +75,9 @@ def gaussian_channel(
     ``BeamChannel.power_mW`` remains physical request metadata. It is converted
     to a normalized channel fraction by :func:`build_launch`; physical power is
     not embedded in the optical field amplitude.
+
+    Channel tilts are transverse phase gradients in rad/um, so the phase
+    factor is exactly ``exp(1j * (kx*x + ky*y + phase))``.
     """
 
     xp = grid.xp

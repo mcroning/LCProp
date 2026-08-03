@@ -42,6 +42,8 @@ def _request(*, steps: int) -> TimeDependentRunRequest:
                     waist_x_um=4.0,
                     waist_y_um=4.0,
                     x0_um=-3.0,
+                    tilt_x_rad_per_um=0.037,
+                    tilt_y_rad_per_um=-0.021,
                 ),
             )
         ),
@@ -125,6 +127,9 @@ def test_checkpoint_save_load_preserves_minimal_state(tmp_path):
     }
     assert loaded.schema_version == 1
     assert loaded.request == result.checkpoint.request
+    loaded_channel = loaded.request.beams.channels[0]
+    assert loaded_channel.tilt_x_rad_per_um == 0.037
+    assert loaded_channel.tilt_y_rad_per_um == -0.021
     assert loaded.completed_steps == 2
     assert loaded.requested_steps == 2
     assert loaded.current_time == result.checkpoint.current_time

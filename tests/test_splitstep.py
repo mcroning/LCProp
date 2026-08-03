@@ -181,6 +181,62 @@ def test_linear_hop_preserves_power():
     assert np.isclose(p1, p0, rtol=1e-5)
 
 
+@pytest.mark.parametrize(
+    ("angle_x_rad", "angle_y_rad"),
+    ((0.0, 0.0), (0.02, 0.0), (0.0, 0.02)),
+)
+def test_linear_propagation_centroid_follows_geometric_angle(
+    angle_x_rad, angle_y_rad
+):
+    wavelength_um = 0.633
+    n_medium = 1.5
+    z_um = 100.0
+    grid = make_grid(
+        GridSpec(
+            Nx=256,
+            Ny=256,
+            x_aperture_um=200.0,
+            y_aperture_um=200.0,
+            z_length_um=z_um,
+            dz_um=z_um,
+        ),
+        real_dtype=np.float64,
+    )
+    k_medium_rad_per_um = 2.0 * np.pi * n_medium / wavelength_um
+    channel = BeamChannel(
+        wavelength_um=wavelength_um,
+        waist_x_um=10.0,
+        waist_y_um=10.0,
+        tilt_x_rad_per_um=k_medium_rad_per_um * np.sin(angle_x_rad),
+        tilt_y_rad_per_um=k_medium_rad_per_um * np.sin(angle_y_rad),
+    )
+    field = build_launch(
+        BeamStack(channels=(channel,)), grid, complex_dtype=np.complex128
+    ).A0
+    kernel = linear_kernel(
+        grid.fxy2_um,
+        dz=z_um,
+        wavelength=wavelength_um,
+        n_ref=n_medium,
+    )
+
+    def centroid(A):
+        intensity = np.abs(A[0]) ** 2
+        total = intensity.sum()
+        return (
+            float((intensity.sum(axis=1) * grid.x_um).sum() / total),
+            float((intensity.sum(axis=0) * grid.y_um).sum() / total),
+        )
+
+    x0, y0 = centroid(field)
+    x1, y1 = centroid(hop_linear(field, kernel))
+
+    # The propagator is paraxial (its exact result is z*sin(angle)); at these
+    # small angles that agrees with the geometric z*tan(angle) expectation.
+    assert x1 - x0 == pytest.approx(z_um * np.tan(angle_x_rad), abs=5e-4)
+    assert y1 - y0 == pytest.approx(z_um * np.tan(angle_y_rad), abs=5e-4)
+
+
 def test_nonlinear_phase_unit_magnitude():
     theta = np.ones((16, 16), dtype=np.float32) * 0.1
 
@@ -225,3 +281,53 @@ def test_advance_slice_with_midintensity_shapes():
     assert I_before.shape == (32, 32)
     assert I_after.shape == (32, 32)
     assert I_mid.shape == (32, 32)
+
+
+def test_advance_slice_uses_symmetric_nonlinear_splitting(monkeypatch):
+    A = np.ones((1, 2, 2), dtype=np.complex128)
+    theta = np.zeros((2, 2), dtype=float)
+    kernel = np.ones((2, 2), dtype=np.complex128)
+    calls = []
+
+    def observed_phase(theta, *, dz, **kwargs):
+        calls.append(("phase", dz))
+        return np.ones_like(theta, dtype=np.complex128)
+
+    def observed_apply(A, phase, *, xp=None):
+        calls.append(("apply", None))
+        return A
+
+    def observed_hop(A, kernel, *, xp=None):
+        calls.append(("linear", None))
+        return A
+
+    monkeypatch.setattr("lcprop.optics.splitstep.nonlinear_phase", observed_phase)
+    monkeypatch.setattr(
+        "lcprop.optics.splitstep.apply_nonlinear_phase_inplace",
+        observed_apply,
+    )
+    monkeypatch.setattr("lcprop.optics.splitstep.hop_linear_inplace", observed_hop)
+
+    from lcprop.optics.splitstep import advance_slice
+
+    advance_slice(
+        A,
+        theta,
+        kernel=kernel,
+        dz=10.0,
+        wavelength=0.633,
+        n_ref=1.5,
+        ne=1.7,
+        no=1.5,
+        Nsub=2,
+    )
+
+    assert calls == [
+        ("phase", 2.5),
+        ("apply", None),
+        ("linear", None),
+        ("apply", None),
+        ("apply", None),
+        ("linear", None),
+        ("apply", None),
+    ]

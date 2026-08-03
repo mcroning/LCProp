@@ -13,11 +13,12 @@ Optical fields are always channel stacks:
 A single beam is represented by ``Nch=1``. There is no scalar-field special
 case inside this module.
 
-The split-step ordering follows the trusted runner convention for one slice:
+The split-step ordering is symmetric for one optical substep:
 
     for substep:
-        apply nonlinear LC phase from theta
+        apply half the nonlinear LC phase from theta
         apply linear Fourier hop
+        apply half the nonlinear LC phase from theta
 
 The caller decides how kernels, substeps, wavelengths, and reference indices
 are constructed.
@@ -280,18 +281,19 @@ def advance_slice(
 
     dz_sub = float(dz) / int(Nsub)
 
+    half_phase = nonlinear_phase(
+        theta,
+        dz=0.5 * dz_sub,
+        wavelength=wavelength,
+        n_ref=n_ref,
+        ne=ne,
+        no=no,
+        xp=xp,
+    )
     for _ in range(int(Nsub)):
-        phase = nonlinear_phase(
-            theta,
-            dz=dz_sub,
-            wavelength=wavelength,
-            n_ref=n_ref,
-            ne=ne,
-            no=no,
-            xp=xp,
-        )
-        apply_nonlinear_phase_inplace(A, phase, xp=xp)
+        apply_nonlinear_phase_inplace(A, half_phase, xp=xp)
         hop_linear_inplace(A, kernel, xp=xp)
+        apply_nonlinear_phase_inplace(A, half_phase, xp=xp)
 
     return A
 

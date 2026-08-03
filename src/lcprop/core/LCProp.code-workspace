@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../../.."
+		},
+		{
+			"path": "../../../../LaunchPane"
+		}
+	],
+	"settings": {
+		"python.defaultInterpreterPath": "/Users/mcroning/miniforge3/envs/lcprop/bin/python",
+		"python.terminal.activateEnvironment": true
+	}
+}

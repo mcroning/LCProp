@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QAbstractSpinBox, QVBoxLayout, QWidget
 
 from lcprop.adapters.launchplane import beam_stack_definition_to_lcprop
 from lcprop.core.beams import BeamStack
@@ -141,6 +141,20 @@ class BeamPanel(QWidget):
 
     def beams(self) -> BeamStack:
         """Return enabled LaunchPane beams adapted to LCProp channels."""
+
+        # LaunchPane disables keyboard tracking on its numerical editors.  A
+        # value typed into the active editor therefore may not yet have
+        # reached its immutable BeamDefinition (notably when a platform does
+        # not move keyboard focus to the Run button).  Commit every pending
+        # numerical edit before taking the request snapshot.
+        editors = self.launch_plane_widget.findChildren(QAbstractSpinBox)
+        pending_text = [(editor, editor.lineEdit().text()) for editor in editors]
+        for editor, text in pending_text:
+            # Committing one field makes LaunchPane refresh the whole
+            # inspector, so restore each captured text immediately before it
+            # is interpreted or a preceding commit can erase it.
+            editor.lineEdit().setText(text)
+            editor.interpretText()
 
         return beam_stack_definition_to_lcprop(
             self.launch_plane_widget.beam_stack

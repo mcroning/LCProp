@@ -36,7 +36,12 @@ def normalize_coherence_groups(
 
 @dataclass(frozen=True)
 class BeamChannel:
-    """One optical input channel."""
+    """One optical input channel.
+
+    ``tilt_x_rad_per_um`` and ``tilt_y_rad_per_um`` are transverse phase
+    gradients, not geometric angles.  The launch phase is
+    ``tilt_x_rad_per_um * x + tilt_y_rad_per_um * y + phase_rad``.
+    """
 
     name: str = "beam"
 

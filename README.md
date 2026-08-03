@@ -141,6 +141,9 @@ request = StaticRunRequest(
                 power_mW=1.0,
                 waist_x_um=3.0,
                 waist_y_um=3.0,
+                # Transverse phase gradients (rad/µm), not geometric angles.
+                tilt_x_rad_per_um=0.0,
+                tilt_y_rad_per_um=0.0,
             ),
         )
     ),

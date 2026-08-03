@@ -218,6 +218,22 @@ def test_request_construction_uses_adapted_beam_stack(app):
     window.close()
 
 
+def test_request_construction_commits_pending_tilt_edits(app):
+    window = LCPropMainWindow()
+    widget = window.beam_panel.launch_plane_widget
+
+    # Model a typed value that has not emitted valueChanged yet. LaunchPane
+    # deliberately disables keyboard tracking on these spin boxes.
+    widget.tilt_x_spin.lineEdit().setText("0.125000")
+    widget.tilt_y_spin.lineEdit().setText("-0.062500")
+
+    channel = window.build_request().beams.channels[0]
+
+    assert channel.tilt_x_rad_per_um == pytest.approx(0.125)
+    assert channel.tilt_y_rad_per_um == pytest.approx(-0.0625)
+    window.close()
+
+
 def test_describe_request_reports_multibeam_summary(app):
     window = LCPropMainWindow()
     window.beam_panel.set_beam_stack_definition(

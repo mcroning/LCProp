@@ -306,6 +306,18 @@ def run_static(
             "optical substep cap reached",
         )
 
+    minimum_y_waist_samples = min(
+        float(channel.waist_y_um) / float(grid.dy_um)
+        for channel in request.beams.channels
+    )
+    if minimum_y_waist_samples < 3.0:
+        warnings = (
+            *warnings,
+            "transverse y sampling is too coarse for reliable nonlinear "
+            f"beam motion: minimum waist_y/dy={minimum_y_waist_samples:.3g}; "
+            "use at least 3 samples per waist",
+        )
+
     status = "stopped" if cancelled else "completed"
     checkpoint_request = replace(request, initial_A=None, initial_theta=None)
     theta_checkpoint_stack = (
