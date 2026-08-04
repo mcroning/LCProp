@@ -1,7 +1,10 @@
 """Portable local persistence helpers."""
 
-import json
-from pathlib import Path
+from lcprop.lc import LC_MATERIAL_ID
+from lcprop.persistence.composition import (
+    CheckpointCodec,
+    CheckpointCodecRegistry,
+)
 
 from lcprop.persistence.timedependent import (
     TD_CHECKPOINT_SCHEMA_VERSION,
@@ -15,33 +18,65 @@ from lcprop.persistence.static import (
     load_static_checkpoint,
     save_static_checkpoint,
 )
+from lcprop.pr.checkpoint import PRTimeDependentCheckpoint
+from lcprop.pr.persistence import load_pr_checkpoint, save_pr_checkpoint
+from lcprop.pr.specs import PR_MATERIAL_ID, PR_TIMEDEPENDENT_WORKFLOW
+
+
+LC_STATIC_CHECKPOINT_CODEC = CheckpointCodec(
+    material_id=LC_MATERIAL_ID,
+    workflow_id="static",
+    checkpoint_type=StaticCheckpoint,
+    save=save_static_checkpoint,
+    load=load_static_checkpoint,
+)
+LC_TIMEDEPENDENT_CHECKPOINT_CODEC = CheckpointCodec(
+    material_id=LC_MATERIAL_ID,
+    workflow_id="timedependent",
+    checkpoint_type=TimeDependentCheckpoint,
+    save=save_timedependent_checkpoint,
+    load=load_timedependent_checkpoint,
+)
+PR_TIMEDEPENDENT_CHECKPOINT_CODEC = CheckpointCodec(
+    material_id=PR_MATERIAL_ID,
+    workflow_id=PR_TIMEDEPENDENT_WORKFLOW,
+    checkpoint_type=PRTimeDependentCheckpoint,
+    save=save_pr_checkpoint,
+    load=load_pr_checkpoint,
+)
+
+CHECKPOINT_CODECS = CheckpointCodecRegistry()
+for _codec in (
+    LC_STATIC_CHECKPOINT_CODEC,
+    LC_TIMEDEPENDENT_CHECKPOINT_CODEC,
+    PR_TIMEDEPENDENT_CHECKPOINT_CODEC,
+):
+    CHECKPOINT_CODECS.register(_codec)
+CHECKPOINT_CODECS.register_legacy_workflow("static", material_id=LC_MATERIAL_ID)
+CHECKPOINT_CODECS.register_legacy_workflow(
+    "timedependent",
+    material_id=LC_MATERIAL_ID,
+)
 
 
 def save_run_checkpoint(checkpoint, run_dir):
-    """Save either workflow checkpoint using the shared run-directory layout."""
+    """Save a checkpoint through its explicitly registered material codec."""
 
-    if isinstance(checkpoint, StaticCheckpoint):
-        return save_static_checkpoint(checkpoint, run_dir)
-    if isinstance(checkpoint, TimeDependentCheckpoint):
-        return save_timedependent_checkpoint(checkpoint, run_dir)
-    raise TypeError(f"unsupported checkpoint type: {type(checkpoint).__name__}")
+    return CHECKPOINT_CODECS.save_checkpoint(checkpoint, run_dir)
 
 
 def load_run_checkpoint(run_dir):
-    """Dispatch a checkpoint loader using workflow metadata only."""
+    """Load a material-identified or supported legacy checkpoint."""
 
-    directory = Path(run_dir)
-    provenance = json.loads(
-        (directory / "provenance.json").read_text(encoding="utf-8")
-    )
-    workflow = provenance.get("workflow")
-    if workflow == "static":
-        return load_static_checkpoint(directory)
-    if workflow == "timedependent":
-        return load_timedependent_checkpoint(directory)
-    raise ValueError(f"unsupported or missing checkpoint workflow: {workflow!r}")
+    return CHECKPOINT_CODECS.load_checkpoint(run_dir)
 
 __all__ = [
+    "CHECKPOINT_CODECS",
+    "CheckpointCodec",
+    "CheckpointCodecRegistry",
+    "LC_STATIC_CHECKPOINT_CODEC",
+    "LC_TIMEDEPENDENT_CHECKPOINT_CODEC",
+    "PR_TIMEDEPENDENT_CHECKPOINT_CODEC",
     "TD_CHECKPOINT_SCHEMA_VERSION",
     "TimeDependentCheckpoint",
     "load_timedependent_checkpoint",

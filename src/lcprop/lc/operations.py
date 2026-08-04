@@ -1,14 +1,12 @@
 """Explicit LC workflow compositions for shared execution."""
 
+from lcprop.lc import LC_MATERIAL_ID
 from lcprop.products.data_model import (
     from_static_result,
     from_timedependent_result,
 )
 from lcprop.runners.base import WorkflowOperation
 from lcprop.workflows import run_static, run_timedependent
-
-
-LC_MATERIAL_ID = "lc"
 
 LC_STATIC_OPERATION = WorkflowOperation(
     material_id=LC_MATERIAL_ID,

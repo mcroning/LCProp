@@ -127,10 +127,12 @@ as a versioned, portable `request.json`, `checkpoint.npz`, and
 payload preserves `E_initial`, `E_current`, and `A0`; it does not substitute an
 optical phase or index perturbation for the physical PR state.
 
-The codec is deliberately material-owned and directly callable. It does not
-change the existing LC checkpoint formats or add PR to the current LC-oriented
-generic persistence dispatcher. This keeps schema ownership explicit while a
-future shared dispatch boundary is validated by more than one material codec.
+The codec is deliberately material-owned and directly callable. It is also
+registered with the shared checkpoint-composition layer using its stable
+material and workflow identifiers. The shared layer delegates payload details
+back to this codec; it does not interpret `E` or reconstruct PR requests. The
+existing LC checkpoint formats remain unchanged and are composed through
+adapters with explicit legacy aliases for their material-less metadata.
 
 ## Two-beam geometry and measurements
 
