@@ -119,10 +119,18 @@ material timestep, and optical substeps must match. The solver's original
 `Nt` is excluded from compatibility because continuation supplies its own
 additional-step count.
 
-The checkpoint is deliberately in-memory only. It contains detached host
-copies of the physical state and sufficient request metadata to validate a
-future material-owned persistence codec, but no disk schema or generic
-persistence dispatch is defined here.
+The checkpoint contains detached host copies of the physical state. The
+PR-owned `save_pr_checkpoint()` and `load_pr_checkpoint()` functions encode it
+as a versioned, portable `request.json`, `checkpoint.npz`, and
+`provenance.json` directory. Both JSON documents identify the material as
+`pr`, the workflow as `pr_timedependent`, and the PR schema version. The NPZ
+payload preserves `E_initial`, `E_current`, and `A0`; it does not substitute an
+optical phase or index perturbation for the physical PR state.
+
+The codec is deliberately material-owned and directly callable. It does not
+change the existing LC checkpoint formats or add PR to the current LC-oriented
+generic persistence dispatcher. This keeps schema ownership explicit while a
+future shared dispatch boundary is validated by more than one material codec.
 
 ## Two-beam geometry and measurements
 

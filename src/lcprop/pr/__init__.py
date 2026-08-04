@@ -5,8 +5,14 @@ from lcprop.pr.checkpoint import (
     validate_pr_checkpoint,
     validate_pr_continuation,
 )
+from lcprop.pr.persistence import (
+    PR_CHECKPOINT_SCHEMA_VERSION,
+    load_pr_checkpoint,
+    save_pr_checkpoint,
+)
 from lcprop.pr.specs import (
     PRMaterialSpec,
+    PR_MATERIAL_ID,
     PRRunRequest,
     PRRunResult,
     PRSolverOptions,
@@ -22,10 +28,14 @@ from lcprop.pr.workflow import continue_pr_timedependent, run_pr_timedependent
 
 __all__ = [
     "PRMaterialSpec",
+    "PR_MATERIAL_ID",
     "PRRunRequest",
     "PRRunResult",
     "PRSolverOptions",
     "PRTimeDependentCheckpoint",
+    "PR_CHECKPOINT_SCHEMA_VERSION",
+    "load_pr_checkpoint",
+    "save_pr_checkpoint",
     "validate_pr_checkpoint",
     "validate_pr_continuation",
     "paraxial_kernel_slope",

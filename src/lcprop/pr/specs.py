@@ -15,6 +15,7 @@ _ELEMENTARY_CHARGE_C = 1.602e-19
 _VACUUM_PERMITTIVITY_F_PER_M = 8.854e-12
 _BOLTZMANN_J_PER_K = 1.380649e-23
 
+PR_MATERIAL_ID = "pr"
 PR_TIMEDEPENDENT_WORKFLOW = "pr_timedependent"
 
 
@@ -155,6 +156,7 @@ class PRRunResult:
 
 __all__ = [
     "PRMaterialSpec",
+    "PR_MATERIAL_ID",
     "PR_TIMEDEPENDENT_WORKFLOW",
     "PRSolverOptions",
     "PRRunRequest",
