@@ -149,6 +149,7 @@ class PRRunResult:
     launch_summary: dict[str, Any]
     status: str = "completed"
     requested_steps: int = 0
+    checkpoint: Any | None = None
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
 

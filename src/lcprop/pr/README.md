@@ -101,6 +101,29 @@ terms explicit, followed by a Picard correction if benchmarks show it is
 needed. It directly targets `I E_xx`, the stiffest high-frequency term, while
 preserving a small PR-owned solver and backend-portable local operators.
 
+## In-memory continuation
+
+`run_pr_timedependent()` returns a `PRTimeDependentCheckpoint` at the latest
+complete material-time boundary, including for pre-cancelled and partially
+completed runs. The checkpoint preserves the original normalized state
+`E_initial`, the latest accepted state `E_current`, and the entrance optical
+field `A0`. An intermediate propagated optical field is not checkpoint state:
+every material update reconstructs its optical source by propagating `A0`
+through the accepted `E_current`.
+
+`continue_pr_timedependent()` resumes for an explicit number of additional
+steps. Completed steps, requested steps, normalized material time, and progress
+records remain cumulative, while `E_initial` continues to mean the initial
+state of the complete run. Grid, material, beams, backend and precision,
+material timestep, and optical substeps must match. The solver's original
+`Nt` is excluded from compatibility because continuation supplies its own
+additional-step count.
+
+The checkpoint is deliberately in-memory only. It contains detached host
+copies of the physical state and sufficient request metadata to validate a
+future material-owned persistence codec, but no disk schema or generic
+persistence dispatch is defined here.
+
 ## Two-beam geometry and measurements
 
 For a requested internal polar angle `theta` and azimuth `phi`, the PR helper

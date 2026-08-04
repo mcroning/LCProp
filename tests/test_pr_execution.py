@@ -112,7 +112,7 @@ def test_progress_reports_complete_normalized_material_time_boundaries():
     assert all(item.coordinate_name == "material_time" for item in progress)
     assert all(item.coordinate_unit == "normalized" for item in progress)
     assert all(item.status == "running" for item in progress)
-    assert all(item.checkpoint_available is False for item in progress)
+    assert all(item.checkpoint_available is True for item in progress)
     assert all(item.elapsed_wall_time >= 0.0 for item in progress)
 
     latest = progress[-1].latest_field_state
@@ -123,6 +123,8 @@ def test_progress_reports_complete_normalized_material_time_boundaries():
         result.source_intensity_stack,
     )
     assert latest["material_time_normalized"] == pytest.approx(0.03)
+    assert result.checkpoint is not None
+    assert result.checkpoint.completed_steps == 3
 
 
 def test_pre_cancelled_run_returns_untouched_material_state():

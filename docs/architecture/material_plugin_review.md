@@ -48,7 +48,7 @@ LC concepts also remain in nominally shared locations. `LCMaterial`, `BiasSpec`,
 
 The `pr` package is an additive, headless material implementation. It owns `PRMaterialSpec`, `PRSolverOptions`, `PRRunRequest`, `PRRunResult`, normalized source construction, spatial derivatives, timestep validation, hopping-model evolution, the `E`-to-response mapping, and its time-dependent workflow. It also owns crossing geometry, aperture checks, plane-wave modal projections, analytic gain comparison, propagation traces, and finite Gaussian coupling benchmarks.
 
-The PR workflow directly uses the shared backend, grid, beam launch, power calculation, diffraction kernel, and `advance_prepared_response()`. It supports the shared cancellation and progress records, owns a `PRRunResult`-to-`RunData` adapter, and exposes an explicit operation that can be registered with `LocalRunner`. It does not use the standard LC workflows, checkpoint dispatcher, or GUI. This establishes a shared headless application path while preserving a material-owned physical workflow.
+The PR workflow directly uses the shared backend, grid, beam launch, power calculation, diffraction kernel, and `advance_prepared_response()`. It supports shared cancellation and progress records, owns an in-memory checkpoint and continuation contract, owns a `PRRunResult`-to-`RunData` adapter, and exposes an explicit operation that can be registered with `LocalRunner`. It does not use the standard LC workflows, persistence checkpoint dispatcher, or GUI. This establishes a shared headless application path while preserving a material-owned physical workflow.
 
 ### Generic GUI components
 
@@ -101,7 +101,7 @@ PR correctly preserves its independent state by defining `PRRunRequest` and `PRR
 
 ### Persistence
 
-Persistence assumes LC workflows. Static and time-dependent checkpoint modules know the associated LC requests and theta arrays. `save_run_checkpoint()` dispatches on concrete LC checkpoint classes, and `load_run_checkpoint()` dispatches on `workflow` values of `static` and `timedependent`. PR has no checkpoint integration.
+Disk persistence assumes LC workflows. Static and time-dependent persistence modules know the associated LC requests and theta arrays. `save_run_checkpoint()` dispatches on concrete LC checkpoint classes, and `load_run_checkpoint()` dispatches on `workflow` values of `static` and `timedependent`. PR now has a validated in-memory `E` checkpoint and exact continuation path, but no serialization codec or integration with the persistence dispatcher.
 
 The existing run-directory layout and provenance file are potentially reusable, but the implemented serialization contract is not material-neutral. A durable plugin boundary would require material/workflow identity, schema ownership, and plugin-owned encoding and decoding of material state. That work should be driven by a real PR checkpoint requirement rather than generalized speculatively.
 
@@ -245,7 +245,7 @@ Migration should proceed by making the existing second material use one shared s
 
 Migration steps 1 through 3 have been implemented for the headless path. Stable LC and PR material/workflow identifiers are carried by explicit operation descriptors. PR owns its result-to-`RunData` adapter and supports shared cancellation and progress reporting. `LocalRunner` can execute explicitly registered LC and PR operations and returns both the concrete material result and its presentation product. Existing LC runner methods remain unchanged compatibility entry points.
 
-The implementation intentionally stops before step 4. No diagnostics have been moved, no persistence schema has changed, no GUI consumes the operation registry, and no package reorganization or external discovery mechanism has been introduced.
+The implementation intentionally leaves step 4 unchanged. In addition, PR now has a material-owned in-memory checkpoint preserving `E_initial`, accepted `E_current`, and `A0`, with exact cumulative continuation. No diagnostics have been moved, no persistence schema has changed, no GUI consumes the operation registry, and no package reorganization or external discovery mechanism has been introduced.
 
 ### Architecture cleanup
 
@@ -303,6 +303,6 @@ A material-plugin architecture is justified at the level of **explicit in-tree c
 
 LCProp should not implement a formal external plugin framework now. The current architecture has a mature optical boundary but incomplete execution, product, persistence, and GUI boundaries. Dynamic discovery, universal state interfaces, broad package moves, and generalized material solvers would create compatibility and maintenance costs before the necessary contracts have been exercised.
 
-LC and PR now use a shared headless execution and product path without material-specific branching in generic dispatch. The remaining milestone that should precede a formal plugin architecture is material-identified persistence with a concrete PR checkpoint or continuation requirement. A PR GUI can follow when required. Those additional boundaries should validate the existing callable composition before it is promoted into a public third-party contract.
+LC and PR now use a shared headless execution and product path without material-specific branching in generic dispatch. PR's concrete checkpoint and continuation requirement is now validated in memory; the remaining milestone that should precede a formal plugin architecture is material-identified disk persistence with a PR-owned codec. A PR GUI can follow when required. Those additional boundaries should validate the existing callable composition before it is promoted into a public third-party contract.
 
 The present architecture is therefore best described as **material-neutral at the optical layer, package-separated at the material layer, and explicitly plugin-composed for headless execution and products**. Persistence and GUI composition remain material-specific. The next work should validate those boundaries only when concrete PR requirements justify them, rather than redesign the validated numerical core.

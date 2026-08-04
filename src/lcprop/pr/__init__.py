@@ -1,5 +1,10 @@
 """Headless photorefractive material model and propagation workflow."""
 
+from lcprop.pr.checkpoint import (
+    PRTimeDependentCheckpoint,
+    validate_pr_checkpoint,
+    validate_pr_continuation,
+)
 from lcprop.pr.specs import (
     PRMaterialSpec,
     PRRunRequest,
@@ -13,18 +18,22 @@ from lcprop.pr.coupling import (
     run_finite_gaussian_coupling,
     run_plane_wave_coupling,
 )
-from lcprop.pr.workflow import run_pr_timedependent
+from lcprop.pr.workflow import continue_pr_timedependent, run_pr_timedependent
 
 __all__ = [
     "PRMaterialSpec",
     "PRRunRequest",
     "PRRunResult",
     "PRSolverOptions",
+    "PRTimeDependentCheckpoint",
+    "validate_pr_checkpoint",
+    "validate_pr_continuation",
     "paraxial_kernel_slope",
     "crossing_beam_channels",
     "PlaneWaveCouplingSpec",
     "run_plane_wave_coupling",
     "FiniteGaussianCouplingSpec",
     "run_finite_gaussian_coupling",
+    "continue_pr_timedependent",
     "run_pr_timedependent",
 ]

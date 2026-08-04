@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from time import perf_counter
 from typing import Any, Callable
 
@@ -12,6 +13,11 @@ from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch import build_launch, normalized_power
 from lcprop.optics.splitstep import advance_prepared_response, linear_kernel
+from lcprop.pr.checkpoint import (
+    PRTimeDependentCheckpoint,
+    validate_pr_checkpoint,
+    validate_pr_continuation,
+)
 from lcprop.pr.evolution import (
     euler_step,
     legacy_conservative_timestep_limit,
@@ -109,6 +115,11 @@ def run_pr_timedependent(
     *,
     cancellation_token: CancellationToken | None = None,
     progress_callback: ProgressCallback | None = None,
+    _completed_steps_offset: int = 0,
+    _requested_steps_total: int | None = None,
+    _cumulative_start_time: float = 0.0,
+    _checkpoint_request: PRRunRequest | None = None,
+    _origin_E: Any | None = None,
 ) -> PRRunResult:
     """Run the frozen-state PR workflow with optional execution controls.
 
@@ -149,7 +160,17 @@ def run_pr_timedependent(
         complex_dtype=backend.complex_dtype,
         real_dtype=backend.real_dtype,
     )
-    E_initial = E.copy()
+    if _origin_E is None:
+        E_initial = E.copy()
+    else:
+        E_initial = grid.xp.asarray(
+            _origin_E,
+            dtype=grid.real_dtype,
+        ).copy()
+        if E_initial.shape != E.shape:
+            raise ValueError(
+                "origin E shape does not match continuation state shape"
+            )
     peak_reference = channel_peak_intensity_reference(A0, xp=grid.xp)
     timestep_limit = validate_timestep(
         request.solver.dt_normalized,
@@ -167,11 +188,21 @@ def run_pr_timedependent(
         xp=grid.xp,
     )
 
-    requested_steps = int(request.solver.Nt)
-    completed_steps = 0
+    segment_total_steps = int(request.solver.Nt)
+    requested_steps = (
+        int(_completed_steps_offset) + segment_total_steps
+        if _requested_steps_total is None
+        else int(_requested_steps_total)
+    )
+    completed_steps = int(_completed_steps_offset)
+    checkpoint_request = _checkpoint_request or replace(
+        request,
+        initial_A=None,
+        initial_E=None,
+    )
     cancelled = False
     source_stack = grid.xp.empty(E.shape, dtype=grid.real_dtype)
-    for step_index in range(requested_steps):
+    for step_index in range(segment_total_steps):
         if cancellation_token is not None and cancellation_token.is_cancelled():
             cancelled = True
             break
@@ -197,7 +228,10 @@ def run_pr_timedependent(
             ),
             xp=grid.xp,
         )
-        completed_steps = step_index + 1
+        segment_completed_steps = step_index + 1
+        completed_steps = (
+            int(_completed_steps_offset) + segment_completed_steps
+        )
 
         if progress_callback is not None:
             A_display, display_source_stack = _optical_pass(
@@ -209,8 +243,12 @@ def run_pr_timedependent(
                 peak_reference=peak_reference,
                 wavelength_um=wavelength_um,
             )
+            segment_elapsed_time = (
+                segment_completed_steps
+                * float(request.solver.dt_normalized)
+            )
             material_time = (
-                completed_steps * float(request.solver.dt_normalized)
+                float(_cumulative_start_time) + segment_elapsed_time
             )
             progress_callback(
                 RunProgress(
@@ -234,17 +272,17 @@ def run_pr_timedependent(
                         "launch_summary": launch.summary(),
                         "material_time_normalized": material_time,
                     },
-                    checkpoint_available=False,
+                    checkpoint_available=True,
                     message="PR material-time step completed",
                     completed_step=completed_steps,
                     total_steps=requested_steps,
                     current_time=material_time,
-                    prior_completed_steps=0,
-                    segment_completed_steps=completed_steps,
-                    segment_total_steps=requested_steps,
+                    prior_completed_steps=int(_completed_steps_offset),
+                    segment_completed_steps=segment_completed_steps,
+                    segment_total_steps=segment_total_steps,
                     cumulative_completed_steps=completed_steps,
-                    segment_start_time=0.0,
-                    segment_elapsed_time=material_time,
+                    segment_start_time=float(_cumulative_start_time),
+                    segment_elapsed_time=segment_elapsed_time,
                     cumulative_time=material_time,
                 )
             )
@@ -260,22 +298,44 @@ def run_pr_timedependent(
     )
 
     status = "cancelled" if cancelled else "completed"
+    A0_host = np.asarray(asnumpy(A0)).copy()
+    E_initial_host = np.asarray(asnumpy(E_initial)).copy()
+    E_final_host = np.asarray(asnumpy(E)).copy()
+    current_time = (
+        float(_cumulative_start_time)
+        + (completed_steps - int(_completed_steps_offset))
+        * float(request.solver.dt_normalized)
+    )
+    checkpoint = PRTimeDependentCheckpoint(
+        request=checkpoint_request,
+        E_initial=E_initial_host.copy(),
+        E_current=E_final_host.copy(),
+        A0=A0_host.copy(),
+        completed_steps=completed_steps,
+        requested_steps=requested_steps,
+        time_normalized=current_time,
+        grid_summary=grid.summary(),
+        E_dtype=str(E_final_host.dtype),
+        A0_dtype=str(A0_host.dtype),
+        status=status,
+    )
+    validate_pr_checkpoint(checkpoint)
+
     return PRRunResult(
-        A_initial=np.asarray(asnumpy(A0)).copy(),
+        A_initial=A0_host,
         A_final=np.asarray(asnumpy(A_final)).copy(),
-        E_initial=np.asarray(asnumpy(E_initial)).copy(),
-        E_final=np.asarray(asnumpy(E)).copy(),
+        E_initial=E_initial_host,
+        E_final=E_final_host,
         source_intensity_stack=np.asarray(asnumpy(source_stack)).copy(),
         power_initial=normalized_power(A0, grid),
         power_final=normalized_power(A_final, grid),
         completed_steps=completed_steps,
-        time_normalized=(
-            completed_steps * float(request.solver.dt_normalized)
-        ),
+        time_normalized=current_time,
         grid_summary=grid.summary(),
         launch_summary=launch.summary(),
         status=status,
         requested_steps=requested_steps,
+        checkpoint=checkpoint,
         diagnostics={
             "backend": backend.summary(),
             "characteristic_wavenumber_per_um": (
@@ -296,4 +356,42 @@ def run_pr_timedependent(
     )
 
 
-__all__ = ["run_pr_timedependent"]
+def continue_pr_timedependent(
+    request: PRRunRequest,
+    checkpoint: PRTimeDependentCheckpoint,
+    additional_steps: int,
+    *,
+    cancellation_token: CancellationToken | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> PRRunResult:
+    """Continue a compatible accepted PR state for additional material steps."""
+
+    resolved_additional_steps = int(additional_steps)
+    if (
+        isinstance(additional_steps, bool)
+        or resolved_additional_steps != additional_steps
+        or resolved_additional_steps < 0
+    ):
+        raise ValueError("additional_steps must be a nonnegative integer")
+    validate_pr_continuation(request, checkpoint)
+    continuation_request = replace(
+        request,
+        solver=replace(request.solver, Nt=resolved_additional_steps),
+        initial_A=np.asarray(checkpoint.A0).copy(),
+        initial_E=np.asarray(checkpoint.E_current).copy(),
+    )
+    return run_pr_timedependent(
+        continuation_request,
+        cancellation_token=cancellation_token,
+        progress_callback=progress_callback,
+        _completed_steps_offset=int(checkpoint.completed_steps),
+        _requested_steps_total=(
+            int(checkpoint.completed_steps) + resolved_additional_steps
+        ),
+        _cumulative_start_time=float(checkpoint.time_normalized),
+        _checkpoint_request=checkpoint.request,
+        _origin_E=checkpoint.E_initial,
+    )
+
+
+__all__ = ["continue_pr_timedependent", "run_pr_timedependent"]
