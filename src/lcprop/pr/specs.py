@@ -15,6 +15,8 @@ _ELEMENTARY_CHARGE_C = 1.602e-19
 _VACUUM_PERMITTIVITY_F_PER_M = 8.854e-12
 _BOLTZMANN_J_PER_K = 1.380649e-23
 
+PR_TIMEDEPENDENT_WORKFLOW = "pr_timedependent"
+
 
 @dataclass(frozen=True)
 class PRMaterialSpec:
@@ -145,11 +147,14 @@ class PRRunResult:
     time_normalized: float
     grid_summary: dict[str, Any]
     launch_summary: dict[str, Any]
+    status: str = "completed"
+    requested_steps: int = 0
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 __all__ = [
     "PRMaterialSpec",
+    "PR_TIMEDEPENDENT_WORKFLOW",
     "PRSolverOptions",
     "PRRunRequest",
     "PRRunResult",
