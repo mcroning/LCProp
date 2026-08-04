@@ -101,7 +101,46 @@ def beam_stack_definition_to_lcprop(
     return converted
 
 
+def beam_stack_to_launchplane(stack: BeamStack):
+    """Convert an LCProp beam stack to enabled LaunchPane definitions.
+
+    ``theta_weight`` is intentionally not represented because LaunchPane owns
+    optical launch data rather than LC material coupling. All optical channel
+    fields and explicit coherence groups are preserved.
+    """
+
+    BeamDefinition, BeamStackDefinition = _launchplane_types()
+    if not isinstance(stack, BeamStack):
+        raise TypeError("stack must be an lcprop.core.beams.BeamStack")
+    stack.validate()
+    definition = BeamStackDefinition(
+        beams=tuple(
+            BeamDefinition(
+                name=channel.name,
+                wavelength_um=channel.wavelength_um,
+                power_mW=channel.power_mW,
+                x_um=channel.x0_um,
+                y_um=channel.y0_um,
+                waist_x_um=channel.waist_x_um,
+                waist_y_um=channel.waist_y_um,
+                tilt_x_rad_per_um=channel.tilt_x_rad_per_um,
+                tilt_y_rad_per_um=channel.tilt_y_rad_per_um,
+                phase_rad=channel.phase_rad,
+                coherence_group=group,
+                enabled=True,
+            )
+            for channel, group in zip(
+                stack.channels,
+                stack.coherence_groups,
+            )
+        )
+    )
+    definition.validate()
+    return definition
+
+
 __all__ = [
     "beam_definition_to_channel",
     "beam_stack_definition_to_lcprop",
+    "beam_stack_to_launchplane",
 ]
