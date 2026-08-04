@@ -100,3 +100,49 @@ The recommended next integrator is semi-implicit diffusion with the remaining
 terms explicit, followed by a Picard correction if benchmarks show it is
 needed. It directly targets `I E_xx`, the stiffest high-frequency term, while
 preserving a small PR-owned solver and backend-portable local operators.
+
+## Two-beam geometry and measurements
+
+For a requested internal polar angle `theta` and azimuth `phi`, the PR helper
+uses
+
+```text
+k_medium = 2*pi*n/wavelength
+kx = k_medium*sin(theta)*cos(phi)
+ky = k_medium*sin(theta)*sin(phi)
+```
+
+The actual LCProp paraxial kernel is
+`exp(-i*pi*dz*wavelength*(fx^2+fy^2)/n)`. Differentiating its spectral phase
+with respect to transverse spatial frequency gives the numerical envelope
+slopes
+
+```text
+dx/dz = kx/k_medium = sin(theta)*cos(phi)
+dy/dz = ky/k_medium = sin(theta)*sin(phi).
+```
+
+Consequently, launch centers for a crossing at `(xc, yc, zc)` are
+`x0=xc-zc*kx/k_medium` and `y0=yc-zc*ky/k_medium`. They deliberately do not
+use the exact-ray `tan(theta)` slope because that is not the trajectory
+implemented by the selected paraxial kernel.
+
+The periodic plane-wave benchmark uses integer FFT modes `+m` and `-m`, so
+both fields and their `2m` interference grating are continuous across x. With
+`kg=(kx_signal-kx_pump)/k0`, paper Equation (7) predicts
+
+```text
+gamma_p*L = gamma*L * 2*kg / (cos(theta)*(1 + kg^2)).
+```
+
+The sign follows the ordered signal-to-pump ratio. Output modal powers are
+computed by complex Fourier projection, never by spatially partitioning the
+interference pattern.
+
+For finite Gaussians, the frozen final E state is replayed through the same
+Strang seam. At every z plane the coherent field is fitted to the two
+pure-diffraction reference fields by solving their 2-by-2 complex Gram system.
+Reported matched powers are `|coefficient|^2` times the reference norm. Since
+overlapping references need not be orthogonal, these matched powers are mode
+diagnostics; conserved total power is always measured directly from the full
+coherent field. Channel-contribution centroids are recorded separately.
