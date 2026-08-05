@@ -22,6 +22,7 @@ from lcprop.pr.evolution import (
     euler_step,
     legacy_conservative_timestep_limit,
     paper_conservative_timestep_limit,
+    semi_implicit_trapezoidal_step,
     validate_timestep,
 )
 from lcprop.pr.optical_response import half_step_response_from_E
@@ -32,6 +33,8 @@ from lcprop.pr.source import (
 from lcprop.pr.specs import (
     PRRunRequest,
     PRRunResult,
+    PR_EULER_INTEGRATOR,
+    PR_SEMI_IMPLICIT_INTEGRATOR,
     PR_TIMEDEPENDENT_WORKFLOW,
 )
 
@@ -176,6 +179,7 @@ def run_pr_timedependent(
         request.solver.dt_normalized,
         grid,
         request.material,
+        integrator=request.solver.integrator,
     )
 
     wavelength_um = wavelengths[0]
@@ -202,32 +206,55 @@ def run_pr_timedependent(
     )
     cancelled = False
     source_stack = grid.xp.empty(E.shape, dtype=grid.real_dtype)
-    for step_index in range(segment_total_steps):
-        if cancellation_token is not None and cancellation_token.is_cancelled():
-            cancelled = True
-            break
 
-        _, source_stack = _optical_pass(
+    def source_intensity_for_state(candidate_E):
+        _, candidate_source = _optical_pass(
             A0,
-            E,
+            candidate_E,
             request=request,
             grid=grid,
             kernel=kernel,
             peak_reference=peak_reference,
             wavelength_um=wavelength_um,
         )
-        E = euler_step(
-            E,
-            source_stack,
-            dt_normalized=request.solver.dt_normalized,
-            applied_field=request.material.applied_field,
-            background_intensity=request.material.background_intensity,
-            dx_normalized=(
-                request.material.characteristic_wavenumber_per_um
-                * grid.dx_um
-            ),
-            xp=grid.xp,
-        )
+        return candidate_source
+
+    for step_index in range(segment_total_steps):
+        if cancellation_token is not None and cancellation_token.is_cancelled():
+            cancelled = True
+            break
+
+        if request.solver.integrator == PR_EULER_INTEGRATOR:
+            source_stack = source_intensity_for_state(E)
+            E = euler_step(
+                E,
+                source_stack,
+                dt_normalized=request.solver.dt_normalized,
+                applied_field=request.material.applied_field,
+                background_intensity=request.material.background_intensity,
+                dx_normalized=(
+                    request.material.characteristic_wavenumber_per_um
+                    * grid.dx_um
+                ),
+                xp=grid.xp,
+            )
+        elif request.solver.integrator == PR_SEMI_IMPLICIT_INTEGRATOR:
+            E = semi_implicit_trapezoidal_step(
+                E,
+                source_intensity_for_state,
+                dt_normalized=request.solver.dt_normalized,
+                applied_field=request.material.applied_field,
+                background_intensity=request.material.background_intensity,
+                dx_normalized=(
+                    request.material.characteristic_wavenumber_per_um
+                    * grid.dx_um
+                ),
+                xp=grid.xp,
+            )
+        else:  # guarded by PRSolverOptions.validate()
+            raise ValueError(
+                f"unknown PR integrator: {request.solver.integrator}"
+            )
         segment_completed_steps = step_index + 1
         completed_steps = (
             int(_completed_steps_offset) + segment_completed_steps
@@ -342,6 +369,7 @@ def run_pr_timedependent(
                 request.material.characteristic_wavenumber_per_um
             ),
             "peak_intensity_reference": peak_reference,
+            "integrator": request.solver.integrator,
             "conservative_dt_limit": timestep_limit,
             "paper_equation_15_dt_limit": paper_conservative_timestep_limit(
                 grid,
@@ -351,7 +379,14 @@ def run_pr_timedependent(
                 grid,
                 request.material,
             ),
-            "stepping_order": "frozen-E optical Strang pass, then synchronous E Euler update",
+            "stepping_order": (
+                "frozen-E optical Strang pass, then synchronous E Euler update"
+                if request.solver.integrator == PR_EULER_INTEGRATOR
+                else (
+                    "accepted/predicted frozen-E optical Strang passes with "
+                    "synchronous linearly implicit trapezoidal E update"
+                )
+            ),
         },
     )
 

@@ -21,6 +21,8 @@ from lcprop.pr.evolution import (
     paper_conservative_timestep_limit,
     paper_mode_timestep_rule,
     periodic_derivatives_x,
+    semi_implicit_amplification,
+    semi_implicit_conservative_timestep_limit,
     validate_timestep,
 )
 from lcprop.pr.optical_response import half_step_response_from_E
@@ -28,6 +30,7 @@ from lcprop.pr.specs import (
     PRMaterialSpec,
     PRRunRequest,
     PRSolverOptions,
+    PR_SEMI_IMPLICIT_INTEGRATOR,
 )
 from lcprop.pr.workflow import run_pr_timedependent
 
@@ -290,6 +293,74 @@ def test_conservative_timestep_guard_reconciles_paper_legacy_and_new_rules():
         validate_timestep(np.nextafter(limit, np.inf), grid, material)
 
 
+def test_semi_implicit_guard_removes_grid_scale_diffusion_restriction():
+    grid = make_grid(
+        GridSpec(
+            Nx=128,
+            Ny=4,
+            x_aperture_um=20.0,
+            y_aperture_um=4.0,
+            dz_um=1.0,
+            z_length_um=1.0,
+        ),
+        real_dtype=np.float64,
+    )
+    material = PRMaterialSpec(
+        dark_intensity=0.2,
+        applied_field=0.5,
+        characteristic_wavenumber_per_um_override=1.0,
+    )
+    euler_limit = conservative_timestep_limit(grid, material)
+    semi_implicit_limit = semi_implicit_conservative_timestep_limit(
+        grid,
+        material,
+    )
+
+    # The zero mode retains explicit Heun reaction with exact boundary 2/I0;
+    # the conservative policy uses one eighth of that boundary.
+    assert semi_implicit_limit == pytest.approx(1.0 / (4.0 * 1.2))
+    assert semi_implicit_limit > 100.0 * euler_limit
+    assert validate_timestep(
+        semi_implicit_limit,
+        grid,
+        material,
+        integrator=PR_SEMI_IMPLICIT_INTEGRATOR,
+    ) == pytest.approx(semi_implicit_limit)
+    with pytest.raises(ValueError, match=PR_SEMI_IMPLICIT_INTEGRATOR):
+        validate_timestep(
+            np.nextafter(semi_implicit_limit, np.inf),
+            grid,
+            material,
+            integrator=PR_SEMI_IMPLICIT_INTEGRATOR,
+        )
+
+
+def test_semi_implicit_scalar_amplification_reduces_to_cn_and_heun():
+    dt = 0.3
+    lambda_implicit = -2.0
+    lambda_explicit = -0.7
+
+    cn = semi_implicit_amplification(
+        dt,
+        lambda_implicit=lambda_implicit,
+        lambda_explicit=0.0,
+    )
+    heun = semi_implicit_amplification(
+        dt,
+        lambda_implicit=0.0,
+        lambda_explicit=lambda_explicit,
+    )
+
+    z_implicit = dt * lambda_implicit
+    z_explicit = dt * lambda_explicit
+    assert cn == pytest.approx(
+        (1.0 + 0.5 * z_implicit) / (1.0 - 0.5 * z_implicit)
+    )
+    assert heun == pytest.approx(
+        1.0 + z_explicit + 0.5 * z_explicit**2
+    )
+
+
 def test_zero_pr_response_equals_pure_diffraction():
     rng = np.random.default_rng(12)
     A0 = rng.normal(size=(2, 12, 10)) + 1j * rng.normal(size=(2, 12, 10))
@@ -447,7 +518,7 @@ def test_frozen_response_lie_and_strang_converge_but_strang_is_more_accurate():
     assert strang_errors[0] / strang_errors[1] > 3.5
 
 
-def _plane_wave_request(*, backend="numpy"):
+def _plane_wave_request(*, backend="numpy", integrator="euler"):
     grid = GridSpec(
         Nx=8,
         Ny=6,
@@ -473,7 +544,12 @@ def _plane_wave_request(*, backend="numpy"):
         refractive_index=2.4,
         characteristic_wavenumber_per_um_override=0.1,
     )
-    solver = PRSolverOptions(Nt=3, dt_normalized=0.01, optical_substeps=2)
+    solver = PRSolverOptions(
+        Nt=3,
+        dt_normalized=0.01,
+        optical_substeps=2,
+        integrator=integrator,
+    )
     return PRRunRequest(
         grid=grid,
         beams=beams,
@@ -502,6 +578,26 @@ def test_small_plane_wave_workflow_matches_analytic_uniform_prediction():
 
     assert result.diagnostics["backend"]["backend"] == "numpy"
     assert np.allclose(result.E_final, E_expected, rtol=0.0, atol=1e-14)
+    assert np.allclose(result.source_intensity_stack, intensity, atol=1e-13)
+    assert np.allclose(result.A_final, phase_expected, rtol=1e-12, atol=1e-12)
+    assert result.power_final == pytest.approx(result.power_initial, rel=2e-14)
+
+
+def test_semi_implicit_plane_wave_workflow_matches_heun_prediction():
+    request = _plane_wave_request(integrator=PR_SEMI_IMPLICIT_INTEGRATOR)
+    result = run_pr_timedependent(request)
+    background = request.material.background_intensity
+    intensity = 1.0 + background
+    dt_intensity = request.solver.dt_normalized * intensity
+    multiplier = 1.0 - dt_intensity + 0.5 * dt_intensity**2
+    equilibrium = request.material.applied_field * background / intensity
+    E_expected = equilibrium * (1.0 - multiplier**request.solver.Nt)
+    phase_expected = np.exp(
+        -2j * request.material.gain_length_product * E_expected
+    )
+
+    assert result.diagnostics["integrator"] == PR_SEMI_IMPLICIT_INTEGRATOR
+    assert np.allclose(result.E_final, E_expected, rtol=0.0, atol=2e-14)
     assert np.allclose(result.source_intensity_stack, intensity, atol=1e-13)
     assert np.allclose(result.A_final, phase_expected, rtol=1e-12, atol=1e-12)
     assert result.power_final == pytest.approx(result.power_initial, rel=2e-14)

@@ -26,6 +26,7 @@ from lcprop.pr.gui.request_adapter import (
     validate_pr_gui_request,
 )
 from lcprop.pr.specs import PRMaterialSpec, PRRunRequest, PRSolverOptions
+from lcprop.pr.specs import PR_EULER_INTEGRATOR, PR_SEMI_IMPLICIT_INTEGRATOR
 
 
 @pytest.fixture(scope="module")
@@ -79,6 +80,7 @@ def test_pr_gui_defaults_are_pr_owned_valid_and_well_sampled(app):
         Nt=10,
         dt_normalized=1e-3,
         optical_substeps=1,
+        integrator=PR_SEMI_IMPLICIT_INTEGRATOR,
     )
     assert request.backend == BackendSpec(
         backend="numpy",
@@ -214,6 +216,7 @@ def test_apply_and_rebuild_saved_pr_request_is_lossless(app):
             Nt=7,
             dt_normalized=1e-4,
             optical_substeps=3,
+            integrator=PR_SEMI_IMPLICIT_INTEGRATOR,
         ),
         backend=BackendSpec(
             backend="auto",
@@ -240,6 +243,23 @@ def test_optional_characteristic_wavenumber_none_round_trips(app):
     _apply(request, controls)
 
     assert _build(controls).material == request.material
+
+
+def test_pr_gui_integrator_selection_round_trips(app):
+    controls = _controls(app)
+    semi_implicit = _build(controls)
+    assert semi_implicit.solver.integrator == PR_SEMI_IMPLICIT_INTEGRATOR
+
+    explicit_euler = replace(
+        semi_implicit,
+        solver=replace(
+            semi_implicit.solver,
+            integrator=PR_EULER_INTEGRATOR,
+        ),
+    )
+    _apply(explicit_euler, controls)
+
+    assert _build(controls).solver.integrator == PR_EULER_INTEGRATOR
 
 
 def test_pr_gui_preflight_rejects_multiple_wavelengths(app):

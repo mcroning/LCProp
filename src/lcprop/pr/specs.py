@@ -17,6 +17,12 @@ _BOLTZMANN_J_PER_K = 1.380649e-23
 
 PR_MATERIAL_ID = "pr"
 PR_TIMEDEPENDENT_WORKFLOW = "pr_timedependent"
+PR_EULER_INTEGRATOR = "euler"
+PR_SEMI_IMPLICIT_INTEGRATOR = "semi_implicit_trapezoidal"
+PR_INTEGRATORS = (
+    PR_EULER_INTEGRATOR,
+    PR_SEMI_IMPLICIT_INTEGRATOR,
+)
 
 
 @dataclass(frozen=True)
@@ -92,11 +98,12 @@ class PRMaterialSpec:
 
 @dataclass(frozen=True)
 class PRSolverOptions:
-    """Explicit normalized-time and optical-substep controls."""
+    """Normalized material-time, integrator, and optical-step controls."""
 
     Nt: int = 1
     dt_normalized: float = 1e-3
     optical_substeps: int = 1
+    integrator: str = PR_EULER_INTEGRATOR
 
     def validate(self) -> None:
         if int(self.Nt) < 0:
@@ -105,6 +112,10 @@ class PRSolverOptions:
             raise ValueError("dt_normalized must be finite and positive")
         if int(self.optical_substeps) < 1:
             raise ValueError("optical_substeps must be at least one")
+        if self.integrator not in PR_INTEGRATORS:
+            raise ValueError(
+                "integrator must be one of " + ", ".join(PR_INTEGRATORS)
+            )
 
 
 @dataclass(frozen=True)
@@ -156,7 +167,10 @@ class PRRunResult:
 
 __all__ = [
     "PRMaterialSpec",
+    "PR_EULER_INTEGRATOR",
+    "PR_INTEGRATORS",
     "PR_MATERIAL_ID",
+    "PR_SEMI_IMPLICIT_INTEGRATOR",
     "PR_TIMEDEPENDENT_WORKFLOW",
     "PRSolverOptions",
     "PRRunRequest",

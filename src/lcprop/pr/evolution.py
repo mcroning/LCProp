@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Callable
 
-from lcprop.pr.specs import PRMaterialSpec
+from lcprop.pr.specs import (
+    PRMaterialSpec,
+    PR_EULER_INTEGRATOR,
+    PR_SEMI_IMPLICIT_INTEGRATOR,
+)
 
 
 def centered_difference_symbols(
@@ -59,6 +63,84 @@ def linearized_euler_mode_limit(
     decay = intensity * (1.0 + k2_squared)
     drift = intensity * field * k1
     return 2.0 * decay / (decay * decay + drift * drift)
+
+
+def semi_implicit_amplification(
+    dt_normalized: float,
+    *,
+    lambda_implicit: complex,
+    lambda_explicit: complex,
+) -> complex:
+    """Return the prototype predictor/corrector scalar amplification."""
+
+    dt = float(dt_normalized)
+    if not math.isfinite(dt) or dt < 0.0:
+        raise ValueError("dt_normalized must be finite and nonnegative")
+    z_implicit = dt * complex(lambda_implicit)
+    z_explicit = dt * complex(lambda_explicit)
+    predictor = (1.0 + z_explicit) / (1.0 - z_implicit)
+    return (
+        1.0
+        + 0.5 * (z_implicit + z_explicit)
+        + 0.5 * z_explicit * predictor
+    ) / (1.0 - 0.5 * z_implicit)
+
+
+def linearized_semi_implicit_mode_limit(
+    k_normalized: float,
+    *,
+    dx_normalized: float,
+    uniform_intensity: float,
+    equilibrium_field: float = 0.0,
+) -> float:
+    """Return the first scalar stability boundary for one split mode.
+
+    Diffusion is assigned to the implicit operator.  Uniform-state reaction
+    and drift remain explicit.  This is a local linearized result, not a
+    nonlinear stability guarantee.
+    """
+
+    intensity = float(uniform_intensity)
+    field = float(equilibrium_field)
+    if not math.isfinite(intensity) or intensity <= 0.0:
+        raise ValueError("uniform_intensity must be finite and positive")
+    if not math.isfinite(field):
+        raise ValueError("equilibrium_field must be finite")
+    k1, k2_squared = centered_difference_symbols(
+        k_normalized,
+        dx_normalized=dx_normalized,
+    )
+    lambda_implicit = -intensity * k2_squared
+    lambda_explicit = -intensity - 1j * intensity * field * k1
+
+    scale = max(abs(lambda_implicit), abs(lambda_explicit), 1e-15)
+    lower = 0.0
+    upper = 1.0 / scale
+    for _ in range(100):
+        amplification = semi_implicit_amplification(
+            upper,
+            lambda_implicit=lambda_implicit,
+            lambda_explicit=lambda_explicit,
+        )
+        if abs(amplification) > 1.0:
+            break
+        lower = upper
+        upper *= 2.0
+    else:
+        return math.inf
+
+    for _ in range(100):
+        midpoint = 0.5 * (lower + upper)
+        amplification = semi_implicit_amplification(
+            midpoint,
+            lambda_implicit=lambda_implicit,
+            lambda_explicit=lambda_explicit,
+        )
+        if abs(amplification) <= 1.0:
+            lower = midpoint
+        else:
+            upper = midpoint
+    return lower
 
 
 def paper_mode_timestep_rule(k_normalized: float) -> float:
@@ -142,6 +224,273 @@ def hopping_rhs(
         float(applied_field) * background
         - (E * intensity - I_x) * (1.0 + E_x)
         + E_xx * intensity
+    )
+
+
+def diffusion_implicit_split(
+    E,
+    intensity,
+    *,
+    applied_field: float,
+    background_intensity: float,
+    dx_normalized: float,
+    xp: Any,
+):
+    """Return ``(I*D2(E), R(E; I) - I*D2(E))``.
+
+    The two returned arrays sum to the authoritative ``hopping_rhs`` exactly
+    up to floating-point subtraction.  Only the grid-stiff diffusion term is
+    selected for implicit treatment; this function does not define a second
+    physical residual.
+    """
+
+    residual = hopping_rhs(
+        E,
+        intensity,
+        applied_field=applied_field,
+        background_intensity=background_intensity,
+        dx_normalized=dx_normalized,
+        xp=xp,
+    )
+    _, E_xx = periodic_derivatives_x(
+        E,
+        dx_normalized=dx_normalized,
+        xp=xp,
+    )
+    implicit = intensity * E_xx
+    return implicit, residual - implicit
+
+
+def _array_has_true(value, *, xp: Any) -> bool:
+    reduced = xp.any(value)
+    return bool(reduced.item() if hasattr(reduced, "item") else reduced)
+
+
+def _validate_diffusion_solve_inputs(
+    rhs,
+    intensity,
+    *,
+    alpha: float,
+    dx_normalized: float,
+    xp: Any,
+):
+    if rhs.shape != intensity.shape:
+        raise ValueError("rhs and intensity must have identical shapes")
+    if rhs.ndim not in (2, 3):
+        raise ValueError(
+            "rhs and intensity must have shape (Nx, Ny) or (Nz, Nx, Ny)"
+        )
+    if int(rhs.shape[-2]) < 3:
+        raise ValueError("periodic diffusion solve requires Nx >= 3")
+    if getattr(rhs.dtype, "kind", None) != "f":
+        raise TypeError("rhs must have a real floating-point dtype")
+    if getattr(intensity.dtype, "kind", None) != "f":
+        raise TypeError("intensity must have a real floating-point dtype")
+    resolved_alpha = float(alpha)
+    if not math.isfinite(resolved_alpha) or resolved_alpha < 0.0:
+        raise ValueError("alpha must be finite and nonnegative")
+    resolved_dx = float(dx_normalized)
+    if not math.isfinite(resolved_dx) or resolved_dx <= 0.0:
+        raise ValueError("dx_normalized must be finite and positive")
+    if _array_has_true(~xp.isfinite(rhs), xp=xp):
+        raise ValueError("rhs must contain only finite values")
+    if _array_has_true(~xp.isfinite(intensity), xp=xp):
+        raise ValueError("intensity must contain only finite values")
+    if _array_has_true(intensity < 0.0, xp=xp):
+        raise ValueError("intensity must be nonnegative")
+    return resolved_alpha, resolved_dx
+
+
+def _solve_tridiagonal_rows(lower, diagonal, upper, rhs, *, xp: Any):
+    """Solve independent variable-coefficient tridiagonal row systems."""
+
+    batch, n = rhs.shape
+    cprime = xp.empty_like(rhs)
+    dprime = xp.empty_like(rhs)
+
+    denominator = diagonal[:, 0]
+    cprime[:, 0] = upper[:, 0] / denominator
+    dprime[:, 0] = rhs[:, 0] / denominator
+
+    for index in range(1, n):
+        denominator = (
+            diagonal[:, index]
+            - lower[:, index] * cprime[:, index - 1]
+        )
+        if index < n - 1:
+            cprime[:, index] = upper[:, index] / denominator
+        else:
+            cprime[:, index] = 0.0
+        dprime[:, index] = (
+            rhs[:, index]
+            - lower[:, index] * dprime[:, index - 1]
+        ) / denominator
+
+    solution = xp.empty_like(rhs)
+    solution[:, -1] = dprime[:, -1]
+    for index in range(n - 2, -1, -1):
+        solution[:, index] = (
+            dprime[:, index]
+            - cprime[:, index] * solution[:, index + 1]
+        )
+    return solution
+
+
+def solve_periodic_variable_diffusion(
+    rhs,
+    intensity,
+    *,
+    alpha: float,
+    dx_normalized: float,
+    xp: Any,
+):
+    """Solve ``(1 - alpha*I*D2) u = rhs`` along periodic x.
+
+    ``rhs`` and ``intensity`` have shape ``(Nx, Ny)`` or
+    ``(Nz, Nx, Ny)``.  The centered second derivative ``D2`` acts on axis
+    ``-2``.  The solve is cyclic tridiagonal along x and batched over every
+    z/y line.  Spatially varying nonnegative intensity is retained exactly in
+    the discrete row coefficients.
+    """
+
+    resolved_alpha, resolved_dx = _validate_diffusion_solve_inputs(
+        rhs,
+        intensity,
+        alpha=alpha,
+        dx_normalized=dx_normalized,
+        xp=xp,
+    )
+    if resolved_alpha == 0.0:
+        return rhs.copy()
+
+    Nx = int(rhs.shape[-2])
+    rhs_rows = xp.moveaxis(rhs, -2, -1).reshape((-1, Nx))
+    intensity_rows = xp.moveaxis(intensity, -2, -1).reshape((-1, Nx))
+    q = (
+        xp.asarray(resolved_alpha, dtype=rhs.dtype)
+        * intensity_rows.astype(rhs.dtype, copy=False)
+        / xp.asarray(resolved_dx * resolved_dx, dtype=rhs.dtype)
+    )
+    lower = -q
+    upper = -q
+    diagonal = 1.0 + 2.0 * q
+
+    # Sherman-Morrison reduction of each cyclic system to two ordinary
+    # tridiagonal solves.  The corner entries are row-specific because the
+    # diffusion coefficient is I_j rather than a shared scalar.
+    corner_upper_right = lower[:, 0]
+    corner_lower_left = upper[:, -1]
+    gamma = -diagonal[:, 0]
+    modified_diagonal = diagonal.copy()
+    modified_diagonal[:, 0] -= gamma
+    modified_diagonal[:, -1] -= (
+        corner_upper_right * corner_lower_left / gamma
+    )
+
+    primary = _solve_tridiagonal_rows(
+        lower,
+        modified_diagonal,
+        upper,
+        rhs_rows,
+        xp=xp,
+    )
+    correction_rhs = xp.zeros_like(rhs_rows)
+    correction_rhs[:, 0] = gamma
+    correction_rhs[:, -1] = corner_lower_left
+    correction = _solve_tridiagonal_rows(
+        lower,
+        modified_diagonal,
+        upper,
+        correction_rhs,
+        xp=xp,
+    )
+    factor_denominator = (
+        1.0
+        + correction[:, 0]
+        + corner_upper_right * correction[:, -1] / gamma
+    )
+    if _array_has_true(factor_denominator == 0.0, xp=xp):
+        raise ValueError("singular periodic diffusion correction")
+    factor = (
+        primary[:, 0]
+        + corner_upper_right * primary[:, -1] / gamma
+    ) / factor_denominator
+    solution_rows = primary - factor[:, None] * correction
+    solution = xp.moveaxis(
+        solution_rows.reshape(xp.moveaxis(rhs, -2, -1).shape),
+        -1,
+        -2,
+    )
+    if _array_has_true(~xp.isfinite(solution), xp=xp):
+        raise ValueError("periodic diffusion solve produced nonfinite values")
+    return solution.astype(rhs.dtype, copy=False)
+
+
+def semi_implicit_trapezoidal_step(
+    E,
+    intensity_from_state: Callable[[Any], Any],
+    *,
+    dt_normalized: float,
+    applied_field: float,
+    background_intensity: float,
+    dx_normalized: float,
+    xp: Any,
+):
+    """Advance one production second-order PR material step.
+
+    The stiff ``I*D2(E)`` term is treated by a linearly implicit
+    predictor/corrector.  ``intensity_from_state`` is evaluated at both the
+    accepted state and the predicted state, so it may represent either a
+    prescribed intensity or the complete self-consistent optical mapping.
+
+    This primitive is selected by the production PR workflow when the
+    ``semi_implicit_trapezoidal`` integrator is requested.
+    """
+
+    dt = float(dt_normalized)
+    if not math.isfinite(dt) or dt <= 0.0:
+        raise ValueError("dt_normalized must be finite and positive")
+    if not callable(intensity_from_state):
+        raise TypeError("intensity_from_state must be callable")
+
+    intensity_n = xp.asarray(intensity_from_state(E), dtype=E.dtype)
+    implicit_n, explicit_n = diffusion_implicit_split(
+        E,
+        intensity_n,
+        applied_field=applied_field,
+        background_intensity=background_intensity,
+        dx_normalized=dx_normalized,
+        xp=xp,
+    )
+    predictor = solve_periodic_variable_diffusion(
+        E + dt * explicit_n,
+        intensity_n,
+        alpha=dt,
+        dx_normalized=dx_normalized,
+        xp=xp,
+    )
+
+    intensity_predictor = xp.asarray(
+        intensity_from_state(predictor),
+        dtype=E.dtype,
+    )
+    _, explicit_predictor = diffusion_implicit_split(
+        predictor,
+        intensity_predictor,
+        applied_field=applied_field,
+        background_intensity=background_intensity,
+        dx_normalized=dx_normalized,
+        xp=xp,
+    )
+    corrected_rhs = E + 0.5 * dt * (
+        implicit_n + explicit_n + explicit_predictor
+    )
+    return solve_periodic_variable_diffusion(
+        corrected_rhs,
+        intensity_predictor,
+        alpha=0.5 * dt,
+        dx_normalized=dx_normalized,
+        xp=xp,
     )
 
 
@@ -244,26 +593,80 @@ def conservative_timestep_limit(grid, material: PRMaterialSpec) -> float:
     return limit
 
 
-def validate_timestep(dt_normalized: float, grid, material: PRMaterialSpec) -> float:
-    """Validate and return the implemented conservative normalized-time guard."""
+def semi_implicit_conservative_timestep_limit(
+    grid,
+    material: PRMaterialSpec,
+) -> float:
+    """Return the quarter-time-style guard for the selected IMEX method."""
+
+    material.validate()
+    Nx = int(grid.Nx)
+    dx_normalized = (
+        material.characteristic_wavenumber_per_um * float(grid.dx_um)
+    )
+    uniform_intensity = 1.0 + material.background_intensity
+    equilibrium_field = (
+        float(material.applied_field)
+        * material.background_intensity
+        / uniform_intensity
+    )
+    limits = []
+    for index in range(Nx):
+        signed_index = index if index <= Nx // 2 else index - Nx
+        k_normalized = 2.0 * math.pi * signed_index / (Nx * dx_normalized)
+        boundary = linearized_semi_implicit_mode_limit(
+            k_normalized,
+            dx_normalized=dx_normalized,
+            uniform_intensity=uniform_intensity,
+            equilibrium_field=equilibrium_field,
+        )
+        limits.append(boundary / 8.0)
+    limit = min(limits)
+    if not math.isfinite(limit) or limit <= 0.0:
+        raise ValueError(
+            "could not determine a positive semi-implicit PR timestep limit"
+        )
+    return limit
+
+
+def validate_timestep(
+    dt_normalized: float,
+    grid,
+    material: PRMaterialSpec,
+    *,
+    integrator: str = PR_EULER_INTEGRATOR,
+) -> float:
+    """Validate and return the selected integrator's conservative guard."""
 
     dt = float(dt_normalized)
     if not math.isfinite(dt) or dt <= 0.0:
         raise ValueError("dt_normalized must be finite and positive")
-    limit = conservative_timestep_limit(grid, material)
+    if integrator == PR_EULER_INTEGRATOR:
+        limit = conservative_timestep_limit(grid, material)
+    elif integrator == PR_SEMI_IMPLICIT_INTEGRATOR:
+        limit = semi_implicit_conservative_timestep_limit(grid, material)
+    else:
+        raise ValueError(f"unknown PR integrator: {integrator}")
     if dt > limit:
         raise ValueError(
-            f"dt_normalized={dt:g} exceeds conservative PR limit {limit:g}"
+            f"dt_normalized={dt:g} exceeds conservative PR limit "
+            f"{limit:g} for integrator {integrator}"
         )
     return limit
 
 
 __all__ = [
     "centered_difference_symbols",
+    "diffusion_implicit_split",
+    "linearized_semi_implicit_mode_limit",
     "linearized_euler_mode_limit",
     "paper_mode_timestep_rule",
     "legacy_mode_timestep_rule",
     "periodic_derivatives_x",
+    "semi_implicit_amplification",
+    "semi_implicit_conservative_timestep_limit",
+    "semi_implicit_trapezoidal_step",
+    "solve_periodic_variable_diffusion",
     "hopping_rhs",
     "euler_step",
     "paper_conservative_timestep_limit",

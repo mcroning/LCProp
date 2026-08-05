@@ -13,11 +13,16 @@ from lcprop.pr.workflow import (
     continue_pr_timedependent,
     run_pr_timedependent,
 )
+from lcprop.pr.specs import PR_SEMI_IMPLICIT_INTEGRATOR
 from tests.test_pr_execution import _request
 
 
-def _request_with_initial_state(*, steps: int = 4):
+def _request_with_initial_state(*, steps: int = 4, integrator: str = "euler"):
     request = _request(steps=steps)
+    request = replace(
+        request,
+        solver=replace(request.solver, integrator=integrator),
+    )
     shape = (
         round(request.grid.z_length_um / request.grid.dz_um),
         request.grid.Nx,
@@ -102,6 +107,28 @@ def test_cancel_resume_matches_uninterrupted_run_exactly():
     assert resumed.completed_steps == 4
     assert resumed.requested_steps == 4
     assert resumed.time_normalized == pytest.approx(0.04)
+    _assert_same_cumulative_physics(resumed, uninterrupted)
+    np.testing.assert_array_equal(
+        resumed.checkpoint.E_current,
+        uninterrupted.checkpoint.E_current,
+    )
+
+
+def test_semi_implicit_resume_matches_uninterrupted_run_exactly():
+    request = _request_with_initial_state(
+        steps=4,
+        integrator=PR_SEMI_IMPLICIT_INTEGRATOR,
+    )
+    first = run_pr_timedependent(
+        replace(request, solver=replace(request.solver, Nt=1))
+    )
+    resumed = continue_pr_timedependent(
+        request,
+        first.checkpoint,
+        additional_steps=3,
+    )
+    uninterrupted = run_pr_timedependent(request)
+
     _assert_same_cumulative_physics(resumed, uninterrupted)
     np.testing.assert_array_equal(
         resumed.checkpoint.E_current,
@@ -238,6 +265,16 @@ def test_zero_step_continuation_preserves_accepted_state():
             lambda request: replace(
                 request,
                 solver=replace(request.solver, optical_substeps=2),
+            ),
+            "incompatible solver",
+        ),
+        (
+            lambda request: replace(
+                request,
+                solver=replace(
+                    request.solver,
+                    integrator=PR_SEMI_IMPLICIT_INTEGRATOR,
+                ),
             ),
             "incompatible solver",
         ),

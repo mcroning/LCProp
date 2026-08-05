@@ -13,7 +13,12 @@ import pytest
 
 from lcprop.pr.gui.main_window import PRMainWindow
 from lcprop.pr.operations import PR_TIMEDEPENDENT_OPERATION
-from lcprop.pr.specs import PR_MATERIAL_ID, PR_TIMEDEPENDENT_WORKFLOW
+from lcprop.pr.specs import (
+    PR_EULER_INTEGRATOR,
+    PR_MATERIAL_ID,
+    PR_SEMI_IMPLICIT_INTEGRATOR,
+    PR_TIMEDEPENDENT_WORKFLOW,
+)
 from lcprop.pr.workflow import run_pr_timedependent
 
 
@@ -264,6 +269,22 @@ def test_checkpoint_compatibility_tracks_edits_without_discarding_state(
     assert window.last_checkpoint is checkpoint
     assert window.continue_button.isEnabled()
     assert window.checkpoint_compatibility_reason is None
+
+    original_integrator = checkpoint.request.solver.integrator
+    other_integrator = (
+        PR_EULER_INTEGRATOR
+        if original_integrator != PR_EULER_INTEGRATOR
+        else PR_SEMI_IMPLICIT_INTEGRATOR
+    )
+    window.evolution_panel.integrator.setCurrentIndex(
+        window.evolution_panel.integrator.findData(other_integrator)
+    )
+    assert not window.continue_button.isEnabled()
+    assert "incompatible solver" in window.checkpoint_compatibility_reason
+    window.evolution_panel.integrator.setCurrentIndex(
+        window.evolution_panel.integrator.findData(original_integrator)
+    )
+    assert window.continue_button.isEnabled()
 
     window.evolution_panel.Nt.setValue(checkpoint.request.solver.Nt + 4)
     assert window.continue_button.isEnabled()

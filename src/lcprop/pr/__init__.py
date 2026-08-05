@@ -12,10 +12,32 @@ from lcprop.pr.persistence import (
 )
 from lcprop.pr.specs import (
     PRMaterialSpec,
+    PR_EULER_INTEGRATOR,
+    PR_INTEGRATORS,
     PR_MATERIAL_ID,
     PRRunRequest,
     PRRunResult,
     PRSolverOptions,
+    PR_SEMI_IMPLICIT_INTEGRATOR,
+)
+from lcprop.pr.static import (
+    PRStaticResult,
+    PRStaticSolverOptions,
+    solve_pr_static_intensity,
+)
+from lcprop.pr.readiness import (
+    PRImageAmplificationReadinessResult,
+    PRImageAmplificationReadinessSpec,
+    make_image_amplification_readiness_request,
+    run_image_amplification_readiness,
+)
+from lcprop.pr.image_amplification import (
+    PRImageAmplificationResult,
+    PRImageAmplificationSpec,
+    make_image_amplification_request,
+    paper_absolute_signal_gain,
+    paper_figure4_spec,
+    run_image_amplification,
 )
 from lcprop.pr.geometry import crossing_beam_channels, paraxial_kernel_slope
 from lcprop.pr.coupling import (
@@ -28,10 +50,19 @@ from lcprop.pr.workflow import continue_pr_timedependent, run_pr_timedependent
 
 __all__ = [
     "PRMaterialSpec",
+    "PR_EULER_INTEGRATOR",
+    "PR_INTEGRATORS",
     "PR_MATERIAL_ID",
     "PRRunRequest",
     "PRRunResult",
     "PRSolverOptions",
+    "PR_SEMI_IMPLICIT_INTEGRATOR",
+    "PRStaticResult",
+    "PRStaticSolverOptions",
+    "PRImageAmplificationReadinessResult",
+    "PRImageAmplificationReadinessSpec",
+    "PRImageAmplificationResult",
+    "PRImageAmplificationSpec",
     "PRTimeDependentCheckpoint",
     "PR_CHECKPOINT_SCHEMA_VERSION",
     "load_pr_checkpoint",
@@ -44,6 +75,13 @@ __all__ = [
     "run_plane_wave_coupling",
     "FiniteGaussianCouplingSpec",
     "run_finite_gaussian_coupling",
+    "make_image_amplification_readiness_request",
+    "run_image_amplification_readiness",
+    "make_image_amplification_request",
+    "paper_absolute_signal_gain",
+    "paper_figure4_spec",
+    "run_image_amplification",
+    "solve_pr_static_intensity",
     "continue_pr_timedependent",
     "run_pr_timedependent",
 ]

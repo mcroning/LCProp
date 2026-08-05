@@ -53,6 +53,7 @@ def validate_pr_gui_request(request: PRRunRequest) -> PRRequestPreflight:
         request.solver.dt_normalized,
         grid,
         request.material,
+        integrator=request.solver.integrator,
     )
     aperture = analyze_beam_stack_aperture(
         grid,

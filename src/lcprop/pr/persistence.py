@@ -21,12 +21,14 @@ from lcprop.pr.specs import (
     PRMaterialSpec,
     PRRunRequest,
     PRSolverOptions,
+    PR_EULER_INTEGRATOR,
     PR_MATERIAL_ID,
     PR_TIMEDEPENDENT_WORKFLOW,
 )
 
 
-PR_CHECKPOINT_SCHEMA_VERSION = 1
+PR_CHECKPOINT_SCHEMA_VERSION = 2
+PR_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS = (1, PR_CHECKPOINT_SCHEMA_VERSION)
 PR_CHECKPOINT_MATERIAL = PR_MATERIAL_ID
 PR_CHECKPOINT_FORMAT = "lcprop-checkpoint"
 
@@ -49,8 +51,21 @@ def _request_to_dict(request: PRRunRequest) -> dict[str, Any]:
     }
 
 
-def _request_from_dict(values: dict[str, Any]) -> PRRunRequest:
+def _request_from_dict(
+    values: dict[str, Any],
+    *,
+    schema_version: int,
+) -> PRRunRequest:
     beam_values = values["beams"]
+    solver_values = dict(values["solver"])
+    if schema_version == 1:
+        if "integrator" in solver_values:
+            raise ValueError(
+                "PR checkpoint schema version 1 must not contain integrator identity"
+            )
+        solver_values["integrator"] = PR_EULER_INTEGRATOR
+    elif "integrator" not in solver_values:
+        raise ValueError("PR checkpoint solver is missing integrator identity")
     request = PRRunRequest(
         grid=GridSpec(**values["grid"]),
         material=PRMaterialSpec(**values["material"]),
@@ -60,7 +75,7 @@ def _request_from_dict(values: dict[str, Any]) -> PRRunRequest:
             ),
             coherence=beam_values["coherence"],
         ),
-        solver=PRSolverOptions(**values["solver"]),
+        solver=PRSolverOptions(**solver_values),
         backend=BackendSpec(**values["backend"]),
     )
     request.grid.validate()
@@ -79,7 +94,7 @@ def _identity(document: dict[str, Any], *, name: str) -> int:
     if document.get("workflow") != PR_TIMEDEPENDENT_WORKFLOW:
         raise ValueError(f"invalid PR checkpoint workflow in {name}")
     version = int(document["schema_version"])
-    if version != PR_CHECKPOINT_SCHEMA_VERSION:
+    if version not in PR_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS:
         raise ValueError(f"unsupported PR checkpoint schema version: {version}")
     return version
 
@@ -175,7 +190,10 @@ def load_pr_checkpoint(run_dir: str | Path) -> PRTimeDependentCheckpoint:
         A0 = np.asarray(arrays["A0"]).copy()
 
     checkpoint = PRTimeDependentCheckpoint(
-        request=_request_from_dict(request_document["request"]),
+        request=_request_from_dict(
+            request_document["request"],
+            schema_version=request_version,
+        ),
         E_initial=E_initial,
         E_current=E_current,
         A0=A0,
@@ -195,6 +213,7 @@ __all__ = [
     "PR_CHECKPOINT_FORMAT",
     "PR_CHECKPOINT_MATERIAL",
     "PR_CHECKPOINT_SCHEMA_VERSION",
+    "PR_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS",
     "load_pr_checkpoint",
     "save_pr_checkpoint",
 ]
