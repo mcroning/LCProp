@@ -79,6 +79,9 @@ class PRImageAmplificationResult:
     zero_response_image_intensity_correlation: float
     normalized_image_rmse: float
     normalized_power_relative_drift: float
+    pr_workflow_runtime_s: float
+    reconstruction_optical_runtime_s: float
+    reconstruction_runtime_s: float
     runtime_s: float
 
 
@@ -432,12 +435,22 @@ def _intensity_metrics(
 def run_image_amplification(
     image_intensity,
     spec: PRImageAmplificationSpec = PRImageAmplificationSpec(),
+    *,
+    backend: BackendSpec | None = None,
 ) -> PRImageAmplificationResult:
-    """Run and measure a finite coherent image-amplification benchmark."""
+    """Run and measure a finite coherent image-amplification benchmark.
+
+    ``backend`` overrides the default NumPy execution backend without changing
+    the image-amplification physics or reconstruction. Workflow results are
+    returned on the host, so the existing NumPy reconstruction remains shared
+    by CPU and GPU runs.
+    """
 
     request, transmission, normalized_grating, gain_length = (
         make_image_amplification_request(image_intensity, spec)
     )
+    if backend is not None:
+        request = replace(request, backend=backend)
     grid = make_grid(request.grid, real_dtype=np.float64)
     pump_kx = float(request.beams.channels[0].tilt_x_rad_per_um)
     signal_kx = float(request.beams.channels[1].tilt_x_rad_per_um)
@@ -449,30 +462,40 @@ def run_image_amplification(
     coherent_input = np.sum(np.asarray(request.initial_A), axis=0)
     input_signal = isolate_signal_carrier(coherent_input, mask)
 
-    started_at = perf_counter()
+    benchmark_started_at = perf_counter()
+    workflow_started_at = perf_counter()
     run_result = run_pr_timedependent(request)
+    pr_workflow_runtime = perf_counter() - workflow_started_at
+    reconstruction_started_at = perf_counter()
     coherent_output = np.sum(np.asarray(run_result.A_final), axis=0)
     output_signal = isolate_signal_carrier(coherent_output, mask)
+    reconstruction_optical_runtime = 0.0
+    optical_started_at = perf_counter()
     backpropagated = _linear_propagate(
         output_signal,
         grid,
         distance_um=-float(request.grid.z_length_um),
         request=request,
     )
+    reconstruction_optical_runtime += perf_counter() - optical_started_at
 
+    optical_started_at = perf_counter()
     zero_output = _linear_propagate(
         coherent_input,
         grid,
         distance_um=float(request.grid.z_length_um),
         request=request,
     )
+    reconstruction_optical_runtime += perf_counter() - optical_started_at
     zero_signal = isolate_signal_carrier(zero_output, mask)
+    optical_started_at = perf_counter()
     zero_backpropagated = _linear_propagate(
         zero_signal,
         grid,
         distance_um=-float(request.grid.z_length_um),
         request=request,
     )
+    reconstruction_optical_runtime += perf_counter() - optical_started_at
     signal_channel_intensity = np.abs(np.asarray(request.initial_A)[1]) ** 2
     roi = signal_channel_intensity > 1e-4 * float(np.max(signal_channel_intensity))
     correlation, normalized_rmse = _intensity_metrics(
@@ -506,6 +529,7 @@ def run_image_amplification(
         (run_result.power_final - run_result.power_initial)
         / run_result.power_initial
     )
+    reconstruction_runtime = perf_counter() - reconstruction_started_at
 
     return PRImageAmplificationResult(
         request=request,
@@ -526,7 +550,10 @@ def run_image_amplification(
         zero_response_image_intensity_correlation=zero_correlation,
         normalized_image_rmse=normalized_rmse,
         normalized_power_relative_drift=power_drift,
-        runtime_s=perf_counter() - started_at,
+        pr_workflow_runtime_s=pr_workflow_runtime,
+        reconstruction_optical_runtime_s=reconstruction_optical_runtime,
+        reconstruction_runtime_s=reconstruction_runtime,
+        runtime_s=perf_counter() - benchmark_started_at,
     )
 
 

@@ -4,6 +4,7 @@ import math
 import numpy as np
 import pytest
 
+from lcprop.core.backend import BackendSpec
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
 from lcprop.pr.image_amplification import (
@@ -114,6 +115,27 @@ def test_request_has_periodic_crossing_carriers_and_exact_peak_ratio():
     ) * (
         request.grid.y_aperture_um / request.grid.Ny
     ) == pytest.approx(1.0)
+
+
+def test_explicit_backend_override_reaches_image_workflow():
+    result = run_image_amplification(
+        _ring_target(),
+        replace(PRImageAmplificationSpec(), Nt=0),
+        backend=BackendSpec(
+            backend="numpy",
+            precision="float32",
+            verbose=False,
+        ),
+    )
+
+    assert result.request.backend.backend == "numpy"
+    assert result.request.backend.precision == "float32"
+    assert result.run_result.diagnostics["backend"] == {
+        "backend": "numpy",
+        "real_dtype": "float32",
+        "complex_dtype": "complex64",
+        "is_gpu": False,
+    }
 
 
 def test_nearest_carrier_partition_recovers_known_periodic_signal_mode():
