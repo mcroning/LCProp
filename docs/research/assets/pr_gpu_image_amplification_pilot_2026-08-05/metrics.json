@@ -1,0 +1,121 @@
+{
+  "backend": {
+    "is_gpu": true,
+    "reported": "cupy",
+    "requested": "cupy"
+  },
+  "ended_utc": "2026-08-05T19:51:57.902486Z",
+  "exit_code": 0,
+  "git_sha": "ea22bf574f5375750ee5f3ec9e8a1c218abdd093",
+  "gpu": {
+    "cold_initialization_seconds": 0.8931998913176358,
+    "compute_capability": "8.9",
+    "cuda_driver_version": 12090,
+    "cuda_runtime_version": 12090,
+    "cupy_version": "13.6.0",
+    "device_count": 1,
+    "device_id": 0,
+    "device_name": "NVIDIA L40S",
+    "free_memory_after_bytes": 46946123776,
+    "free_memory_before_bytes": 47208267776,
+    "memory_pool_peak_proxy_bytes": 259014144,
+    "memory_pool_used_after_bytes": 0,
+    "total_memory_after_bytes": 47665709056,
+    "total_memory_bytes": 47665709056
+  },
+  "hostname": "pax020",
+  "image_path": "/tmp/lcprop-pr-image-pilot-2209653/AF_Res_Chart.png",
+  "image_sha256": "e424f1070587d79d2a91f4a3bd14e7c11e80adfe7c723e45432d9d4fc5bb85b7",
+  "image_shape": [
+    216,
+    255
+  ],
+  "limits": {
+    "maximum_normalized_rmse": 1.0,
+    "minimum_gain": 1.1,
+    "minimum_image_correlation": 0.8,
+    "power_relative_drift": 1e-09
+  },
+  "memory_estimate": {
+    "one_float64_E_state_bytes": 10485760
+  },
+  "metrics": {
+    "analytic_absolute_signal_gain": 9.910891089108912,
+    "finite_outputs": true,
+    "image_intensity_correlation": 0.9897689452600813,
+    "measured_absolute_signal_gain": 4.51124753468667,
+    "normalized_image_rmse": 0.18040825934966398,
+    "normalized_power_relative_drift": -2.3314683517128287e-15,
+    "zero_response_image_intensity_correlation": 1.0
+  },
+  "mode": "gpu_pilot",
+  "output_dir": "/tmp/lcprop-pr-image-pilot-2209653/products",
+  "parameters": {
+    "Nt": 200,
+    "Nx": 256,
+    "Ny": 256,
+    "beam_waist_um": 48.0,
+    "characteristic_wavenumber_per_um": 0.5,
+    "coherence_group": "pr-image-amplification",
+    "dark_intensity": 0.05,
+    "dt_normalized": 0.05,
+    "dz_um": 20.0,
+    "image_size_factor": 1.0,
+    "input_peak_ratio": 0.001,
+    "interaction_length_um": 400.0,
+    "invert_image": false,
+    "positive_mode_index": 8,
+    "refractive_index": 2.4,
+    "saturated_small_signal_gain": 10.0,
+    "signal_gain_sign": 1,
+    "wavelength_um": 0.633,
+    "x_aperture_um": 256.0,
+    "y_aperture_um": 256.0
+  },
+  "passed": true,
+  "products": {
+    "E_final_midplane.npy": 262272,
+    "input_signal.png": 7915,
+    "input_target.png": 5649,
+    "output_signal.png": 7863,
+    "reconstructed_signal.png": 6286,
+    "reconstructed_signal_intensity.npy": 262272,
+    "zero_response_reconstruction.png": 7915
+  },
+  "repository": "/cluster/tufts/cglab/mcroning/LCProp",
+  "sampling": {
+    "Nz": 20,
+    "dx_um": 1.0,
+    "dy_um": 1.0,
+    "grating_samples_per_period": 16.0,
+    "longitudinal_steps": 20,
+    "samples_per_waist_x": 48.0,
+    "samples_per_waist_y": 48.0
+  },
+  "scheduler": {
+    "cuda_visible_devices": "0",
+    "slurm_gpus_on_node": "1",
+    "slurm_job_gpus": "3",
+    "slurm_job_id": "2209653",
+    "tmpdir": "/tmp"
+  },
+  "schema": "lcprop.pr_image_amplification_gpu_pilot.v1",
+  "started_utc": "2026-08-05T19:51:20.381754Z",
+  "status": "passed",
+  "timing_seconds": {
+    "benchmark_total": 36.506350552197546,
+    "pr_evolution_including_optical_passes": 36.486970383673906,
+    "reconstruction_optical_propagation": 0.011398293543606997,
+    "reconstruction_total": 0.019370372872799635,
+    "synchronized_execution": 36.55043317889795
+  },
+  "total_wall_seconds": 37.5067474138923,
+  "versions": {
+    "cupy": "13.6.0",
+    "lcprop": "0.1.0",
+    "numpy": "2.1.0",
+    "pillow": "11.1.0",
+    "python": "3.10.4",
+    "scipy": "1.15.2"
+  }
+}
