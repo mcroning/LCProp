@@ -25,6 +25,12 @@ from lcprop.pr.specs import (
     PR_SEMI_IMPLICIT_INTEGRATOR,
 )
 from lcprop.pr.workflow import run_pr_timedependent
+from lcprop.pr.static_streaming import (
+    PRStreamingStaticOptions,
+    PRStreamingStaticRequest,
+    PRStreamingStaticResult,
+    run_pr_static_streaming,
+)
 
 
 @dataclass(frozen=True)
@@ -47,10 +53,20 @@ class PRImageAmplificationSpec:
     beam_waist_um: float = 12.0
     image_size_factor: float = 1.0
     input_peak_ratio: float = 1e-3
-    saturated_small_signal_gain: float = 10.0
+    saturated_small_signal_gain: float | None = 10.0
     signal_gain_sign: int = 1
     dark_intensity: float = 0.05
+    applied_field: float = 0.0
     characteristic_wavenumber_per_um: float | None = 0.5
+    relative_permittivity: float = 2500.0
+    mobile_charge_density_m3: float = 6.4e22
+    temperature_K: float = 293.0
+    gain_length_product_override: float | None = None
+    tukey_alpha: float = 0.0
+    volume_noise_epsilon: float = 0.0
+    volume_noise_correlation_um: float = 0.4
+    volume_noise_seed: int | None = None
+    volume_noise_seeds: tuple[int, ...] | None = None
     Nt: int = 500
     dt_normalized: float = 0.05
     invert_image: bool = True
@@ -83,6 +99,26 @@ class PRImageAmplificationResult:
     reconstruction_optical_runtime_s: float
     reconstruction_runtime_s: float
     runtime_s: float
+
+
+@dataclass(frozen=True)
+class PRStreamingImageAmplificationResult:
+    """Figure-style observables from a bounded-memory static PR march."""
+
+    request: PRStreamingStaticRequest
+    run_result: PRStreamingStaticResult
+    image_transmission: np.ndarray
+    input_signal_field: np.ndarray
+    output_signal_field: np.ndarray
+    backpropagated_signal_field: np.ndarray
+    output_total_intensity: np.ndarray
+    normalized_grating_wavenumber: float
+    gain_length_product: float
+    analytic_absolute_signal_gain: float
+    measured_absolute_signal_gain: float
+    image_intensity_correlation: float
+    normalized_image_rmse: float
+    normalized_power_relative_drift: float
 
 
 def paper_absolute_signal_gain(
@@ -138,6 +174,50 @@ def paper_figure4_spec() -> PRImageAmplificationSpec:
         characteristic_wavenumber_per_um=None,
         Nt=250,
         dt_normalized=0.01,
+        invert_image=False,
+    )
+
+
+def paper_figure6_spec() -> PRImageAmplificationSpec:
+    """Return the research-scale parameters reported for paper Figure 6.
+
+    These are the saved trusted-implementation parameters supplied with the
+    benchmark, with the quoted image selector intentionally replaced by the
+    Air Force resolution chart at the caller boundary. The saved calculation
+    generated and saved one random volume-noise seed per longitudinal slice.
+    LCProp preserves that exact sequence for deterministic replay.
+    """
+
+    from lcprop.pr.figure6_noise_seeds import FIGURE6_VOLUME_NOISE_SEEDS
+
+    external_angle = 0.08543723722873033
+    mode = round(3000.0 * math.sin(external_angle) / 0.5)
+    return PRImageAmplificationSpec(
+        Nx=16384,
+        Ny=1024,
+        x_aperture_um=3000.0,
+        y_aperture_um=1000.0,
+        interaction_length_um=3940.0,
+        dz_um=2.0,
+        wavelength_um=0.5,
+        refractive_index=2.4,
+        positive_mode_index=mode,
+        beam_waist_um=600.0,
+        image_size_factor=1.0,
+        input_peak_ratio=1.0,
+        saturated_small_signal_gain=None,
+        dark_intensity=0.01,
+        applied_field=0.0,
+        characteristic_wavenumber_per_um=None,
+        relative_permittivity=2500.0,
+        mobile_charge_density_m3=2e22,
+        temperature_K=293.0,
+        gain_length_product_override=10.0,
+        tukey_alpha=0.2,
+        volume_noise_epsilon=0.02,
+        volume_noise_correlation_um=0.4,
+        volume_noise_seed=None,
+        volume_noise_seeds=FIGURE6_VOLUME_NOISE_SEEDS,
         invert_image=False,
     )
 
@@ -248,25 +328,31 @@ def _gain_geometry(
             "positive_mode_index must place the two-beam grating below Nyquist"
         )
     kx = 2.0 * math.pi * mode / float(spec.x_aperture_um)
-    k_medium = 2.0 * math.pi * float(spec.refractive_index) / float(
-        spec.wavelength_um
-    )
+    k_medium = 2.0 * math.pi * float(spec.refractive_index) / float(spec.wavelength_um)
     if kx >= k_medium:
         raise ValueError("selected carrier is not a propagating mode")
     internal_angle = math.asin(kx / k_medium)
     k0 = _resolved_characteristic_wavenumber(spec)
     normalized_grating = -2.0 * kx / k0
-    coupling_factor = 2.0 * normalized_grating / (
-        math.cos(internal_angle) * (1.0 + normalized_grating**2)
+    coupling_factor = (
+        2.0
+        * normalized_grating
+        / (math.cos(internal_angle) * (1.0 + normalized_grating**2))
     )
     if int(spec.signal_gain_sign) not in (-1, 1):
         raise ValueError("signal_gain_sign must be +1 or -1")
-    gamma_p_L = (
-        int(spec.signal_gain_sign)
-        * 0.5
-        * math.log(float(spec.saturated_small_signal_gain))
-    )
-    gain_length_product = gamma_p_L / coupling_factor
+    override = spec.gain_length_product_override
+    if override is None:
+        gamma_p_L = (
+            int(spec.signal_gain_sign)
+            * 0.5
+            * math.log(float(spec.saturated_small_signal_gain))
+        )
+        gain_length_product = gamma_p_L / coupling_factor
+    else:
+        gain_length_product = float(override)
+        if not math.isfinite(gain_length_product):
+            raise ValueError("gain_length_product_override must be finite")
     return kx, internal_angle, normalized_grating, gain_length_product
 
 
@@ -277,11 +363,19 @@ def make_image_amplification_request(
     """Create an image-bearing signal and crossing coherent pump request."""
 
     ratio = float(spec.input_peak_ratio)
-    saturated_gain = float(spec.saturated_small_signal_gain)
+    saturated_gain = spec.saturated_small_signal_gain
     if not math.isfinite(ratio) or ratio <= 0.0:
         raise ValueError("input_peak_ratio must be finite and positive")
-    if not math.isfinite(saturated_gain) or saturated_gain <= 1.0:
-        raise ValueError("saturated_small_signal_gain must be greater than one")
+    if spec.gain_length_product_override is None:
+        if (
+            saturated_gain is None
+            or not math.isfinite(float(saturated_gain))
+            or float(saturated_gain) <= 1.0
+        ):
+            raise ValueError(
+                "saturated_small_signal_gain must be greater than one when "
+                "gain_length_product_override is not supplied"
+            )
     if not math.isfinite(float(spec.beam_waist_um)) or spec.beam_waist_um <= 0.0:
         raise ValueError("beam_waist_um must be finite and positive")
 
@@ -319,9 +413,7 @@ def make_image_amplification_request(
         grid,
         center_x_um=channels[1].x0_um,
         center_y_um=channels[1].y0_um,
-        physical_size_um=(
-            float(spec.image_size_factor) * float(spec.beam_waist_um)
-        ),
+        physical_size_um=(float(spec.image_size_factor) * float(spec.beam_waist_um)),
         invert=spec.invert_image,
     )
     A0[1] *= np.sqrt(transmission)
@@ -342,9 +434,12 @@ def make_image_amplification_request(
     beams = BeamStack(channels=resolved_channels, coherence="coherent")
     material = PRMaterialSpec(
         dark_intensity=float(spec.dark_intensity),
-        applied_field=0.0,
+        applied_field=float(spec.applied_field),
         gain_length_product=gain_length,
         refractive_index=float(spec.refractive_index),
+        relative_permittivity=float(spec.relative_permittivity),
+        mobile_charge_density_m3=float(spec.mobile_charge_density_m3),
+        temperature_K=float(spec.temperature_K),
         characteristic_wavenumber_per_um_override=(
             None
             if spec.characteristic_wavenumber_per_um is None
@@ -394,7 +489,9 @@ def isolate_signal_carrier(field, mask: np.ndarray) -> np.ndarray:
     return np.fft.ifft2(np.fft.fft2(supplied) * mask)
 
 
-def _linear_propagate(field: np.ndarray, grid, *, distance_um: float, request) -> np.ndarray:
+def _linear_propagate(
+    field: np.ndarray, grid, *, distance_um: float, request
+) -> np.ndarray:
     kernel = linear_kernel(
         grid.fxy2_um,
         dz=float(distance_um),
@@ -513,9 +610,11 @@ def run_image_amplification(
     input_signal_power = float(np.sum(np.abs(input_signal) ** 2) * dxdy)
     output_signal_power = float(np.sum(np.abs(output_signal) ** 2) * dxdy)
     measured_gain = output_signal_power / input_signal_power
-    internal_angle = math.asin(pump_kx * float(spec.wavelength_um) / (
-        2.0 * math.pi * float(spec.refractive_index)
-    ))
+    internal_angle = math.asin(
+        pump_kx
+        * float(spec.wavelength_um)
+        / (2.0 * math.pi * float(spec.refractive_index))
+    )
     analytic_gamma = analytic_plane_wave_gain_length(
         gain_length_product=gain_length,
         signed_grating_k_normalized=normalized_grating,
@@ -526,8 +625,7 @@ def run_image_amplification(
         gamma_p_L=analytic_gamma,
     )
     power_drift = float(
-        (run_result.power_final - run_result.power_initial)
-        / run_result.power_initial
+        (run_result.power_final - run_result.power_initial) / run_result.power_initial
     )
     reconstruction_runtime = perf_counter() - reconstruction_started_at
 
@@ -557,14 +655,116 @@ def run_image_amplification(
     )
 
 
+def run_streaming_image_amplification(
+    image_intensity,
+    spec: PRImageAmplificationSpec = PRImageAmplificationSpec(),
+    *,
+    solver: PRStreamingStaticOptions | None = None,
+    backend: BackendSpec | None = None,
+) -> PRStreamingImageAmplificationResult:
+    """Run the static streaming workflow through the established measurement chain.
+
+    The raw coherent output intensity is retained for a Figure 6-style output
+    panel.  Gain and fidelity use the same Fourier carrier partition and
+    matched-field back-propagation as the transient image benchmark; they do
+    not spatially divide coherently overlapping beams.
+    """
+
+    transient_request, transmission, normalized_grating, gain_length = (
+        make_image_amplification_request(image_intensity, spec)
+    )
+    selected_backend = transient_request.backend if backend is None else backend
+    if solver is None:
+        solver = PRStreamingStaticOptions(
+            tukey_alpha=float(spec.tukey_alpha),
+            volume_noise_epsilon=float(spec.volume_noise_epsilon),
+            volume_noise_correlation_um=float(spec.volume_noise_correlation_um),
+            volume_noise_seed=spec.volume_noise_seed,
+            volume_noise_seeds=spec.volume_noise_seeds,
+        )
+    request = PRStreamingStaticRequest(
+        grid=transient_request.grid,
+        beams=transient_request.beams,
+        material=transient_request.material,
+        solver=solver,
+        backend=selected_backend,
+        initial_A=transient_request.initial_A,
+    )
+    grid = make_grid(request.grid, real_dtype=np.float64)
+    pump_kx = float(request.beams.channels[0].tilt_x_rad_per_um)
+    signal_kx = float(request.beams.channels[1].tilt_x_rad_per_um)
+    mask = signal_carrier_mask(
+        grid,
+        pump_kx_rad_per_um=pump_kx,
+        signal_kx_rad_per_um=signal_kx,
+    )
+    coherent_input = np.sum(np.asarray(request.initial_A), axis=0)
+    input_signal = isolate_signal_carrier(coherent_input, mask)
+    run_result = run_pr_static_streaming(request)
+    coherent_output = np.sum(np.asarray(run_result.A_final), axis=0)
+    output_signal = isolate_signal_carrier(coherent_output, mask)
+    backpropagated = _linear_propagate(
+        output_signal,
+        grid,
+        distance_um=-float(request.grid.z_length_um),
+        request=request,
+    )
+    signal_channel_intensity = np.abs(np.asarray(request.initial_A)[1]) ** 2
+    roi = signal_channel_intensity > 1e-4 * float(np.max(signal_channel_intensity))
+    correlation, normalized_rmse = _intensity_metrics(
+        input_signal,
+        backpropagated,
+        roi,
+    )
+    dxdy = float(grid.dx_um) * float(grid.dy_um)
+    input_signal_power = float(np.sum(np.abs(input_signal) ** 2) * dxdy)
+    output_signal_power = float(np.sum(np.abs(output_signal) ** 2) * dxdy)
+    internal_angle = math.asin(
+        pump_kx
+        * float(spec.wavelength_um)
+        / (2.0 * math.pi * float(spec.refractive_index))
+    )
+    analytic_gamma = analytic_plane_wave_gain_length(
+        gain_length_product=gain_length,
+        signed_grating_k_normalized=normalized_grating,
+        internal_half_angle_rad=internal_angle,
+    )
+    analytic_gain = paper_absolute_signal_gain(
+        input_ratio=float(spec.input_peak_ratio),
+        gamma_p_L=analytic_gamma,
+    )
+    return PRStreamingImageAmplificationResult(
+        request=request,
+        run_result=run_result,
+        image_transmission=transmission,
+        input_signal_field=input_signal,
+        output_signal_field=output_signal,
+        backpropagated_signal_field=backpropagated,
+        output_total_intensity=np.abs(coherent_output) ** 2,
+        normalized_grating_wavenumber=normalized_grating,
+        gain_length_product=gain_length,
+        analytic_absolute_signal_gain=analytic_gain,
+        measured_absolute_signal_gain=output_signal_power / input_signal_power,
+        image_intensity_correlation=correlation,
+        normalized_image_rmse=normalized_rmse,
+        normalized_power_relative_drift=(
+            run_result.power_final - run_result.power_initial
+        )
+        / run_result.power_initial,
+    )
+
+
 __all__ = [
     "PRImageAmplificationResult",
     "PRImageAmplificationSpec",
+    "PRStreamingImageAmplificationResult",
     "isolate_signal_carrier",
     "make_image_amplification_request",
     "paper_absolute_signal_gain",
     "paper_figure4_spec",
+    "paper_figure6_spec",
     "prepare_image_transmission",
     "run_image_amplification",
+    "run_streaming_image_amplification",
     "signal_carrier_mask",
 ]

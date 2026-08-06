@@ -127,6 +127,54 @@ research-scale GPU convergence run. Those changes should be reviewed as a
 separate performance and boundary-condition milestone rather than hidden in
 the benchmark.
 
+## Figure 6 Saved-Run Contract
+
+The subsequently supplied trusted-run parameters for Figure 6 supersede an
+earlier caption-based inference. They are a distinct ratio-one case:
+
+| Parameter | Saved value |
+|---|---:|
+| Gain-length product `gl` | 10 |
+| Input peak-intensity ratio | 1 |
+| Grid | 16,384 × 1,024 × 1,970 |
+| Aperture | 3,000 µm × 1,000 µm |
+| Interaction length | 3,940 µm |
+| Longitudinal step | 2 µm |
+| Wavelength | 0.5 µm |
+| Beam waists | 600 µm |
+| External half-angles | ±0.08543723722873033 rad |
+| Refractive index | 2.4 |
+| Dark intensity | 0.01 |
+| Applied field | 0 |
+| Relative permittivity | 2,500 |
+| Mobile charge density | 2e22 m^-3 |
+| Temperature | 293 K |
+| Tukey alpha | 0.2 |
+| Volume-noise epsilon | 0.02 |
+| Noise correlation length | 0.4 µm |
+
+LCProp replaces the saved `No Image` selector with the checksummed Air Force
+resolution chart by explicit project direction. The supplied external angle
+maps to periodic Fourier mode 512 on the 3 mm aperture, within 2e-6 rad, and
+gives 16 samples per interference-grating period.
+
+The complete saved configuration subsequently supplied all 1,970 generated
+volume-noise seeds, exactly matching the number of longitudinal slices. LCProp
+preserves that explicit sequence and selects seed `k` for slice `k`, matching
+the trusted run's indexing. The sequence is validated as unsigned 32-bit
+integers and results record its count, endpoints, and SHA-256 digest. A
+base-seed derivation policy remains available for new reproducible fanning
+experiments, but Figure 6 does not use it. Interpreted as little-endian uint32,
+the historical sequence has SHA-256
+`ade77c0e678bf3c2836131c4771e9df22774eba3cc3eb30e17150107adf2f32f`.
+
+The full float64 E volume for this corrected contract would require about
+246 GiB before source, residual, solver work, and optical arrays. The PR-owned
+streaming workflow instead retains two transverse E slices and selected
+diagnostics. Its production, full-nonlinear Lie reference, and legacy
+linearized spectral/Lie modes remain explicitly distinct so agreement or
+departure can be attributed to the material equation and optical ordering.
+
 ---
 
 End of validation record.

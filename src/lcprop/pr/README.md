@@ -188,6 +188,53 @@ signal/pump interaction. These results clear the numerical gate for beginning
 a separate, physically benchmarked image-amplification study without adding a
 new workflow or architecture layer.
 
+## Streaming static image benchmarks
+
+`run_pr_static_streaming()` provides a PR-owned bounded-memory z march for
+paper-scale static comparisons. The production mode uses the complete
+nonlinear hopping residual, refreshed midpoint source, cyclic material solve,
+and prepared-response Strang optical advancement used by `run_pr_static()`.
+It retains only the current and previous material slices, scalar per-slice
+moments and summaries, and explicitly requested x-z or y-z cross-sections.
+
+Because no E volume exists to replay, its independent validation is a second
+complete streaming solve from the original launch field and zero material
+seed. No first-pass E slice is reused. Final optical fields and per-slice
+state/source/residual moments must reproduce within the resolved precision
+tolerances. This deterministic recomputation is not the frozen-volume replay
+performed by `run_pr_static()`, and the result provenance states that
+difference explicitly.
+
+Three research modes remain separate:
+
+- `legacy_linearized_spectral_lie` implements the trusted PRProp3D static
+  spectral solution of paper Equation (5), exact angular-spectrum hop, and
+  full-hop/full-response Lie ordering;
+- `full_nonlinear_lie_reference` replaces only the linearized material solve
+  with LCProp's complete nonlinear steady residual;
+- `production_nonlinear_strang` uses the complete nonlinear coupled solve and
+  the shared prepared-response Strang interface.
+
+The optional square-root two-dimensional Tukey window reproduces PRProp3D's
+window definition and is disabled unless requested. Optional correlated
+volume phase noise follows the trusted amplitude, Gaussian-filter, and
+correlation-length scaling. It accepts either an explicit seed for every z
+slice or a base seed that deterministically derives each slice seed. Explicit
+sequences are length-checked against `Nz` and recorded by count, endpoints,
+and SHA-256 digest, so independent recomputation is meaningful without
+copying a long seed list into each result.
+
+`paper_figure6_spec()` records the supplied saved-run contract: 16,384 ×
+1,024 × 1,970 samples, 3,000 µm × 1,000 µm aperture, 3,940 µm length, 2 µm
+step, 0.5 µm wavelength, 600 µm waists, equal incident peak intensities,
+external half-angles ±0.0854372372 rad, direct gain-length product 10,
+`Id=0.01`, `N_T=2e22 m^-3`, Tukey alpha 0.2, and volume-noise parameters
+`epsilon=0.02`, `sigma=0.4 µm`. The caller supplies the Air Force chart. Its
+1,970 historical per-slice noise seeds are preserved in
+`figure6_noise_seeds.py` and selected directly by `paper_figure6_spec()`. Their
+little-endian uint32 SHA-256 is
+`ade77c0e678bf3c2836131c4771e9df22774eba3cc3eb30e17150107adf2f32f`.
+
 ## Image amplification
 
 `run_image_amplification()` implements the PRProp3D measurement chain for a
