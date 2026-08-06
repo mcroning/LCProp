@@ -1,0 +1,253 @@
+{
+  "backend": {
+    "is_gpu": true,
+    "reported": "cupy",
+    "requested": "cupy"
+  },
+  "comparison_with_transient_job_2209653": {
+    "image_intensity_correlation": {
+      "static": 0.9909092551464946,
+      "static_minus_transient": 0.0011403098864133376,
+      "transient_job_2209653": 0.9897689452600813
+    },
+    "measured_absolute_signal_gain": {
+      "static": 4.587429083811026,
+      "static_minus_transient": 0.07618154912435582,
+      "transient_job_2209653": 4.51124753468667
+    },
+    "normalized_image_rmse": {
+      "static": 0.16215489277430692,
+      "static_minus_transient": -0.01825336657535706,
+      "transient_job_2209653": 0.18040825934966398
+    },
+    "normalized_power_relative_drift": {
+      "static": -2.220446049250313e-15,
+      "static_minus_transient": 1.1102230246251565e-16,
+      "transient_job_2209653": -2.3314683517128287e-15
+    },
+    "zero_response_image_intensity_correlation": {
+      "static": 1.0,
+      "static_minus_transient": 0.0,
+      "transient_job_2209653": 1.0
+    }
+  },
+  "ended_utc": "2026-08-06T16:41:44.369168Z",
+  "exit_code": 0,
+  "git_sha": "a51d48b5c9a80b64516735f1e9445001703ce72e",
+  "gpu": {
+    "cold_initialization_seconds": 1.094583397731185,
+    "compute_capability": "9.0",
+    "cuda_driver_version": 12090,
+    "cuda_runtime_version": 12090,
+    "cupy_version": "13.6.0",
+    "device_count": 1,
+    "device_id": 0,
+    "device_name": "NVIDIA H200",
+    "free_memory_after_bytes": 149438267392,
+    "free_memory_before_bytes": 149555707904,
+    "memory_pool_peak_proxy_bytes": 112737792,
+    "memory_pool_used_after_bytes": 0,
+    "total_memory_after_bytes": 150110273536,
+    "total_memory_bytes": 150110273536
+  },
+  "hostname": "pax009",
+  "image_path": "/tmp/lcprop-pr-static-image-2222684/AF_Res_Chart.png",
+  "image_sha256": "e424f1070587d79d2a91f4a3bd14e7c11e80adfe7c723e45432d9d4fc5bb85b7",
+  "image_shape": [
+    216,
+    255
+  ],
+  "limits": {
+    "maximum_normalized_rmse": 1.0,
+    "minimum_gain": 1.1,
+    "minimum_image_correlation": 0.8,
+    "power_relative_drift": 1e-09,
+    "zero_response_correlation_atol": 2e-12
+  },
+  "memory_estimate": {
+    "one_float64_E_state_bytes": 10485760
+  },
+  "metrics": {
+    "analytic_absolute_signal_gain": 9.910891089108912,
+    "finite_outputs": true,
+    "image_intensity_correlation": 0.9909092551464946,
+    "measured_absolute_signal_gain": 4.587429083811026,
+    "normalized_image_rmse": 0.16215489277430692,
+    "normalized_power_relative_drift": -2.220446049250313e-15,
+    "zero_response_image_intensity_correlation": 1.0
+  },
+  "mode": "gpu_pilot",
+  "operational_status": "passed",
+  "output_dir": "/tmp/lcprop-pr-static-image-2222684/products",
+  "parameters": {
+    "Nt": 200,
+    "Nx": 256,
+    "Ny": 256,
+    "beam_waist_um": 48.0,
+    "characteristic_wavenumber_per_um": 0.5,
+    "coherence_group": "pr-image-amplification",
+    "dark_intensity": 0.05,
+    "dt_normalized": 0.05,
+    "dz_um": 20.0,
+    "image_size_factor": 1.0,
+    "input_peak_ratio": 0.001,
+    "interaction_length_um": 400.0,
+    "invert_image": false,
+    "positive_mode_index": 8,
+    "refractive_index": 2.4,
+    "saturated_small_signal_gain": 10.0,
+    "signal_gain_sign": 1,
+    "wavelength_um": 0.633,
+    "x_aperture_um": 256.0,
+    "y_aperture_um": 256.0
+  },
+  "passed": true,
+  "products": {
+    "E_final_midplane.npy": 262272,
+    "input_signal.png": 7915,
+    "input_target.png": 5649,
+    "output_signal.png": 7998,
+    "reconstructed_signal.png": 6352,
+    "reconstructed_signal_intensity.npy": 262272,
+    "zero_response_reconstruction.png": 7915
+  },
+  "repository": "/cluster/tufts/cglab/mcroning/LCProp",
+  "sampling": {
+    "Nz": 20,
+    "dx_um": 1.0,
+    "dy_um": 1.0,
+    "grating_samples_per_period": 16.0,
+    "longitudinal_steps": 20,
+    "samples_per_waist_x": 48.0,
+    "samples_per_waist_y": 48.0
+  },
+  "scheduler": {
+    "cuda_visible_devices": "0",
+    "slurm_gpus_on_node": "1",
+    "slurm_job_gpus": "3",
+    "slurm_job_id": "2222684",
+    "tmpdir": "/tmp"
+  },
+  "schema": "lcprop.pr_static_image_amplification_gpu_pilot.v1",
+  "scientific_assessment": {
+    "classification": "supported",
+    "controls": {
+      "image_correlation": {
+        "criterion": ">= 0.8",
+        "measured": 0.9909092551464946,
+        "supported": true
+      },
+      "normalized_image_rmse": {
+        "criterion": "<= 1.0",
+        "measured": 0.16215489277430692,
+        "supported": true
+      },
+      "signal_amplification": {
+        "criterion": "> 1.1",
+        "measured": 4.587429083811026,
+        "supported": true
+      }
+    },
+    "transient_comparison_is_acceptance_criterion": false
+  },
+  "started_utc": "2026-08-06T16:41:29.618427Z",
+  "static_diagnostics": {
+    "accepted_coupled_updates": 80,
+    "completed_slices": 20,
+    "converged": true,
+    "coupled_iteration_records": 80,
+    "maximum_coupled_passes_used": 4,
+    "maximum_slice_residual_max": 4.352205699997835e-09,
+    "maximum_slice_residual_rms": 1.8952234470814792e-10,
+    "rejected_coupled_updates": 0,
+    "replay": {
+      "field_consistent": true,
+      "field_max_abs_difference": 0.0,
+      "residual_consistent": true,
+      "residual_converged": true,
+      "residual_max": 4.352205699997835e-09,
+      "residual_max_abs_difference": 0.0,
+      "residual_rms": 1.7673465280730444e-10,
+      "source_consistent": true,
+      "source_max_abs_difference": 0.0
+    },
+    "status": "converged",
+    "termination_reasons": [
+      "residual_tolerance"
+    ],
+    "tolerance_provenance": {
+      "coupled_residual_max_tolerance": {
+        "source": "precision_default",
+        "value": 1e-07
+      },
+      "coupled_residual_rms_tolerance": {
+        "source": "precision_default",
+        "value": 1e-08
+      },
+      "material_solver": {
+        "residual_max_tolerance": 1e-09,
+        "residual_rms_tolerance": 1e-10,
+        "source": "precision_default"
+      },
+      "precision": "float64",
+      "replay_atol": {
+        "source": "precision_default",
+        "value": 1e-12
+      },
+      "replay_rtol": {
+        "source": "precision_default",
+        "value": 1e-11
+      }
+    }
+  },
+  "static_solver": {
+    "armijo_fraction": 0.0001,
+    "material_solver": null,
+    "max_backtracks": 16,
+    "max_coupled_passes": 20,
+    "minimum_step_scale": 1.52587890625e-05,
+    "optical_substeps": 1,
+    "record_iteration_history": true,
+    "replay_atol": null,
+    "replay_rtol": null,
+    "residual_max_tolerance": null,
+    "residual_rms_tolerance": null
+  },
+  "status": "passed",
+  "td_reference": {
+    "directly_comparable_geometry": true,
+    "git_sha": "ea22bf574f5375750ee5f3ec9e8a1c218abdd093",
+    "metrics": {
+      "analytic_absolute_signal_gain": 9.910891089108912,
+      "finite_outputs": true,
+      "image_intensity_correlation": 0.9897689452600813,
+      "measured_absolute_signal_gain": 4.51124753468667,
+      "normalized_image_rmse": 0.18040825934966398,
+      "normalized_power_relative_drift": -2.3314683517128287e-15,
+      "zero_response_image_intensity_correlation": 1.0
+    },
+    "sha256": "1f686ec06875b66d19b20c87b8108684b971ef9afbd35dde963c91979e3eb9b9",
+    "slurm_job_id": "2209653"
+  },
+  "td_reference_path": "/cluster/tufts/cglab/mcroning/LCProp/docs/research/assets/pr_gpu_image_amplification_pilot_2026-08-05/metrics.json",
+  "timing_seconds": {
+    "benchmark_total": 13.5385299064219,
+    "coupled_static_workflow": 13.521903901360929,
+    "reconstruction_optical_propagation": 0.01121567003428936,
+    "reconstruction_total": 0.016619741916656494,
+    "synchronized_execution": 13.582470587454736
+  },
+  "total_wall_seconds": 14.736743033863604,
+  "transient_controls_not_used_by_static_solver": {
+    "Nt": 200,
+    "dt_normalized": 0.05
+  },
+  "versions": {
+    "cupy": "13.6.0",
+    "lcprop": "0.1.0",
+    "numpy": "2.1.0",
+    "pillow": "11.1.0",
+    "python": "3.10.4",
+    "scipy": "1.15.2"
+  }
+}
