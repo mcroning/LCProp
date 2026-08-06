@@ -63,6 +63,65 @@ def _initial_fields(request: PRRunRequest, *, launch, grid, complex_dtype, real_
     return A0, E0
 
 
+def advance_pr_slice_with_midpoint_source(
+    A_in,
+    E_slice,
+    *,
+    kernel,
+    optical_substeps: int,
+    dz_um: float,
+    wavelength_um: float,
+    interaction_length_um: float,
+    gain_length_product: float,
+    peak_intensity_reference: float,
+    background_intensity: float,
+    coherence_groups,
+    xp,
+):
+    """Advance one frozen-E PR slice and return its midpoint source.
+
+    The input field is not modified. The returned source is the arithmetic
+    mean of the normalized PR-driving intensities immediately before and
+    after the prepared-response Strang slice, matching the time-dependent
+    workflow's established material-source definition.
+    """
+
+    resolved_substeps = int(optical_substeps)
+    if resolved_substeps < 1:
+        raise ValueError("optical_substeps must be at least one")
+    A_out = A_in.copy()
+    I_before = pr_driving_intensity(
+        A_out,
+        peak_intensity_reference=peak_intensity_reference,
+        background_intensity=background_intensity,
+        coherence_groups=coherence_groups,
+        xp=xp,
+    )
+    half_response = half_step_response_from_E(
+        E_slice,
+        dz_substep_um=float(dz_um) / resolved_substeps,
+        wavelength_um=wavelength_um,
+        interaction_length_um=interaction_length_um,
+        gain_length_product=gain_length_product,
+        xp=xp,
+    )
+    advance_prepared_response(
+        A_out,
+        kernel=kernel,
+        half_step_response=half_response,
+        Nsub=resolved_substeps,
+        xp=xp,
+    )
+    I_after = pr_driving_intensity(
+        A_out,
+        peak_intensity_reference=peak_intensity_reference,
+        background_intensity=background_intensity,
+        coherence_groups=coherence_groups,
+        xp=xp,
+    )
+    return A_out, 0.5 * (I_before + I_after)
+
+
 def _optical_pass(
     A0,
     E,
@@ -77,39 +136,22 @@ def _optical_pass(
     A = A0.copy()
     source_stack = xp.empty(E.shape, dtype=grid.real_dtype)
     groups = request.beams.coherence_groups
-    dz_substep = grid.dz_um / int(request.solver.optical_substeps)
 
     for k in range(grid.Nz):
-        I_before = pr_driving_intensity(
+        A, source_stack[k] = advance_pr_slice_with_midpoint_source(
             A,
-            peak_intensity_reference=peak_reference,
-            background_intensity=request.material.background_intensity,
-            coherence_groups=groups,
-            xp=xp,
-        )
-        half_response = half_step_response_from_E(
             E[k],
-            dz_substep_um=dz_substep,
+            kernel=kernel,
+            optical_substeps=request.solver.optical_substeps,
+            dz_um=grid.dz_um,
             wavelength_um=wavelength_um,
             interaction_length_um=request.grid.z_length_um,
             gain_length_product=request.material.gain_length_product,
-            xp=xp,
-        )
-        advance_prepared_response(
-            A,
-            kernel=kernel,
-            half_step_response=half_response,
-            Nsub=request.solver.optical_substeps,
-            xp=xp,
-        )
-        I_after = pr_driving_intensity(
-            A,
             peak_intensity_reference=peak_reference,
             background_intensity=request.material.background_intensity,
             coherence_groups=groups,
             xp=xp,
         )
-        source_stack[k] = 0.5 * (I_before + I_after)
     return A, source_stack
 
 

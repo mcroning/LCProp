@@ -24,6 +24,16 @@ from lcprop.pr.static import (
     PRStaticResult,
     PRStaticSolverOptions,
     solve_pr_static_intensity,
+    solve_pr_static_intensity_batched,
+)
+from lcprop.pr.static_workflow import (
+    PRCoupledStaticIterationRecord,
+    PRCoupledStaticSliceSummary,
+    PRStaticRunRequest,
+    PRStaticRunResult,
+    PRStaticWorkflowOptions,
+    PR_STATIC_WORKFLOW,
+    run_pr_static,
 )
 from lcprop.pr.readiness import (
     PRImageAmplificationReadinessResult,
@@ -46,7 +56,11 @@ from lcprop.pr.coupling import (
     run_finite_gaussian_coupling,
     run_plane_wave_coupling,
 )
-from lcprop.pr.workflow import continue_pr_timedependent, run_pr_timedependent
+from lcprop.pr.workflow import (
+    advance_pr_slice_with_midpoint_source,
+    continue_pr_timedependent,
+    run_pr_timedependent,
+)
 
 __all__ = [
     "PRMaterialSpec",
@@ -59,6 +73,12 @@ __all__ = [
     "PR_SEMI_IMPLICIT_INTEGRATOR",
     "PRStaticResult",
     "PRStaticSolverOptions",
+    "PRCoupledStaticIterationRecord",
+    "PRCoupledStaticSliceSummary",
+    "PRStaticRunRequest",
+    "PRStaticRunResult",
+    "PRStaticWorkflowOptions",
+    "PR_STATIC_WORKFLOW",
     "PRImageAmplificationReadinessResult",
     "PRImageAmplificationReadinessSpec",
     "PRImageAmplificationResult",
@@ -82,6 +102,9 @@ __all__ = [
     "paper_figure4_spec",
     "run_image_amplification",
     "solve_pr_static_intensity",
+    "solve_pr_static_intensity_batched",
+    "advance_pr_slice_with_midpoint_source",
+    "run_pr_static",
     "continue_pr_timedependent",
     "run_pr_timedependent",
 ]

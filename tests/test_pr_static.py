@@ -9,6 +9,7 @@ from lcprop.pr.static import (
     PRStaticSolverOptions,
     fixed_intensity_jacobian_rows,
     solve_pr_static_intensity,
+    solve_pr_static_intensity_batched,
 )
 
 
@@ -119,6 +120,37 @@ def test_nonlinear_static_root_is_independent_of_reasonable_initial_guess():
     )
 
 
+def test_batched_static_root_matches_dense_solver_and_iteration_contract():
+    Nx, Ny = 48, 4
+    x = np.arange(Nx)
+    intensity = (
+        1.0
+        + 0.24 * np.cos(2.0 * np.pi * x / Nx)
+        + 0.07 * np.sin(6.0 * np.pi * x / Nx)
+    )[:, None] * np.ones((1, Ny))
+    initial = 0.03 * np.cos(4.0 * np.pi * x / Nx)[:, None]
+    common = dict(
+        applied_field=0.45,
+        background_intensity=0.16,
+        dx_normalized=0.21,
+        initial_E=np.broadcast_to(initial, intensity.shape).copy(),
+    )
+
+    dense = solve_pr_static_intensity(intensity, **common)
+    batched = solve_pr_static_intensity_batched(intensity, **common)
+
+    assert dense.converged
+    assert batched.converged
+    assert batched.status == dense.status
+    assert batched.iterations == dense.iterations
+    assert tuple(record.step_scale for record in batched.records) == tuple(
+        record.step_scale for record in dense.records
+    )
+    assert np.allclose(batched.E, dense.E, rtol=0.0, atol=3e-14)
+    assert batched.residual_rms == pytest.approx(dense.residual_rms, abs=2e-15)
+    assert batched.residual_max == pytest.approx(dense.residual_max, abs=2e-14)
+
+
 def test_static_solver_does_not_claim_convergence_from_no_update():
     intensity = np.ones((16, 2))
     options = PRStaticSolverOptions(
@@ -206,3 +238,34 @@ def test_static_reference_solver_validates_shapes_and_uses_float64():
             background_intensity=0.1,
             dx_normalized=0.2,
         )
+
+
+def test_batched_static_material_solve_stays_on_cupy_when_available():
+    cp = pytest.importorskip("cupy")
+    try:
+        _ = cp.arange(1)
+    except Exception as exc:
+        pytest.skip(f"CuPy device unavailable: {exc}")
+
+    Nx, Ny = 32, 3
+    x = cp.arange(Nx, dtype=cp.float64)
+    intensity = (
+        1.1 + 0.2 * cp.cos(2.0 * cp.pi * x / Nx)
+    )[:, None] * cp.ones((1, Ny), dtype=cp.float64)
+    gpu = solve_pr_static_intensity_batched(
+        intensity,
+        applied_field=0.3,
+        background_intensity=0.2,
+        dx_normalized=0.25,
+        xp=cp,
+    )
+    cpu = solve_pr_static_intensity(
+        cp.asnumpy(intensity),
+        applied_field=0.3,
+        background_intensity=0.2,
+        dx_normalized=0.25,
+    )
+
+    assert gpu.converged
+    assert isinstance(gpu.E, cp.ndarray)
+    assert np.allclose(cp.asnumpy(gpu.E), cpu.E, rtol=2e-12, atol=2e-13)

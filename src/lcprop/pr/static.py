@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
+from lcprop.pr.cyclic import solve_cyclic_tridiagonal_rows
 from lcprop.pr.evolution import hopping_rhs, periodic_derivatives_x
 
 
@@ -54,7 +55,7 @@ class PRStaticIterationRecord:
 class PRStaticResult:
     """Strict fixed-intensity root and convergence evidence."""
 
-    E: np.ndarray
+    E: Any
     converged: bool
     status: str
     iterations: int
@@ -113,6 +114,97 @@ def _validated_inputs(
     return intensity_array, state, applied, background, dx
 
 
+def _array_has_true(value, *, xp: Any) -> bool:
+    reduced = xp.any(value)
+    return bool(reduced.item() if hasattr(reduced, "item") else reduced)
+
+
+def _validated_batched_inputs(
+    intensity,
+    initial_E,
+    *,
+    applied_field: float,
+    background_intensity: float,
+    dx_normalized: float,
+    options: PRStaticSolverOptions,
+    xp: Any,
+):
+    options.validate()
+    intensity_array = xp.asarray(intensity)
+    if intensity_array.ndim not in (2, 3):
+        raise ValueError(
+            "intensity must have shape (Nx, Ny) or (Nz, Nx, Ny)"
+        )
+    if int(intensity_array.shape[-2]) < 3:
+        raise ValueError("fixed-intensity PR solve requires Nx >= 3")
+    if getattr(intensity_array.dtype, "kind", None) != "f":
+        raise TypeError("intensity must have a real floating-point dtype")
+    if _array_has_true(~xp.isfinite(intensity_array), xp=xp):
+        raise ValueError("intensity must contain only finite values")
+    if _array_has_true(intensity_array < 0.0, xp=xp):
+        raise ValueError("intensity must be nonnegative")
+    intensity_array = intensity_array.copy()
+
+    if initial_E is None:
+        state = xp.zeros_like(intensity_array)
+    else:
+        state = xp.asarray(initial_E)
+        if state.shape != intensity_array.shape:
+            raise ValueError("initial_E must have the same shape as intensity")
+        if getattr(state.dtype, "kind", None) != "f":
+            raise TypeError("initial_E must have a real floating-point dtype")
+        if state.dtype != intensity_array.dtype:
+            raise TypeError("initial_E and intensity must have the same dtype")
+        if _array_has_true(~xp.isfinite(state), xp=xp):
+            raise ValueError("initial_E must contain only finite values")
+        state = state.copy()
+
+    applied = float(applied_field)
+    background = float(background_intensity)
+    dx = float(dx_normalized)
+    if not math.isfinite(applied):
+        raise ValueError("applied_field must be finite")
+    if not math.isfinite(background) or background < 0.0:
+        raise ValueError("background_intensity must be finite and nonnegative")
+    if not math.isfinite(dx) or dx <= 0.0:
+        raise ValueError("dx_normalized must be finite and positive")
+    return intensity_array, state, applied, background, dx
+
+
+def _fixed_intensity_jacobian_rows_backend(
+    state,
+    fixed_intensity,
+    *,
+    dx_normalized: float,
+    xp: Any,
+):
+    E_x, _ = periodic_derivatives_x(
+        state,
+        dx_normalized=dx_normalized,
+        xp=xp,
+    )
+    I_x, _ = periodic_derivatives_x(
+        fixed_intensity,
+        dx_normalized=dx_normalized,
+        xp=xp,
+    )
+    charge_flux = state * fixed_intensity - I_x
+    inverse_dx_squared = 1.0 / (dx_normalized * dx_normalized)
+    lower = (
+        fixed_intensity * inverse_dx_squared
+        + charge_flux / (2.0 * dx_normalized)
+    )
+    diagonal = (
+        -fixed_intensity * (1.0 + E_x)
+        - 2.0 * fixed_intensity * inverse_dx_squared
+    )
+    upper = (
+        fixed_intensity * inverse_dx_squared
+        - charge_flux / (2.0 * dx_normalized)
+    )
+    return lower, diagonal, upper
+
+
 def fixed_intensity_jacobian_rows(
     E,
     intensity,
@@ -137,31 +229,12 @@ def fixed_intensity_jacobian_rows(
     if not math.isfinite(dx) or dx <= 0.0:
         raise ValueError("dx_normalized must be finite and positive")
 
-    E_x, _ = periodic_derivatives_x(
+    return _fixed_intensity_jacobian_rows_backend(
         state,
-        dx_normalized=dx,
-        xp=np,
-    )
-    I_x, _ = periodic_derivatives_x(
         fixed_intensity,
         dx_normalized=dx,
         xp=np,
     )
-    charge_flux = state * fixed_intensity - I_x
-    inverse_dx_squared = 1.0 / (dx * dx)
-    lower = (
-        fixed_intensity * inverse_dx_squared
-        + charge_flux / (2.0 * dx)
-    )
-    diagonal = (
-        -fixed_intensity * (1.0 + E_x)
-        - 2.0 * fixed_intensity * inverse_dx_squared
-    )
-    upper = (
-        fixed_intensity * inverse_dx_squared
-        - charge_flux / (2.0 * dx)
-    )
-    return lower, diagonal, upper
 
 
 def _newton_direction(
@@ -194,15 +267,37 @@ def _newton_direction(
     return np.moveaxis(direction_rows.reshape(moved_shape), -1, -2)
 
 
-def _residual_metrics(residual) -> tuple[float, float]:
-    values = np.asarray(residual, dtype=np.float64)
-    return (
-        float(np.sqrt(np.mean(values * values))),
-        float(np.max(np.abs(values))),
+def batched_newton_direction(
+    residual,
+    lower,
+    diagonal,
+    upper,
+    *,
+    xp: Any,
+):
+    """Solve the periodic PR Newton systems with the batched O(Nx) kernel."""
+
+    return solve_cyclic_tridiagonal_rows(
+        lower,
+        diagonal,
+        upper,
+        -residual,
+        xp=xp,
     )
 
 
-def solve_pr_static_intensity(
+def _backend_scalar(value) -> float:
+    return float(value.item() if hasattr(value, "item") else value)
+
+
+def _residual_metrics(residual, *, xp: Any) -> tuple[float, float]:
+    return (
+        _backend_scalar(xp.sqrt(xp.mean(residual * residual))),
+        _backend_scalar(xp.max(xp.abs(residual))),
+    )
+
+
+def _solve_pr_static_intensity_backend(
     intensity,
     *,
     applied_field: float,
@@ -210,16 +305,14 @@ def solve_pr_static_intensity(
     dx_normalized: float,
     initial_E: Any | None = None,
     options: PRStaticSolverOptions = PRStaticSolverOptions(),
+    direction_solver: Callable[[Any, Any, Any, Any], Any],
+    input_validator: Callable[..., Any],
+    jacobian_builder: Callable[[Any, Any], Any],
+    xp: Any,
 ) -> PRStaticResult:
-    """Solve the complete discrete fixed-intensity equation ``R(E; I)=0``.
+    """Run the shared Newton loop with selected backend linear algebra."""
 
-    This is a CPU NumPy reference solver. It uses the exact cyclic Jacobian
-    of the centered-difference residual and a globally damped Newton update.
-    Convergence requires both residual RMS and residual maximum tolerances;
-    a small state update alone is never accepted as convergence.
-    """
-
-    intensity_array, state, applied, background, dx = _validated_inputs(
+    intensity_array, state, applied, background, dx = input_validator(
         intensity,
         initial_E,
         applied_field=applied_field,
@@ -236,11 +329,11 @@ def solve_pr_static_intensity(
             applied_field=applied,
             background_intensity=background,
             dx_normalized=dx,
-            xp=np,
+            xp=xp,
         )
 
     residual = residual_at(state)
-    residual_rms, residual_max = _residual_metrics(residual)
+    residual_rms, residual_max = _residual_metrics(residual, xp=xp)
     records.append(
         PRStaticIterationRecord(
             iteration=0,
@@ -268,13 +361,12 @@ def solve_pr_static_intensity(
         if iteration == int(options.max_iterations):
             break
 
-        lower, diagonal, upper = fixed_intensity_jacobian_rows(
+        lower, diagonal, upper = jacobian_builder(
             state,
             intensity_array,
-            dx_normalized=dx,
         )
         try:
-            direction = _newton_direction(
+            direction = direction_solver(
                 residual,
                 lower,
                 diagonal,
@@ -297,12 +389,15 @@ def solve_pr_static_intensity(
         for _ in range(int(options.max_backtracks) + 1):
             candidate = state + step_scale * direction
             candidate_residual = residual_at(candidate)
-            candidate_rms, candidate_max = _residual_metrics(candidate_residual)
+            candidate_rms, candidate_max = _residual_metrics(
+                candidate_residual,
+                xp=xp,
+            )
             required_rms = (
                 1.0 - float(options.armijo_fraction) * step_scale
             ) * residual_rms
             if (
-                np.all(np.isfinite(candidate))
+                not _array_has_true(~xp.isfinite(candidate), xp=xp)
                 and math.isfinite(candidate_rms)
                 and candidate_rms <= required_rms
             ):
@@ -349,10 +444,100 @@ def solve_pr_static_intensity(
     )
 
 
+def solve_pr_static_intensity(
+    intensity,
+    *,
+    applied_field: float,
+    background_intensity: float,
+    dx_normalized: float,
+    initial_E: Any | None = None,
+    options: PRStaticSolverOptions = PRStaticSolverOptions(),
+) -> PRStaticResult:
+    """Solve ``R(E; I)=0`` with the dense CPU NumPy reference direction.
+
+    The complete centered-difference residual, damping, convergence criteria,
+    and result semantics are shared with the structured implementation. This
+    dense path remains the small-system validation oracle.
+    """
+
+    def dense_jacobian(state, fixed_intensity):
+        return fixed_intensity_jacobian_rows(
+            state,
+            fixed_intensity,
+            dx_normalized=dx_normalized,
+        )
+
+    return _solve_pr_static_intensity_backend(
+        intensity,
+        applied_field=applied_field,
+        background_intensity=background_intensity,
+        dx_normalized=dx_normalized,
+        initial_E=initial_E,
+        options=options,
+        direction_solver=_newton_direction,
+        input_validator=_validated_inputs,
+        jacobian_builder=dense_jacobian,
+        xp=np,
+    )
+
+
+def solve_pr_static_intensity_batched(
+    intensity,
+    *,
+    applied_field: float,
+    background_intensity: float,
+    dx_normalized: float,
+    initial_E: Any | None = None,
+    options: PRStaticSolverOptions = PRStaticSolverOptions(),
+    xp: Any = np,
+) -> PRStaticResult:
+    """Solve ``R(E; I)=0`` with the O(Nx) batched cyclic direction.
+
+    Arrays and nonlinear iteration remain on the explicitly supplied NumPy- or
+    CuPy-like backend. The dense oracle uses the same residual, damping, and
+    acceptance contract; only the linear-system implementation differs.
+    """
+
+    def structured_direction(residual, lower, diagonal, upper):
+        return batched_newton_direction(
+            residual,
+            lower,
+            diagonal,
+            upper,
+            xp=xp,
+        )
+
+    def validate_backend_inputs(*args, **kwargs):
+        return _validated_batched_inputs(*args, **kwargs, xp=xp)
+
+    def structured_jacobian(state, fixed_intensity):
+        return _fixed_intensity_jacobian_rows_backend(
+            state,
+            fixed_intensity,
+            dx_normalized=dx_normalized,
+            xp=xp,
+        )
+
+    return _solve_pr_static_intensity_backend(
+        intensity,
+        applied_field=applied_field,
+        background_intensity=background_intensity,
+        dx_normalized=dx_normalized,
+        initial_E=initial_E,
+        options=options,
+        direction_solver=structured_direction,
+        input_validator=validate_backend_inputs,
+        jacobian_builder=structured_jacobian,
+        xp=xp,
+    )
+
+
 __all__ = [
     "PRStaticIterationRecord",
     "PRStaticResult",
     "PRStaticSolverOptions",
+    "batched_newton_direction",
     "fixed_intensity_jacobian_rows",
     "solve_pr_static_intensity",
+    "solve_pr_static_intensity_batched",
 ]

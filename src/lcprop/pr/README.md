@@ -138,6 +138,36 @@ independent and transparent root calculation over production-scale throughput.
 Uniform and spatially modulated cases agree with long-time semi-implicit
 transients in the focused validation suite.
 
+## Self-consistent static workflow
+
+`run_pr_static()` solves the coupled optical/material steady problem with a
+slice-local z march. For each slice it holds the accepted incoming optical
+field fixed, evaluates the same before/after midpoint source used by the
+time-dependent workflow, and uses `solve_pr_static_intensity_batched()` for
+the prescribed-source material correction. Every damped correction is then
+checked against a newly propagated source. Only the refreshed complete PR
+residual can establish convergence, and both its RMS and maximum must pass.
+
+The structured material solve uses a PR-owned batched cyclic-tridiagonal
+kernel along x. It supports NumPy and CuPy without changing the discrete
+equation, while `solve_pr_static_intensity()` retains the dense NumPy solve as
+the small-system oracle. The completed E volume is independently replayed
+from the original launch field; sequential and replayed optical fields,
+sources, and residuals must agree before the workflow reports convergence.
+Results are returned as detached host arrays, consistent with the existing PR
+time-dependent result boundary.
+
+Coupled-static tolerances use explicit precision-aware defaults when their
+option value is `None`. Float64 retains material residual RMS/max defaults of
+`1e-10`/`1e-9`, coupled residual RMS/max defaults of `1e-8`/`1e-7`, and replay
+relative/absolute defaults of `1e-11`/`1e-12`. Float32 uses
+`2e-6`/`1e-5`, `2e-6`/`1e-5`, and `2e-6`/`2e-7`, respectively. Every numeric
+override is preserved exactly. Supplying a `PRStaticSolverOptions` object
+likewise makes its material tolerances explicit; omitting it selects the
+precision default without changing the fixed-intensity solver API. Results
+record every resolved value and whether it came from the precision policy, an
+explicit workflow override, or an explicitly supplied material-solver object.
+
 ## Image-amplification numerical readiness
 
 `run_image_amplification_readiness()` is a bounded headless acceptance case,

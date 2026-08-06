@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any, Callable
 
+from lcprop.pr.cyclic import solve_cyclic_tridiagonal_rows
 from lcprop.pr.specs import (
     PRMaterialSpec,
     PR_EULER_INTEGRATOR,
@@ -301,41 +302,6 @@ def _validate_diffusion_solve_inputs(
     return resolved_alpha, resolved_dx
 
 
-def _solve_tridiagonal_rows(lower, diagonal, upper, rhs, *, xp: Any):
-    """Solve independent variable-coefficient tridiagonal row systems."""
-
-    batch, n = rhs.shape
-    cprime = xp.empty_like(rhs)
-    dprime = xp.empty_like(rhs)
-
-    denominator = diagonal[:, 0]
-    cprime[:, 0] = upper[:, 0] / denominator
-    dprime[:, 0] = rhs[:, 0] / denominator
-
-    for index in range(1, n):
-        denominator = (
-            diagonal[:, index]
-            - lower[:, index] * cprime[:, index - 1]
-        )
-        if index < n - 1:
-            cprime[:, index] = upper[:, index] / denominator
-        else:
-            cprime[:, index] = 0.0
-        dprime[:, index] = (
-            rhs[:, index]
-            - lower[:, index] * dprime[:, index - 1]
-        ) / denominator
-
-    solution = xp.empty_like(rhs)
-    solution[:, -1] = dprime[:, -1]
-    for index in range(n - 2, -1, -1):
-        solution[:, index] = (
-            dprime[:, index]
-            - cprime[:, index] * solution[:, index + 1]
-        )
-    return solution
-
-
 def solve_periodic_variable_diffusion(
     rhs,
     intensity,
@@ -363,67 +329,21 @@ def solve_periodic_variable_diffusion(
     if resolved_alpha == 0.0:
         return rhs.copy()
 
-    Nx = int(rhs.shape[-2])
-    rhs_rows = xp.moveaxis(rhs, -2, -1).reshape((-1, Nx))
-    intensity_rows = xp.moveaxis(intensity, -2, -1).reshape((-1, Nx))
     q = (
         xp.asarray(resolved_alpha, dtype=rhs.dtype)
-        * intensity_rows.astype(rhs.dtype, copy=False)
+        * intensity.astype(rhs.dtype, copy=False)
         / xp.asarray(resolved_dx * resolved_dx, dtype=rhs.dtype)
     )
     lower = -q
     upper = -q
     diagonal = 1.0 + 2.0 * q
-
-    # Sherman-Morrison reduction of each cyclic system to two ordinary
-    # tridiagonal solves.  The corner entries are row-specific because the
-    # diffusion coefficient is I_j rather than a shared scalar.
-    corner_upper_right = lower[:, 0]
-    corner_lower_left = upper[:, -1]
-    gamma = -diagonal[:, 0]
-    modified_diagonal = diagonal.copy()
-    modified_diagonal[:, 0] -= gamma
-    modified_diagonal[:, -1] -= (
-        corner_upper_right * corner_lower_left / gamma
-    )
-
-    primary = _solve_tridiagonal_rows(
+    return solve_cyclic_tridiagonal_rows(
         lower,
-        modified_diagonal,
+        diagonal,
         upper,
-        rhs_rows,
+        rhs,
         xp=xp,
     )
-    correction_rhs = xp.zeros_like(rhs_rows)
-    correction_rhs[:, 0] = gamma
-    correction_rhs[:, -1] = corner_lower_left
-    correction = _solve_tridiagonal_rows(
-        lower,
-        modified_diagonal,
-        upper,
-        correction_rhs,
-        xp=xp,
-    )
-    factor_denominator = (
-        1.0
-        + correction[:, 0]
-        + corner_upper_right * correction[:, -1] / gamma
-    )
-    if _array_has_true(factor_denominator == 0.0, xp=xp):
-        raise ValueError("singular periodic diffusion correction")
-    factor = (
-        primary[:, 0]
-        + corner_upper_right * primary[:, -1] / gamma
-    ) / factor_denominator
-    solution_rows = primary - factor[:, None] * correction
-    solution = xp.moveaxis(
-        solution_rows.reshape(xp.moveaxis(rhs, -2, -1).shape),
-        -1,
-        -2,
-    )
-    if _array_has_true(~xp.isfinite(solution), xp=xp):
-        raise ValueError("periodic diffusion solve produced nonfinite values")
-    return solution.astype(rhs.dtype, copy=False)
 
 
 def semi_implicit_trapezoidal_step(
