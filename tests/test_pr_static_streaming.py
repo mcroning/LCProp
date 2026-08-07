@@ -1,5 +1,4 @@
 from dataclasses import replace
-import hashlib
 import math
 
 import numpy as np
@@ -93,43 +92,45 @@ def _request(*, mode=PR_STREAMING_PRODUCTION, backend="numpy", precision="float6
     )
 
 
-def test_paper_figure6_spec_preserves_equal_ratio_published_contract():
+def test_paper_figure6_spec_preserves_published_request_and_input_polarity():
     spec = paper_figure6_spec()
     angle = math.asin(
         spec.positive_mode_index * spec.wavelength_um / spec.x_aperture_um
     )
 
-    assert (spec.Nx, spec.Ny) == (16384, 1024)
-    assert (spec.x_aperture_um, spec.y_aperture_um) == (3000.0, 1000.0)
-    assert spec.interaction_length_um == 3940.0
+    assert (spec.Nx, spec.Ny) == (16384, 2048)
+    assert (spec.x_aperture_um, spec.y_aperture_um) == (4000.0, 4000.0)
+    assert spec.interaction_length_um == 4350.0
     assert spec.dz_um == 2.0
-    assert spec.wavelength_um == 0.5
-    assert spec.beam_waist_um == 600.0
+    assert spec.wavelength_um == 0.514
+    assert spec.beam_waist_um == 3400.0
     assert spec.input_peak_ratio == 1.0
-    assert spec.saturated_small_signal_gain is None
-    assert spec.gain_length_product_override == 10.0
+    assert spec.saturated_small_signal_gain == 4000.0
+    assert spec.gain_length_product_override is None
     assert spec.dark_intensity == 0.01
-    assert spec.mobile_charge_density_m3 == 2e22
-    assert spec.tukey_alpha == 0.2
-    assert spec.volume_noise_epsilon == 0.02
+    assert spec.mobile_charge_density_m3 == 6.4e22
+    assert spec.tukey_alpha == 0.05
+    assert spec.volume_noise_epsilon == 0.0
     assert spec.volume_noise_correlation_um == 0.4
     assert spec.volume_noise_seed is None
-    assert len(spec.volume_noise_seeds) == 1970
-    assert spec.volume_noise_seeds[:3] == (
-        1304151306,
-        2998548564,
-        21195955,
+    assert spec.volume_noise_seeds is None
+    assert spec.invert_image is True
+    assert spec.positive_mode_index == 1024
+    assert spec.Nx / (2 * spec.positive_mode_index) == pytest.approx(8.0)
+    assert math.degrees(angle) == pytest.approx(7.56, abs=0.01)
+    kx = 2.0 * math.pi * spec.positive_mode_index / spec.x_aperture_um
+    normalized_grating = (
+        -2.0 * kx / PRMaterialSpec().characteristic_wavenumber_per_um
     )
-    assert spec.volume_noise_seeds[-1] == 2453989226
-    seed_digest = hashlib.sha256(
-        np.asarray(spec.volume_noise_seeds, dtype="<u4").tobytes()
-    ).hexdigest()
-    assert seed_digest == (
-        "ade77c0e678bf3c2836131c4771e9df22774eba3cc3eb30e17150107adf2f32f"
+    internal_angle = math.asin(
+        kx * spec.wavelength_um / (2.0 * math.pi * spec.refractive_index)
     )
-    assert spec.positive_mode_index == 512
-    assert spec.Nx / (2 * spec.positive_mode_index) == pytest.approx(16.0)
-    assert angle == pytest.approx(0.08543723722873033, abs=2e-6)
+    coupling_factor = 2.0 * normalized_grating / (
+        math.cos(internal_angle) * (1.0 + normalized_grating**2)
+    )
+    assert 0.5 * math.log(4000.0) / coupling_factor == pytest.approx(
+        -4.31151372731
+    )
 
 
 def test_figure6_direct_gain_and_material_parameters_reach_request():
@@ -144,16 +145,24 @@ def test_figure6_direct_gain_and_material_parameters_reach_request():
         positive_mode_index=2,
         beam_waist_um=19.2,
     )
-    request, _transmission, _grating, gain_length = make_image_amplification_request(
+    request, _transmission, grating, gain_length = make_image_amplification_request(
         np.ones((8, 8)), spec
     )
 
-    assert gain_length == 10.0
-    assert request.material.gain_length_product == 10.0
+    internal_angle = math.asin(
+        request.beams.channels[0].tilt_x_rad_per_um
+        * spec.wavelength_um
+        / (2.0 * math.pi * spec.refractive_index)
+    )
+    expected_gain_length = 0.5 * math.log(4000.0) / (
+        2.0 * grating / (math.cos(internal_angle) * (1.0 + grating**2))
+    )
+    assert gain_length == pytest.approx(expected_gain_length)
+    assert request.material.gain_length_product == pytest.approx(expected_gain_length)
     assert request.material.applied_field == 0.0
     assert request.material.dark_intensity == 0.01
     assert request.material.relative_permittivity == 2500.0
-    assert request.material.mobile_charge_density_m3 == 2e22
+    assert request.material.mobile_charge_density_m3 == 6.4e22
     assert request.material.temperature_K == 293.0
 
 

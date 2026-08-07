@@ -179,46 +179,53 @@ def paper_figure4_spec() -> PRImageAmplificationSpec:
 
 
 def paper_figure6_spec() -> PRImageAmplificationSpec:
-    """Return the research-scale parameters reported for paper Figure 6.
+    """Return the published large-signal Figure 6 benchmark contract.
 
-    These are the saved trusted-implementation parameters supplied with the
-    benchmark, with the quoted image selector intentionally replaced by the
-    Air Force resolution chart at the caller boundary. The saved calculation
-    generated and saved one random volume-noise seed per longitudinal slice.
-    LCProp preserves that exact sequence for deterministic replay.
+    Figure 6 uses the Figure 4 geometry with equal incident peak intensities,
+    the published Tukey window, and no scattering noise.  The Air Force chart
+    is supplied by the caller and inverted before square padding and
+    nearest-neighbor placement so that its launch intensity has the published
+    dark chart field with bright bars and labels.  This explicit preprocessing
+    polarity is part of the benchmark request, not a production default.
+
+    The paper's supplementary ``Figure_3_4_6.json`` contains an unrelated
+    no-image, noisy 3 mm by 1 mm saved run and is not used to define this
+    caption-derived contract. ``Nt`` and ``dt_normalized`` remain compatibility
+    fields of :class:`PRImageAmplificationSpec`; the static streaming workflow
+    does not consume them.
     """
 
-    from lcprop.pr.figure6_noise_seeds import FIGURE6_VOLUME_NOISE_SEEDS
-
-    external_angle = 0.08543723722873033
-    mode = round(3000.0 * math.sin(external_angle) / 0.5)
+    external_angle = math.radians(7.56)
+    mode = round(4000.0 * math.sin(external_angle) / 0.514)
     return PRImageAmplificationSpec(
         Nx=16384,
-        Ny=1024,
-        x_aperture_um=3000.0,
-        y_aperture_um=1000.0,
-        interaction_length_um=3940.0,
+        Ny=2048,
+        x_aperture_um=4000.0,
+        y_aperture_um=4000.0,
+        interaction_length_um=4350.0,
         dz_um=2.0,
-        wavelength_um=0.5,
+        wavelength_um=0.514,
         refractive_index=2.4,
         positive_mode_index=mode,
-        beam_waist_um=600.0,
+        beam_waist_um=3400.0,
         image_size_factor=1.0,
         input_peak_ratio=1.0,
-        saturated_small_signal_gain=None,
+        saturated_small_signal_gain=4000.0,
         dark_intensity=0.01,
         applied_field=0.0,
         characteristic_wavenumber_per_um=None,
         relative_permittivity=2500.0,
-        mobile_charge_density_m3=2e22,
+        mobile_charge_density_m3=6.4e22,
         temperature_K=293.0,
-        gain_length_product_override=10.0,
-        tukey_alpha=0.2,
-        volume_noise_epsilon=0.02,
+        gain_length_product_override=None,
+        tukey_alpha=0.05,
+        volume_noise_epsilon=0.0,
         volume_noise_correlation_um=0.4,
         volume_noise_seed=None,
-        volume_noise_seeds=FIGURE6_VOLUME_NOISE_SEEDS,
-        invert_image=False,
+        volume_noise_seeds=None,
+        Nt=250,
+        dt_normalized=0.01,
+        invert_image=True,
     )
 
 

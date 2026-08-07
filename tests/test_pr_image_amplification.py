@@ -13,6 +13,7 @@ from lcprop.pr.image_amplification import (
     make_image_amplification_request,
     paper_absolute_signal_gain,
     paper_figure4_spec,
+    paper_figure6_spec,
     prepare_image_transmission,
     run_image_amplification,
     signal_carrier_mask,
@@ -89,6 +90,37 @@ def test_real_image_preprocessing_is_bounded_and_uses_transparent_exterior():
     assert np.max(transmission) == 1.0
     assert transmission[0, 0] == 1.0
     assert np.any(transmission < 1.0)
+
+
+def test_figure6_inverts_before_padding_and_keeps_exterior_transparent():
+    grid = make_grid(
+        GridSpec(
+            Nx=20,
+            Ny=16,
+            x_aperture_um=20.0,
+            y_aperture_um=16.0,
+            z_length_um=10.0,
+            dz_um=2.0,
+        ),
+        real_dtype=np.float64,
+    )
+    image = np.ones((4, 6), dtype=float)
+    image[1:3, 2:4] = 0.0
+    transmission = prepare_image_transmission(
+        image,
+        grid,
+        center_x_um=0.0,
+        center_y_um=0.0,
+        physical_size_um=8.0,
+        invert=paper_figure6_spec().invert_image,
+    )
+
+    assert transmission[0, 0] == 1.0
+    assert np.min(transmission) == 0.0
+    assert np.max(transmission) == 1.0
+    assert np.count_nonzero(transmission == 1.0) > image.size
+    assert np.any(transmission[6:14, 4:12] == 0.0)
+    assert np.any(transmission[6:14, 4:12] == 1.0)
 
 
 def test_request_has_periodic_crossing_carriers_and_exact_peak_ratio():

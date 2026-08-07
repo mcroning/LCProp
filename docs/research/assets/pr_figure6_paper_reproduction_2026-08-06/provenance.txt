@@ -1,0 +1,38 @@
+job_id=2227722
+start_utc=2026-08-06T22:49:31Z
+hostname=pax007
+repository=/cluster/tufts/cglab/mcroning/LCProp
+expected_git_sha=eab1959d53f9f03ff37d89cf0da7d7b6478db12d
+actual_git_sha=eab1959d53f9f03ff37d89cf0da7d7b6478db12d
+repository_status=0
+run_dir=/cluster/tufts/cglab/mcroning/lcprop_runs/pr-figure6-paper-2227722
+python=/cluster/tufts/cglab/mcroning/condaenv/prenv/bin/python
+pythonpath=/cluster/tufts/cglab/mcroning/LCProp/src
+payload=/cluster/tufts/cglab/mcroning/lcprop_runs/pr_figure6_paper_setup.py
+payload_sha256=d90a61b6baaea6062e53693fe85f5ee86ee250397436a74e5f9475bdbb4c8e26
+image=/cluster/tufts/cglab/mcroning/lcprop_runs/inputs/AF_Res_Chart.png
+image_sha256=e424f1070587d79d2a91f4a3bd14e7c11e80adfe7c723e45432d9d4fc5bb85b7
+cuda_visible_devices=0
+slurm_job_gpus=4
+loaded_modules:
+
+Currently Loaded Modules:
+  1) cuda/12.9.0
+
+
+
+nvcc_version:
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2025 NVIDIA Corporation
+Built on Wed_Apr__9_19:24:57_PDT_2025
+Cuda compilation tools, release 12.9, V12.9.41
+Build cuda_12.9.r12.9/compiler.35813241_0
+gpu_inventory:
+0, NVIDIA A100 80GB PCIe, 575.57.08, 81920 MiB
+Python 3.10.4
+cupy=13.6.0
+numpy=2.1.0
+scipy=1.15.2
+lcprop=/cluster/tufts/cglab/mcroning/LCProp/src/lcprop/__init__.py
+end_utc=2026-08-06T23:05:41Z
+242M	/cluster/tufts/cglab/mcroning/lcprop_runs/pr-figure6-paper-2227722

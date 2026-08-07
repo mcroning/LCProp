@@ -1,0 +1,160 @@
+{
+  "schema": "lcprop.pr_figure6_request_correction.v1",
+  "classification": "local launch-request validation",
+  "output_panel_evaluated": false,
+  "output_panel_reason": "No corrected full-scale propagation was authorized; Figure 6b evaluation is gated on a successful corrected full-scale run.",
+  "sources": {
+    "air_force_chart": {
+      "path": "/private/tmp/prprop3d-af-chart.png",
+      "sha256": "e424f1070587d79d2a91f4a3bd14e7c11e80adfe7c723e45432d9d4fc5bb85b7"
+    },
+    "published_figure6a": {
+      "path": "reference/prprop/photonics-12-00113-v3/Fig 6-a.png",
+      "sha256": "14a36afa232a06cdeab16b7b009ab4c7c2ac83848af83e09979b9a9f945fb5dc",
+      "data_crop_pixels_yx": [
+        [
+          95,
+          734
+        ],
+        [
+          282,
+          921
+        ]
+      ]
+    }
+  },
+  "exact_benchmark_spec": {
+    "Nx": 16384,
+    "Ny": 2048,
+    "x_aperture_um": 4000.0,
+    "y_aperture_um": 4000.0,
+    "interaction_length_um": 4350.0,
+    "dz_um": 2.0,
+    "wavelength_um": 0.514,
+    "refractive_index": 2.4,
+    "positive_mode_index": 1024,
+    "beam_waist_um": 3400.0,
+    "image_size_factor": 1.0,
+    "input_peak_ratio": 1.0,
+    "saturated_small_signal_gain": 4000.0,
+    "signal_gain_sign": 1,
+    "dark_intensity": 0.01,
+    "applied_field": 0.0,
+    "characteristic_wavenumber_per_um": null,
+    "relative_permittivity": 2500.0,
+    "mobile_charge_density_m3": 6.4e+22,
+    "temperature_K": 293.0,
+    "gain_length_product_override": null,
+    "tukey_alpha": 0.05,
+    "volume_noise_epsilon": 0.0,
+    "volume_noise_correlation_um": 0.4,
+    "volume_noise_seed": null,
+    "volume_noise_seeds": null,
+    "Nt": 250,
+    "dt_normalized": 0.01,
+    "invert_image": true,
+    "coherence_group": "pr-image-amplification"
+  },
+  "static_unused_compatibility_fields": [
+    "Nt",
+    "dt_normalized"
+  ],
+  "local_similarity_validation": {
+    "scale": 0.25,
+    "spec": {
+      "Nx": 4096,
+      "Ny": 512,
+      "x_aperture_um": 1000.0,
+      "y_aperture_um": 1000.0,
+      "interaction_length_um": 1087.5,
+      "dz_um": 0.5,
+      "wavelength_um": 0.1285,
+      "refractive_index": 2.4,
+      "positive_mode_index": 256,
+      "beam_waist_um": 850.0,
+      "image_size_factor": 1.0,
+      "input_peak_ratio": 1.0,
+      "saturated_small_signal_gain": 4000.0,
+      "signal_gain_sign": 1,
+      "dark_intensity": 0.01,
+      "applied_field": 0.0,
+      "characteristic_wavenumber_per_um": null,
+      "relative_permittivity": 2500.0,
+      "mobile_charge_density_m3": 6.4e+22,
+      "temperature_K": 293.0,
+      "gain_length_product_override": null,
+      "tukey_alpha": 0.05,
+      "volume_noise_epsilon": 0.0,
+      "volume_noise_correlation_um": 0.4,
+      "volume_noise_seed": null,
+      "volume_noise_seeds": null,
+      "Nt": 250,
+      "dt_normalized": 0.01,
+      "invert_image": true,
+      "coherence_group": "pr-image-amplification"
+    },
+    "preserved_dimensionless_quantities": [
+      "external incidence angle",
+      "samples per two-beam grating period",
+      "beam-waist to aperture ratio",
+      "interaction-length to aperture ratio",
+      "image-size to beam-waist ratio"
+    ]
+  },
+  "preprocessing": [
+    "Pillow grayscale conversion",
+    "normalize source intensity to [0, 1]",
+    "invert source intensity",
+    "pad non-square source to even square with transparent value 1",
+    "rotate source into LCProp (x, y) array convention",
+    "nearest-neighbor resize without prefiltering",
+    "place at the image-bearing signal launch center",
+    "multiply signal amplitude by sqrt(transmission)",
+    "renormalize signal peak ratio and total launch power",
+    "isolate signal with the unchanged nearest-carrier Fourier mask",
+    "transpose and reflect persisted raster into published orientation"
+  ],
+  "controls": {
+    "only_spec_difference": "invert_image: false -> true",
+    "grid_equal": true,
+    "material_equal": true,
+    "solver_equal": true,
+    "corrected_transmission_range": [
+      0.0,
+      1.0
+    ],
+    "previous_transmission_range": [
+      0.0,
+      1.0
+    ]
+  },
+  "published_input_presentation": {
+    "observable": "carrier-isolated signal intensity",
+    "field_of_view_um": [
+      -2000.0,
+      2000.0,
+      -2000.0,
+      2000.0
+    ],
+    "colormap": "viridis",
+    "scale": "linear",
+    "limits": [
+      0.0,
+      0.5
+    ]
+  },
+  "metrics": {
+    "corrected": {
+      "pearson_correlation": 0.7987635520734537,
+      "normalized_rmse": 0.19542904971943922,
+      "edge_correlation": 0.41456143019218517
+    },
+    "corrected_horizontal_registration_pixels": -8,
+    "non_inverted_control": {
+      "pearson_correlation": -0.27635419386637716,
+      "normalized_rmse": 0.5228335865605626,
+      "edge_correlation": 0.18419404734229805
+    },
+    "non_inverted_horizontal_registration_pixels": 24
+  }
+}

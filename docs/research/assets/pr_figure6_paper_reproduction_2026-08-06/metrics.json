@@ -1,0 +1,254 @@
+{
+  "actual_git_sha": "eab1959d53f9f03ff37d89cf0da7d7b6478db12d",
+  "backend_actual": {
+    "backend": "cupy",
+    "complex_dtype": "complex128",
+    "is_gpu": true,
+    "real_dtype": "float64"
+  },
+  "backend_requested": "cupy",
+  "ended_utc": "2026-08-06T23:05:40.954817Z",
+  "exit_code": 0,
+  "expected_git_sha": "eab1959d53f9f03ff37d89cf0da7d7b6478db12d",
+  "gpu": {
+    "cold_initialization_s": 0.4669523099437356,
+    "cuda_driver_version": 12090,
+    "cuda_runtime_version": 12090,
+    "cupy_pool_total_bytes": 16643720704,
+    "cupy_pool_used_bytes": 1073741824,
+    "device_count": 1,
+    "device_id": 0,
+    "device_name": "NVIDIA A100 80GB PCIe",
+    "free_memory_after_bytes": 67997925376,
+    "free_memory_before_bytes": 84647215104,
+    "total_memory_bytes": 85094825984
+  },
+  "hostname": "pax007",
+  "input": {
+    "image_path": "/cluster/tufts/cglab/mcroning/lcprop_runs/inputs/AF_Res_Chart.png",
+    "image_sha256": "e424f1070587d79d2a91f4a3bd14e7c11e80adfe7c723e45432d9d4fc5bb85b7",
+    "image_shape": [
+      216,
+      255
+    ]
+  },
+  "mode": "legacy_linearized_spectral_lie",
+  "paper_setup": {
+    "beam_ratio": 1.0,
+    "external_half_angle_deg": 7.56,
+    "figure": 6,
+    "saturated_intensity_gain": 4000.0,
+    "source": "Photonics 2025, 12(2), 113, Figure 6 caption",
+    "volume_noise": "disabled; not part of the published Figure 6 setup"
+  },
+  "parameters": {
+    "Nt": 250,
+    "Nx": 16384,
+    "Ny": 2048,
+    "applied_field": 0.0,
+    "beam_waist_um": 3400.0,
+    "characteristic_wavenumber_per_um": null,
+    "coherence_group": "pr-image-amplification",
+    "dark_intensity": 0.01,
+    "dt_normalized": 0.01,
+    "dz_um": 2.0,
+    "gain_length_product_override": null,
+    "image_size_factor": 1.0,
+    "input_peak_ratio": 1.0,
+    "interaction_length_um": 4350.0,
+    "invert_image": false,
+    "mobile_charge_density_m3": 6.4e+22,
+    "positive_mode_index": 1024,
+    "refractive_index": 2.4,
+    "relative_permittivity": 2500.0,
+    "saturated_small_signal_gain": 4000.0,
+    "signal_gain_sign": 1,
+    "temperature_K": 293.0,
+    "tukey_alpha": 0.05,
+    "volume_noise_correlation_um": 0.4,
+    "volume_noise_epsilon": 0.0,
+    "volume_noise_seed": null,
+    "volume_noise_seeds": null,
+    "wavelength_um": 0.514,
+    "x_aperture_um": 4000.0,
+    "y_aperture_um": 4000.0
+  },
+  "products": {
+    "E_xz_mid_y.png": {
+      "bytes": 131773,
+      "sha256": "6e29c621eb782ec663220227b3b4d9e82cde71d8489197fff27afdb681beb221"
+    },
+    "compact_diagnostics.npz": {
+      "bytes": 251920066,
+      "sha256": "57ee65af9e4d95113808f38688d1d6e7dd4ec5d99d083ed571d7c0f9b46b0146"
+    },
+    "input_signal.png": {
+      "bytes": 121758,
+      "sha256": "319a604f95ff05aea3cecdf7403fb4f701a09f4640a8133d9abbc7cb945f3b85"
+    },
+    "input_target.png": {
+      "bytes": 5649,
+      "sha256": "effdc3569ffd9bcce2f7038b7ac46e49d2a400c2627cad5e03172021458c81cb"
+    },
+    "output_signal.png": {
+      "bytes": 327630,
+      "sha256": "7d779a5649dd3298aaa741c50ce10fbb0cc26649a6cb078b1fec51dc8412a817"
+    },
+    "output_total_intensity.png": {
+      "bytes": 322865,
+      "sha256": "3234c581ca543779d75f0e7aa4f35eafe3a383ccfbd0ba701e23b1c1bcdea705"
+    },
+    "reconstructed_signal.png": {
+      "bytes": 89461,
+      "sha256": "e01a5d6a22f39daad93ceb82e93971d78ea56bfbaa350c39495efe45ab98da3f"
+    },
+    "source_xz_mid_y.png": {
+      "bytes": 226398,
+      "sha256": "c6eaeaec2149e5ea78900303774dde241c099981c6a56aad2cf8898e1edf3396"
+    }
+  },
+  "results": {
+    "analytic_absolute_signal_gain": 1.9995001249687578,
+    "completed_slices": 2175,
+    "full_nonlinear_residual_moments": {
+      "finite": true,
+      "first": [
+        161.50427969727752,
+        442804.76543552044,
+        -0.4983122935507526,
+        0.8898273774681875
+      ],
+      "last": [
+        1448.387223547502,
+        425522.8839356326,
+        -11.397253015607971,
+        11.077800662241197
+      ],
+      "middle": [
+        92.64757402760989,
+        12410.402842407057,
+        -1.3294769110844638,
+        1.8467881957280208
+      ],
+      "shape": [
+        2175,
+        4
+      ]
+    },
+    "governing_residual_moments": {
+      "finite": true,
+      "first": [
+        -5.991018693366057e-11,
+        4.399393829990703e-23,
+        -5.773159728050814e-15,
+        7.993605777301127e-15
+      ],
+      "last": [
+        1.5194162580631788e-12,
+        8.914957944179167e-24,
+        -1.2434497875801753e-14,
+        1.7763568394002505e-14
+      ],
+      "middle": [
+        -5.817857094897335e-13,
+        1.694246862639095e-24,
+        -8.881784197001252e-15,
+        1.0658141036401503e-14
+      ],
+      "shape": [
+        2175,
+        4
+      ]
+    },
+    "image_intensity_correlation": 0.37610315715804943,
+    "measured_absolute_signal_gain": 1.9354864071712272,
+    "normalized_image_rmse": 0.8388530506322817,
+    "normalized_power_relative_drift": -0.10780928065245333,
+    "power_final": 0.8921907193475475,
+    "power_initial": 1.0000000000000009,
+    "replay": {
+      "consistent": true,
+      "field_consistent": true,
+      "field_max_abs_difference": 0.0,
+      "moment_max_abs_differences": {
+        "full_nonlinear_residual": 0.0,
+        "residual": 0.0,
+        "source": 0.0,
+        "state": 0.0
+      },
+      "moments_bitwise_consistent": true,
+      "performed": true,
+      "specification": "independent complete recomputation from original A0 and zero E seed; no first-pass material state is reused"
+    },
+    "source_moments": {
+      "finite": true,
+      "first": [
+        20659994.90636186,
+        20152020.255176786,
+        0.014291828896879456,
+        2.218826832968275
+      ],
+      "last": [
+        18410377.121635698,
+        16998728.237703893,
+        0.01,
+        7.67448086656336
+      ],
+      "middle": [
+        18940712.148351267,
+        14553524.170628108,
+        0.01,
+        4.022689932803814
+      ],
+      "shape": [
+        2175,
+        4
+      ]
+    },
+    "state_moments": {
+      "finite": true,
+      "first": [
+        -3712.981357806362,
+        13757552.728322756,
+        -2.9733079184323685,
+        3.4204469223444103
+      ],
+      "last": [
+        117.86425272461747,
+        2455782.5852211025,
+        -6.722871019183604,
+        7.39252189864471
+      ],
+      "middle": [
+        -2940.902918900523,
+        466787.0543841581,
+        -4.22767794273135,
+        4.2247141865508855
+      ],
+      "shape": [
+        2175,
+        4
+      ]
+    },
+    "workflow_status": "converged"
+  },
+  "scheduler": {
+    "cuda_visible_devices": "0",
+    "job_gpus": "4",
+    "job_id": "2227722"
+  },
+  "schema": "lcprop.pr_figure6_paper_setup.v1",
+  "started_utc": "2026-08-06T22:49:37.857306Z",
+  "status": "passed",
+  "timing": {
+    "synchronized_calculation_s": 945.0483117075637,
+    "total_payload_s": 963.0934543386102
+  },
+  "versions": {
+    "cupy": "13.6.0",
+    "numpy": "2.1.0",
+    "pillow": "11.1.0",
+    "python": "3.10.4",
+    "scipy": "1.15.2"
+  }
+}

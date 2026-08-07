@@ -224,15 +224,22 @@ sequences are length-checked against `Nz` and recorded by count, endpoints,
 and SHA-256 digest, so independent recomputation is meaningful without
 copying a long seed list into each result.
 
-`paper_figure6_spec()` records the supplied saved-run contract: 16,384 ×
-1,024 × 1,970 samples, 3,000 µm × 1,000 µm aperture, 3,940 µm length, 2 µm
-step, 0.5 µm wavelength, 600 µm waists, equal incident peak intensities,
-external half-angles ±0.0854372372 rad, direct gain-length product 10,
-`Id=0.01`, `N_T=2e22 m^-3`, Tukey alpha 0.2, and volume-noise parameters
-`epsilon=0.02`, `sigma=0.4 µm`. The caller supplies the Air Force chart. Its
-1,970 historical per-slice noise seeds are preserved in
-`figure6_noise_seeds.py` and selected directly by `paper_figure6_spec()`. Their
-little-endian uint32 SHA-256 is
+`paper_figure6_spec()` records the published large-signal image-amplification
+contract: 16,384 × 2,048 × 2,175 samples, 4,000 µm × 4,000 µm aperture,
+4,350 µm length, 2 µm step, 0.514 µm wavelength, 3,400 µm waists, equal
+incident peak intensities, external half-angles ±7.56 degrees,
+`G_sat=4000`, `Id=0.01`, Tukey alpha 0.05, and no scattering noise. The caller
+supplies the checksummed Air Force chart. Figure 6 uses the inverted real-image
+transparency: inversion precedes square padding and nearest-neighbor placement,
+giving the published dark chart field with bright bars while the exterior
+remains transparent. This polarity belongs to the benchmark spec; general
+production defaults and the preprocessing API are unchanged.
+
+The paper supplement's file named `Figure_3_4_6.json` instead contains an
+unrelated no-image, noisy 3,000 µm × 1,000 µm saved run. Its 1,970 historical
+per-slice noise seeds remain preserved in `figure6_noise_seeds.py` as useful
+fanning/reference data, but `paper_figure6_spec()` does not select them. Their
+little-endian uint32 SHA-256 remains
 `ade77c0e678bf3c2836131c4771e9df22774eba3cc3eb30e17150107adf2f32f`.
 
 ## Image amplification

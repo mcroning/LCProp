@@ -50,13 +50,13 @@ def _scaled_spec():
         Nx=64,
         Ny=32,
         x_aperture_um=96.0,
-        y_aperture_um=32.0,
+        y_aperture_um=48.0,
         interaction_length_um=40.0,
         dz_um=10.0,
         positive_mode_index=2,
         beam_waist_um=19.2,
-        gain_length_product_override=0.2,
-        volume_noise_seeds=paper_figure6_spec().volume_noise_seeds[:4],
+        saturated_small_signal_gain=None,
+        gain_length_product_override=-0.2,
     )
 
 
@@ -119,9 +119,11 @@ def main() -> int:
         "classification": "scaled local numerical-path comparison",
         "image_sha256": AF_CHART_SHA256,
         "figure6_exact_contract": {
-            "shape": [16384, 1024, 1970],
-            "gain_length_product": 10.0,
-            "historical_noise_seed_count": 1970,
+            "shape": [16384, 2048, 2175],
+            "saturated_small_signal_gain": 4000.0,
+            "input_peak_ratio": 1.0,
+            "invert_image": True,
+            "volume_noise": "disabled",
         },
         "scaled_results": results,
         "mode_comparisons": comparisons,

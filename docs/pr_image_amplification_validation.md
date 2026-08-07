@@ -127,53 +127,53 @@ research-scale GPU convergence run. Those changes should be reviewed as a
 separate performance and boundary-condition milestone rather than hidden in
 the benchmark.
 
-## Figure 6 Saved-Run Contract
+## Figure 6 Published Contract
 
-The subsequently supplied trusted-run parameters for Figure 6 supersede an
-earlier caption-based inference. They are a distinct ratio-one case:
+The direct panel audit in
+`docs/research/pr_figure6_panel_comparison_2026-08-07.md` established that the
+paper caption and rendered panels, rather than the mislabeled supplementary
+JSON, define the final Figure 6 request. It is the ratio-one large-signal case
+using the Figure 4 geometry:
 
-| Parameter | Saved value |
+| Parameter | Published value |
 |---|---:|
-| Gain-length product `gl` | 10 |
+| Saturated small-signal gain | 4,000 |
 | Input peak-intensity ratio | 1 |
-| Grid | 16,384 × 1,024 × 1,970 |
-| Aperture | 3,000 µm × 1,000 µm |
-| Interaction length | 3,940 µm |
+| Grid | 16,384 × 2,048 × 2,175 |
+| Aperture | 4,000 µm × 4,000 µm |
+| Interaction length | 4,350 µm |
 | Longitudinal step | 2 µm |
-| Wavelength | 0.5 µm |
-| Beam waists | 600 µm |
-| External half-angles | ±0.08543723722873033 rad |
+| Wavelength | 0.514 µm |
+| Beam waists | 3,400 µm |
+| External half-angles | ±7.56° |
 | Refractive index | 2.4 |
 | Dark intensity | 0.01 |
 | Applied field | 0 |
 | Relative permittivity | 2,500 |
-| Mobile charge density | 2e22 m^-3 |
+| Mobile charge density | 6.4e22 m^-3 |
 | Temperature | 293 K |
-| Tukey alpha | 0.2 |
-| Volume-noise epsilon | 0.02 |
-| Noise correlation length | 0.4 µm |
+| Tukey alpha | 0.05 |
+| Volume noise | Disabled |
+| Image transparency | Inverted Air Force chart |
 
-LCProp replaces the saved `No Image` selector with the checksummed Air Force
-resolution chart by explicit project direction. The supplied external angle
-maps to periodic Fourier mode 512 on the 3 mm aperture, within 2e-6 rad, and
-gives 16 samples per interference-grating period.
+The external angle maps to periodic Fourier mode 1024 on the 4 mm aperture and
+gives eight samples per interference-grating period. The real-image
+preprocessing normalizes the checksummed chart, inverts it, pads it to an even
+square using transparent value one, rotates it into LCProp's `(x, y)` array
+convention, resizes it with nearest-neighbor interpolation, and applies the
+square root as a signal-amplitude transparency. Inversion before padding is
+essential: it produces the published dark chart field with bright bars while
+leaving the surrounding Gaussian beam unobstructed.
 
-The complete saved configuration subsequently supplied all 1,970 generated
-volume-noise seeds, exactly matching the number of longitudinal slices. LCProp
-preserves that explicit sequence and selects seed `k` for slice `k`, matching
-the trusted run's indexing. The sequence is validated as unsigned 32-bit
-integers and results record its count, endpoints, and SHA-256 digest. A
-base-seed derivation policy remains available for new reproducible fanning
-experiments, but Figure 6 does not use it. Interpreted as little-endian uint32,
-the historical sequence has SHA-256
-`ade77c0e678bf3c2836131c4771e9df22774eba3cc3eb30e17150107adf2f32f`.
+The supplementary `Figure_3_4_6.json` contains a separate no-image, noisy
+3,000 µm × 1,000 µm configuration with `gl=10`. It is not a serialized Figure
+6 request. Its historical seed sequence remains available for future fanning
+validation but is not selected by `paper_figure6_spec()`.
 
-The full float64 E volume for this corrected contract would require about
-246 GiB before source, residual, solver work, and optical arrays. The PR-owned
-streaming workflow instead retains two transverse E slices and selected
-diagnostics. Its production, full-nonlinear Lie reference, and legacy
-linearized spectral/Lie modes remain explicitly distinct so agreement or
-departure can be attributed to the material equation and optical ordering.
+The PR-owned streaming workflow retains only bounded transverse state and
+selected diagnostics. Its production, full-nonlinear Lie reference, and legacy
+linearized spectral/Lie modes remain explicitly distinct; correcting the
+benchmark transparency does not change any of those numerical paths.
 
 ---
 
