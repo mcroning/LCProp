@@ -217,12 +217,54 @@ Three research modes remain separate:
 
 The optional square-root two-dimensional Tukey window reproduces PRProp3D's
 window definition and is disabled unless requested. Optional correlated
-volume phase noise follows the trusted amplitude, Gaussian-filter, and
-correlation-length scaling. It accepts either an explicit seed for every z
-slice or a base seed that deterministically derives each slice seed. Explicit
-sequences are length-checked against `Nz` and recorded by count, endpoints,
-and SHA-256 digest, so independent recomputation is meaningful without
-copying a long seed list into each result.
+volume phase noise has two explicitly separate representations.
+
+The legacy representation follows the trusted amplitude, Gaussian-filter,
+and correlation-length scaling exactly. It accepts either an explicit seed
+for every material-z slice or a base seed that deterministically derives each
+slice seed. Explicit sequences are length-checked against `Nz` and recorded by
+count, endpoints, and SHA-256 digest. Because both the seed address and the
+screen normalization depend on the material-slice index and `Nz`, equal base
+seeds on different longitudinal grids do **not** describe the same physical
+disorder. This behavior remains the default so earlier results do not change.
+
+`PRCanonicalScatteringSpec` selects the partition-independent alternative.
+The trusted model assigns each independent phase screen variance proportional
+to `epsilon/Ns`; LCProp therefore interprets it as a white-in-z random phase
+measure rather than a point-sampled smooth field. Independent increments live
+on canonical half-open physical-z slabs. A material interval receives the sum
+of all canonical increments that it contains, so a coarse interval is the same
+realization as its constituent fine intervals. The canonical spacing must
+divide both the material interval and the complete z domain exactly.
+
+Each slab seed is addressed directly from the realization seed and physical
+slab index. Generation order and earlier requests cannot change a slab. The
+implementation retains only one transverse accumulator, uses NumPy or CuPy
+arrays on the selected backend, and records the algorithm version, seed,
+canonical spacing, domain, shape, apertures, normalization and coordinate
+conventions, backend RNG, dtype, canonical-seed checksum, and configuration
+checksum. It does not retain a three-dimensional scattering volume.
+
+For example, the same realization can be used on 50 µm and 2 µm material
+grids with:
+
+```python
+scattering = PRCanonicalScatteringSpec(
+    epsilon=0.02,
+    transverse_correlation_um=0.4,
+    realization_seed=12345,
+    canonical_dz_um=2.0,
+)
+options = PRStreamingStaticOptions(
+    partition_independent_scattering=scattering,
+)
+```
+
+The canonical and legacy controls are mutually exclusive. Scattering is still
+applied once after each complete nominal material slice; optical substeps do
+not relocate or subdivide it. Thus partition-independent runs share integrated
+disorder, while differences caused by screen placement and material/optical
+discretization remain part of the experiment.
 
 `paper_figure6_spec()` records the published large-signal image-amplification
 contract: 16,384 × 2,048 × 2,175 samples, 4,000 µm × 4,000 µm aperture,

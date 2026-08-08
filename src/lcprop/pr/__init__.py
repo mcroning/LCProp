@@ -20,6 +20,14 @@ from lcprop.pr.specs import (
     PRSolverOptions,
     PR_SEMI_IMPLICIT_INTEGRATOR,
 )
+from lcprop.pr.scattering import (
+    PR_CANONICAL_SCATTERING_ALGORITHM,
+    PRCanonicalScatteringSpec,
+    canonical_scattering_phase_increment,
+    canonical_scattering_provenance,
+    canonical_slab_range,
+    canonical_slab_seed,
+)
 from lcprop.pr.static import (
     PRStaticResult,
     PRStaticSolverOptions,
@@ -89,6 +97,8 @@ __all__ = [
     "PRRunResult",
     "PRSolverOptions",
     "PR_SEMI_IMPLICIT_INTEGRATOR",
+    "PR_CANONICAL_SCATTERING_ALGORITHM",
+    "PRCanonicalScatteringSpec",
     "PRStaticResult",
     "PRStaticSolverOptions",
     "PRCoupledStaticIterationRecord",
@@ -132,6 +142,10 @@ __all__ = [
     "run_streaming_image_amplification",
     "solve_pr_static_intensity",
     "solve_pr_static_intensity_batched",
+    "canonical_scattering_phase_increment",
+    "canonical_scattering_provenance",
+    "canonical_slab_range",
+    "canonical_slab_seed",
     "advance_pr_slice_with_midpoint_source",
     "run_pr_static",
     "run_pr_static_streaming",

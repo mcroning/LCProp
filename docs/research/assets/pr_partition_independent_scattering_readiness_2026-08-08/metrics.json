@@ -1,0 +1,90 @@
+{
+  "configuration": {
+    "aperture_um": [
+      64.0,
+      32.0
+    ],
+    "coarse_dz_um": 10.0,
+    "coarse_optical_substeps": 5,
+    "fine_dz_um": 2.0,
+    "fine_optical_substeps": 1,
+    "shape": [
+      32,
+      16
+    ],
+    "z_length_um": 20.0
+  },
+  "purpose": "readiness only; output-field differences measure longitudinal discretization and screen placement, not Figure A5 ring suppression",
+  "scattering_identity": {
+    "canonical_seed_sha256_le_u32": "76ed280e7fade2ddda907f1a50170b6b1843f3fff64fca34e0ebc4fe09a14262",
+    "coarse_and_fine_provenance_equal": true,
+    "coarse_total_phase_sha256": "fee1b021bb6f4c9e641f704d48e0edd24b0d2c986cdcbfa05f41aefccf567815",
+    "configuration_sha256": "8c08221e08f50689f7d398634bf89ef5b20e286572c4384b7af2765de3e766ef",
+    "fine_total_phase_sha256": "fdcf38299f121dec2f349e41995acb5aa8dd455b02055a04c01f7e9a82793abb",
+    "interval_errors": [
+      {
+        "max_abs": 1.1102230246251565e-16,
+        "relative_l2": 2.128396771372398e-16,
+        "z_start_um": 0.0
+      },
+      {
+        "max_abs": 1.6653345369377348e-16,
+        "relative_l2": 2.2134655236539084e-16,
+        "z_start_um": 10.0
+      }
+    ],
+    "provenance": {
+      "algorithm_version": "canonical_phase_slabs_v1",
+      "canonical_dz_um": 2.0,
+      "canonical_seed_sha256_le_u32": "76ed280e7fade2ddda907f1a50170b6b1843f3fff64fca34e0ebc4fe09a14262",
+      "canonical_slab_count": 10,
+      "configuration_sha256": "8c08221e08f50689f7d398634bf89ef5b20e286572c4384b7af2765de3e766ef",
+      "coordinate_convention": "canonical slab i is [i*canonical_dz_um, (i+1)*canonical_dz_um); material screens are interval sums",
+      "epsilon_total_phase_variance": 0.02,
+      "first_canonical_seed": 4221408154,
+      "last_canonical_seed": 3179456684,
+      "longitudinal_model": "independent white-in-z phase increments",
+      "mode": "partition_independent_canonical_phase_slabs",
+      "normalization_convention": "each canonical unfiltered increment has variance epsilon*canonical_dz_um/z_length_um*4*pi before the trusted Gaussian filter and sqrt(sigma_x*sigma_y) factor",
+      "real_dtype": "float64",
+      "realization_seed": 20260808,
+      "rng_addressing": "SeedSequence([realization_seed, LCPR_tag, slab_index])",
+      "rng_backend": "numpy.random.RandomState",
+      "rng_backend_version": "2.5.1",
+      "seedsequence_numpy_version": "2.5.1",
+      "transverse_aperture_um": [
+        64.0,
+        32.0
+      ],
+      "transverse_correlation_um": 0.8,
+      "transverse_filter": "scipy-compatible gaussian_filter default boundary",
+      "transverse_filter_library": "scipy 1.18.0",
+      "transverse_shape": [
+        32,
+        16
+      ],
+      "z_domain_um": [
+        0.0,
+        20.0
+      ]
+    },
+    "total_phase_max_abs": 1.6653345369377348e-16,
+    "total_phase_relative_l2": 2.1314127796095794e-16
+  },
+  "software": {
+    "numpy": "2.5.1",
+    "python": "3.12.13 | packaged by Anaconda, Inc. | (main, Mar 19 2026, 20:12:32) [Clang 20.1.8 ]",
+    "scipy": "1.18.0"
+  },
+  "workflow": {
+    "coarse_power_relative_drift": 2.2204460492503126e-16,
+    "coarse_replay_consistent": true,
+    "coarse_runtime_s": 0.017393624992109835,
+    "coarse_status": "converged",
+    "fine_power_relative_drift": 6.661338147750938e-16,
+    "fine_replay_consistent": true,
+    "fine_runtime_s": 0.041488165967166424,
+    "fine_status": "converged",
+    "output_field_relative_l2": 0.022975113051390366
+  }
+}

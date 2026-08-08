@@ -31,6 +31,12 @@ from lcprop.optics.launch import build_launch, normalized_power
 from lcprop.optics.splitstep import linear_kernel
 from lcprop.pr.evolution import hopping_rhs
 from lcprop.pr.optical_response import half_step_response_from_E
+from lcprop.pr.scattering import (
+    PRCanonicalScatteringSpec,
+    canonical_scattering_phase_increment,
+    canonical_scattering_provenance,
+    canonical_slab_range,
+)
 from lcprop.pr.source import (
     channel_peak_intensity_reference,
     pr_driving_intensity,
@@ -78,6 +84,7 @@ class PRStreamingStaticOptions:
     volume_noise_correlation_um: float = 0.4
     volume_noise_seed: int | None = None
     volume_noise_seeds: tuple[int, ...] | None = None
+    partition_independent_scattering: PRCanonicalScatteringSpec | None = None
 
     def validate(self) -> None:
         self.coupled.validate()
@@ -113,6 +120,18 @@ class PRStreamingStaticOptions:
                     raise ValueError(
                         "volume_noise_seeds must contain unsigned 32-bit integers"
                     )
+        canonical = self.partition_independent_scattering
+        if canonical is not None:
+            canonical.validate()
+            if (
+                epsilon != 0.0
+                or self.volume_noise_seed is not None
+                or self.volume_noise_seeds is not None
+            ):
+                raise ValueError(
+                    "partition_independent_scattering and legacy volume-noise "
+                    "controls are mutually exclusive"
+                )
         for name in ("capture_y_indices", "capture_x_indices"):
             if any(
                 int(index) != index or int(index) < 0 for index in getattr(self, name)
@@ -311,6 +330,20 @@ def _volume_noise_phase(
     grid,
     xp: Any,
 ):
+    canonical = request.solver.partition_independent_scattering
+    if canonical is not None:
+        return canonical_scattering_phase_increment(
+            canonical,
+            z_start_um=float(z_index) * float(grid.dz_um),
+            dz_um=float(grid.dz_um),
+            z_length_um=float(request.grid.z_length_um),
+            Nx=grid.Nx,
+            Ny=grid.Ny,
+            x_aperture_um=float(request.grid.x_aperture_um),
+            y_aperture_um=float(request.grid.y_aperture_um),
+            real_dtype=grid.real_dtype,
+            xp=xp,
+        )
     epsilon = float(request.solver.volume_noise_epsilon)
     if epsilon == 0.0:
         return None
@@ -377,11 +410,32 @@ def volume_noise_seed_for_slice(
     )
 
 
-def _volume_noise_provenance(options: PRStreamingStaticOptions) -> dict[str, Any]:
+def _volume_noise_provenance(
+    options: PRStreamingStaticOptions,
+    *,
+    request: PRStreamingStaticRequest,
+    grid,
+    xp: Any,
+) -> dict[str, Any]:
+    canonical = options.partition_independent_scattering
+    if canonical is not None:
+        return canonical_scattering_provenance(
+            canonical,
+            z_length_um=float(request.grid.z_length_um),
+            Nx=grid.Nx,
+            Ny=grid.Ny,
+            x_aperture_um=float(request.grid.x_aperture_um),
+            y_aperture_um=float(request.grid.y_aperture_um),
+            real_dtype=grid.real_dtype,
+            xp=xp,
+        )
     explicit = options.volume_noise_seeds
     if explicit is not None:
         values = np.asarray(explicit, dtype="<u4")
         return {
+            "mode": "legacy_per_material_slice",
+            "epsilon": float(options.volume_noise_epsilon),
+            "correlation_um": float(options.volume_noise_correlation_um),
             "seed_policy": "explicit_per_slice_sequence",
             "seed_count": int(values.size),
             "seed_sha256_le_u32": hashlib.sha256(values.tobytes()).hexdigest(),
@@ -389,6 +443,9 @@ def _volume_noise_provenance(options: PRStreamingStaticOptions) -> dict[str, Any
             "last_seed": int(values[-1]),
         }
     return {
+        "mode": "legacy_per_material_slice",
+        "epsilon": float(options.volume_noise_epsilon),
+        "correlation_um": float(options.volume_noise_correlation_um),
         "seed_policy": "SeedSequence(base_seed, z_index)",
         "base_seed": options.volume_noise_seed,
     }
@@ -413,6 +470,14 @@ def _validate_request(request: PRStreamingStaticRequest):
         request.solver.volume_noise_seeds
     ) != round_nz(request.grid.z_length_um, request.grid.dz_um):
         raise ValueError("volume_noise_seeds length must equal the number of z slices")
+    canonical = request.solver.partition_independent_scattering
+    if canonical is not None:
+        canonical_slab_range(
+            canonical,
+            z_start_um=0.0,
+            dz_um=float(request.grid.dz_um),
+            z_length_um=float(request.grid.z_length_um),
+        )
     return wavelengths[0]
 
 
@@ -866,9 +931,12 @@ def run_pr_static_streaming(
                 request.solver.deterministic_replay
             ),
             "volume_noise": {
-                "epsilon": float(request.solver.volume_noise_epsilon),
-                "correlation_um": float(request.solver.volume_noise_correlation_um),
-                **_volume_noise_provenance(request.solver),
+                **_volume_noise_provenance(
+                    request.solver,
+                    request=request,
+                    grid=grid,
+                    xp=xp,
+                ),
             },
             "captured_y_indices": tuple(request.solver.capture_y_indices),
             "captured_x_indices": tuple(request.solver.capture_x_indices),
