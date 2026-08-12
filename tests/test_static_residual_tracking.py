@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from lcprop.algorithms.theta_cn import (
+from lcprop.lc.theta_cn import (
     static_director_residual,
     static_director_residual_metrics,
 )

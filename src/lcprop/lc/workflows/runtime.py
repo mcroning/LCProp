@@ -37,9 +37,9 @@ from lcprop.optics.substeps import (
     OpticalSubstepPlan,
     build_optical_substep_kernel,
 )
-from lcprop.algorithms.theta_cn import prepare_cn_operator
-from lcprop.algorithms.theta_picard import cn_trapezoid_picard_step
-from lcprop.algorithms.theta_cn_zcoupled import cn_trapezoid_picard_step_zcoupled
+from lcprop.lc.theta_cn import prepare_cn_operator
+from lcprop.lc.theta_picard import cn_trapezoid_picard_step
+from lcprop.lc.theta_cn_zcoupled import cn_trapezoid_picard_step_zcoupled
 
 
 @dataclass(frozen=True)

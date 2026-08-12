@@ -13,7 +13,7 @@ from lcprop.core.derived import compute_neff
 from lcprop.lc.propagation import advance_slice
 from lcprop.optics.splitstep import total_intensity
 from lcprop.optics.substeps import build_optical_substep_kernel
-from lcprop.algorithms.theta_picard import cn_trapezoid_picard_step
+from lcprop.lc.theta_picard import cn_trapezoid_picard_step
 from lcprop.algorithms.thomas import solve_const_offdiag_batched
 from lcprop.lc.diagnostics import residual_theta_static
 from lcprop.products.diagnostics import intensity_metrics

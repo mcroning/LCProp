@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from lcprop.algorithms.theta_cn import static_director_residual_metrics
+from lcprop.lc.theta_cn import static_director_residual_metrics
 from lcprop.core.backend import asnumpy
 
 Array = Any

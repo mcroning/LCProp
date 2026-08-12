@@ -9,7 +9,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from lcprop.algorithms.theta_cn import laplacian_dirichletx_periody
+from lcprop.lc.theta_cn import laplacian_dirichletx_periody
 from lcprop.products.static_torque_balance import (
     build_static_torque_balance_data,
     plot_static_torque_balance,

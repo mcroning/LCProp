@@ -16,7 +16,7 @@ from lcprop.persistence.timedependent import TimeDependentCheckpoint
 from lcprop.optics.launch import normalized_power, reconstructed_physical_powers_mW
 from lcprop.optics.splitstep import total_intensity
 from lcprop.products.diagnostics import rms_widths
-from lcprop.algorithms.td_zmarch import TDZMarchControls, run_td_zmarch
+from lcprop.lc.td_zmarch import TDZMarchControls, run_td_zmarch
 from lcprop.lc.workflows.runtime import (
     build_runtime_components,
     initial_A_field,

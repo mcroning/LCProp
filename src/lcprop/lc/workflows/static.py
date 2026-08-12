@@ -34,9 +34,9 @@ from lcprop.optics.launch import (
 )
 from lcprop.optics.splitstep import total_intensity
 from lcprop.optics.substeps import build_optical_substep_kernel
-from lcprop.algorithms.theta_cn import prepare_cn_operator
-from lcprop.algorithms.theta_cn import static_director_residual_metrics
-from lcprop.algorithms.theta_picard import cn_trapezoid_picard_step
+from lcprop.lc.theta_cn import prepare_cn_operator
+from lcprop.lc.theta_cn import static_director_residual_metrics
+from lcprop.lc.theta_picard import cn_trapezoid_picard_step
 from lcprop.persistence.static import (
     StaticCheckpoint,
     static_request_fingerprint,

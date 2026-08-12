@@ -11,7 +11,7 @@ from typing import Any
 
 import numpy as np
 
-from lcprop.algorithms.theta_cn import (
+from lcprop.lc.theta_cn import (
     laplacian_dirichletx_periody,
     static_director_residual,
     theta_drive,
