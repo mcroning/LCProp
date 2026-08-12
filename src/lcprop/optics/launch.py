@@ -3,8 +3,8 @@
 This module converts human-facing ``BeamStack`` objects into optical
 channel stacks consumed by the algorithms.
 
-It does not propagate fields, build FFT kernels, solve theta, or manage
-products.
+It does not propagate fields, build FFT kernels, solve material state, or
+manage products.
 
 Array convention
 ----------------
@@ -33,7 +33,6 @@ class LaunchResult:
     physical_powers_mW: Array
     power_fractions: Array
     physical_total_power_mW: float
-    theta_weights: Array
     wavelengths_um: Array
     coherence: str
     coherence_groups: tuple[str, ...]
@@ -48,7 +47,6 @@ class LaunchResult:
             "power_fractions": [float(x) for x in np.asarray(_to_numpy(self.power_fractions)).ravel()],
             "field_normalization": "sum_channel_integrals_equals_one",
             "wavelengths_um": [float(x) for x in np.asarray(_to_numpy(self.wavelengths_um)).ravel()],
-            "theta_weights": [float(x) for x in np.asarray(_to_numpy(self.theta_weights)).ravel()],
         }
 
 
@@ -146,10 +144,6 @@ def build_launch(
 
     A0 = xp.stack(fields, axis=0).astype(complex_dtype, copy=False)
 
-    theta_weights = xp.asarray(
-        [float(ch.theta_weight) for ch in beams.channels],
-        dtype=grid.real_dtype,
-    )
     wavelengths_um = xp.asarray(
         [float(ch.wavelength_um) for ch in beams.channels],
         dtype=grid.real_dtype,
@@ -160,7 +154,6 @@ def build_launch(
         physical_powers_mW=physical_powers_mW,
         power_fractions=power_fractions,
         physical_total_power_mW=physical_total_power_mW,
-        theta_weights=theta_weights,
         wavelengths_um=wavelengths_um,
         coherence=beams.coherence,
         coherence_groups=beams.coherence_groups,

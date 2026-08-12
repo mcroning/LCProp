@@ -73,6 +73,33 @@ def test_pr_checkpoint_disk_round_trip_preserves_physical_state_and_request(
     assert request_document["request"]["beams"]["channels"][0][
         "tilt_y_rad_per_um"
     ] == result.checkpoint.request.beams.channels[0].tilt_y_rad_per_um
+    assert (
+        "theta_weight"
+        not in request_document["request"]["beams"]["channels"][0]
+    )
+
+
+@pytest.mark.parametrize("legacy_weight", [1.0, 2.0])
+def test_pr_checkpoint_legacy_theta_weight_ingestion_is_explicit(
+    tmp_path,
+    legacy_weight,
+):
+    result = run_pr_timedependent(_request_with_initial_state(steps=1))
+    save_pr_checkpoint(result.checkpoint, tmp_path)
+
+    def add_legacy_weight(document):
+        document["request"]["beams"]["channels"][0][
+            "theta_weight"
+        ] = legacy_weight
+
+    _rewrite_json(tmp_path / "request.json", add_legacy_weight)
+
+    if legacy_weight == 1.0:
+        loaded = load_pr_checkpoint(tmp_path)
+        assert not hasattr(loaded.request.beams.channels[0], "theta_weight")
+    else:
+        with pytest.raises(ValueError, match="legacy non-unit theta_weight"):
+            load_pr_checkpoint(tmp_path)
 
 
 def test_disk_loaded_pr_checkpoint_continues_exactly(tmp_path):

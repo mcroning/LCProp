@@ -4,8 +4,8 @@ from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec, LCMaterial
 from lcprop.core.grid import make_grid
 from lcprop.lc.coupling import resolved_bi
+from lcprop.lc.source import director_driving_intensity
 from lcprop.optics.launch import build_launch
-from lcprop.optics.splitstep import weighted_theta_intensity
 
 
 def _normalization_metrics(power_mW: float, Nx: int) -> tuple[float, float]:
@@ -27,9 +27,8 @@ def _normalization_metrics(power_mW: float, Nx: int) -> tuple[float, float]:
         )
     )
     launch = build_launch(beams, grid)
-    weighted_intensity = weighted_theta_intensity(
+    weighted_intensity = director_driving_intensity(
         launch.A0,
-        launch.theta_weights,
         coherence_groups=launch.coherence_groups,
         xp=grid.xp,
     )

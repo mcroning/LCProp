@@ -13,7 +13,8 @@ from lcprop.core.requests import (
     TimeDependentRunRequest,
     TimeDependentSolverOptions,
 )
-from lcprop.optics.splitstep import advance_slice, linear_kernel
+from lcprop.lc.propagation import advance_slice
+from lcprop.optics.splitstep import linear_kernel
 from lcprop.optics.substeps import (
     build_optical_substep_kernel,
     resolve_optical_substeps,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import hashlib
 import json
 from pathlib import Path
 
@@ -215,6 +216,48 @@ def test_shared_dispatch_loads_legacy_lc_static_without_format_change(tmp_path):
     assert "format" not in provenance
     assert "material" not in request_document
     assert "format" not in request_document
+
+
+def test_static_checkpoint_serialization_omits_removed_theta_weight(tmp_path):
+    stopped, _ = _stop_static_after(_static_request(), 1)
+    save_run_checkpoint(stopped.checkpoint, tmp_path)
+
+    request_document = json.loads((tmp_path / "request.json").read_text())
+
+    assert (
+        "theta_weight"
+        not in request_document["request"]["beams"]["channels"][0]
+    )
+
+
+@pytest.mark.parametrize("legacy_weight", [1.0, 2.0])
+def test_static_checkpoint_legacy_theta_weight_ingestion_is_explicit(
+    tmp_path,
+    legacy_weight,
+):
+    stopped, _ = _stop_static_after(_static_request(), 1)
+    save_run_checkpoint(stopped.checkpoint, tmp_path)
+    request_path = tmp_path / "request.json"
+    provenance_path = tmp_path / "provenance.json"
+    request_document = json.loads(request_path.read_text())
+    request_values = request_document["request"]
+    request_values["beams"]["channels"][0]["theta_weight"] = legacy_weight
+    serialized = json.dumps(
+        request_values,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    provenance = json.loads(provenance_path.read_text())
+    provenance["request_fingerprint"] = hashlib.sha256(serialized).hexdigest()
+    request_path.write_text(json.dumps(request_document), encoding="utf-8")
+    provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+
+    if legacy_weight == 1.0:
+        loaded = load_run_checkpoint(tmp_path)
+        assert not hasattr(loaded.request.beams.channels[0], "theta_weight")
+    else:
+        with pytest.raises(ValueError, match="legacy non-unit theta_weight"):
+            load_run_checkpoint(tmp_path)
 
 
 def test_shared_dispatch_loads_legacy_lc_timedependent(tmp_path):

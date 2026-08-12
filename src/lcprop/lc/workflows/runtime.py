@@ -23,11 +23,11 @@ from lcprop.core.grid import RuntimeGrid, make_grid
 from lcprop.core.derived import resolved_b
 from lcprop.lc.coupling import resolved_bi
 from lcprop.lc.bias import BiasResult, build_bias
-from lcprop.optics.launch import LaunchResult, build_launch
-from lcprop.optics.splitstep import (
-    advance_slice_with_midintensity,
-    weighted_theta_intensity,
+from lcprop.lc.source import (
+    advance_slice_with_midpoint_source,
+    director_driving_intensity,
 )
+from lcprop.optics.launch import LaunchResult, build_launch
 from lcprop.optics.substeps import (
     OpticalSubstepPlan,
     build_optical_substep_kernel,
@@ -170,9 +170,8 @@ def build_runtime_components(
 def initial_theta_intensity(components: RuntimeComponents):
     """Return effective theta-driving intensity for the launch field."""
 
-    return weighted_theta_intensity(
+    return director_driving_intensity(
         initial_A_field(components),
-        components.launch.theta_weights,
         coherent=components.coherent,
         coherence_groups=components.coherence_groups,
         xp=components.grid.xp,
@@ -233,7 +232,7 @@ def make_global_uniform_theta_iteration(components: RuntimeComponents):
         I_mid = initial_theta_intensity(components)
 
         for _ in range(grid.Nz):
-            A, _, _, I_mid = advance_slice_with_midintensity(
+            A, _, _, I_mid = advance_slice_with_midpoint_source(
                 A,
                 theta,
                 kernel=components.kernel,
@@ -244,7 +243,6 @@ def make_global_uniform_theta_iteration(components: RuntimeComponents):
                 no=components.request.material.no,
                 coherent=components.coherent,
                 coherence_groups=components.coherence_groups,
-                theta_weights=components.launch.theta_weights,
                 Nsub=components.optical_substeps.Nsub,
                 xp=xp,
             )
@@ -261,7 +259,7 @@ def make_td_optics_step(components: RuntimeComponents):
     xp = grid.xp
 
     def optics_step(A, theta_k, k):
-        A, _, _, I_mid = advance_slice_with_midintensity(
+        A, _, _, I_mid = advance_slice_with_midpoint_source(
             A,
             theta_k,
             kernel=components.kernel,
@@ -272,7 +270,6 @@ def make_td_optics_step(components: RuntimeComponents):
             no=components.request.material.no,
             coherent=components.coherent,
             coherence_groups=components.coherence_groups,
-            theta_weights=components.launch.theta_weights,
             Nsub=components.optical_substeps.Nsub,
             xp=xp,
         )

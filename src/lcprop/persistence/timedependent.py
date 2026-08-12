@@ -10,7 +10,8 @@ from typing import Any, Literal
 
 import numpy as np
 
-from lcprop.core.beams import BeamChannel, BeamStack
+from lcprop.core.beams import BeamStack
+from lcprop.adapters.legacy_beams import beam_channel_from_mapping
 from lcprop.core.context import BiasSpec, GridSpec, LCMaterial
 from lcprop.core.requests import (
     OutputOptions,
@@ -85,7 +86,8 @@ def _request_from_dict(values: dict[str, Any]) -> TimeDependentRunRequest:
         bias=BiasSpec(**values["bias"]),
         beams=BeamStack(
             channels=tuple(
-                BeamChannel(**channel) for channel in beam_values["channels"]
+                beam_channel_from_mapping(channel)
+                for channel in beam_values["channels"]
             ),
             coherence=beam_values["coherence"],
         ),

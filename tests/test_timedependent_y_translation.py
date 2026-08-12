@@ -7,6 +7,7 @@ from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import BiasSpec, GridSpec, LCMaterial
 from lcprop.core.grid import make_grid
 from lcprop.core.requests import OutputOptions, TimeDependentRunRequest, TimeDependentSolverOptions
+import lcprop.lc.propagation as lc_propagation
 from lcprop.optics.splitstep import total_intensity
 import lcprop.optics.splitstep as splitstep
 import lcprop.workflows.timedependent as timedependent
@@ -96,7 +97,7 @@ def test_frozen_director_td_uses_shared_advance_and_preserves_tilt(monkeypatch):
     )
     shared_advance_calls = 0
     prepared_advance_calls = 0
-    original_advance = splitstep.advance_slice
+    original_advance = lc_propagation.advance_slice
     original_prepared_advance = splitstep.advance_prepared_response
 
     def observed_advance(*args, **kwargs):
@@ -109,7 +110,7 @@ def test_frozen_director_td_uses_shared_advance_and_preserves_tilt(monkeypatch):
         prepared_advance_calls += 1
         return original_prepared_advance(*args, **kwargs)
 
-    monkeypatch.setattr(splitstep, "advance_slice", observed_advance)
+    monkeypatch.setattr(lc_propagation, "advance_slice", observed_advance)
     monkeypatch.setattr(
         splitstep,
         "advance_prepared_response",

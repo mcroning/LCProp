@@ -10,7 +10,8 @@ from lcprop.lc.requests import SolitonRequest
 from lcprop.lc.results import SolitonResult
 from lcprop.core.backend import asnumpy, synchronize
 from lcprop.core.derived import compute_neff
-from lcprop.optics.splitstep import advance_slice, total_intensity
+from lcprop.lc.propagation import advance_slice
+from lcprop.optics.splitstep import total_intensity
 from lcprop.optics.substeps import build_optical_substep_kernel
 from lcprop.algorithms.theta_picard import cn_trapezoid_picard_step
 from lcprop.algorithms.thomas import solve_const_offdiag_batched

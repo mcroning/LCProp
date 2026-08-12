@@ -11,7 +11,8 @@ from typing import Any, Literal
 
 import numpy as np
 
-from lcprop.core.beams import BeamChannel, BeamStack
+from lcprop.core.beams import BeamStack
+from lcprop.adapters.legacy_beams import beam_channel_from_mapping
 from lcprop.core.context import BiasSpec, GridSpec, LCMaterial
 from lcprop.core.requests import (
     OutputOptions,
@@ -93,7 +94,8 @@ def _request_from_dict(values: dict[str, Any]) -> StaticRunRequest:
         bias=BiasSpec(**values["bias"]),
         beams=BeamStack(
             channels=tuple(
-                BeamChannel(**channel) for channel in beam_values["channels"]
+                beam_channel_from_mapping(channel)
+                for channel in beam_values["channels"]
             ),
             coherence=beam_values["coherence"],
         ),
@@ -104,8 +106,12 @@ def _request_from_dict(values: dict[str, Any]) -> StaticRunRequest:
 
 
 def static_request_fingerprint(request: StaticRunRequest) -> str:
+    return _request_values_fingerprint(_request_to_dict(request))
+
+
+def _request_values_fingerprint(values: dict[str, Any]) -> str:
     document = json.dumps(
-        _request_to_dict(request), sort_keys=True, separators=(",", ":")
+        values, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
     return hashlib.sha256(document).hexdigest()
 
@@ -226,6 +232,11 @@ def load_static_checkpoint(run_dir) -> StaticCheckpoint:
     )
     if request_document.get("workflow") != "static" or provenance.get("workflow") != "static":
         raise ValueError("checkpoint directory does not contain a static workflow")
+    request_values = request_document["request"]
+    recorded_fingerprint = str(provenance["request_fingerprint"])
+    if _request_values_fingerprint(request_values) != recorded_fingerprint:
+        raise ValueError("static checkpoint serialized request fingerprint mismatch")
+    canonical_request = _request_from_dict(request_values)
     with np.load(directory / "checkpoint.npz", allow_pickle=False) as arrays:
         theta_intensity = (
             np.asarray(arrays["theta_intensity_stack"]).copy()
@@ -233,7 +244,7 @@ def load_static_checkpoint(run_dir) -> StaticCheckpoint:
             else None
         )
         checkpoint = StaticCheckpoint(
-            request=_request_from_dict(request_document["request"]),
+            request=canonical_request,
             next_slice_index=int(provenance["next_slice_index"]),
             completed_slices=int(provenance["completed_slices"]),
             z_reached_um=float(provenance["z_reached_um"]),
@@ -262,7 +273,7 @@ def load_static_checkpoint(run_dir) -> StaticCheckpoint:
             A_dtype=str(provenance["A_dtype"]),
             theta_dtype=str(provenance["theta_dtype"]),
             status=str(provenance["status"]),
-            request_fingerprint=str(provenance["request_fingerprint"]),
+            request_fingerprint=static_request_fingerprint(canonical_request),
             schema_version=int(provenance["schema_version"]),
         )
     validate_static_checkpoint(checkpoint)

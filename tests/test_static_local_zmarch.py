@@ -49,7 +49,6 @@ def _request_parts() -> dict:
                     waist_y_um=10.0,
                     x0_um=-20.0,
                     y0_um=0.0,
-                    theta_weight=1.0,
                     coherence_group="A",
                 ),
             )
@@ -95,7 +94,7 @@ def test_static_local_self_consistent_marches_theta_and_field_along_z(monkeypatc
     grid = make_grid(request.grid)
     x_um = np.asarray(grid.x_um)
     calls: list[dict[str, np.ndarray | tuple[str, ...]]] = []
-    original_advance = static_workflow.advance_slice_with_midintensity
+    original_advance = static_workflow.advance_slice_with_midpoint_source
 
     def observed_advance(A, theta, **kwargs):
         A_in = np.asarray(A).copy()
@@ -106,14 +105,13 @@ def test_static_local_self_consistent_marches_theta_and_field_along_z(monkeypatc
                 "A_out": np.asarray(result[0]).copy(),
                 "I_mid": np.asarray(result[3]).copy(),
                 "coherence_groups": tuple(kwargs["coherence_groups"]),
-                "theta_weights": np.asarray(kwargs["theta_weights"]).copy(),
             }
         )
         return result
 
     monkeypatch.setattr(
         static_workflow,
-        "advance_slice_with_midintensity",
+        "advance_slice_with_midpoint_source",
         observed_advance,
     )
     result = static_workflow.run_static(request)
@@ -150,7 +148,6 @@ def test_static_local_self_consistent_marches_theta_and_field_along_z(monkeypatc
     assert not np.array_equal(first_trial[1]["A_in"], first_trial[0]["A_in"])
 
     assert all(call["coherence_groups"] == ("A",) for call in calls)
-    assert all(np.array_equal(call["theta_weights"], [1.0]) for call in calls)
 
     optical_x = np.asarray(
         [_centroid_x(call["I_mid"], x_um) for call in accepted]

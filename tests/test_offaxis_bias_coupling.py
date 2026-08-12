@@ -13,7 +13,7 @@ from lcprop.core.requests import (
     StaticSolverOptions,
     StaticWorkflowOptions,
 )
-from lcprop.optics.splitstep import advance_slice
+from lcprop.lc.propagation import advance_slice
 from lcprop.workflows.runtime import (
     build_runtime_components,
     initial_A_field,
@@ -166,7 +166,7 @@ def test_offaxis_beam_receives_bias_and_updated_self_consistent_theta(
         _centroid_x(fixed_result.A_final, components.grid.x_um),
     )
 
-    original_advance = static_workflow.advance_slice_with_midintensity
+    original_advance = static_workflow.advance_slice_with_midpoint_source
     trial_centroids: list[float] = []
 
     def observed_advance(A, theta, **kwargs):
@@ -176,7 +176,7 @@ def test_offaxis_beam_receives_bias_and_updated_self_consistent_theta(
 
     monkeypatch.setattr(
         static_workflow,
-        "advance_slice_with_midintensity",
+        "advance_slice_with_midpoint_source",
         observed_advance,
     )
     self_request = _offaxis_request(

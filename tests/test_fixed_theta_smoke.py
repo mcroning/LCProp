@@ -6,8 +6,9 @@ from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.requests import StaticRunRequest, StaticSolverOptions, OutputOptions
 
 from lcprop.lc.bias import build_bias
+from lcprop.lc.propagation import advance_slice
 from lcprop.optics.launch import build_launch, total_power
-from lcprop.optics.splitstep import linear_kernel, advance_slice
+from lcprop.optics.splitstep import linear_kernel
 
 
 def test_one_slice_fixed_theta_smoke():

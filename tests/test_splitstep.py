@@ -8,13 +8,9 @@ from lcprop.optics.launch import build_launch, total_power
 from lcprop.optics.splitstep import (
     as_channel_stack,
     total_intensity,
-    weighted_theta_intensity,
     linear_kernel,
     hop_linear,
-    nonlinear_phase,
     advance_prepared_response,
-    advance_slice,
-    advance_slice_with_midintensity,
 )
 
 
@@ -124,44 +120,6 @@ def test_single_channel_grouped_behavior_is_unchanged():
     assert np.allclose(total_intensity(A, coherence_groups=("laser",)), expected)
 
 
-def test_weighted_theta_intensity():
-    A = np.ones((2, 4, 5), dtype=np.complex64)
-    weights = np.asarray([1.0, 3.0], dtype=np.float32)
-
-    I = weighted_theta_intensity(A, weights)
-
-    assert np.allclose(I, 4.0)
-
-
-def test_weighted_grouped_theta_intensity_applies_one_weight_per_group():
-    A = np.ones((3, 2, 2), dtype=np.complex64)
-    weights = np.asarray([2.0, 2.0, 3.0], dtype=np.float32)
-
-    actual = weighted_theta_intensity(
-        A,
-        weights,
-        coherence_groups=("A", "A", "B"),
-    )
-
-    assert np.allclose(actual, 2.0 * np.abs(A[0] + A[1]) ** 2 + 3.0 * np.abs(A[2]) ** 2)
-
-
-def test_weighted_grouped_theta_intensity_rejects_unequal_intragroup_weights():
-    A = np.ones((2, 2, 2), dtype=np.complex64)
-    weights = np.asarray([1.0, 2.0], dtype=np.float32)
-
-    with pytest.raises(ValueError) as exc_info:
-        weighted_theta_intensity(
-            A,
-            weights,
-            coherence_groups=("laser", "laser"),
-        )
-
-    assert str(exc_info.value) == (
-        "theta_weights must be equal within coherent group 'laser'; got [1.0, 2.0]"
-    )
-
-
 def test_linear_hop_preserves_power():
     grid = make_grid(GridSpec(Nx=64, Ny=64, z_length_um=50.0))
     beams = BeamStack(channels=(BeamChannel(power_mW=1.0),))
@@ -237,100 +195,6 @@ def test_linear_propagation_centroid_follows_geometric_angle(
     # small angles that agrees with the geometric z*tan(angle) expectation.
     assert x1 - x0 == pytest.approx(z_um * np.tan(angle_x_rad), abs=5e-4)
     assert y1 - y0 == pytest.approx(z_um * np.tan(angle_y_rad), abs=5e-4)
-
-
-def test_nonlinear_phase_unit_magnitude():
-    theta = np.ones((16, 16), dtype=np.float32) * 0.1
-
-    phase = nonlinear_phase(
-        theta,
-        dz=5.0,
-        wavelength=0.633,
-        n_ref=1.5,
-        ne=1.7,
-        no=1.5,
-    )
-
-    assert np.allclose(np.abs(phase), 1.0)
-
-
-def test_advance_slice_with_midintensity_shapes():
-    grid = make_grid(GridSpec(Nx=32, Ny=32, z_length_um=50.0))
-    beams = BeamStack(channels=(BeamChannel(power_mW=1.0),))
-    launch = build_launch(beams, grid)
-
-    theta = np.zeros((32, 32), dtype=np.float32)
-
-    kernel = linear_kernel(
-        grid.fxy2_um,
-        dz=grid.dz_um,
-        wavelength=0.633,
-        n_ref=1.5,
-    )
-
-    A, I_before, I_after, I_mid = advance_slice_with_midintensity(
-        launch.A0.copy(),
-        theta,
-        kernel=kernel,
-        dz=grid.dz_um,
-        wavelength=0.633,
-        n_ref=1.5,
-        ne=1.7,
-        no=1.5,
-    )
-
-    assert A.shape == (1, 32, 32)
-    assert I_before.shape == (32, 32)
-    assert I_after.shape == (32, 32)
-    assert I_mid.shape == (32, 32)
-
-
-def test_lc_advance_wrapper_matches_prepared_response():
-    rng = np.random.default_rng(23)
-    A0 = (
-        rng.normal(size=(2, 12, 10))
-        + 1j * rng.normal(size=(2, 12, 10))
-    ).astype(np.complex128)
-    theta = np.linspace(0.05, 0.65, 120, dtype=np.float64).reshape(12, 10)
-    fxy2 = rng.uniform(0.0, 0.2, size=(12, 10))
-    dz = 7.5
-    Nsub = 3
-    wavelength = 0.633
-    n_ref = 1.5
-    kernel = linear_kernel(
-        fxy2,
-        dz=dz / Nsub,
-        wavelength=wavelength,
-        n_ref=n_ref,
-    )
-    half_step_response = nonlinear_phase(
-        theta,
-        dz=0.5 * dz / Nsub,
-        wavelength=wavelength,
-        n_ref=n_ref,
-        ne=1.7,
-        no=1.5,
-    )
-
-    wrapped = advance_slice(
-        A0.copy(),
-        theta,
-        kernel=kernel,
-        dz=dz,
-        wavelength=wavelength,
-        n_ref=n_ref,
-        ne=1.7,
-        no=1.5,
-        Nsub=Nsub,
-    )
-    prepared = advance_prepared_response(
-        A0.copy(),
-        kernel=kernel,
-        half_step_response=half_step_response,
-        Nsub=Nsub,
-    )
-
-    np.testing.assert_allclose(wrapped, prepared, rtol=0.0, atol=0.0)
 
 
 def test_prepared_shared_response_matches_explicit_channel_broadcast():

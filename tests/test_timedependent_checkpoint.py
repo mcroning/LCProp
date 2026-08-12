@@ -1,4 +1,5 @@
 from dataclasses import replace
+import json
 
 import numpy as np
 import pytest
@@ -139,6 +140,35 @@ def test_checkpoint_save_load_preserves_minimal_state(tmp_path):
     assert loaded.A0_dtype == result.checkpoint.A0_dtype
     np.testing.assert_array_equal(loaded.theta, result.checkpoint.theta)
     np.testing.assert_array_equal(loaded.A0, result.checkpoint.A0)
+
+
+def test_checkpoint_serialization_omits_removed_theta_weight(tmp_path):
+    result = run_timedependent(_request(steps=1))
+    save_timedependent_checkpoint(result.checkpoint, tmp_path)
+
+    document = json.loads((tmp_path / "request.json").read_text())
+
+    assert "theta_weight" not in document["request"]["beams"]["channels"][0]
+
+
+@pytest.mark.parametrize("legacy_weight", [1.0, 2.0])
+def test_checkpoint_legacy_theta_weight_ingestion_is_explicit(
+    tmp_path,
+    legacy_weight,
+):
+    result = run_timedependent(_request(steps=1))
+    save_timedependent_checkpoint(result.checkpoint, tmp_path)
+    path = tmp_path / "request.json"
+    document = json.loads(path.read_text())
+    document["request"]["beams"]["channels"][0]["theta_weight"] = legacy_weight
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    if legacy_weight == 1.0:
+        loaded = load_timedependent_checkpoint(tmp_path)
+        assert not hasattr(loaded.request.beams.channels[0], "theta_weight")
+    else:
+        with pytest.raises(ValueError, match="legacy non-unit theta_weight"):
+            load_timedependent_checkpoint(tmp_path)
 
 
 def test_continuation_matches_uninterrupted_run(tmp_path):

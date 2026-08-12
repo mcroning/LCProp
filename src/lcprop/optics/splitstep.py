@@ -1,8 +1,8 @@
 """Multichannel split-step optical propagation kernels.
 
 This module is a numerical black box. It consumes channel-stack fields,
-theta slices, kernels, and optical coefficients. It knows nothing about beam
-setup, LC-cell experiments, GUI state, files, continuation, or diagnostics.
+prepared response screens, and kernels. It knows nothing about beam setup,
+material state, experiments, GUI state, files, continuation, or diagnostics.
 
 Field convention
 ----------------
@@ -25,8 +25,6 @@ all channels with shape ``(Nx, Ny)`` or supplied per channel with shape
 ``(Nch, Nx, Ny)``. The caller decides how responses, kernels, substeps,
 wavelengths, and reference indices are constructed.
 
-The theta-based functions remain LC compatibility wrappers around this
-material-neutral advancement surface.
 """
 
 from __future__ import annotations
@@ -111,55 +109,6 @@ def total_intensity(
     return intensity
 
 
-def weighted_theta_intensity(
-    A: Array,
-    weights: Array | None = None,
-    *,
-    coherent: bool = False,
-    coherence_groups: tuple[str, ...] | list[str] | None = None,
-    xp: Any | None = None,
-) -> Array:
-    """Return effective plain intensity for theta algorithms.
-
-    The theta algorithms expect plain intensity and multiply by ``bi``
-    internally. ``weights`` are relative optical-coupling multipliers, such as
-    ``bi_c / bi_ref``; they weight intensity, not field amplitude. Coherently
-    interfering channels must therefore have equal weights within their group.
-    """
-
-    xp = _xp_from(A, weights, xp=xp)
-
-    if weights is None:
-        return total_intensity(
-            A,
-            coherent=coherent,
-            coherence_groups=coherence_groups,
-            xp=xp,
-        )
-
-    weights = xp.asarray(weights)
-    if weights.ndim != 1 or weights.shape[0] != A.shape[0]:
-        raise ValueError("weights must have shape (Nch,)")
-
-    groups = _coherence_group_indices(
-        A.shape[0],
-        coherent=coherent,
-        coherence_groups=coherence_groups,
-    )
-    intensity = xp.zeros_like(xp.abs(A[0]) ** 2)
-    for group_name, group_field in _coherent_group_fields(A, groups, xp=xp):
-        indices = groups[group_name]
-        group_weights = weights[list(indices)]
-        equal = xp.all(group_weights == group_weights[0])
-        if not bool(equal.item() if hasattr(equal, "item") else equal):
-            raise ValueError(
-                f"theta_weights must be equal within coherent group {group_name!r}; "
-                f"got {group_weights.tolist()}"
-            )
-        intensity = intensity + group_weights[0] * xp.abs(group_field) ** 2
-    return intensity
-
-
 def _coherence_group_indices(
     n_channels: int,
     *,
@@ -185,18 +134,6 @@ def _coherent_group_fields(A: Array, groups: dict[str, tuple[int, ...]], *, xp: 
 
     for group_name, indices in groups.items():
         yield group_name, xp.sum(A[list(indices)], axis=0)
-
-
-def neff_from_theta(theta: Array, *, ne: float, no: float, xp: Any | None = None) -> Array:
-    """Extraordinary-ray effective index from director angle theta.
-
-    Compatibility wrapper around lcprop.core.derived.compute_neff.
-    """
-
-    from lcprop.lc.optical_response import neff_from_theta as lc_neff_from_theta
-
-    xp = _xp_from(theta, xp=xp)
-    return lc_neff_from_theta(theta, ne=ne, no=no, xp=xp)
 
 
 def linear_kernel(
@@ -233,32 +170,6 @@ def hop_linear_inplace(A: Array, kernel: Array, *, xp: Any | None = None) -> Arr
 
     A[...] = hop_linear(A, kernel, xp=xp)
     return A
-
-
-def nonlinear_phase(
-    theta: Array,
-    *,
-    dz: float,
-    wavelength: float,
-    n_ref: float,
-    ne: float,
-    no: float,
-    xp: Any | None = None,
-) -> Array:
-    """Compatibility wrapper for the LC optical-response phase screen."""
-
-    from lcprop.lc.optical_response import phase_screen_from_theta
-
-    xp = _xp_from(theta, xp=xp)
-    return phase_screen_from_theta(
-        theta,
-        dz=dz,
-        wavelength=wavelength,
-        n_ref=n_ref,
-        ne=ne,
-        no=no,
-        xp=xp,
-    )
 
 
 def apply_response_screen_inplace(
@@ -353,132 +264,13 @@ def advance_prepared_response(
     return A
 
 
-def apply_nonlinear_phase_inplace(A: Array, phase: Array, *, xp: Any | None = None) -> Array:
-    """Compatibility wrapper applying a shared or per-channel phase screen."""
-
-    return apply_response_screen_inplace(A, phase, xp=xp)
-
-
-def advance_slice(
-    A: Array,
-    theta: Array,
-    *,
-    kernel: Array,
-    dz: float,
-    wavelength: float,
-    n_ref: float,
-    ne: float,
-    no: float,
-    Nsub: int = 1,
-    xp: Any | None = None,
-) -> Array:
-    """Advance a channel stack through one z slice.
-
-    The field ``A`` is updated in place and also returned.
-    """
-
-    xp = _xp_from(A, theta, kernel, xp=xp)
-    if int(Nsub) < 1:
-        raise ValueError("Nsub must be >= 1")
-
-    dz_sub = float(dz) / int(Nsub)
-
-    half_phase = nonlinear_phase(
-        theta,
-        dz=0.5 * dz_sub,
-        wavelength=wavelength,
-        n_ref=n_ref,
-        ne=ne,
-        no=no,
-        xp=xp,
-    )
-    return advance_prepared_response(
-        A,
-        kernel=kernel,
-        half_step_response=half_phase,
-        Nsub=Nsub,
-        xp=xp,
-    )
-
-
-def advance_slice_with_midintensity(
-    A: Array,
-    theta: Array,
-    *,
-    kernel: Array,
-    dz: float,
-    wavelength: float,
-    n_ref: float,
-    ne: float,
-    no: float,
-    Nsub: int = 1,
-    coherent: bool = False,
-    coherence_groups: tuple[str, ...] | list[str] | None = None,
-    theta_weights: Array | None = None,
-    xp: Any | None = None,
-) -> tuple[Array, Array, Array, Array]:
-    """Advance one z slice and return midpoint intensity.
-
-    Returns
-    -------
-    A
-        Updated channel stack.
-    I_before
-        Effective plain theta intensity before propagation.
-    I_after
-        Effective plain theta intensity after propagation.
-    I_mid
-        ``0.5 * (I_before + I_after)``.
-    """
-
-    xp = _xp_from(A, theta, kernel, theta_weights, xp=xp)
-
-    I_before = weighted_theta_intensity(
-        A,
-        theta_weights,
-        coherent=coherent,
-        coherence_groups=coherence_groups,
-        xp=xp,
-    )
-
-    advance_slice(
-        A,
-        theta,
-        kernel=kernel,
-        dz=dz,
-        wavelength=wavelength,
-        n_ref=n_ref,
-        ne=ne,
-        no=no,
-        Nsub=Nsub,
-        xp=xp,
-    )
-
-    I_after = weighted_theta_intensity(
-        A,
-        theta_weights,
-        coherent=coherent,
-        coherence_groups=coherence_groups,
-        xp=xp,
-    )
-
-    I_mid = 0.5 * (I_before + I_after)
-    return A, I_before, I_after, I_mid
-
-
 __all__ = [
     "as_channel_stack",
     "channel_intensities",
     "total_intensity",
-    "weighted_theta_intensity",
-    "neff_from_theta",
     "linear_kernel",
     "hop_linear",
     "hop_linear_inplace",
-    "nonlinear_phase",
     "apply_response_screen_inplace",
     "advance_prepared_response",
-    "apply_nonlinear_phase_inplace",
-    "advance_slice",
-    "advance_slice_with_midintensity",
 ]

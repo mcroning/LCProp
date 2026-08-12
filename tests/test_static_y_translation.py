@@ -14,7 +14,8 @@ from lcprop.core.requests import (
     StaticSolverOptions,
     StaticWorkflowOptions,
 )
-from lcprop.optics.splitstep import advance_slice, total_intensity
+from lcprop.lc.propagation import advance_slice
+from lcprop.optics.splitstep import total_intensity
 from lcprop.workflows.runtime import build_runtime_components
 from lcprop.workflows.static import run_static
 

@@ -59,7 +59,6 @@ class BeamChannel:
 
     phase_rad: float = 0.0
 
-    theta_weight: float = 1.0
     coherence_group: str = LEGACY_COHERENCE_GROUP
 
     def validate(self) -> None:
@@ -69,8 +68,6 @@ class BeamChannel:
             raise ValueError("power_mW must be nonnegative")
         if self.waist_x_um <= 0.0 or self.waist_y_um <= 0.0:
             raise ValueError("waists must be positive")
-        if self.theta_weight < 0.0:
-            raise ValueError("theta_weight must be nonnegative")
         if not isinstance(self.coherence_group, str) or not self.coherence_group.strip():
             raise ValueError("coherence_group must be non-empty")
 

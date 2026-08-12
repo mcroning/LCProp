@@ -11,7 +11,8 @@ from typing import Any
 import numpy as np
 
 from lcprop.core.backend import BackendSpec, asnumpy
-from lcprop.core.beams import BeamChannel, BeamStack
+from lcprop.core.beams import BeamStack
+from lcprop.adapters.legacy_beams import beam_channel_from_mapping
 from lcprop.core.context import GridSpec
 from lcprop.pr.checkpoint import (
     PRTimeDependentCheckpoint,
@@ -71,7 +72,8 @@ def _request_from_dict(
         material=PRMaterialSpec(**values["material"]),
         beams=BeamStack(
             channels=tuple(
-                BeamChannel(**channel) for channel in beam_values["channels"]
+                beam_channel_from_mapping(channel)
+                for channel in beam_values["channels"]
             ),
             coherence=beam_values["coherence"],
         ),

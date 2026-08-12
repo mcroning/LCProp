@@ -53,7 +53,6 @@ def _static_request(*, slices=3):
             waist_y_um=4.0,
             x0_um=-3.0,
             coherence_group="laser-A",
-            theta_weight=1.0,
         ),)),
         solver=StaticSolverOptions(
             workflow=_workflow(),

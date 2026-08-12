@@ -10,7 +10,8 @@ from PySide6.QtWidgets import QApplication
 from launchplane.model import BeamDefinition, BeamStackDefinition
 
 from lcprop.gui.main_window import LCPropMainWindow
-from lcprop.optics.splitstep import advance_slice, total_intensity
+from lcprop.lc.propagation import advance_slice
+from lcprop.optics.splitstep import total_intensity
 from lcprop.workflows.runtime import build_runtime_components
 import lcprop.workflows.static as static_workflow
 
@@ -60,7 +61,7 @@ def test_exact_gui_offaxis_run_plots_current_final_intensity(monkeypatch):
     components = build_runtime_components(request)
     A0 = np.asarray(components.launch.A0).copy()
     trial_centroids: list[float] = []
-    original_advance = static_workflow.advance_slice_with_midintensity
+    original_advance = static_workflow.advance_slice_with_midpoint_source
 
     def observed_advance(A, theta, **kwargs):
         result = original_advance(A, theta, **kwargs)
@@ -69,7 +70,7 @@ def test_exact_gui_offaxis_run_plots_current_final_intensity(monkeypatch):
 
     monkeypatch.setattr(
         static_workflow,
-        "advance_slice_with_midintensity",
+        "advance_slice_with_midpoint_source",
         observed_advance,
     )
 

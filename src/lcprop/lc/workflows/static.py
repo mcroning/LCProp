@@ -20,16 +20,14 @@ from lcprop.core.grid import make_grid
 from lcprop.core.derived import resolved_b
 from lcprop.lc.coupling import resolved_bi
 from lcprop.lc.bias import build_bias
+from lcprop.lc.propagation import advance_slice
+from lcprop.lc.source import advance_slice_with_midpoint_source
 from lcprop.optics.launch import (
     build_launch,
     normalized_power,
     reconstructed_physical_powers_mW,
 )
-from lcprop.optics.splitstep import (
-    advance_slice,
-    advance_slice_with_midintensity,
-    total_intensity,
-)
+from lcprop.optics.splitstep import total_intensity
 from lcprop.optics.substeps import build_optical_substep_kernel
 from lcprop.algorithms.theta_cn import prepare_cn_operator
 from lcprop.algorithms.theta_cn import static_director_residual_metrics
@@ -551,7 +549,7 @@ def _run_local_self_consistent_zmarch(
         A_slice_in = A.copy()
 
         def optical_midpoint(theta):
-            A_trial, _, _, I_mid = advance_slice_with_midintensity(
+            A_trial, _, _, I_mid = advance_slice_with_midpoint_source(
                 A_slice_in.copy(),
                 theta,
                 kernel=kernel,
@@ -561,7 +559,6 @@ def _run_local_self_consistent_zmarch(
                 ne=request.material.ne,
                 no=request.material.no,
                 coherence_groups=launch.coherence_groups,
-                theta_weights=launch.theta_weights,
                 Nsub=optical_Nsub,
                 xp=xp,
             )

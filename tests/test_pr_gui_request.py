@@ -119,7 +119,6 @@ def test_beam_stack_inverse_mapping_preserves_optical_fields_and_signs(app):
                 tilt_y_rad_per_um=-0.047,
                 phase_rad=0.7,
                 coherence_group="laser-a",
-                theta_weight=2.5,
             ),
             BeamChannel(
                 name="negative-x",
@@ -133,7 +132,6 @@ def test_beam_stack_inverse_mapping_preserves_optical_fields_and_signs(app):
                 tilt_y_rad_per_um=0.041,
                 phase_rad=-0.4,
                 coherence_group="laser-a",
-                theta_weight=0.5,
             ),
         ),
         coherence="incoherent",
@@ -156,7 +154,6 @@ def test_beam_stack_inverse_mapping_preserves_optical_fields_and_signs(app):
         assert actual.tilt_y_rad_per_um == expected.tilt_y_rad_per_um
         assert actual.phase_rad == expected.phase_rad
         assert actual.coherence_group == expected.coherence_group
-        assert actual.theta_weight == 1.0
 
 
 def test_apply_and_rebuild_saved_pr_request_is_lossless(app):

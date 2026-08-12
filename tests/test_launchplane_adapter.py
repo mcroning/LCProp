@@ -134,15 +134,17 @@ def test_all_disabled_stack_is_rejected(launchplane_model):
         beam_stack_definition_to_lcprop(stack)
 
 
-def test_theta_weight_defaults_to_one(launchplane_model):
+def test_removed_theta_weight_unit_compatibility_is_accepted(launchplane_model):
     beam = launchplane_model.BeamDefinition()
 
-    channel = beam_definition_to_channel(beam)
+    channel = beam_definition_to_channel(beam, theta_weight=1.0)
 
-    assert channel.theta_weight == 1.0
+    assert not hasattr(channel, "theta_weight")
 
 
-def test_supplied_theta_weight_applies_to_every_channel(launchplane_model):
+def test_removed_theta_weight_unit_stack_compatibility_is_accepted(
+    launchplane_model,
+):
     stack = launchplane_model.BeamStackDefinition(
         beams=(
             launchplane_model.BeamDefinition(name="one"),
@@ -150,27 +152,24 @@ def test_supplied_theta_weight_applies_to_every_channel(launchplane_model):
         )
     )
 
-    converted = beam_stack_definition_to_lcprop(stack, theta_weight=2.75)
+    converted = beam_stack_definition_to_lcprop(stack, theta_weight=1.0)
 
-    assert tuple(channel.theta_weight for channel in converted.channels) == (
-        2.75,
-        2.75,
-    )
+    assert all(not hasattr(channel, "theta_weight") for channel in converted.channels)
 
 
-@pytest.mark.parametrize("theta_weight", [0.0, -1.0])
-def test_nonpositive_theta_weight_is_rejected_for_one_beam(
+@pytest.mark.parametrize("theta_weight", [0.0, -1.0, 2.75, "invalid"])
+def test_nonunit_legacy_theta_weight_is_rejected_for_one_beam(
     launchplane_model,
     theta_weight,
 ):
     beam = launchplane_model.BeamDefinition()
 
-    with pytest.raises(ValueError, match="^theta_weight must be positive$"):
+    with pytest.raises(ValueError, match="legacy non-unit theta_weight"):
         beam_definition_to_channel(beam, theta_weight=theta_weight)
 
 
-@pytest.mark.parametrize("theta_weight", [0.0, -1.0])
-def test_nonpositive_theta_weight_is_rejected_for_stack(
+@pytest.mark.parametrize("theta_weight", [0.0, -1.0, 2.75, "invalid"])
+def test_nonunit_legacy_theta_weight_is_rejected_for_stack(
     launchplane_model,
     theta_weight,
 ):
@@ -178,7 +177,7 @@ def test_nonpositive_theta_weight_is_rejected_for_stack(
         beams=(launchplane_model.BeamDefinition(),)
     )
 
-    with pytest.raises(ValueError, match="^theta_weight must be positive$"):
+    with pytest.raises(ValueError, match="legacy non-unit theta_weight"):
         beam_stack_definition_to_lcprop(stack, theta_weight=theta_weight)
 
 

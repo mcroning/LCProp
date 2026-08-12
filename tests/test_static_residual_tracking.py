@@ -256,7 +256,7 @@ def test_convergence_is_not_accepted_from_stale_midpoint(monkeypatch):
 
     monkeypatch.setattr(
         static_workflow,
-        "advance_slice_with_midintensity",
+        "advance_slice_with_midpoint_source",
         changing_midpoint,
     )
     monkeypatch.setattr(

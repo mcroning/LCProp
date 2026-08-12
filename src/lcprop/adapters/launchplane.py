@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from lcprop.core.beams import BeamChannel, BeamStack
+from lcprop.adapters.legacy_beams import discard_legacy_unit_theta_weight
 
 if TYPE_CHECKING:
     from launchplane.model import BeamDefinition, BeamStackDefinition
@@ -27,18 +28,7 @@ def _launchplane_types():
     return BeamDefinition, BeamStackDefinition
 
 
-def _validated_theta_weight(theta_weight: float) -> float:
-    value = float(theta_weight)
-    if value <= 0.0:
-        raise ValueError("theta_weight must be positive")
-    return value
-
-
-def _beam_definition_to_channel(
-    beam: BeamDefinition,
-    *,
-    theta_weight: float,
-) -> BeamChannel:
+def _beam_definition_to_channel(beam: BeamDefinition) -> BeamChannel:
     return BeamChannel(
         name=beam.name,
         wavelength_um=beam.wavelength_um,
@@ -51,14 +41,12 @@ def _beam_definition_to_channel(
         tilt_y_rad_per_um=beam.tilt_y_rad_per_um,
         phase_rad=beam.phase_rad,
         coherence_group=beam.coherence_group,
-        theta_weight=theta_weight,
     )
 
 
 def beam_definition_to_channel(
     beam: BeamDefinition,
-    *,
-    theta_weight: float = 1.0,
+    **legacy_options,
 ) -> BeamChannel:
     """Convert one LaunchPane beam definition to an LCProp channel."""
 
@@ -67,16 +55,15 @@ def beam_definition_to_channel(
         raise TypeError("beam must be a launchplane.model.BeamDefinition")
 
     beam.validate()
-    weight = _validated_theta_weight(theta_weight)
-    channel = _beam_definition_to_channel(beam, theta_weight=weight)
+    discard_legacy_unit_theta_weight(legacy_options)
+    channel = _beam_definition_to_channel(beam)
     channel.validate()
     return channel
 
 
 def beam_stack_definition_to_lcprop(
     stack: BeamStackDefinition,
-    *,
-    theta_weight: float = 1.0,
+    **legacy_options,
 ) -> BeamStack:
     """Convert the enabled beams in a LaunchPane stack to an LCProp stack."""
 
@@ -86,14 +73,14 @@ def beam_stack_definition_to_lcprop(
 
     # Validate the complete LaunchPane model before disabled beams are filtered.
     stack.validate()
-    weight = _validated_theta_weight(theta_weight)
+    discard_legacy_unit_theta_weight(legacy_options)
     enabled_beams = tuple(beam for beam in stack.beams if beam.enabled)
     if not enabled_beams:
         raise ValueError("LaunchPane beam stack contains no enabled beams")
 
     converted = BeamStack(
         channels=tuple(
-            _beam_definition_to_channel(beam, theta_weight=weight)
+            _beam_definition_to_channel(beam)
             for beam in enabled_beams
         )
     )
@@ -104,9 +91,7 @@ def beam_stack_definition_to_lcprop(
 def beam_stack_to_launchplane(stack: BeamStack):
     """Convert an LCProp beam stack to enabled LaunchPane definitions.
 
-    ``theta_weight`` is intentionally not represented because LaunchPane owns
-    optical launch data rather than LC material coupling. All optical channel
-    fields and explicit coherence groups are preserved.
+    All optical channel fields and explicit coherence groups are preserved.
     """
 
     BeamDefinition, BeamStackDefinition = _launchplane_types()
