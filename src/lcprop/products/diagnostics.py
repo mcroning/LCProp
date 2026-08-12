@@ -1,4 +1,4 @@
-"""Shared diagnostics for LC workflows and products.
+"""Material-neutral optical diagnostics.
 
 These functions operate on already-prepared arrays and runtime grids. They do
 not know how to build experiments, run algorithms, save files, or plot.
@@ -8,10 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
-
 from lcprop.core.backend import asnumpy
-from lcprop.algorithms.theta_cn import static_director_residual_metrics
 
 Array = Any
 
@@ -68,51 +65,21 @@ def intensity_metrics(I: Array, grid: Any) -> dict[str, float]:
     }
 
 
-def theta_metrics(theta: Array) -> dict[str, float]:
-    """Return min/max/rms metrics for a theta array."""
-    try:
-        xp = theta.__array_namespace__()  # type: ignore[attr-defined]
-    except Exception:
-        xp = None
 
-    arr = asnumpy(theta)
-    return {
-        "theta_min": float(np.min(arr)),
-        "theta_max": float(np.max(arr)),
-        "theta_rms": float(np.sqrt(np.mean(arr * arr))),
-    }
+_LC_COMPAT_EXPORTS = (
+    "residual_theta_static",
+    "theta_metrics",
+    "theta_update_metrics",
+)
 
 
-def theta_update_metrics(theta: Array, theta_prev: Array) -> dict[str, float]:
-    """Return RMS and max update between two theta arrays."""
-    d = asnumpy(theta - theta_prev)
-    return {
-        "dtheta_rms": float(np.sqrt(np.mean(d * d))),
-        "dtheta_max": float(np.max(np.abs(d))),
-    }
+def __getattr__(name: str):
+    """Resolve legacy LC diagnostics from their LC-owned module."""
+    if name not in _LC_COMPAT_EXPORTS:
+        raise AttributeError(name)
+    from lcprop.lc import diagnostics as lc_diagnostics
 
-
-def residual_theta_static(
-    theta: Array,
-    intensity: Array,
-    *,
-    b: float,
-    bi: float,
-    dx: float,
-    dy: float,
-    theta_bc: float,
-    xp: Any | None = None,
-) -> dict[str, float]:
-    """Compatibility wrapper for the canonical static residual metrics."""
-    return static_director_residual_metrics(
-        theta,
-        intensity,
-        b=b,
-        bi=bi,
-        dx=dx,
-        dy=dy,
-        xp=xp,
-    )
+    return getattr(lc_diagnostics, name)
 
 
 __all__ = [
@@ -123,7 +90,5 @@ __all__ = [
     "centroid",
     "rms_widths",
     "intensity_metrics",
-    "theta_metrics",
-    "theta_update_metrics",
-    "residual_theta_static",
+    *_LC_COMPAT_EXPORTS,
 ]

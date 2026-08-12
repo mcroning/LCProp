@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from lcprop.core.context import BiasSpec
+from lcprop.lc.specs import BiasSpec
 from lcprop.core.derived import theta_center
 from lcprop.core.grid import RuntimeGrid
 

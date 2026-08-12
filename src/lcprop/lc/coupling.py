@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from scipy.constants import c as C0
 
-from lcprop.core.context import GridSpec, LCMaterial
+from lcprop.core.context import GridSpec
+from lcprop.lc.specs import LCMaterial
 from lcprop.core.beams import BeamStack
 
 

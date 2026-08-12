@@ -9,7 +9,7 @@ import math
 import numpy as np
 import scipy.special as spspec
 
-from lcprop.core.context import BiasSpec
+from lcprop.lc.specs import BiasSpec
 from lcprop.core.derived import resolved_b
 from lcprop.core.grid import RuntimeGrid
 
