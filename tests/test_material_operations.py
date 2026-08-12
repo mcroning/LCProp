@@ -1,3 +1,6 @@
+import subprocess
+import sys
+
 import numpy as np
 import pytest
 
@@ -6,7 +9,12 @@ from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken
 from lcprop.lc.operations import (
+    LC_CONTINUE_STATIC_OPERATION,
+    LC_CONTINUE_TIMEDEPENDENT_OPERATION,
     LC_MATERIAL_ID,
+    LC_PARAMETER_SWEEP_OPERATION,
+    LC_SOLITON_EXISTENCE_OPERATION,
+    LC_SOLITON_OPERATION,
     LC_STATIC_OPERATION,
     LC_TIMEDEPENDENT_OPERATION,
 )
@@ -184,3 +192,54 @@ def test_material_packages_expose_operations_without_a_global_registry():
         PR_MATERIAL_ID,
         PR_TIMEDEPENDENT_WORKFLOW,
     )
+
+
+def test_shared_local_runner_import_does_not_import_material_packages():
+    script = """
+import sys
+import lcprop.runners.local
+assert 'lcprop.lc' not in sys.modules
+assert 'lcprop.pr' not in sys.modules
+"""
+    subprocess.run([sys.executable, "-c", script], check=True)
+
+
+def test_material_operation_callbacks_have_material_owned_provenance():
+    for operation in (
+        LC_STATIC_OPERATION,
+        LC_TIMEDEPENDENT_OPERATION,
+        LC_SOLITON_OPERATION,
+        LC_SOLITON_EXISTENCE_OPERATION,
+        LC_PARAMETER_SWEEP_OPERATION,
+        LC_CONTINUE_STATIC_OPERATION,
+        LC_CONTINUE_TIMEDEPENDENT_OPERATION,
+    ):
+        assert operation.material_id == LC_MATERIAL_ID
+        assert operation.run.__module__.startswith("lcprop.lc.")
+        assert operation.to_run_data.__module__ == "lcprop.lc.products"
+
+    assert PR_TIMEDEPENDENT_OPERATION.run.__module__.startswith("lcprop.pr.")
+    assert PR_TIMEDEPENDENT_OPERATION.to_run_data.__module__ == (
+        "lcprop.pr.products"
+    )
+
+
+def test_lc_compatibility_method_delegates_through_operation_execution(
+    monkeypatch,
+):
+    runner = LocalRunner()
+    observed = []
+    original = runner.run_operation
+
+    def capture(operation, request, *args, **kwargs):
+        observed.append((operation, kwargs["_prepare_products"]))
+        return original(operation, request, *args, **kwargs)
+
+    monkeypatch.setattr(runner, "run_operation", capture)
+    legacy = runner.run_static(make_base_static_request())
+
+    assert observed == [(LC_STATIC_OPERATION, False)]
+    assert legacy.kind == "static"
+    assert legacy.message == "Completed locally"
+    assert legacy.run_data is None
+    assert legacy.material_id is None

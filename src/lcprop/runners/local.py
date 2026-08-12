@@ -1,19 +1,6 @@
-from dataclasses import replace
 from typing import Iterable
 
 from lcprop.runners.base import RunnerResult, WorkflowOperation
-from lcprop.workflows import (
-    continue_static,
-    continue_timedependent,
-    run_static,
-    run_timedependent,
-    validate_timedependent_continuation,
-    validate_static_continuation,
-    run_soliton,
-    run_soliton_existence,
-    run_parameter_sweep,
-)
-from lcprop.workflows.soliton_trans import polish_soliton
 
 
 class LocalRunner:
@@ -51,14 +38,16 @@ class LocalRunner:
         self,
         operation: WorkflowOperation,
         request,
+        *args,
+        _prepare_products: bool = True,
         **kwargs,
     ) -> RunnerResult:
         """Execute an explicit operation and prepare its shared products."""
 
         if not isinstance(operation, WorkflowOperation):
             raise TypeError("operation must be a WorkflowOperation")
-        result = operation.run(request, **kwargs)
-        run_data = operation.to_run_data(result)
+        result = operation.run(request, *args, **kwargs)
+        run_data = operation.to_run_data(result) if _prepare_products else None
         status = getattr(result, "status", "completed")
         if status == "cancelled":
             message = "Cancelled locally"
@@ -94,34 +83,41 @@ class LocalRunner:
         return self.run_operation(operation, request, **kwargs)
 
     def run_static(self, request, **kwargs) -> RunnerResult:
-        result = run_static(request, **kwargs)
-        message = (
-            "Stopped locally"
-            if result.status == "stopped"
-            else "Completed locally"
-        )
-        return RunnerResult("static", result, message)
+        """Compatibility-only LC static entry point."""
+
+        from lcprop.lc.operations import LC_STATIC_OPERATION
+
+        return self._run_lc_compatibility(LC_STATIC_OPERATION, request, **kwargs)
 
     def continue_static(self, request, checkpoint, **kwargs) -> RunnerResult:
-        result = continue_static(request, checkpoint, **kwargs)
-        message = (
-            "Stopped locally"
-            if result.status == "stopped"
-            else "Completed locally"
+        """Compatibility-only LC static continuation entry point."""
+
+        from lcprop.lc.operations import LC_CONTINUE_STATIC_OPERATION
+
+        return self._run_lc_compatibility(
+            LC_CONTINUE_STATIC_OPERATION,
+            request,
+            checkpoint,
+            **kwargs,
         )
-        return RunnerResult("static", result, message)
 
     def validate_static_continuation(self, request, checkpoint) -> None:
+        """Compatibility-only LC continuation validation."""
+
+        from lcprop.lc.workflows import validate_static_continuation
+
         validate_static_continuation(request, checkpoint)
 
     def run_timedependent(self, request, **kwargs) -> RunnerResult:
-        result = run_timedependent(request, **kwargs)
-        message = (
-            "Cancelled locally"
-            if result.status == "cancelled"
-            else "Completed locally"
+        """Compatibility-only LC time-dependent entry point."""
+
+        from lcprop.lc.operations import LC_TIMEDEPENDENT_OPERATION
+
+        return self._run_lc_compatibility(
+            LC_TIMEDEPENDENT_OPERATION,
+            request,
+            **kwargs,
         )
-        return RunnerResult("timedependent", result, message)
 
     def continue_timedependent(
         self,
@@ -130,55 +126,88 @@ class LocalRunner:
         additional_steps,
         **kwargs,
     ) -> RunnerResult:
-        result = continue_timedependent(
+        """Compatibility-only LC time-dependent continuation entry point."""
+
+        from lcprop.lc.operations import LC_CONTINUE_TIMEDEPENDENT_OPERATION
+
+        return self._run_lc_compatibility(
+            LC_CONTINUE_TIMEDEPENDENT_OPERATION,
             request,
             checkpoint,
             additional_steps,
             **kwargs,
         )
-        message = (
-            "Cancelled locally"
-            if result.status == "cancelled"
-            else "Completed locally"
-        )
-        return RunnerResult("timedependent", result, message)
 
     def validate_timedependent_continuation(self, request, checkpoint) -> None:
+        """Compatibility-only LC continuation validation."""
+
+        from lcprop.lc.workflows import validate_timedependent_continuation
+
         validate_timedependent_continuation(request, checkpoint)
 
     def run_soliton(self, request, **kwargs) -> RunnerResult:
-        seed = run_soliton(request, **kwargs)
-        result = seed
-        message = "Stopped locally" if seed.status == "stopped" else "Completed locally"
+        """Compatibility-only LC soliton entry point."""
 
-        if request.refine_transverse and seed.status != "stopped":
-            polish_request = replace(
-                request,
-                theta_steps_per_outer=request.transverse_theta_steps_per_outer,
-            )
-            result = polish_soliton(
-                polish_request,
-                seed,
-                max_outer=request.transverse_max_outer,
-                field_mix=request.transverse_field_mix,
-                theta_mix=request.transverse_theta_mix,
-                **kwargs,
-            )
-            message = "Completed locally with transverse refinement"
+        from lcprop.lc.operations import LC_SOLITON_OPERATION
 
-        return RunnerResult("soliton", result, message)
+        runner_result = self._run_lc_compatibility(
+            LC_SOLITON_OPERATION,
+            request,
+            **kwargs,
+        )
+        if request.refine_transverse and runner_result.result.status != "stopped":
+            return RunnerResult(
+                runner_result.kind,
+                runner_result.result,
+                "Completed locally with transverse refinement",
+            )
+        return runner_result
 
     def run_soliton_existence(self, request) -> RunnerResult:
-        return RunnerResult(
-            "soliton_existence",
-            run_soliton_existence(request),
-            "Completed locally",
+        """Compatibility-only LC soliton-existence entry point."""
+
+        from lcprop.lc.operations import LC_SOLITON_EXISTENCE_OPERATION
+
+        return self._run_lc_compatibility(
+            LC_SOLITON_EXISTENCE_OPERATION,
+            request,
         )
 
     def run_parameter_sweep(self, request, **kwargs) -> RunnerResult:
-        result = run_parameter_sweep(request, **kwargs)
+        """Compatibility-only LC parameter-sweep entry point."""
+
+        from lcprop.lc.operations import LC_PARAMETER_SWEEP_OPERATION
+
+        return self._run_lc_compatibility(
+            LC_PARAMETER_SWEEP_OPERATION,
+            request,
+            **kwargs,
+        )
+
+    def _run_lc_compatibility(
+        self,
+        operation: WorkflowOperation,
+        request,
+        *args,
+        **kwargs,
+    ) -> RunnerResult:
+        """Delegate a historical LC method through canonical execution.
+
+        Legacy methods historically omitted prepared products and material
+        identity. Preserve that public result shape while sharing all workflow
+        execution, cancellation, progress, errors, and status handling with
+        :meth:`run_operation`.
+        """
+
+        canonical = self.run_operation(
+            operation,
+            request,
+            *args,
+            _prepare_products=False,
+            **kwargs,
+        )
         return RunnerResult(
-            "parameter_sweep",
-            result,
-            "Stopped locally" if result.status == "stopped" else "Completed locally",
+            canonical.kind,
+            canonical.result,
+            canonical.message,
         )
