@@ -209,6 +209,29 @@ def test_lc_checkpoint_facade_preserves_identity(facade, legacy):
     assert facade is legacy
 
 
+def test_legacy_persistence_modules_alias_canonical_lc_modules():
+    canonical_static = importlib.import_module("lcprop.lc.persistence.static")
+    canonical_td = importlib.import_module("lcprop.lc.persistence.timedependent")
+
+    assert legacy_static_persistence is canonical_static
+    assert legacy_td_persistence is canonical_td
+
+
+def test_lc_checkpoint_objects_report_canonical_modules():
+    assert lc_persistence.StaticCheckpoint.__module__ == (
+        "lcprop.lc.persistence.static"
+    )
+    assert lc_persistence.static_request_fingerprint.__module__ == (
+        "lcprop.lc.persistence.static"
+    )
+    assert lc_persistence.TimeDependentCheckpoint.__module__ == (
+        "lcprop.lc.persistence.timedependent"
+    )
+    assert lc_persistence.save_timedependent_checkpoint.__module__ == (
+        "lcprop.lc.persistence.timedependent"
+    )
+
+
 def test_top_level_lc_exports_are_the_facade_objects():
     for module in (
         lc_specs,
@@ -313,6 +336,24 @@ def test_persistence_and_lc_facades_support_reverse_import_order():
 
     assert persistence.StaticCheckpoint is reloaded_lc.StaticCheckpoint
     assert persistence.TimeDependentCheckpoint is reloaded_lc.TimeDependentCheckpoint
+    assert persistence.LC_STATIC_CHECKPOINT_CODEC.checkpoint_type is (
+        lc_persistence.StaticCheckpoint
+    )
+    assert persistence.LC_STATIC_CHECKPOINT_CODEC.save is (
+        lc_persistence.save_static_checkpoint
+    )
+    assert persistence.LC_STATIC_CHECKPOINT_CODEC.load is (
+        lc_persistence.load_static_checkpoint
+    )
+    assert persistence.LC_TIMEDEPENDENT_CHECKPOINT_CODEC.checkpoint_type is (
+        lc_persistence.TimeDependentCheckpoint
+    )
+    assert persistence.LC_TIMEDEPENDENT_CHECKPOINT_CODEC.save is (
+        lc_persistence.save_timedependent_checkpoint
+    )
+    assert persistence.LC_TIMEDEPENDENT_CHECKPOINT_CODEC.load is (
+        lc_persistence.load_timedependent_checkpoint
+    )
 
 
 def test_pr_public_ownership_remains_importable_and_distinct():

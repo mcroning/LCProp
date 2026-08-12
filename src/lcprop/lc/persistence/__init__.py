@@ -1,6 +1,6 @@
-"""LC-owned facade for liquid-crystal checkpoint interfaces."""
+"""Canonical liquid-crystal checkpoint state and disk codecs."""
 
-from lcprop.persistence.static import (
+from lcprop.lc.persistence.static import (
     STATIC_CHECKPOINT_SCHEMA_VERSION,
     StaticCheckpoint,
     load_static_checkpoint,
@@ -8,7 +8,7 @@ from lcprop.persistence.static import (
     static_request_fingerprint,
     validate_static_checkpoint,
 )
-from lcprop.persistence.timedependent import (
+from lcprop.lc.persistence.timedependent import (
     TD_CHECKPOINT_SCHEMA_VERSION,
     TimeDependentCheckpoint,
     load_timedependent_checkpoint,

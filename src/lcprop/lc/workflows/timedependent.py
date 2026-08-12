@@ -12,7 +12,7 @@ from lcprop.core.backend import asnumpy
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.lc.requests import TimeDependentRunRequest, StaticRunRequest, StaticSolverOptions
 from lcprop.lc.results import TimeDependentRunResult
-from lcprop.persistence.timedependent import TimeDependentCheckpoint
+from lcprop.lc.persistence.timedependent import TimeDependentCheckpoint
 from lcprop.optics.launch import normalized_power, reconstructed_physical_powers_mW
 from lcprop.optics.splitstep import total_intensity
 from lcprop.products.diagnostics import rms_widths

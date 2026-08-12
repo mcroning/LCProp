@@ -37,7 +37,7 @@ from lcprop.optics.substeps import build_optical_substep_kernel
 from lcprop.lc.theta_cn import prepare_cn_operator
 from lcprop.lc.theta_cn import static_director_residual_metrics
 from lcprop.lc.theta_picard import cn_trapezoid_picard_step
-from lcprop.persistence.static import (
+from lcprop.lc.persistence.static import (
     StaticCheckpoint,
     static_request_fingerprint,
     validate_static_checkpoint,
