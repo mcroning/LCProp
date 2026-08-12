@@ -227,7 +227,7 @@ def run_timedependent(
                     "theta_current": np.asarray(asnumpy(latest_theta)).copy(),
                     "theta_initial": np.asarray(asnumpy(theta0)),
                     "theta_bias": np.asarray(asnumpy(runtime.bias.theta_2d)),
-                    "grid_summary": runtime.grid.summary(),
+                    "grid_summary": runtime.grid_summary(),
                     "launch_summary": runtime.launch.summary(),
                     "optical_diagnostics": (
                         runtime.optical_substeps.diagnostics()
@@ -303,7 +303,7 @@ def run_timedependent(
         completed_steps=completed_steps,
         requested_steps=requested_steps_total,
         current_time=current_time,
-        grid_summary=runtime.grid.summary(),
+        grid_summary=runtime.grid_summary(),
         theta_dtype=str(td.theta.dtype),
         A0_dtype=str(A0.dtype),
         status=status,
@@ -326,7 +326,7 @@ def run_timedependent(
         theta_bias=runtime.bias.theta_2d,
         power_initial=power_initial,
         power_final=power_final,
-        grid_summary=runtime.grid.summary(),
+        grid_summary=runtime.grid_summary(),
         launch_summary=runtime.launch.summary(),
         bias_summary=runtime.bias.summary(),
         Nt=td.steps,

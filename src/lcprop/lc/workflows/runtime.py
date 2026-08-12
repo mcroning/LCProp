@@ -23,6 +23,11 @@ from lcprop.core.grid import RuntimeGrid, make_grid
 from lcprop.core.derived import resolved_b
 from lcprop.lc.coupling import resolved_bi
 from lcprop.lc.bias import BiasResult, build_bias
+from lcprop.lc.normalization import (
+    LCSpatialNormalization,
+    lc_grid_summary,
+    make_lc_spatial_normalization,
+)
 from lcprop.lc.source import (
     advance_slice_with_midpoint_source,
     director_driving_intensity,
@@ -53,6 +58,7 @@ class RuntimeComponents:
 
     request: StaticRunRequest
     grid: RuntimeGrid
+    normalization: LCSpatialNormalization
     bias: BiasResult
     launch: LaunchResult
 
@@ -69,6 +75,11 @@ class RuntimeComponents:
     kernel: Any
     optical_substeps: OpticalSubstepPlan
     cn: CNOperator
+
+    def grid_summary(self) -> dict[str, float | int | str]:
+        """Return physical grid provenance plus LC solver spacings."""
+
+        return lc_grid_summary(self.grid, self.normalization)
 
 
 def initial_A_field(components: RuntimeComponents):
@@ -110,6 +121,7 @@ def build_runtime_components(
     request.runtime.validate()
 
     grid = make_grid(request.grid, real_dtype=np.float64 if request.runtime.precision == "float64" else np.float32)
+    normalization = make_lc_spatial_normalization(grid)
     bias = build_bias(request.bias, grid, request.material)
     launch = build_launch(request.beams, grid, complex_dtype=np.complex128 if request.runtime.precision == "float64" else np.complex64)
 
@@ -141,8 +153,8 @@ def build_runtime_components(
     s, off, diag, lam_y = prepare_cn_operator(
         dt=theta_dt,
         mobility=mobility,
-        dx=grid.du,
-        dy=grid.dv,
+        dx=normalization.du,
+        dy=normalization.dv,
         Ny=grid.Ny,
         xp=grid.xp,
         dtype=grid.real_dtype,
@@ -151,6 +163,7 @@ def build_runtime_components(
     return RuntimeComponents(
         request=request,
         grid=grid,
+        normalization=normalization,
         bias=bias,
         launch=launch,
         b=b,
@@ -202,8 +215,8 @@ def make_picard_theta_relax(
             bi=components.bi,
             dt=theta_dt,
             mobility=mobility,
-            dx=grid.du,
-            dy=grid.dv,
+            dx=components.normalization.du,
+            dy=components.normalization.dv,
             s=cn.s,
             off=cn.off,
             diag=cn.diag,
@@ -309,8 +322,8 @@ def make_zcoupled_theta_step(
             theta_next=theta_next,
             gamma_z=gamma_z,
             mobility=mobility,
-            dx=grid.du,
-            dy=grid.dv,
+            dx=components.normalization.du,
+            dy=components.normalization.dv,
             s=cn.s,
             off=cn.off,
             diag=cn.diag,

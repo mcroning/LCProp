@@ -12,6 +12,7 @@ import scipy.special as spspec
 from lcprop.lc.specs import BiasSpec
 from lcprop.core.derived import resolved_b
 from lcprop.core.grid import RuntimeGrid
+from lcprop.lc.normalization import make_lc_spatial_normalization
 
 Array = Any
 
@@ -139,9 +140,9 @@ def theta_bias_1d_exact(
     b = resolved_b(material, bias)
     theta_bc = float(bias.theta_bc)
 
-    # Dimensionless transverse coordinate u in [-1, 1].
-    half_width = max(1e-300, float(grid.spec.x_aperture_um) / 2.0)
-    u_np = _to_numpy(grid.x_um / half_width).astype(np.float64, copy=False)
+    # Dimensionless LC transverse coordinate u in [-1, 1].
+    normalization = make_lc_spatial_normalization(grid)
+    u_np = _to_numpy(normalization.u).astype(np.float64, copy=False)
 
     if abs(theta_bc) < 1e-14:
         theta_np = _theta_bias_1d_exact_zero_bc_np(u_np, b, eps_clip=eps_clip)

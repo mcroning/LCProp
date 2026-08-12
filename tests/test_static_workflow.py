@@ -42,4 +42,6 @@ def test_run_static_fixed_theta_workflow():
     assert np.isclose(result.physical_power_initial_mW, 1.0, rtol=1e-6)
     assert np.isclose(result.physical_power_final_mW, 1.0, rtol=1e-5)
     assert result.grid_summary["Nz"] == 10
+    assert result.grid_summary["du"] == 2.0 / 63.0
+    assert result.grid_summary["dv"] == (2.0 / 63.0) * (1.0 / 0.75)
     assert "fixed prepared theta" in result.warnings[0]

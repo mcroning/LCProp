@@ -61,3 +61,5 @@ def test_run_timedependent_smoke():
     assert result.launch_summary["field_normalization"] == (
         "sum_channel_integrals_equals_one"
     )
+    assert result.grid_summary["du"] == 2.0 / 31.0
+    assert result.grid_summary["dv"] == (2.0 / 31.0) * (100.0 / 75.0)

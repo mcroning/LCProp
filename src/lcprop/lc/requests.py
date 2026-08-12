@@ -121,6 +121,8 @@ class StaticRunRequest:
 
 @dataclass(frozen=True)
 class TimeDependentSolverOptions:
+    """LC director solver controls with normalized material time ``dt``."""
+
     workflow: StaticWorkflowOptions = StaticWorkflowOptions(
         strategy="local_self_consistent",
         theta_solver="picard_cn",

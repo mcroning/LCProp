@@ -26,27 +26,17 @@ class GridSpec:
             raise ValueError("z_length_um must be positive")
 
 
-@dataclass(frozen=True)
-class TimeSpec:
-    """Physical/pseudo-time discretization choices."""
-
-    dt: float = 7.5e-4
-    Nt: int = 20
-
-    def validate(self) -> None:
-        if self.dt <= 0.0:
-            raise ValueError("dt must be positive")
-        if self.Nt < 0:
-            raise ValueError("Nt must be nonnegative")
-
-
 _LC_COMPATIBILITY_EXPORTS = {"BiasSpec", "LCContext", "LCMaterial"}
+_LC_COMPATIBILITY_EXPORTS.add("TimeSpec")
 
 
 def __getattr__(name: str):
     if name not in _LC_COMPATIBILITY_EXPORTS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    value = getattr(import_module("lcprop.lc.specs"), name)
+    module_name = (
+        "lcprop.lc.normalization" if name == "TimeSpec" else "lcprop.lc.specs"
+    )
+    value = getattr(import_module(module_name), name)
     globals()[name] = value
     return value
 

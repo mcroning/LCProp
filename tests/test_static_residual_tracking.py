@@ -11,6 +11,7 @@ from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import BiasSpec, GridSpec, LCMaterial
 from lcprop.core.derived import resolved_b
 from lcprop.core.grid import make_grid
+from lcprop.lc.normalization import make_lc_spatial_normalization
 from lcprop.core.requests import (
     OutputOptions,
     StaticRunRequest,
@@ -223,6 +224,7 @@ def test_final_residual_matches_returned_theta_and_refreshed_midpoint():
     request = _request(static_max_coupled_passes=1)
     result = run_static(request)
     grid = make_grid(request.grid)
+    normalization = make_lc_spatial_normalization(grid)
     b = resolved_b(request.material, request.bias)
     bi = resolved_bi(request.grid, request.material, request.beams)
 
@@ -233,8 +235,8 @@ def test_final_residual_matches_returned_theta_and_refreshed_midpoint():
             np.asarray(result.theta_intensity_stack[k]),
             b=b,
             bi=bi,
-            dx=grid.du,
-            dy=grid.dv,
+            dx=normalization.du,
+            dy=normalization.dv,
         )
         assert summary.final_residual_rms == independent["residual_rms"]
         assert summary.final_residual_max == independent["residual_max"]

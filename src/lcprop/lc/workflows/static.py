@@ -20,6 +20,11 @@ from lcprop.core.grid import make_grid
 from lcprop.core.derived import resolved_b
 from lcprop.lc.coupling import resolved_bi
 from lcprop.lc.bias import build_bias
+from lcprop.lc.normalization import (
+    LCSpatialNormalization,
+    lc_grid_summary,
+    make_lc_spatial_normalization,
+)
 from lcprop.lc.propagation import advance_slice
 from lcprop.lc.source import advance_slice_with_midpoint_source
 from lcprop.optics.launch import (
@@ -65,6 +70,8 @@ def run_static(
             raise ValueError("static_max_coupled_passes must be >= 1")
 
     grid = make_grid(request.grid, real_dtype=np.float64 if request.runtime.precision == "float64" else np.float32)
+    normalization = make_lc_spatial_normalization(grid)
+    grid_summary = lc_grid_summary(grid, normalization)
     bias = build_bias(request.bias, grid, request.material)
     launch = build_launch(request.beams, grid, complex_dtype=np.complex128 if request.runtime.precision == "float64" else np.complex64)
 
@@ -124,7 +131,7 @@ def run_static(
                         "theta_current": np.asarray(asnumpy(theta_latest)).copy(),
                         "theta_input": live_input_theta,
                         "theta_bias": np.asarray(asnumpy(bias.theta_2d)),
-                        "grid_summary": grid.summary(),
+                        "grid_summary": grid_summary,
                         "launch_summary": launch.summary(),
                         "optical_diagnostics": optical_substeps.diagnostics(),
                         "completed_slices": completed,
@@ -144,6 +151,7 @@ def run_static(
             wavelength_um=wavelength_um,
             n_ref=n_ref,
             optical_Nsub=optical_substeps.Nsub,
+            normalization=normalization,
             checkpoint=_checkpoint,
             should_cancel=(
                 None
@@ -240,7 +248,7 @@ def run_static(
                             "theta_current": np.asarray(asnumpy(theta)),
                             "theta_input": np.asarray(asnumpy(theta)),
                             "theta_bias": np.asarray(asnumpy(bias.theta_2d)),
-                            "grid_summary": grid.summary(),
+                            "grid_summary": grid_summary,
                             "launch_summary": launch.summary(),
                             "optical_diagnostics": (
                                 optical_substeps.diagnostics()
@@ -340,7 +348,7 @@ def run_static(
         slice_summaries=tuple(slice_summaries),
         iteration_records=tuple(iteration_records),
         relax_steps=n_steps,
-        grid_summary=grid.summary(),
+        grid_summary=grid_summary,
         launch_summary=launch.summary(),
         normalized_power_initial=float(power_initial),
         physical_power_initial_mW=float(physical_power_initial_mW),
@@ -364,7 +372,7 @@ def run_static(
         ),
         power_initial=power_initial,
         power_final=power_final,
-        grid_summary=grid.summary(),
+        grid_summary=grid_summary,
         launch_summary=launch.summary(),
         bias_summary=bias.summary(),
         n_steps=n_steps,
@@ -438,6 +446,7 @@ def _run_local_self_consistent_zmarch(
     wavelength_um: float,
     n_ref: float,
     optical_Nsub: int,
+    normalization: LCSpatialNormalization,
     checkpoint: StaticCheckpoint | None = None,
     should_cancel=None,
     phase_screen_fn=None,
@@ -483,8 +492,8 @@ def _run_local_self_consistent_zmarch(
     s, off, diag, _ = prepare_cn_operator(
         dt=0.01,
         mobility=1.0,
-        dx=grid.du,
-        dy=grid.dv,
+        dx=normalization.du,
+        dy=normalization.dv,
         Ny=grid.Ny,
         xp=xp,
         dtype=grid.real_dtype,
@@ -577,8 +586,8 @@ def _run_local_self_consistent_zmarch(
             midpoint_intensity,
             b=b,
             bi=bi,
-            dx=grid.du,
-            dy=grid.dv,
+            dx=normalization.du,
+            dy=normalization.dv,
             xp=xp,
         )
 
@@ -603,8 +612,8 @@ def _run_local_self_consistent_zmarch(
                     bi=bi,
                     dt=0.01,
                     mobility=1.0,
-                    dx=grid.du,
-                    dy=grid.dv,
+                    dx=normalization.du,
+                    dy=normalization.dv,
                     s=s,
                     off=off,
                     diag=diag,
@@ -623,8 +632,8 @@ def _run_local_self_consistent_zmarch(
                     midpoint_intensity,
                     b=b,
                     bi=bi,
-                    dx=grid.du,
-                    dy=grid.dv,
+                    dx=normalization.du,
+                    dy=normalization.dv,
                     xp=xp,
                 )
                 final_residual = residual_before
@@ -706,8 +715,8 @@ def _run_local_self_consistent_zmarch(
                 midpoint_intensity,
                 b=b,
                 bi=bi,
-                dx=grid.du,
-                dy=grid.dv,
+                dx=normalization.du,
+                dy=normalization.dv,
                 xp=xp,
             )
             finite = all(
