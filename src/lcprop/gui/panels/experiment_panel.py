@@ -1,34 +1,7 @@
-from __future__ import annotations
+"""Compatibility alias for the canonical LC experiment panel."""
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QComboBox, QFormLayout, QLabel, QVBoxLayout, QWidget
+from importlib import import_module as _import_module
+import sys as _sys
 
-
-class ExperimentPanel(QWidget):
-    experimentChanged = Signal(str)
-
-    def __init__(self):
-        super().__init__()
-        layout = QVBoxLayout(self)
-
-        self.experiment = QComboBox()
-        self.experiment.addItems([
-            "Static propagation",
-            "Time-dependent propagation",
-            "Soliton",
-            "Soliton existence curve",
-        ])
-        self.experiment.currentTextChanged.connect(self.experimentChanged.emit)
-
-        form = QFormLayout()
-        form.addRow("Experiment", self.experiment)
-
-        layout.addLayout(form)
-        layout.addWidget(QLabel("Static and time-dependent propagation are wired to LocalRunner."))
-        layout.addStretch(1)
-
-    def current_experiment(self) -> str:
-        return self.experiment.currentText()
-
-    def set_current_experiment(self, name: str) -> None:
-        self.experiment.setCurrentText(name)
+_canonical = _import_module("lcprop.lc.gui.panels.experiment_panel")
+_sys.modules[__name__] = _canonical

@@ -1,18 +1,10 @@
-from __future__ import annotations
+"""Compatibility launcher for the canonical LC application entry point."""
 
-import sys
-from PySide6.QtWidgets import QApplication
-from lcprop.gui.main_window import LCPropMainWindow
-
-
-def main() -> int:
-    app = QApplication(sys.argv)
-    win = LCPropMainWindow()
-    app.aboutToQuit.connect(win.shutdown_background_run)
-    win.resize(760, 760)
-    win.show()
-    return app.exec()
+from lcprop.lc.gui.app import main
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+__all__ = ["main"]
