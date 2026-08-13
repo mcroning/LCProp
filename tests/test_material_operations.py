@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -243,3 +244,64 @@ def test_lc_compatibility_method_delegates_through_operation_execution(
     assert legacy.message == "Completed locally"
     assert legacy.run_data is None
     assert legacy.material_id is None
+
+
+@pytest.mark.parametrize(
+    ("method_name", "operation", "args", "kwargs"),
+    [
+        ("run_static", LC_STATIC_OPERATION, (), {}),
+        ("continue_static", LC_CONTINUE_STATIC_OPERATION, (object(),), {}),
+        ("run_timedependent", LC_TIMEDEPENDENT_OPERATION, (), {}),
+        (
+            "continue_timedependent",
+            LC_CONTINUE_TIMEDEPENDENT_OPERATION,
+            (object(), 3),
+            {},
+        ),
+        ("run_soliton", LC_SOLITON_OPERATION, (), {}),
+        ("run_soliton_existence", LC_SOLITON_EXISTENCE_OPERATION, (), {}),
+        ("run_parameter_sweep", LC_PARAMETER_SWEEP_OPERATION, (), {}),
+    ],
+)
+def test_all_lc_execution_compatibility_methods_delegate_to_canonical_operation(
+    monkeypatch,
+    method_name,
+    operation,
+    args,
+    kwargs,
+):
+    runner = LocalRunner()
+    request = SimpleNamespace(refine_transverse=False)
+    workflow_result = SimpleNamespace(status="completed")
+    observed = []
+
+    def capture(selected, selected_request, *selected_args, **selected_kwargs):
+        observed.append(
+            (
+                selected,
+                selected_request,
+                selected_args,
+                selected_kwargs,
+            )
+        )
+        return SimpleNamespace(
+            kind=selected.workflow_id,
+            result=workflow_result,
+            message="Completed locally",
+        )
+
+    monkeypatch.setattr(runner, "run_operation", capture)
+    result = getattr(runner, method_name)(request, *args, **kwargs)
+
+    assert observed == [
+        (
+            operation,
+            request,
+            args,
+            {"_prepare_products": False},
+        )
+    ]
+    assert result.kind == operation.workflow_id
+    assert result.result is workflow_result
+    assert result.run_data is None
+    assert result.material_id is None

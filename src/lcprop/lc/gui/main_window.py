@@ -27,6 +27,15 @@ from lcprop.lc.products import (
     from_timedependent_live_state,
     to_run_data,
 )
+from lcprop.lc import LC_MATERIAL_ID
+from lcprop.lc.operations import (
+    LC_CONTINUE_STATIC_OPERATION,
+    LC_CONTINUE_TIMEDEPENDENT_OPERATION,
+    LC_PARAMETER_SWEEP_OPERATION,
+    LC_SOLITON_OPERATION,
+    LC_STATIC_OPERATION,
+    LC_TIMEDEPENDENT_OPERATION,
+)
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.runners.local import LocalRunner
 from lcprop.gui.workers import WorkflowWorker
@@ -56,12 +65,23 @@ from lcprop.lc.requests import (
     StaticRunRequest,
     TimeDependentRunRequest,
 )
+from lcprop.lc.workflows import (
+    validate_static_continuation,
+    validate_timedependent_continuation,
+)
 from lcprop.lc.workflows.timedependent import timedependent_state_from_static_result
 
 class LCPropMainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.runner = LocalRunner()
+        self.runner = LocalRunner(
+            operations=(
+                LC_STATIC_OPERATION,
+                LC_TIMEDEPENDENT_OPERATION,
+                LC_SOLITON_OPERATION,
+                LC_PARAMETER_SWEEP_OPERATION,
+            )
+        )
         self.retained_results = RetainedResults()
         self.last_soliton_result = None
         self.last_soliton_existence_result = None
@@ -259,7 +279,7 @@ class LCPropMainWindow(QWidget):
 
     def _td_checkpoint_matches_current_request(self, checkpoint) -> bool:
         try:
-            self.runner.validate_timedependent_continuation(
+            validate_timedependent_continuation(
                 self.build_timedependent_request(), checkpoint
             )
         except Exception:
@@ -273,7 +293,7 @@ class LCPropMainWindow(QWidget):
         if checkpoint is not None:
             try:
                 request = self.build_timedependent_request()
-                self.runner.validate_timedependent_continuation(request, checkpoint)
+                validate_timedependent_continuation(request, checkpoint)
             except Exception as exc:
                 self.last_timedependent_checkpoint = None
                 self.retained_results.last_standard_td_checkpoint = None
@@ -706,25 +726,45 @@ class LCPropMainWindow(QWidget):
         return {
             "Static propagation": (
                 self.build_request,
-                self.runner.run_static,
+                LC_STATIC_OPERATION,
                 "static workflow",
             ),
             "Time-dependent propagation": (
                 self.build_timedependent_request,
-                self.runner.run_timedependent,
+                LC_TIMEDEPENDENT_OPERATION,
                 "time-dependent workflow",
             ),
             "Soliton": (
                 self.build_soliton_request,
-                self.runner.run_soliton,
+                LC_SOLITON_OPERATION,
                 "soliton workflow",
             ),
             "Soliton existence curve": (
                 self.build_soliton_existence_request,
-                self.runner.run_parameter_sweep,
+                LC_PARAMETER_SWEEP_OPERATION,
                 "soliton existence workflow",
             ),
         }
+
+    def _run_registered(self, operation, request, **kwargs):
+        """Dispatch one canonical LC operation through the shared runner."""
+
+        runner_result = self.runner.run_registered(
+            LC_MATERIAL_ID,
+            operation.workflow_id,
+            request,
+            **kwargs,
+        )
+        if (
+            operation is LC_SOLITON_OPERATION
+            and request.refine_transverse
+            and runner_result.result.status != "stopped"
+        ):
+            return replace(
+                runner_result,
+                message="Completed locally with transverse refinement",
+            )
+        return runner_result
 
     def run_static_clicked(self):
         if self._background_running:
@@ -737,7 +777,7 @@ class LCPropMainWindow(QWidget):
             self._start_static_background()
             return
         try:
-            request_builder, runner_result_fn, _run_label = (
+            request_builder, operation, _run_label = (
                 self._experiment_dispatch()[experiment]
             )
             req = request_builder()
@@ -752,7 +792,7 @@ class LCPropMainWindow(QWidget):
         )
         self._start_timedependent_background(
             request=req,
-            runner_callable=runner_result_fn,
+            runner_callable=partial(self._run_registered, operation),
             workflow=workflow,
         )
 
@@ -886,10 +926,11 @@ class LCPropMainWindow(QWidget):
         token = CancellationToken()
         thread = QThread(self)
         worker = WorkflowWorker(
-            (
-                self.runner.run_timedependent
+            partial(
+                self._run_registered,
+                LC_TIMEDEPENDENT_OPERATION
                 if workflow == "timedependent"
-                else self.runner.run_static
+                else LC_STATIC_OPERATION,
             )
             if runner_callable is None
             else runner_callable,
@@ -944,9 +985,10 @@ class LCPropMainWindow(QWidget):
         additional_steps: int,
     ) -> None:
         """Start an in-memory continuation without adding saved-run UI."""
-        self.runner.validate_timedependent_continuation(request, checkpoint)
+        validate_timedependent_continuation(request, checkpoint)
         continuation_runner = partial(
-            self.runner.continue_timedependent,
+            self.runner.run_operation,
+            LC_CONTINUE_TIMEDEPENDENT_OPERATION,
             checkpoint=checkpoint,
             additional_steps=additional_steps,
         )
@@ -966,9 +1008,9 @@ class LCPropMainWindow(QWidget):
         try:
             request = self.build_timedependent_request() if is_td else self.build_request()
             if is_td:
-                self.runner.validate_timedependent_continuation(request, checkpoint)
+                validate_timedependent_continuation(request, checkpoint)
             else:
-                self.runner.validate_static_continuation(request, checkpoint)
+                validate_static_continuation(request, checkpoint)
         except ValueError as exc:
             if is_td:
                 self.last_timedependent_checkpoint = None
@@ -990,7 +1032,9 @@ class LCPropMainWindow(QWidget):
             )
         else:
             continuation_runner = partial(
-                self.runner.continue_static, checkpoint=checkpoint
+                self.runner.run_operation,
+                LC_CONTINUE_STATIC_OPERATION,
+                checkpoint=checkpoint,
             )
             self._start_static_background(
                 request=request,
@@ -1342,7 +1386,11 @@ class LCPropMainWindow(QWidget):
                 static_reference=self._td_static_reference,
             )
         else:
-            run_data = to_run_data(result)
+            run_data = (
+                runner_result.run_data
+                if runner_result.run_data is not None
+                else to_run_data(result)
+            )
         self.results_panel.set_run_data(run_data)
         self.results_panel.append_console("")
         self.results_panel.append_console(runner_result.message)

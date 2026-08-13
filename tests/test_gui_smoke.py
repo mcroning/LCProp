@@ -5,6 +5,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 
 from lcprop.gui.main_window import LCPropMainWindow
+from lcprop.lc.operations import (
+    LC_PARAMETER_SWEEP_OPERATION,
+    LC_SOLITON_OPERATION,
+    LC_STATIC_OPERATION,
+    LC_TIMEDEPENDENT_OPERATION,
+)
 from lcprop.runners.local import LocalRunner
 
 
@@ -17,6 +23,41 @@ def test_gui_builds_static_request():
     assert req.grid.z_length_um == 3000.0
     assert req.beams.channels[0].waist_x_um == 3.0
     assert req.beams.channels[0].power_mW == 1.0
+
+
+def test_lc_gui_registers_and_selects_canonical_operations():
+    app = QApplication.instance() or QApplication([])
+    win = LCPropMainWindow()
+
+    assert win.runner.registered_operations == (
+        LC_STATIC_OPERATION,
+        LC_TIMEDEPENDENT_OPERATION,
+        LC_SOLITON_OPERATION,
+        LC_PARAMETER_SWEEP_OPERATION,
+    )
+    dispatch = win._experiment_dispatch()
+    assert dispatch["Static propagation"][1] is LC_STATIC_OPERATION
+    assert dispatch["Time-dependent propagation"][1] is LC_TIMEDEPENDENT_OPERATION
+    assert dispatch["Soliton"][1] is LC_SOLITON_OPERATION
+    assert dispatch["Soliton existence curve"][1] is LC_PARAMETER_SWEEP_OPERATION
+
+
+def test_lc_gui_registered_dispatch_does_not_require_compatibility_method(
+    monkeypatch,
+):
+    app = QApplication.instance() or QApplication([])
+    win = LCPropMainWindow()
+    request = win.build_request()
+
+    def compatibility_path_is_not_canonical(*_args, **_kwargs):
+        raise AssertionError("historical LocalRunner.run_static was invoked")
+
+    monkeypatch.setattr(win.runner, "run_static", compatibility_path_is_not_canonical)
+    result = win._run_registered(LC_STATIC_OPERATION, request)
+
+    assert result.kind == "static"
+    assert result.material_id == "lc"
+    assert result.run_data.workflow == "static"
 
 
 def test_local_runner_static_smoke():

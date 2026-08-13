@@ -277,9 +277,9 @@ def test_main_window_td_from_static_live_stop_and_reference_fields():
     window.solver_panel.Nt.setValue(5)
     window.use_last_static.setChecked(True)
 
-    original = window.runner.run_timedependent
+    original = window._run_registered
 
-    def slow_runner(request, **kwargs):
+    def slow_runner(operation, request, **kwargs):
         gui_progress = kwargs["progress_callback"]
 
         def slow_progress(progress):
@@ -287,10 +287,12 @@ def test_main_window_td_from_static_live_stop_and_reference_fields():
             time.sleep(0.03)
 
         return original(
-            request, **{**kwargs, "progress_callback": slow_progress}
+            operation,
+            request,
+            **{**kwargs, "progress_callback": slow_progress},
         )
 
-    window.runner.run_timedependent = slow_runner
+    window._run_registered = slow_runner
     window.run_button.click()
     console = window.results_panel.workspace.console
     deadline = time.monotonic() + 10.0

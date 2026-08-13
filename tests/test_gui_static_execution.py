@@ -54,9 +54,9 @@ def test_gui_static_worker_stop_continue_and_live_latest_fields():
     gui_thread = QThread.currentThread()
     worker_threads = []
     queued_event = []
-    original = window.runner.run_static
+    original = window._run_registered
 
-    def slow_runner(request, **kwargs):
+    def slow_runner(operation, request, **kwargs):
         worker_threads.append(QThread.currentThread())
         gui_progress = kwargs["progress_callback"]
 
@@ -65,10 +65,12 @@ def test_gui_static_worker_stop_continue_and_live_latest_fields():
             time.sleep(0.03)
 
         return original(
-            request, **{**kwargs, "progress_callback": slow_progress}
+            operation,
+            request,
+            **{**kwargs, "progress_callback": slow_progress},
         )
 
-    window.runner.run_static = slow_runner
+    window._run_registered = slow_runner
     QTimer.singleShot(0, lambda: queued_event.append(True))
     window.run_button.click()
     console = window.results_panel.workspace.console

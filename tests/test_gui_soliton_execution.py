@@ -339,7 +339,7 @@ def test_completed_single_soliton_run_enables_soliton_source_mode():
     result = _soliton_result(request, 3.0)
     window.experiment_panel.experiment.setCurrentText("Soliton")
     window.build_soliton_request = lambda: request
-    window.runner.run_soliton = lambda _request, **_kwargs: RunnerResult(
+    window._run_registered = lambda _operation, _request, **_kwargs: RunnerResult(
         "soliton", result, "Completed locally"
     )
 
@@ -482,7 +482,9 @@ def test_soliton_worker_stop_is_cooperative_and_close_joins_thread():
             time.sleep(0.002)
         return RunnerResult("soliton", result, "Stopped locally")
 
-    window.runner.run_soliton = cooperative_runner
+    window._run_registered = lambda _operation, request, **kwargs: cooperative_runner(
+        request, **kwargs
+    )
     window.run_button.click()
     _wait_for(app, lambda: window._background_running)
     thread = window._td_thread

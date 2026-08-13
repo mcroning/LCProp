@@ -77,14 +77,14 @@ def test_gui_timedependent_run_uses_worker_thread_and_processes_qt_event():
     worker_threads = []
     queued_event_seen = []
     responsive_while_running = []
-    original = win.runner.run_timedependent
+    original = win._run_registered
 
-    def observed_runner(request, **kwargs):
+    def observed_runner(operation, request, **kwargs):
         worker_threads.append(QThread.currentThread())
         time.sleep(0.05)
-        return original(request, **kwargs)
+        return original(operation, request, **kwargs)
 
-    win.runner.run_timedependent = observed_runner
+    win._run_registered = observed_runner
     QTimer.singleShot(0, lambda: queued_event_seen.append(True))
     win.run_static_clicked()
     assert not win.continue_button.isEnabled()
@@ -108,18 +108,22 @@ def test_gui_timedependent_run_uses_worker_thread_and_processes_qt_event():
 
 def test_gui_stop_returns_cancelled_checkpoint_not_failure():
     app, win = _tiny_td_window(steps=20)
-    original = win.runner.run_timedependent
+    original = win._run_registered
 
-    def slow_runner(request, **kwargs):
+    def slow_runner(operation, request, **kwargs):
         gui_progress = kwargs["progress_callback"]
 
         def slow_progress(progress):
             gui_progress(progress)
             time.sleep(0.03)
 
-        return original(request, **{**kwargs, "progress_callback": slow_progress})
+        return original(
+            operation,
+            request,
+            **{**kwargs, "progress_callback": slow_progress},
+        )
 
-    win.runner.run_timedependent = slow_runner
+    win._run_registered = slow_runner
     win.run_static_clicked()
     console = win.results_panel.workspace.console
     _wait_for(app, lambda: "segment step 1/20" in console.toPlainText())
@@ -189,10 +193,10 @@ def test_gui_stop_returns_cancelled_checkpoint_not_failure():
 def test_gui_worker_exception_is_returned_to_gui():
     app, win = _tiny_td_window()
 
-    def failing_runner(request, **kwargs):
+    def failing_runner(operation, request, **kwargs):
         raise RuntimeError("worker test failure")
 
-    win.runner.run_timedependent = failing_runner
+    win._run_registered = failing_runner
     win.run_static_clicked()
     _wait_for(app, lambda: not win._background_running)
 
@@ -208,9 +212,9 @@ def test_gui_continuation_indicator_starts_from_checkpoint_and_updates_on_gui_th
     initial = win.runner.run_timedependent(request).result
     prior_time = initial.checkpoint.current_time
     gui_thread = QThread.currentThread()
-    original_continue = win.runner.continue_timedependent
+    original_continue = win.runner.run_operation
 
-    def slow_continue(request, checkpoint, additional_steps, **kwargs):
+    def slow_continue(operation, request, checkpoint, additional_steps, **kwargs):
         gui_progress = kwargs["progress_callback"]
 
         def slow_progress(progress):
@@ -218,13 +222,14 @@ def test_gui_continuation_indicator_starts_from_checkpoint_and_updates_on_gui_th
             time.sleep(0.03)
 
         return original_continue(
+            operation,
             request,
             checkpoint,
             additional_steps,
             **{**kwargs, "progress_callback": slow_progress},
         )
 
-    win.runner.continue_timedependent = slow_continue
+    win.runner.run_operation = slow_continue
     win.start_timedependent_continuation(
         request,
         initial.checkpoint,

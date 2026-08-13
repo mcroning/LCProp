@@ -75,14 +75,16 @@ def test_exact_gui_offaxis_run_plots_current_final_intensity(monkeypatch):
     )
 
     captured = {}
-    original_runner = window.runner.run_static
+    original_runner = window._run_registered
 
-    def capture_runner(run_request, **kwargs):
+    def capture_runner(operation, run_request, **kwargs):
         captured["request"] = run_request
-        captured["runner_result"] = original_runner(run_request, **kwargs)
+        captured["runner_result"] = original_runner(
+            operation, run_request, **kwargs
+        )
         return captured["runner_result"]
 
-    monkeypatch.setattr(window.runner, "run_static", capture_runner)
+    monkeypatch.setattr(window, "_run_registered", capture_runner)
     window.run_static_clicked()
     deadline = time.monotonic() + 240.0
     while window._background_running:
