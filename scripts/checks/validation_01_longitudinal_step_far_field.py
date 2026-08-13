@@ -36,7 +36,7 @@ import matplotlib.pyplot as plt
 from lcprop.core.backend import asnumpy
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import BiasSpec, GridSpec, LCMaterial
-from lcprop.core.derived import resolved_b
+from lcprop.lc.bias import resolved_b
 from lcprop.core.grid import make_grid
 from lcprop.core.requests import (
     OutputOptions,

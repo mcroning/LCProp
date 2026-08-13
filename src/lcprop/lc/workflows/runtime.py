@@ -20,9 +20,8 @@ from typing import Any
 
 from lcprop.lc.requests import StaticRunRequest
 from lcprop.core.grid import RuntimeGrid, make_grid
-from lcprop.core.derived import resolved_b
 from lcprop.lc.coupling import resolved_bi
-from lcprop.lc.bias import BiasResult, build_bias
+from lcprop.lc.bias import BiasResult, build_bias, resolved_b
 from lcprop.lc.normalization import (
     LCSpatialNormalization,
     lc_grid_summary,

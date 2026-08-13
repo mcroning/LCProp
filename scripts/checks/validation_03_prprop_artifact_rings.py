@@ -22,7 +22,7 @@ from scipy.signal import find_peaks
 
 import validation_01_longitudinal_step_far_field as validation
 from lcprop.core.backend import asnumpy
-from lcprop.core.derived import compute_neff
+from lcprop.lc.optical_response import compute_neff
 from lcprop.core.grid import make_grid
 
 

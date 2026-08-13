@@ -4,14 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+import math
 
 import numpy as np
 
 from lcprop.lc.specs import BiasSpec
-from lcprop.core.derived import theta_center
 from lcprop.core.grid import RuntimeGrid
 
 Array = Any
+
+
+def theta_center(bias) -> float:
+    """Return requested center theta seed, defaulting to pi/4."""
+    return math.pi / 4 if bias.theta_center is None else float(bias.theta_center)
 
 
 @dataclass(frozen=True)
@@ -92,6 +97,7 @@ def build_bias(bias: BiasSpec, grid: RuntimeGrid) -> BiasResult:
 __all__ = [
     "Array",
     "BiasResult",
+    "theta_center",
     "build_cosine_bias_2d",
     "stack_theta",
     "build_bias",

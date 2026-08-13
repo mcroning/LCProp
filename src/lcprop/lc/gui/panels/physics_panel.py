@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QFormLayout, QLabel, QGridLayout, QVBoxLayout, QWi
 
 from lcprop.lc.specs import BiasSpec, LCMaterial
 from lcprop.gui.panels.helpers import double_spin_box
-from lcprop.core.derived import (
+from lcprop.lc.bias import (
     compute_b_from_voltage,
     compute_freedericksz_voltage,
 )

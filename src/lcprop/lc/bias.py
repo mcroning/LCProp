@@ -10,11 +10,43 @@ import numpy as np
 import scipy.special as spspec
 
 from lcprop.lc.specs import BiasSpec
-from lcprop.core.derived import resolved_b
 from lcprop.core.grid import RuntimeGrid
 from lcprop.lc.normalization import make_lc_spatial_normalization
 
 Array = Any
+EPS0 = 8.8541878128e-12
+
+
+def compute_b_from_voltage(
+    V_bias: float,
+    *,
+    K: float,
+    delta_epsilon: float,
+) -> float:
+    """Return b = delta_epsilon eps0 V_bias^2 / (8K)."""
+    return float(delta_epsilon) * EPS0 * float(V_bias) ** 2 / (8.0 * float(K))
+
+
+def compute_freedericksz_voltage(
+    *,
+    K: float,
+    delta_epsilon: float,
+) -> float:
+    """Return one-constant Freedericksz voltage."""
+    return math.pi * math.sqrt(float(K) / (EPS0 * float(delta_epsilon)))
+
+
+def resolved_b(material, bias) -> float:
+    """Return b_override if present, otherwise compute b from voltage."""
+    material.validate()
+    bias.validate()
+    if bias.b_override is not None:
+        return float(bias.b_override)
+    return compute_b_from_voltage(
+        bias.V_bias,
+        K=material.K,
+        delta_epsilon=material.delta_epsilon,
+    )
 
 
 @dataclass(frozen=True)
@@ -266,6 +298,10 @@ def build_bias(bias: BiasSpec, grid: RuntimeGrid, material) -> BiasResult:
 __all__ = [
     "Array",
     "BiasResult",
+    "EPS0",
+    "compute_b_from_voltage",
+    "compute_freedericksz_voltage",
+    "resolved_b",
     "theta0_from_b_zero_bc",
     "theta0_from_b_dirichlet_bc",
     "b_from_theta0_zero_bc",

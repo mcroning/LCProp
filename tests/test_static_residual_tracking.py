@@ -9,7 +9,7 @@ from lcprop.lc.theta_cn import (
 )
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import BiasSpec, GridSpec, LCMaterial
-from lcprop.core.derived import resolved_b
+from lcprop.lc.bias import resolved_b
 from lcprop.core.grid import make_grid
 from lcprop.lc.normalization import make_lc_spatial_normalization
 from lcprop.core.requests import (

@@ -6,7 +6,12 @@ from typing import Any
 
 import numpy as np
 
-from lcprop.core.derived import compute_neff
+
+def compute_neff(theta, *, ne: float, no: float, xp=np):
+    """Extraordinary-ray effective index."""
+    c = xp.cos(theta)
+    s = xp.sin(theta)
+    return (float(ne) * float(no)) / xp.sqrt((float(ne) * c) ** 2 + (float(no) * s) ** 2)
 
 
 def neff_from_theta(theta, *, ne: float, no: float, xp: Any | None = None):
@@ -36,4 +41,4 @@ def phase_screen_from_theta(
     return xp.exp(1j * k0 * float(dz) * dn)
 
 
-__all__ = ["neff_from_theta", "phase_screen_from_theta"]
+__all__ = ["compute_neff", "neff_from_theta", "phase_screen_from_theta"]

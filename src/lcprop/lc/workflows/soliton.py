@@ -9,7 +9,7 @@ import time as _time
 from lcprop.lc.requests import SolitonRequest
 from lcprop.lc.results import SolitonResult
 from lcprop.core.backend import asnumpy, synchronize
-from lcprop.core.derived import compute_neff
+from lcprop.lc.optical_response import compute_neff
 from lcprop.lc.propagation import advance_slice
 from lcprop.optics.splitstep import total_intensity
 from lcprop.optics.substeps import build_optical_substep_kernel

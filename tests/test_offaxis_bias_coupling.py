@@ -6,7 +6,7 @@ import numpy as np
 
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import BiasSpec, GridSpec, LCMaterial
-from lcprop.core.derived import compute_neff
+from lcprop.lc.optical_response import compute_neff
 from lcprop.core.requests import (
     OutputOptions,
     StaticRunRequest,

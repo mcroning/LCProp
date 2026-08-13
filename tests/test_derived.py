@@ -1,12 +1,36 @@
 import numpy as np
 
+from lcprop.core import derived as legacy_derived
 from lcprop.core.derived import (
     EPS0,
     compute_b_from_voltage,
     compute_freedericksz_voltage,
     compute_neff,
 )
+from lcprop.lc import bias as lc_bias
+from lcprop.lc import bias_cosine as lc_bias_cosine
+from lcprop.lc import optical_response as lc_optical_response
 from lcprop.lc.coupling import compute_bi_from_power
+
+
+def test_legacy_derived_exports_preserve_lc_owned_identity_and_provenance():
+    assert legacy_derived.EPS0 is lc_bias.EPS0
+    assert legacy_derived.compute_b_from_voltage is lc_bias.compute_b_from_voltage
+    assert (
+        legacy_derived.compute_freedericksz_voltage
+        is lc_bias.compute_freedericksz_voltage
+    )
+    assert legacy_derived.resolved_b is lc_bias.resolved_b
+    assert legacy_derived.theta_center is lc_bias_cosine.theta_center
+    assert legacy_derived.compute_neff is lc_optical_response.compute_neff
+
+    assert lc_bias.compute_b_from_voltage.__module__ == "lcprop.lc.bias"
+    assert lc_bias.compute_freedericksz_voltage.__module__ == "lcprop.lc.bias"
+    assert lc_bias.resolved_b.__module__ == "lcprop.lc.bias"
+    assert lc_bias_cosine.theta_center.__module__ == "lcprop.lc.bias_cosine"
+    assert lc_optical_response.compute_neff.__module__ == (
+        "lcprop.lc.optical_response"
+    )
 
 def test_compute_b_from_voltage():
     b = compute_b_from_voltage(

@@ -17,9 +17,8 @@ from lcprop.lc.results import (
     StaticSliceSummary,
 )
 from lcprop.core.grid import make_grid
-from lcprop.core.derived import resolved_b
 from lcprop.lc.coupling import resolved_bi
-from lcprop.lc.bias import build_bias
+from lcprop.lc.bias import build_bias, resolved_b
 from lcprop.lc.normalization import (
     LCSpatialNormalization,
     lc_grid_summary,
