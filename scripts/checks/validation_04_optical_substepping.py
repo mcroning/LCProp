@@ -33,19 +33,18 @@ from scipy.signal import find_peaks
 import validation_01_longitudinal_step_far_field as validation
 from lcprop.core.backend import asnumpy
 from lcprop.core.grid import make_grid
+from lcprop.lc import run_static
+from lcprop.lc.propagation import advance_slice, neff_from_theta
 from lcprop.optics.launch import (
     build_launch,
     normalized_power,
     reconstructed_physical_powers_mW,
 )
 from lcprop.optics.splitstep import (
-    advance_slice,
     linear_kernel,
-    neff_from_theta,
     total_intensity,
 )
 from lcprop.products.diagnostics import rms_widths
-from lcprop.workflows import run_static
 
 
 NOMINAL_DZ_UM = 20.0

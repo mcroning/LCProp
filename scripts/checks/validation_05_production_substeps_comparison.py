@@ -22,9 +22,9 @@ import matplotlib.pyplot as plt
 import validation_01_longitudinal_step_far_field as validation
 from lcprop.core.backend import asnumpy
 from lcprop.core.grid import make_grid
+from lcprop.lc import run_static
 from lcprop.optics.splitstep import total_intensity
 from lcprop.products.diagnostics import rms_widths
-from lcprop.workflows import run_static
 
 
 LOG_DYNAMIC_RANGE_DECADES = 12.0

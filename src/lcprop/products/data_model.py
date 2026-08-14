@@ -1,3 +1,10 @@
+"""Material-neutral presentation records and LC compatibility adapters.
+
+The data records and collections defined here are canonical shared APIs. The
+lazy LC result adapters retained in ``__all__`` are compatibility exports; new
+LC code should import those adapters from :mod:`lcprop.lc.products`.
+"""
+
 from __future__ import annotations
 
 from collections import OrderedDict

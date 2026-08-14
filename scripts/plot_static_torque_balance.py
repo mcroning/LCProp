@@ -12,18 +12,20 @@ matplotlib.use("Agg")
 import numpy as np
 
 from lcprop.core.beams import BeamChannel, BeamStack
-from lcprop.core.context import BiasSpec, GridSpec, LCMaterial
-from lcprop.core.requests import (
+from lcprop.core.context import GridSpec
+from lcprop.lc import (
+    BiasSpec,
+    LCMaterial,
     OutputOptions,
     StaticRunRequest,
     StaticSolverOptions,
     StaticWorkflowOptions,
+    run_static,
 )
-from lcprop.products.static_torque_balance import (
+from lcprop.lc.static_torque_balance import (
     build_static_torque_balance_data,
     plot_static_torque_balance,
 )
-from lcprop.workflows.static import run_static
 
 
 def _positive_int(value: str) -> int:

@@ -1,3 +1,10 @@
+"""Shared grid specification with historical LC compatibility exports.
+
+``GridSpec`` is the canonical material-neutral API in this module. The LC
+names exposed through ``__getattr__`` and ``__all__`` are retained for import
+compatibility; new LC code should import them from :mod:`lcprop.lc`.
+"""
+
 from dataclasses import dataclass
 from importlib import import_module
 

@@ -24,8 +24,8 @@ import matplotlib.pyplot as plt
 import validation_01_longitudinal_step_far_field as validation
 from lcprop.core.backend import asnumpy
 from lcprop.core.grid import make_grid
+from lcprop.lc import run_static
 from lcprop.optics.splitstep import total_intensity
-from lcprop.workflows import run_static
 
 
 DZ_VALUES_UM = (20.0, 10.0, 5.0, 2.0)

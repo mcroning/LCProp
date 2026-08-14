@@ -35,20 +35,25 @@ import matplotlib.pyplot as plt
 
 from lcprop.core.backend import asnumpy
 from lcprop.core.beams import BeamChannel, BeamStack
-from lcprop.core.context import BiasSpec, GridSpec, LCMaterial
-from lcprop.lc.bias import resolved_b
+from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
-from lcprop.core.requests import (
+from lcprop.lc import (
+    BiasSpec,
+    LCMaterial,
     OutputOptions,
     RuntimeOptions,
     StaticRunRequest,
     StaticSolverOptions,
     StaticWorkflowOptions,
+    run_static,
 )
-from lcprop.lc.bias import b_from_theta0_zero_bc, theta0_from_b_zero_bc
+from lcprop.lc.bias import (
+    b_from_theta0_zero_bc,
+    resolved_b,
+    theta0_from_b_zero_bc,
+)
 from lcprop.optics.splitstep import total_intensity
 from lcprop.products.diagnostics import rms_widths
-from lcprop.workflows import run_static
 
 from _experimental_scattering_noise import (
     CorrelatedPhaseNoise3D,
