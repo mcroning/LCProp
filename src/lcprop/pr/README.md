@@ -1,4 +1,20 @@
-# Minimal photorefractive vertical slice
+# Photorefractive material package
+
+`lcprop.pr` is LCProp's canonical photorefractive material package. It owns
+the PR state, normalization, transport equations, numerical solvers,
+workflows, persistence codec, product adapter, and standalone GUI. It reuses
+the shared beam launch, runtime grid, backend, and material-neutral prepared
+optical-response propagation interfaces.
+
+The production scalar model, coupled-static workflows, and the isolated
+transverse reference are deliberately distinct. This document records their
+implemented semantics; it is not a general photorefractive-theory tutorial or
+a substitute for benchmark-specific research records.
+
+Package-level installation and application instructions are in the
+[repository README](../../../README.md). The peer-material ownership contract
+is defined by the
+[canonical architecture decision record](../../../docs/architecture/LCProp_Target_Architecture.md).
 
 ## State, normalization, and boundaries
 

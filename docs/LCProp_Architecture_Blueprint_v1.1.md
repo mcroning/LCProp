@@ -2,9 +2,14 @@
 
 ## Version 1.1
 
-**Status:** Authoritative architecture document and source of truth
+**Status:** Historical; superseded by
+[`architecture/LCProp_Target_Architecture.md`](architecture/LCProp_Target_Architecture.md)
 
 **Current implementation checkpoint:** July 2026
+
+> This blueprint records the LC-centric architecture before the peer LC/PR
+> ownership migration. It is retained for engineering history and must not be
+> used as the current package-boundary contract.
 
 ## 1. Purpose and vision
 

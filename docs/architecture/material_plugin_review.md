@@ -1,5 +1,12 @@
 # Material Plugin Architecture Review
 
+> **Historical review.** This document predates completion of the peer LC/PR
+> ownership migration. Its findings are retained as design history. Current
+> architecture is defined by
+> [`LCProp_Target_Architecture.md`](LCProp_Target_Architecture.md), with the
+> enduring rationale summarized in
+> [`material_plugin_architectural_rationale.md`](material_plugin_architectural_rationale.md).
+
 ## Executive Summary
 
 LCProp now contains the essential technical seam required to support more than one nonlinear material model, but it does not yet contain a complete material-plugin architecture. The distinction is important. The photorefractive (PR) implementation demonstrates that a second material can reuse the beam model, runtime grid, backend selection, launch construction, diffraction kernel, multichannel field representation, and split-step optical advancement without changing the liquid-crystal (LC) implementation. This is strong evidence that the optical core has reached a genuinely material-neutral boundary.

@@ -2,51 +2,67 @@
 
 This document is forward-looking. Current implementation facts belong in
 [`STATUS.md`](STATUS.md), and architectural decisions belong in
-[`LCProp_Architecture_Blueprint_v1.1.md`](LCProp_Architecture_Blueprint_v1.1.md).
+[`architecture/LCProp_Target_Architecture.md`](architecture/LCProp_Target_Architecture.md).
 
-## Near-term implementation order
+The peer-material ownership migration is complete. New work should preserve
+that baseline rather than reopen package boundaries as part of unrelated
+physics or numerical changes.
 
-1. **Commit the grouped-coherence checkpoint.**
-   Preserve the tested native `coherence_group` model as the adapter baseline.
+## Public-package priorities
 
-2. **Implement and test the thin LCProp-side LaunchPane adapter.**
-   Convert enabled `BeamDefinition` objects to `BeamChannel` objects,
-   preserve ordering and `coherence_group` strings, apply the default
-   `theta_weight` policy, and reject an all-disabled launch clearly.
+1. **Stabilize public documentation and package metadata.**
+   Keep installation, examples, application entry points, architecture links,
+   and status synchronized with the repository.
 
-3. **Embed `LaunchPlaneWidget` in the LCProp Beam tab.**
-   Keep LaunchPane independent and route its model through the LCProp adapter.
+2. **Define release validation.**
+   Establish the supported Python/backend matrix, distinguish CPU tests from
+   explicitly commissioned CUDA tests, and record exact commands and results
+   for release candidates.
 
-4. **Synchronize aperture dimensions from `GridPanel`.**
-   Keep `GridPanel` authoritative for `x_aperture_um` and
-   `y_aperture_um`; pass only those physical dimensions to LaunchPane.
+3. **Expand small reproducible examples.**
+   Add bounded LC and PR examples that exercise canonical imports and complete
+   request/workflow/result paths without requiring research-scale resources.
 
-5. **Prove one-beam equivalence with the former `BeamPanel` controls.**
-   Compare requests and launch fields for matching wavelength, power, waist,
-   position, tilt, and phase inputs.
+4. **Document compatibility policy.**
+   Identify historical import surfaces, define their support window, and keep
+   canonical ownership objectively testable through module provenance and
+   object identity.
 
-6. **Test multibeam grouped-coherence requests end to end.**
-   Cover enabled-beam filtering, mixed `coherence_group` values, request construction,
-   workflow execution, and displayed products.
+5. **Improve packaging completeness.**
+   Review project metadata, licensing, supported entry points, and distribution
+   contents before the first public release. Do not infer or add legal metadata
+   without an explicit project decision.
 
-7. **Add save/reload and workspace persistence.**
-   Define versioned request/result manifests and restore editor and result-view
-   state without serializing ephemeral runtime objects.
+6. **Maintain reusable operational procedures.**
+   Keep `docs/codex/` limited to reusable architecture, development,
+   commissioning, and research procedures. Store one-off prompts and private
+   experiment histories outside the public package.
 
-8. **Add the stability workflow.**
-   Express stability inputs and outputs as LCProp request/result objects and
-   reuse established workflow and product boundaries.
+## Numerical and scientific work
 
-9. **Improve GUI responsiveness and background job handling.**
-   Move long runs off the UI thread and define progress, cancellation, error,
-   completion, and spinning-wheel behavior.
+Numerical or physical extensions should be proposed and validated as separate
+bounded milestones. In particular:
 
-## Later numerical milestones
+- keep production LC and PR equations material-owned;
+- keep the PR transverse reference isolated until a reviewed physics decision
+  promotes any part of it;
+- justify new shared abstractions with at least two concrete consumers;
+- preserve prepared-response semantics and backend-native execution;
+- separate small automated regression tests from research-scale studies.
 
-- validate and integrate dual-grid methods;
-- complete a global z-coupled workflow;
-- evaluate additional global, bidirectional, or Newton-style strategies only
-  with explicit physics-validation evidence.
+Potential future optical models, material models, vector propagation,
+nonlocal responses, and external plugin discovery remain design decisions, not
+implicit roadmap commitments.
 
-Each milestone should leave the full automated suite passing and add focused
-tests at the boundary it introduces.
+## Milestone discipline
+
+Each implementation milestone should:
+
+- state its approved scope and non-goals;
+- preserve the canonical dependency direction;
+- add focused regression coverage;
+- run the complete relevant material suite;
+- distinguish local CPU validation from GPU commissioning;
+- pass an independent pre-commit review;
+- leave durable public documentation only when it benefits package users or
+  future contributors.

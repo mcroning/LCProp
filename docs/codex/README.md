@@ -225,19 +225,22 @@ Long-lived software design and architectural decisions.
 
 ### Development
 
-Engineering history, implementation milestones, and validation records.
+Reusable engineering and validation procedures for bounded implementation.
 
 ### Research
 
-Scientific experiments, measurements, figures, and conclusions.
+Reusable procedures for scientific experiments, measurements, and review.
 
 ### Operations
 
 Cluster procedures, commissioning guides, prompt templates, and workflow
 documentation.
 
-Raw conversations normally remain outside Git. Curated decisions,
-reports, and milestone records belong in the repository.
+Raw conversations, one-off prompts, private experiment notebooks, unpublished
+references, and scheduler output remain outside the public package. Curated
+architecture decisions and reusable operating procedures belong here. Public
+scientific validation records are retained only when they document supported
+package behavior and do not depend on private paths.
 
 ## Design Principles
 

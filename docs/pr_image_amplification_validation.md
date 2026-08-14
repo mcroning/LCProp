@@ -12,8 +12,9 @@ bounded numerical-readiness gate. The physics reference is Section 3.2 of
 “Three-Dimensional Scalar Time-Dependent Photorefractive Beam Propagation
 Model,” Photonics 12, 113 (2025), DOI
 [`10.3390/photonics12020113`](https://doi.org/10.3390/photonics12020113). The
-implementation conventions are cross-checked against the frozen
-`reference/prprop/prprop3d.py` source.
+implementation conventions were cross-checked against an archived trusted
+reference implementation during development. That unpublished reference is
+not part of the public package.
 
 ## Source Images
 
@@ -129,11 +130,11 @@ the benchmark.
 
 ## Figure 6 Published Contract
 
-The direct panel audit in
-`docs/research/pr_figure6_panel_comparison_2026-08-07.md` established that the
-paper caption and rendered panels, rather than the mislabeled supplementary
-JSON, define the final Figure 6 request. It is the ratio-one large-signal case
-using the Figure 4 geometry:
+A direct panel audit established that the paper caption and rendered panels,
+rather than the mislabeled supplementary JSON, define the final Figure 6
+request. The private run record and source figures are archived separately.
+The public contract is the ratio-one large-signal case using the Figure 4
+geometry:
 
 | Parameter | Published value |
 |---|---:|

@@ -17,7 +17,7 @@ The derivation is intentionally PR-owned. It does not change the material compos
 The physics and sign conventions are taken from:
 
 - Equation (4) of `docs/photonics-12-00113-v3.pdf`;
-- the full `dEdt_f()` implementation in `reference/prprop/prprop3d.py`;
+- the archived trusted reference implementation's full `dEdt_f()` path;
 - the validated implementation in `src/lcprop/pr/evolution.py`;
 - the intensity mapping in `src/lcprop/pr/source.py`;
 - the frozen-state optical pass in `src/lcprop/pr/workflow.py`.
