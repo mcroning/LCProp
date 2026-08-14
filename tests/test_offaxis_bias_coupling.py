@@ -100,6 +100,7 @@ def _propagate_trajectory(components, theta: np.ndarray) -> tuple[np.ndarray, np
             n_ref=components.n_ref,
             ne=components.request.material.ne,
             no=components.request.material.no,
+            Nsub=components.optical_substeps.Nsub,
             xp=components.grid.xp,
         )
         centroids.append(_centroid_x(A, components.grid.x_um))

@@ -158,6 +158,7 @@ def test_exact_gui_offaxis_run_plots_current_final_intensity(monkeypatch):
             n_ref=components.n_ref,
             ne=request.material.ne,
             no=request.material.no,
+            Nsub=components.optical_substeps.Nsub,
             xp=components.grid.xp,
         )
         frozen_centroids.append(
