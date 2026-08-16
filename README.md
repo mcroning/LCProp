@@ -210,3 +210,7 @@ LCProp supports two fundamentally different nonlinear material models through
 the same optical propagation engine. The architecture migration that
 established peer LC and PR ownership is complete; future work should build on
 the canonical boundaries rather than reopen them incidentally.
+
+## License
+
+LCProp is licensed under the BSD 3-Clause License. See [LICENSE](LICENSE).

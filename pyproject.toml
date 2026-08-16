@@ -3,6 +3,8 @@ name = "lcprop"
 version = "0.1.0"
 description = "Optical beam propagation in liquid-crystal and photorefractive media"
 readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
     "numpy",
@@ -17,7 +19,7 @@ gui = ["PySide6", "pyqtgraph"]
 lcprop-pr = "lcprop.pr.gui.app:main"
 
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
