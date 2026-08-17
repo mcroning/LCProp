@@ -143,6 +143,38 @@ def test_static_product_preserves_fields_convergence_and_replay_evidence():
     ) == 2
 
 
+def test_static_volume_products_share_readonly_authoritative_result_memory():
+    result = _synthetic_static_result()
+    data = pr_static_result_to_run_data(result)
+    retained = (
+        ("initial_E_stack", result.E_initial),
+        ("final_E_stack", result.E_final),
+        ("pr_driving_intensity_stack", result.source_intensity_stack),
+        ("pr_static_residual_stack", result.residual_stack),
+    )
+
+    for key, authoritative in retained:
+        presented = data.fields[key].data
+        before = authoritative.copy()
+        assert presented is not authoritative
+        assert np.shares_memory(presented, authoritative)
+        assert not presented.flags.writeable
+        with pytest.raises(ValueError, match="WRITEABLE"):
+            presented.flags.writeable = True
+        with pytest.raises(ValueError, match="read-only"):
+            presented.flat[0] = -999.0
+        np.testing.assert_array_equal(authoritative, before)
+
+    assert not np.shares_memory(
+        data.fields["initial_E"].data,
+        result.E_initial,
+    )
+    assert not np.shares_memory(
+        data.fields["final_E"].data,
+        result.E_final,
+    )
+
+
 def test_cancelled_static_product_uses_only_completed_prefix():
     result = _synthetic_static_result(
         completed_slices=1,

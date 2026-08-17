@@ -38,6 +38,21 @@ def _copied_array(value: Any) -> np.ndarray:
     return np.asarray(asnumpy(value)).copy()
 
 
+def _readonly_shared_numpy_array(value: Any) -> np.ndarray:
+    """Share a canonical host array through a read-only presentation view.
+
+    ``run_pr_static`` already detaches its retained volumes at the workflow
+    result boundary.  A view avoids duplicating those volumes while preventing
+    GUI/presentation consumers from mutating the authoritative result.  Keep a
+    defensive copy for non-NumPy inputs whose ownership is not established by
+    the canonical static workflow.
+    """
+
+    if not isinstance(value, np.ndarray):
+        return _copied_array(value)
+    return np.asarray(memoryview(value).toreadonly())
+
+
 def _geometry_from_grid_summary(
     summary: dict[str, Any],
     *,
@@ -298,10 +313,12 @@ def _validated_static_result_arrays(
 ]:
     A_initial = _copied_array(result.A_initial)
     A_final = _copied_array(result.A_final)
-    E_initial = _copied_array(result.E_initial)
-    E_final = _copied_array(result.E_final)
-    source_intensity = _copied_array(result.source_intensity_stack)
-    residual = _copied_array(result.residual_stack)
+    E_initial = _readonly_shared_numpy_array(result.E_initial)
+    E_final = _readonly_shared_numpy_array(result.E_final)
+    source_intensity = _readonly_shared_numpy_array(
+        result.source_intensity_stack
+    )
+    residual = _readonly_shared_numpy_array(result.residual_stack)
 
     nx = len(np.asarray(geometry.x))
     ny = len(np.asarray(geometry.y))

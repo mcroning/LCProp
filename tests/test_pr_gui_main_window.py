@@ -215,6 +215,18 @@ def test_pr_window_dispatches_static_and_presents_registered_run_data(app):
         "static_coupled_passes"
     ) >= 0
     diagnostics = workspace.diagnostics_view.toPlainText()
+    for key, authoritative in (
+        ("initial_E_stack", window.last_result.E_initial),
+        ("final_E_stack", window.last_result.E_final),
+        (
+            "pr_driving_intensity_stack",
+            window.last_result.source_intensity_stack,
+        ),
+        ("pr_static_residual_stack", window.last_result.residual_stack),
+    ):
+        presented = window.last_runner_result.run_data.fields[key].data
+        assert np.shares_memory(presented, authoritative)
+        assert not presented.flags.writeable
     assert "status: converged" in diagnostics
     assert "replay:" in diagnostics
     assert workspace.image_pane.td_time_label.text() == (
