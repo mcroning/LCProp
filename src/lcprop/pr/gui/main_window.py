@@ -30,6 +30,7 @@ from lcprop.gui.experiment_files import (
     choose_experiment_save_path,
     launchplane_presentation_payload,
     launchplane_stack_from_presentation,
+    show_experiment_open_warning,
 )
 from lcprop.gui.workers import WorkflowWorker
 from lcprop.persistence import (
@@ -373,7 +374,8 @@ class PRMainWindow(QWidget):
             return
         try:
             loaded = self.load_experiment_from(path)
-        except Exception:
+        except Exception as exc:
+            show_experiment_open_warning(self, exc)
             self.status_label.setText("Experiment open failed")
             self.results_panel.append_console("ERROR")
             self.results_panel.append_console(traceback.format_exc())

@@ -8,6 +8,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication
 
+import lcprop.gui.experiment_files as experiment_files
+import lcprop.lc.gui.main_window as lc_main_window
+import lcprop.pr.gui.main_window as pr_main_window
 from lcprop.lc import LC_MATERIAL_ID
 from lcprop.lc.gui.main_window import LCPropMainWindow
 from lcprop.lc.gui.request_adapter import (
@@ -159,9 +162,11 @@ def test_wrong_material_rejected_before_lc_state_or_checkpoint_changes(
     checkpoint = object()
     target.last_timedependent_checkpoint = checkpoint
 
-    with pytest.raises(ExperimentMaterialError):
+    with pytest.raises(ExperimentMaterialError) as captured:
         target.load_experiment_from(path)
 
+    assert captured.value.actual_material_id == PR_MATERIAL_ID
+    assert captured.value.expected_material_id == LC_MATERIAL_ID
     after = target._capture_experiment_gui_state()
     assert after == before
     assert target.last_timedependent_checkpoint is checkpoint
@@ -179,11 +184,93 @@ def test_wrong_material_rejected_before_pr_state_or_checkpoint_changes(
     checkpoint = object()
     target.last_checkpoint = checkpoint
 
-    with pytest.raises(ExperimentMaterialError):
+    with pytest.raises(ExperimentMaterialError) as captured:
         target.load_experiment_from(path)
 
+    assert captured.value.actual_material_id == LC_MATERIAL_ID
+    assert captured.value.expected_material_id == PR_MATERIAL_ID
     after = target._capture_experiment_gui_state()
     assert after == before
+    assert target.last_checkpoint is checkpoint
+
+
+def test_lc_open_button_warns_that_pr_file_requires_pr_application(
+    app, tmp_path, monkeypatch
+):
+    source = PRMainWindow()
+    path = tmp_path / "pr-for-lc-warning.lcprop.json"
+    source.save_experiment_to(path)
+    target = LCPropMainWindow()
+    target.grid_panel.Nx.setValue(96)
+    before = target._capture_experiment_gui_state()
+    checkpoint = object()
+    target.last_timedependent_checkpoint = checkpoint
+    target._run_registered = lambda *_args, **_kwargs: pytest.fail(
+        "wrong-material open must not execute"
+    )
+    warnings = []
+    monkeypatch.setattr(
+        lc_main_window,
+        "choose_experiment_open_path",
+        lambda _parent: path,
+    )
+    monkeypatch.setattr(
+        experiment_files.QMessageBox,
+        "warning",
+        lambda parent, title, text: warnings.append((parent, title, text)),
+    )
+
+    target.open_experiment_clicked()
+
+    assert warnings == [
+        (
+            target,
+            "Experiment Material Mismatch",
+            "This experiment is for Photorefractive (PR). "
+            "Open it with the PR application.",
+        )
+    ]
+    assert target._capture_experiment_gui_state() == before
+    assert target.last_timedependent_checkpoint is checkpoint
+
+
+def test_pr_open_button_warns_that_lc_file_requires_lc_application(
+    app, tmp_path, monkeypatch
+):
+    source = LCPropMainWindow()
+    path = tmp_path / "lc-for-pr-warning.lcprop.json"
+    source.save_experiment_to(path)
+    target = PRMainWindow()
+    target.grid_panel.Nx.setValue(96)
+    before = target._capture_experiment_gui_state()
+    checkpoint = object()
+    target.last_checkpoint = checkpoint
+    target._run_registered = lambda *_args, **_kwargs: pytest.fail(
+        "wrong-material open must not execute"
+    )
+    warnings = []
+    monkeypatch.setattr(
+        pr_main_window,
+        "choose_experiment_open_path",
+        lambda _parent: path,
+    )
+    monkeypatch.setattr(
+        experiment_files.QMessageBox,
+        "warning",
+        lambda parent, title, text: warnings.append((parent, title, text)),
+    )
+
+    target.open_experiment_clicked()
+
+    assert warnings == [
+        (
+            target,
+            "Experiment Material Mismatch",
+            "This experiment is for Liquid crystal (LC). "
+            "Open it with the LC application.",
+        )
+    ]
+    assert target._capture_experiment_gui_state() == before
     assert target.last_checkpoint is checkpoint
 
 

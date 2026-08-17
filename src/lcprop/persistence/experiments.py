@@ -35,6 +35,17 @@ class ExperimentSchemaError(ExperimentError):
 class ExperimentMaterialError(ExperimentError):
     """The material identity is unknown or incompatible with the caller."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        actual_material_id: str | None = None,
+        expected_material_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.actual_material_id = actual_material_id
+        self.expected_material_id = expected_material_id
+
 
 class ExperimentWorkflowError(ExperimentError):
     """No request codec is registered for the named workflow."""
@@ -406,7 +417,9 @@ def read_experiment_file(
         if material_id != expected_material_id:
             raise ExperimentMaterialError(
                 f"experiment material_id {material_id!r} does not match "
-                f"expected material_id {expected_material_id!r}"
+                f"expected material_id {expected_material_id!r}",
+                actual_material_id=material_id,
+                expected_material_id=expected_material_id,
             )
     codec = registry.codec(material_id, workflow_id)
     request_payload = require_mapping(

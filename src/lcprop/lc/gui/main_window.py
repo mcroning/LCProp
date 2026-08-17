@@ -45,6 +45,7 @@ from lcprop.gui.experiment_files import (
     choose_experiment_save_path,
     launchplane_presentation_payload,
     launchplane_stack_from_presentation,
+    show_experiment_open_warning,
 )
 from lcprop.persistence import load_experiment, save_experiment
 from lcprop.lc.gui.request_adapter import (
@@ -447,7 +448,8 @@ class LCPropMainWindow(QWidget):
             return
         try:
             loaded = self.load_experiment_from(path)
-        except Exception:
+        except Exception as exc:
+            show_experiment_open_warning(self, exc)
             self.results_panel.append_console("Experiment open failed")
             self.results_panel.append_console(traceback.format_exc())
             self.tabs.setCurrentWidget(self.results_panel)
