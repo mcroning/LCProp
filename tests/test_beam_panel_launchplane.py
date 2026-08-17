@@ -13,6 +13,7 @@ from launchplane.model import BeamDefinition, BeamStackDefinition
 
 from lcprop.gui.main_window import LCPropMainWindow
 from lcprop.gui.panels.beam_panel import BeamPanel
+from lcprop.pr.gui.beam_panel import pr_default_beam_stack_definition
 
 
 @pytest.fixture
@@ -35,7 +36,21 @@ def test_beam_panel_embeds_launchplane_with_lcprop_defaults(app):
     assert beam.phase_rad == 0.0
     assert beam.coherence_group == "laser_A"
     assert beam.enabled is True
+    assert beam.launch_input_mode == "angle"
+    assert beam.launch_medium_index == 1.0
+    assert panel.launch_plane_widget.launch_input_mode_combo.currentData() == "angle"
+    assert not panel.launch_plane_widget.angle_x_spin.isHidden()
+    assert panel.launch_plane_widget.tilt_x_spin.isHidden()
     panel.close()
+
+
+def test_pr_default_beam_uses_same_external_angle_editor_semantics():
+    beam = pr_default_beam_stack_definition().beams[0]
+
+    assert beam.launch_input_mode == "angle"
+    assert beam.launch_medium_index == 1.0
+    assert beam.angle_x_rad == 0.0
+    assert beam.angle_y_rad == 0.0
 
 
 def test_beam_panel_first_show_fits_current_aperture_once_without_moving_beams(
@@ -221,6 +236,9 @@ def test_request_construction_uses_adapted_beam_stack(app):
 def test_request_construction_commits_pending_tilt_edits(app):
     window = LCPropMainWindow()
     widget = window.beam_panel.launch_plane_widget
+    widget.launch_input_mode_combo.setCurrentIndex(
+        widget.launch_input_mode_combo.findData("transverse_wavevector")
+    )
 
     # Model a typed value that has not emitted valueChanged yet. LaunchPane
     # deliberately disables keyboard tracking on these spin boxes.
@@ -231,6 +249,22 @@ def test_request_construction_commits_pending_tilt_edits(app):
 
     assert channel.tilt_x_rad_per_um == pytest.approx(0.125)
     assert channel.tilt_y_rad_per_um == pytest.approx(-0.0625)
+    window.close()
+
+
+def test_request_construction_commits_pending_external_angle_edit(app):
+    window = LCPropMainWindow()
+    widget = window.beam_panel.launch_plane_widget
+    widget.angle_y_spin.lineEdit().setText("0.00000000")
+    widget.angle_x_spin.lineEdit().setText("0.10000000")
+
+    channel = window.build_request().beams.channels[0]
+
+    assert channel.tilt_x_rad_per_um == pytest.approx(
+        0.990950800381,
+        abs=5e-13,
+    )
+    assert channel.tilt_y_rad_per_um == 0.0
     window.close()
 
 

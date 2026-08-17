@@ -39,7 +39,7 @@ class BeamPanel(QWidget):
         )
         default_stack = BeamStackDefinition(
             beams=(
-                BeamDefinition(
+                BeamDefinition.from_launch_angles(
                     name="beam",
                     wavelength_um=0.633,
                     power_mW=1.0,
@@ -47,8 +47,8 @@ class BeamPanel(QWidget):
                     y_um=0.0,
                     waist_x_um=3.0,
                     waist_y_um=3.0,
-                    tilt_x_rad_per_um=0.0,
-                    tilt_y_rad_per_um=0.0,
+                    angle_x_rad=0.0,
+                    angle_y_rad=0.0,
                     phase_rad=0.0,
                     coherence_group="laser_A",
                     enabled=True,
@@ -147,7 +147,15 @@ class BeamPanel(QWidget):
         # reached its immutable BeamDefinition (notably when a platform does
         # not move keyboard focus to the Run button).  Commit every pending
         # numerical edit before taking the request snapshot.
-        editors = self.launch_plane_widget.findChildren(QAbstractSpinBox)
+        # LaunchPane retains both the angle and transverse-wavevector editors
+        # and hides the inactive pair.  Interpreting an inactive editor would
+        # switch the beam back to that editor's input mode, so only commit the
+        # controls belonging to the currently displayed inspector state.
+        editors = [
+            editor
+            for editor in self.launch_plane_widget.findChildren(QAbstractSpinBox)
+            if not editor.isHidden()
+        ]
         pending_text = [(editor, editor.lineEdit().text()) for editor in editors]
         for editor, text in pending_text:
             # Committing one field makes LaunchPane refresh the whole

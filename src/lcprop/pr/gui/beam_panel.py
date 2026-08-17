@@ -10,7 +10,7 @@ def pr_default_beam_stack_definition() -> BeamStackDefinition:
 
     return BeamStackDefinition(
         beams=(
-            BeamDefinition(
+            BeamDefinition.from_launch_angles(
                 name="PR beam",
                 wavelength_um=0.633,
                 power_mW=1.0,
@@ -18,8 +18,8 @@ def pr_default_beam_stack_definition() -> BeamStackDefinition:
                 y_um=0.0,
                 waist_x_um=20.0,
                 waist_y_um=20.0,
-                tilt_x_rad_per_um=0.0,
-                tilt_y_rad_per_um=0.0,
+                angle_x_rad=0.0,
+                angle_y_rad=0.0,
                 phase_rad=0.0,
                 coherence_group="pr-laser",
                 enabled=True,

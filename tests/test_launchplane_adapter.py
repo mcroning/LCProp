@@ -12,8 +12,13 @@ import pytest
 from lcprop.adapters import (
     beam_definition_to_channel,
     beam_stack_definition_to_lcprop,
+    beam_stack_to_launchplane,
 )
-from lcprop.optics.splitstep import total_intensity
+from lcprop.core.beams import BeamChannel, BeamStack
+from lcprop.core.context import GridSpec
+from lcprop.core.grid import make_grid
+from lcprop.optics.launch import build_launch
+from lcprop.optics.splitstep import hop_linear, linear_kernel, total_intensity
 
 
 @pytest.fixture
@@ -53,6 +58,143 @@ def test_one_enabled_beam_maps_field_for_field(launchplane_model):
     assert channel.tilt_y_rad_per_um == beam.tilt_y_rad_per_um
     assert channel.phase_rad == beam.phase_rad
     assert channel.coherence_group == beam.coherence_group
+
+
+def test_external_air_angle_transfers_resolved_wavevector_exactly(
+    launchplane_model,
+):
+    beam = launchplane_model.BeamDefinition.from_launch_angles(
+        wavelength_um=0.633,
+        angle_x_rad=0.1,
+        angle_y_rad=0.0,
+        launch_medium_index=1.0,
+    )
+
+    channel = beam_definition_to_channel(beam)
+
+    assert beam.tilt_x_rad_per_um == pytest.approx(
+        0.990950800381,
+        abs=5e-13,
+    )
+    assert channel.tilt_x_rad_per_um == beam.transverse_wavevector_x_rad_per_um
+    assert channel.tilt_y_rad_per_um == beam.transverse_wavevector_y_rad_per_um
+
+
+def test_legacy_phase_slope_remains_phase_slope(launchplane_model):
+    beam = launchplane_model.BeamDefinition(tilt_x_rad_per_um=0.1)
+
+    channel = beam_definition_to_channel(beam)
+
+    assert beam.launch_input_mode == "transverse_wavevector"
+    assert beam.launch_medium_index is None
+    assert channel.tilt_x_rad_per_um == 0.1
+
+
+def test_lcprop_round_trip_preserves_wavevector_without_air_provenance():
+    stack = BeamStack(
+        channels=(
+            BeamChannel(
+                name="off-axis",
+                tilt_x_rad_per_um=0.73,
+                tilt_y_rad_per_um=-0.41,
+                coherence_group="laser",
+            ),
+        )
+    )
+
+    definition = beam_stack_to_launchplane(stack)
+    rebuilt = beam_stack_definition_to_lcprop(definition)
+    beam = definition.beams[0]
+
+    assert beam.launch_input_mode == "transverse_wavevector"
+    assert beam.launch_medium_index is None
+    assert rebuilt.channels[0].tilt_x_rad_per_um == 0.73
+    assert rebuilt.channels[0].tilt_y_rad_per_um == -0.41
+
+
+@pytest.mark.parametrize(
+    ("angle_x_rad", "angle_y_rad", "axis"),
+    ((0.04, 0.0, 0), (0.0, 0.04, 1)),
+)
+def test_external_angle_phase_gradient_and_paraxial_centroid_slope(
+    launchplane_model,
+    angle_x_rad,
+    angle_y_rad,
+    axis,
+):
+    wavelength_um = 0.633
+    z_um = 20.0
+    n_ref = 1.5
+    beam = launchplane_model.BeamDefinition.from_launch_angles(
+        wavelength_um=wavelength_um,
+        waist_x_um=10.0,
+        waist_y_um=10.0,
+        angle_x_rad=angle_x_rad,
+        angle_y_rad=angle_y_rad,
+        launch_medium_index=1.0,
+    )
+    channel = beam_definition_to_channel(beam)
+    grid = make_grid(
+        GridSpec(
+            Nx=256,
+            Ny=256,
+            x_aperture_um=128.0,
+            y_aperture_um=128.0,
+            z_length_um=z_um,
+            dz_um=z_um,
+        ),
+        real_dtype=np.float64,
+    )
+    field = build_launch(
+        BeamStack(channels=(channel,)),
+        grid,
+        complex_dtype=np.complex128,
+    ).A0
+    q = (
+        channel.tilt_x_rad_per_um
+        if axis == 0
+        else channel.tilt_y_rad_per_um
+    )
+    scalar_field = field[0]
+    if axis == 0:
+        product = scalar_field[1:, :] * np.conj(scalar_field[:-1, :])
+        weight = np.minimum(
+            np.abs(scalar_field[1:, :]),
+            np.abs(scalar_field[:-1, :]),
+        )
+        spacing = grid.dx_um
+        coordinate = grid.x_um
+    else:
+        product = scalar_field[:, 1:] * np.conj(scalar_field[:, :-1])
+        weight = np.minimum(
+            np.abs(scalar_field[:, 1:]),
+            np.abs(scalar_field[:, :-1]),
+        )
+        spacing = grid.dy_um
+        coordinate = grid.y_um
+    mask = weight > 0.05 * np.max(np.abs(scalar_field))
+    measured_q = np.median(np.angle(product[mask]) / spacing)
+
+    def centroid(A):
+        intensity = np.abs(A[0]) ** 2
+        marginal = intensity.sum(axis=1 if axis == 0 else 0)
+        return float(np.sum(marginal * coordinate) / np.sum(marginal))
+
+    kernel = linear_kernel(
+        grid.fxy2_um,
+        dz=z_um,
+        wavelength=wavelength_um,
+        n_ref=n_ref,
+    )
+    propagated = hop_linear(field, kernel)
+    k_ref = 2.0 * np.pi * n_ref / wavelength_um
+
+    assert q > 0.0
+    assert measured_q == pytest.approx(q, abs=2e-15)
+    assert centroid(propagated) - centroid(field) == pytest.approx(
+        z_um * q / k_ref,
+        abs=2e-8,
+    )
 
 
 def test_x_and_y_coordinates_are_not_swapped(launchplane_model):
