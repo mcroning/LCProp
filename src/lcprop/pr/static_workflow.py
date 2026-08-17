@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
-from typing import Any
+from time import perf_counter
+from typing import Any, Callable
 
 import numpy as np
 
 from lcprop.core.backend import BackendSpec, asnumpy, get_backend
 from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
+from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch import build_launch, normalized_power
 from lcprop.optics.splitstep import linear_kernel
@@ -25,6 +27,9 @@ from lcprop.pr.workflow import advance_pr_slice_with_midpoint_source
 
 
 PR_STATIC_WORKFLOW = "pr_static"
+
+
+ProgressCallback = Callable[[RunProgress], None]
 
 
 @dataclass(frozen=True)
@@ -300,7 +305,12 @@ def _criteria_met(
     )
 
 
-def run_pr_static(request: PRStaticRunRequest) -> PRStaticRunResult:
+def run_pr_static(
+    request: PRStaticRunRequest,
+    *,
+    cancellation_token: CancellationToken | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> PRStaticRunResult:
     """Solve the self-consistent static PR problem by a local coupled z-march.
 
     At each slice, the accepted incoming optical field remains fixed while a
@@ -309,6 +319,7 @@ def run_pr_static(request: PRStaticRunRequest) -> PRStaticRunResult:
     intensity. A final independent replay verifies the assembled state.
     """
 
+    started_at = perf_counter()
     request.grid.validate()
     request.beams.validate()
     request.material.validate()
@@ -375,6 +386,8 @@ def run_pr_static(request: PRStaticRunRequest) -> PRStaticRunResult:
     A = A0.copy()
     records: list[PRCoupledStaticIterationRecord] = []
     summaries: list[PRCoupledStaticSliceSummary] = []
+    completed_slices = 0
+    cancelled = False
 
     def advance_slice(A_in, state):
         return advance_pr_slice_with_midpoint_source(
@@ -403,6 +416,10 @@ def run_pr_static(request: PRStaticRunRequest) -> PRStaticRunResult:
         )
 
     for k in range(grid.Nz):
+        if cancellation_token is not None and cancellation_token.is_cancelled():
+            cancelled = True
+            break
+
         A_slice_in = A.copy()
         if request.initial_E is not None:
             state = E_initial[k].copy()
@@ -567,23 +584,70 @@ def run_pr_static(request: PRStaticRunRequest) -> PRStaticRunResult:
                 termination_reason=termination_reason,
             )
         )
+        completed_slices = k + 1
+        if progress_callback is not None:
+            progress_callback(
+                RunProgress(
+                    workflow=PR_STATIC_WORKFLOW,
+                    status="running",
+                    completed_units=completed_slices,
+                    total_units=grid.Nz,
+                    current_coordinate=float(completed_slices * grid.dz_um),
+                    coordinate_name="z",
+                    coordinate_unit="um",
+                    elapsed_wall_time=perf_counter() - started_at,
+                    latest_field_state={
+                        "A_initial": np.asarray(asnumpy(A0)).copy(),
+                        "A_current": np.asarray(asnumpy(A)).copy(),
+                        "E_current": np.asarray(asnumpy(state)).copy(),
+                        "source_intensity_current": np.asarray(
+                            asnumpy(intensity)
+                        ).copy(),
+                        "residual_current": np.asarray(
+                            asnumpy(residual)
+                        ).copy(),
+                        "completed_slices": completed_slices,
+                        "grid_summary": grid.summary(),
+                        "launch_summary": launch.summary(),
+                    },
+                    checkpoint_available=False,
+                    message="PR static z slice completed",
+                    diagnostics={
+                        "converged": converged,
+                        "termination_reason": termination_reason,
+                        "residual_rms": residual_rms,
+                        "residual_max": residual_max,
+                    },
+                )
+            )
 
     sequential_A = A.copy()
     replay_A = A0.copy()
-    replay_source = xp.empty_like(source_stack)
-    replay_residual = xp.empty_like(residual_stack)
-    for k in range(grid.Nz):
+    completed_E = E_stack[:completed_slices]
+    completed_source = source_stack[:completed_slices]
+    completed_residual = residual_stack[:completed_slices]
+    replay_source = xp.empty_like(completed_source)
+    replay_residual = xp.empty_like(completed_residual)
+    for k in range(completed_slices):
         replay_A, replay_source[k] = advance_slice(replay_A, E_stack[k])
         replay_residual[k] = residual_at(E_stack[k], replay_source[k])
 
-    replay_rms, replay_max = _residual_metrics(replay_residual, xp=xp)
+    if completed_slices:
+        replay_rms, replay_max = _residual_metrics(replay_residual, xp=xp)
+    else:
+        replay_rms = 0.0
+        replay_max = 0.0
     field_max_abs = _backend_scalar(xp.max(xp.abs(replay_A - sequential_A)))
-    source_max_abs = _backend_scalar(
-        xp.max(xp.abs(replay_source - source_stack))
-    )
-    residual_max_abs = _backend_scalar(
-        xp.max(xp.abs(replay_residual - residual_stack))
-    )
+    if completed_slices:
+        source_max_abs = _backend_scalar(
+            xp.max(xp.abs(replay_source - completed_source))
+        )
+        residual_max_abs = _backend_scalar(
+            xp.max(xp.abs(replay_residual - completed_residual))
+        )
+    else:
+        source_max_abs = 0.0
+        residual_max_abs = 0.0
     field_consistent = not _array_has_true(
         ~xp.isclose(
             replay_A,
@@ -596,7 +660,7 @@ def run_pr_static(request: PRStaticRunRequest) -> PRStaticRunResult:
     source_consistent = not _array_has_true(
         ~xp.isclose(
             replay_source,
-            source_stack,
+            completed_source,
             rtol=tolerances.replay_rtol,
             atol=tolerances.replay_atol,
         ),
@@ -605,15 +669,20 @@ def run_pr_static(request: PRStaticRunRequest) -> PRStaticRunResult:
     residual_consistent = not _array_has_true(
         ~xp.isclose(
             replay_residual,
-            residual_stack,
+            completed_residual,
             rtol=tolerances.replay_rtol,
             atol=tolerances.replay_atol,
         ),
         xp=xp,
     )
-    replay_converged = _criteria_met(replay_rms, replay_max, tolerances)
+    replay_converged = bool(
+        completed_slices == grid.Nz
+        and _criteria_met(replay_rms, replay_max, tolerances)
+    )
     converged = bool(
-        all(summary.converged for summary in summaries)
+        not cancelled
+        and completed_slices == grid.Nz
+        and all(summary.converged for summary in summaries)
         and replay_converged
         and field_consistent
         and source_consistent
@@ -623,14 +692,14 @@ def run_pr_static(request: PRStaticRunRequest) -> PRStaticRunResult:
     return PRStaticRunResult(
         A_initial=np.asarray(asnumpy(A0)).copy(),
         A_final=np.asarray(asnumpy(replay_A)).copy(),
-        E_initial=np.asarray(asnumpy(E_initial)).copy(),
-        E_final=np.asarray(asnumpy(E_stack)).copy(),
+        E_initial=np.asarray(asnumpy(E_initial[:completed_slices])).copy(),
+        E_final=np.asarray(asnumpy(completed_E)).copy(),
         source_intensity_stack=np.asarray(asnumpy(replay_source)).copy(),
         residual_stack=np.asarray(asnumpy(replay_residual)).copy(),
         power_initial=normalized_power(A0, grid),
         power_final=normalized_power(replay_A, grid),
         converged=converged,
-        completed_slices=grid.Nz,
+        completed_slices=completed_slices,
         iteration_records=tuple(records),
         slice_summaries=tuple(summaries),
         grid_summary=grid.summary(),
@@ -638,6 +707,8 @@ def run_pr_static(request: PRStaticRunRequest) -> PRStaticRunResult:
         backend_summary=backend.summary(),
         tolerance_provenance=tolerances.provenance(),
         replay_diagnostics={
+            "performed_slices": completed_slices,
+            "requested_slices": grid.Nz,
             "residual_rms": replay_rms,
             "residual_max": replay_max,
             "field_max_abs_difference": field_max_abs,
@@ -648,7 +719,11 @@ def run_pr_static(request: PRStaticRunRequest) -> PRStaticRunResult:
             "residual_consistent": residual_consistent,
             "residual_converged": replay_converged,
         },
-        status="converged" if converged else "not_converged",
+        status=(
+            "cancelled"
+            if cancelled
+            else ("converged" if converged else "not_converged")
+        ),
     )
 
 

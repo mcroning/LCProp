@@ -9,8 +9,17 @@ from lcprop.lc.operations import LC_MATERIAL_ID, LC_STATIC_OPERATION
 from lcprop.persistence import load_run_checkpoint, save_run_checkpoint
 from lcprop.persistence.static import StaticCheckpoint
 from lcprop.pr.checkpoint import PRTimeDependentCheckpoint
-from lcprop.pr.operations import PR_MATERIAL_ID, PR_TIMEDEPENDENT_OPERATION
+from lcprop.pr.operations import (
+    PR_MATERIAL_ID,
+    PR_STATIC_OPERATION,
+    PR_TIMEDEPENDENT_OPERATION,
+)
 from lcprop.pr.specs import PR_TIMEDEPENDENT_WORKFLOW
+from lcprop.pr.static_workflow import (
+    PRStaticRunRequest,
+    PRStaticWorkflowOptions,
+    PR_STATIC_WORKFLOW,
+)
 from lcprop.pr.workflow import continue_pr_timedependent
 from lcprop.runners.local import LocalRunner
 from tests.test_all_workflows import make_base_static_request
@@ -58,11 +67,16 @@ def test_registered_pr_stop_disk_resume_and_products_match_uninterrupted(
     tmp_path,
 ):
     runner = LocalRunner(
-        operations=(LC_STATIC_OPERATION, PR_TIMEDEPENDENT_OPERATION)
+        operations=(
+            LC_STATIC_OPERATION,
+            PR_TIMEDEPENDENT_OPERATION,
+            PR_STATIC_OPERATION,
+        )
     )
     assert tuple(operation.key for operation in runner.registered_operations) == (
         (LC_MATERIAL_ID, "static"),
         (PR_MATERIAL_ID, PR_TIMEDEPENDENT_WORKFLOW),
+        (PR_MATERIAL_ID, PR_STATIC_WORKFLOW),
     )
 
     request = _request(steps=4)
@@ -125,6 +139,27 @@ def test_registered_pr_stop_disk_resume_and_products_match_uninterrupted(
     assert resumed.time_normalized == uninterrupted.result.time_normalized
     assert resumed.diagnostics == uninterrupted.result.diagnostics
     _assert_same_pr_run_data(resumed_data, uninterrupted.run_data)
+
+    static_request = PRStaticRunRequest(
+        grid=request.grid,
+        beams=request.beams,
+        material=request.material,
+        solver=PRStaticWorkflowOptions(),
+        backend=request.backend,
+        initial_A=request.initial_A,
+    )
+    static = runner.run_registered(
+        PR_MATERIAL_ID,
+        PR_STATIC_WORKFLOW,
+        static_request,
+    )
+    assert static.kind == PR_STATIC_WORKFLOW
+    assert static.material_id == PR_MATERIAL_ID
+    assert static.result.status == "converged"
+    assert static.run_data.workflow == PR_STATIC_WORKFLOW
+    assert static.run_data.diagnostics["summary"].values["replay"][
+        "field_consistent"
+    ]
 
     lc_result = runner.run_registered(
         LC_MATERIAL_ID,

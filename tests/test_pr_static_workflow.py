@@ -6,6 +6,7 @@ import pytest
 from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
+from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.pr.evolution import hopping_rhs
 from lcprop.pr.specs import (
     PRMaterialSpec,
@@ -122,6 +123,104 @@ def test_coupled_histories_decrease_and_independent_replay_is_exact():
     assert result.replay_diagnostics["source_max_abs_difference"] == 0.0
     assert result.replay_diagnostics["residual_max_abs_difference"] == 0.0
     assert result.power_final == pytest.approx(result.power_initial, rel=2e-14)
+
+
+def test_optional_execution_arguments_preserve_completed_static_result():
+    request = _static_request(Nz=2)
+
+    original = run_pr_static(request)
+    explicit_none = run_pr_static(
+        request,
+        cancellation_token=None,
+        progress_callback=None,
+    )
+
+    assert explicit_none.status == original.status == "converged"
+    assert explicit_none.completed_slices == original.completed_slices == 2
+    np.testing.assert_array_equal(explicit_none.A_final, original.A_final)
+    np.testing.assert_array_equal(explicit_none.E_final, original.E_final)
+    np.testing.assert_array_equal(
+        explicit_none.source_intensity_stack,
+        original.source_intensity_stack,
+    )
+    np.testing.assert_array_equal(
+        explicit_none.residual_stack,
+        original.residual_stack,
+    )
+    assert explicit_none.iteration_records == original.iteration_records
+    assert explicit_none.slice_summaries == original.slice_summaries
+    assert explicit_none.replay_diagnostics == original.replay_diagnostics
+    assert explicit_none.tolerance_provenance == original.tolerance_provenance
+
+
+def test_static_progress_and_cancellation_stop_at_an_accepted_slice_boundary():
+    request = _static_request(Nz=3)
+    token = CancellationToken()
+    progress = []
+
+    def stop_after_first(item: RunProgress) -> None:
+        progress.append(item)
+        token.cancel()
+
+    result = run_pr_static(
+        request,
+        cancellation_token=token,
+        progress_callback=stop_after_first,
+    )
+
+    assert result.status == "cancelled"
+    assert not result.converged
+    assert result.completed_slices == 1
+    assert len(result.slice_summaries) == 1
+    assert result.E_initial.shape == (1, 12, 4)
+    assert result.E_final.shape == (1, 12, 4)
+    assert result.source_intensity_stack.shape == (1, 12, 4)
+    assert result.residual_stack.shape == (1, 12, 4)
+    assert result.replay_diagnostics["performed_slices"] == 1
+    assert result.replay_diagnostics["requested_slices"] == 3
+    assert result.replay_diagnostics["field_consistent"]
+    assert result.replay_diagnostics["source_consistent"]
+    assert result.replay_diagnostics["residual_consistent"]
+    assert not result.replay_diagnostics["residual_converged"]
+
+    assert len(progress) == 1
+    update = progress[0]
+    assert update.workflow == "pr_static"
+    assert update.completed_units == 1
+    assert update.total_units == 3
+    assert update.current_coordinate == pytest.approx(request.grid.dz_um)
+    assert update.coordinate_name == "z"
+    assert update.coordinate_unit == "um"
+    assert update.checkpoint_available is False
+    assert update.diagnostics["converged"]
+    np.testing.assert_array_equal(
+        update.latest_field_state["A_current"],
+        result.A_final,
+    )
+    np.testing.assert_array_equal(
+        update.latest_field_state["E_current"],
+        result.E_final[0],
+    )
+
+
+def test_pre_cancelled_static_run_reports_no_trial_slice_as_physical_state():
+    request = _static_request(Nz=2)
+    token = CancellationToken()
+    token.cancel()
+
+    result = run_pr_static(request, cancellation_token=token)
+
+    assert result.status == "cancelled"
+    assert not result.converged
+    assert result.completed_slices == 0
+    assert result.iteration_records == ()
+    assert result.slice_summaries == ()
+    assert result.E_initial.shape == (0, 12, 4)
+    assert result.E_final.shape == (0, 12, 4)
+    assert result.source_intensity_stack.shape == (0, 12, 4)
+    assert result.residual_stack.shape == (0, 12, 4)
+    np.testing.assert_array_equal(result.A_final, result.A_initial)
+    assert result.power_final == result.power_initial
 
 
 def test_stale_fixed_source_root_cannot_establish_coupled_convergence(monkeypatch):

@@ -19,12 +19,21 @@ from lcprop.lc.operations import (
     LC_STATIC_OPERATION,
     LC_TIMEDEPENDENT_OPERATION,
 )
-from lcprop.pr.operations import PR_MATERIAL_ID, PR_TIMEDEPENDENT_OPERATION
+from lcprop.pr.operations import (
+    PR_MATERIAL_ID,
+    PR_STATIC_OPERATION,
+    PR_TIMEDEPENDENT_OPERATION,
+)
 from lcprop.pr.specs import (
     PRMaterialSpec,
     PRRunRequest,
     PRSolverOptions,
     PR_TIMEDEPENDENT_WORKFLOW,
+)
+from lcprop.pr.static_workflow import (
+    PRStaticRunRequest,
+    PRStaticWorkflowOptions,
+    PR_STATIC_WORKFLOW,
 )
 from lcprop.runners.base import WorkflowOperation
 from lcprop.runners.local import LocalRunner
@@ -71,6 +80,18 @@ def _pr_request(*, steps: int = 2) -> PRRunRequest:
             verbose=False,
         ),
         initial_A=np.ones((1, grid.Nx, grid.Ny), dtype=np.complex128),
+    )
+
+
+def _pr_static_request() -> PRStaticRunRequest:
+    transient = _pr_request()
+    return PRStaticRunRequest(
+        grid=transient.grid,
+        beams=transient.beams,
+        material=transient.material,
+        solver=PRStaticWorkflowOptions(),
+        backend=transient.backend,
+        initial_A=transient.initial_A,
     )
 
 
@@ -183,6 +204,60 @@ def test_pr_operation_uses_same_execution_path_with_progress_and_cancellation():
     assert summary["completed_material_steps"] == 1
 
 
+def test_pr_static_operation_uses_registered_execution_and_preserves_status():
+    runner = LocalRunner(operations=(PR_STATIC_OPERATION,))
+    progress = []
+
+    shared = runner.run_registered(
+        PR_MATERIAL_ID,
+        PR_STATIC_WORKFLOW,
+        _pr_static_request(),
+        progress_callback=progress.append,
+    )
+
+    assert shared.kind == PR_STATIC_WORKFLOW
+    assert shared.material_id == PR_MATERIAL_ID
+    assert shared.message == "Completed locally"
+    assert shared.result.status == "converged"
+    assert shared.result.converged
+    assert shared.run_data.workflow == PR_STATIC_WORKFLOW
+    assert len(progress) == 2
+    assert all(item.workflow == PR_STATIC_WORKFLOW for item in progress)
+    summary = shared.run_data.diagnostics["summary"].values
+    assert summary["status"] == "converged"
+    assert summary["converged"] is True
+    assert shared.result.tolerance_provenance["material_solver"]["source"] == (
+        "precision_default"
+    )
+
+
+def test_registered_pr_static_cancellation_returns_completed_prefix_products():
+    runner = LocalRunner(operations=(PR_STATIC_OPERATION,))
+    token = CancellationToken()
+    progress = []
+
+    def stop_after_first(item) -> None:
+        progress.append(item)
+        token.cancel()
+
+    shared = runner.run_registered(
+        PR_MATERIAL_ID,
+        PR_STATIC_WORKFLOW,
+        _pr_static_request(),
+        cancellation_token=token,
+        progress_callback=stop_after_first,
+    )
+
+    assert shared.message == "Cancelled locally"
+    assert shared.result.status == "cancelled"
+    assert shared.result.completed_slices == 1
+    assert shared.run_data.geometry.z.shape == (1,)
+    assert shared.run_data.fields["final_E_stack"].data.shape[0] == 1
+    assert shared.run_data.diagnostics["summary"].values["status"] == (
+        "cancelled"
+    )
+
+
 def test_material_packages_expose_operations_without_a_global_registry():
     assert LC_STATIC_OPERATION.key == (LC_MATERIAL_ID, "static")
     assert LC_TIMEDEPENDENT_OPERATION.key == (
@@ -192,6 +267,10 @@ def test_material_packages_expose_operations_without_a_global_registry():
     assert PR_TIMEDEPENDENT_OPERATION.key == (
         PR_MATERIAL_ID,
         PR_TIMEDEPENDENT_WORKFLOW,
+    )
+    assert PR_STATIC_OPERATION.key == (
+        PR_MATERIAL_ID,
+        PR_STATIC_WORKFLOW,
     )
 
 
@@ -219,10 +298,9 @@ def test_material_operation_callbacks_have_material_owned_provenance():
         assert operation.run.__module__.startswith("lcprop.lc.")
         assert operation.to_run_data.__module__ == "lcprop.lc.products"
 
-    assert PR_TIMEDEPENDENT_OPERATION.run.__module__.startswith("lcprop.pr.")
-    assert PR_TIMEDEPENDENT_OPERATION.to_run_data.__module__ == (
-        "lcprop.pr.products"
-    )
+    for operation in (PR_STATIC_OPERATION, PR_TIMEDEPENDENT_OPERATION):
+        assert operation.run.__module__.startswith("lcprop.pr.")
+        assert operation.to_run_data.__module__ == "lcprop.pr.products"
 
 
 def test_lc_compatibility_method_delegates_through_operation_execution(
