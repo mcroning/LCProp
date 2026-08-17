@@ -152,6 +152,31 @@ def test_shared_execution_does_not_mask_workflow_or_product_errors():
         LocalRunner().run_operation(adapter_failure, object())
 
 
+def test_local_runner_reports_exact_pre_product_conversion_boundary():
+    events = []
+    result = object()
+    operation = WorkflowOperation(
+        "material",
+        "workflow",
+        lambda _request: events.append("run") or result,
+        lambda value: events.append("products") or value,
+    )
+
+    runner_result = LocalRunner().run_operation(
+        operation,
+        object(),
+        _before_product_conversion=(
+            lambda actual_operation, actual_result: events.append(
+                (actual_operation, actual_result)
+            )
+        ),
+    )
+
+    assert events == ["run", (operation, result), "products"]
+    assert runner_result.result is result
+    assert runner_result.run_data is result
+
+
 def test_lc_static_operation_uses_shared_execution_without_changing_legacy_method():
     request = make_base_static_request()
     runner = LocalRunner(operations=(LC_STATIC_OPERATION,))
@@ -221,7 +246,22 @@ def test_pr_static_operation_uses_registered_execution_and_preserves_status():
     assert shared.result.status == "converged"
     assert shared.result.converged
     assert shared.run_data.workflow == PR_STATIC_WORKFLOW
-    assert len(progress) == 2
+    assert len(
+        [
+            item
+            for item in progress
+            if (item.diagnostics or {}).get("phase") == "solve"
+        ]
+    ) == 2
+    assert [
+        (item.diagnostics or {}).get("phase") for item in progress[2:]
+    ] == [
+        "replay",
+        "replay",
+        "replay",
+        "replay_validation",
+        "scientific_result",
+    ]
     assert all(item.workflow == PR_STATIC_WORKFLOW for item in progress)
     summary = shared.run_data.diagnostics["summary"].values
     assert summary["status"] == "converged"

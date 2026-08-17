@@ -134,6 +134,21 @@ def test_pr_window_dispatches_static_and_presents_registered_run_data(app):
     calls = []
     worker_threads = []
     original = window.runner.run_registered
+    original_set_run_data = window.results_panel.set_run_data
+    rendering_states = []
+
+    def observed_set_run_data(run_data):
+        rendering_states.append(
+            (
+                window.status_label.text(),
+                window.results_panel.workspace.image_pane.td_time_label.text(),
+                window.stop_button.isEnabled(),
+                window._background_running,
+            )
+        )
+        return original_set_run_data(run_data)
+
+    window.results_panel.set_run_data = observed_set_run_data
 
     def observed(material_id, workflow_id, request, **kwargs):
         calls.append((material_id, workflow_id, request))
@@ -152,12 +167,28 @@ def test_pr_window_dispatches_static_and_presents_registered_run_data(app):
     assert window.run_status == "completed"
     assert window.status_label.text() == "Converged"
     assert window.last_progress.workflow == PR_STATIC_WORKFLOW
+    assert (window.last_progress.diagnostics or {}).get("phase") == (
+        "gui_products"
+    )
     assert window.last_progress_thread is gui_thread
     assert not window.continue_button.isEnabled()
     assert not window.save_checkpoint_button.isEnabled()
 
     workspace = window.results_panel.workspace
-    assert "PR static progress: slice 1/2" in workspace.console.toPlainText()
+    console_text = workspace.console.toPlainText()
+    assert "PR static progress: slice 1/2" in console_text
+    expected_phases = (
+        "Validating static solution: independent replay 0/2",
+        "Validating replay consistency...",
+        "Preparing scientific results...",
+        "Preparing GUI results...",
+        "Rendering results...",
+    )
+    positions = [console_text.index(message) for message in expected_phases]
+    assert positions == sorted(positions)
+    assert rendering_states == [
+        ("Rendering results...", "Rendering results...", True, True)
+    ]
     assert "Static solve converged" in workspace.console.toPlainText()
     assert workspace.longitudinal_pane.field_selector.findData(
         "final_E_stack"

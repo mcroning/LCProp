@@ -1,4 +1,4 @@
-from typing import Iterable
+from typing import Any, Callable, Iterable
 
 from lcprop.runners.base import RunnerResult, WorkflowOperation
 
@@ -40,6 +40,9 @@ class LocalRunner:
         request,
         *args,
         _prepare_products: bool = True,
+        _before_product_conversion: (
+            Callable[[WorkflowOperation, Any], None] | None
+        ) = None,
         **kwargs,
     ) -> RunnerResult:
         """Execute an explicit operation and prepare its shared products."""
@@ -47,6 +50,8 @@ class LocalRunner:
         if not isinstance(operation, WorkflowOperation):
             raise TypeError("operation must be a WorkflowOperation")
         result = operation.run(request, *args, **kwargs)
+        if _prepare_products and _before_product_conversion is not None:
+            _before_product_conversion(operation, result)
         run_data = operation.to_run_data(result) if _prepare_products else None
         status = getattr(result, "status", "completed")
         if status == "cancelled":

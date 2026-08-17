@@ -127,6 +127,7 @@ def test_coupled_histories_decrease_and_independent_replay_is_exact():
 
 def test_optional_execution_arguments_preserve_completed_static_result():
     request = _static_request(Nz=2)
+    progress = []
 
     original = run_pr_static(request)
     explicit_none = run_pr_static(
@@ -134,6 +135,7 @@ def test_optional_execution_arguments_preserve_completed_static_result():
         cancellation_token=None,
         progress_callback=None,
     )
+    reported = run_pr_static(request, progress_callback=progress.append)
 
     assert explicit_none.status == original.status == "converged"
     assert explicit_none.completed_slices == original.completed_slices == 2
@@ -151,6 +153,21 @@ def test_optional_execution_arguments_preserve_completed_static_result():
     assert explicit_none.slice_summaries == original.slice_summaries
     assert explicit_none.replay_diagnostics == original.replay_diagnostics
     assert explicit_none.tolerance_provenance == original.tolerance_provenance
+    np.testing.assert_array_equal(reported.A_final, original.A_final)
+    np.testing.assert_array_equal(reported.E_final, original.E_final)
+    np.testing.assert_array_equal(
+        reported.source_intensity_stack,
+        original.source_intensity_stack,
+    )
+    np.testing.assert_array_equal(
+        reported.residual_stack,
+        original.residual_stack,
+    )
+    assert reported.converged == original.converged
+    assert reported.replay_diagnostics == original.replay_diagnostics
+    assert (progress[-1].diagnostics or {}).get("phase") == (
+        "scientific_result"
+    )
 
 
 def test_static_progress_and_cancellation_stop_at_an_accepted_slice_boundary():
@@ -183,8 +200,22 @@ def test_static_progress_and_cancellation_stop_at_an_accepted_slice_boundary():
     assert result.replay_diagnostics["residual_consistent"]
     assert not result.replay_diagnostics["residual_converged"]
 
-    assert len(progress) == 1
-    update = progress[0]
+    solve_updates = [
+        item
+        for item in progress
+        if (item.diagnostics or {}).get("phase") == "solve"
+    ]
+    assert len(solve_updates) == 1
+    assert [
+        (item.diagnostics or {}).get("phase") for item in progress
+    ] == [
+        "solve",
+        "replay",
+        "replay",
+        "replay_validation",
+        "scientific_result",
+    ]
+    update = solve_updates[0]
     assert update.workflow == "pr_static"
     assert update.completed_units == 1
     assert update.total_units == 3
@@ -201,6 +232,26 @@ def test_static_progress_and_cancellation_stop_at_an_accepted_slice_boundary():
         update.latest_field_state["E_current"],
         result.E_final[0],
     )
+
+
+def test_static_replay_progress_cadence_is_bounded_for_large_slice_counts():
+    progress = []
+    result = run_pr_static(
+        _static_request(Nz=205, gain_length_product=0.0),
+        progress_callback=progress.append,
+    )
+
+    replay = [
+        item
+        for item in progress
+        if (item.diagnostics or {}).get("phase") == "replay"
+    ]
+
+    assert result.converged
+    assert replay[0].completed_units == 0
+    assert replay[-1].completed_units == 205
+    assert len(replay) <= 102
+    assert all(item.total_units == 205 for item in replay)
 
 
 def test_pre_cancelled_static_run_reports_no_trial_slice_as_physical_state():

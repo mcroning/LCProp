@@ -415,6 +415,30 @@ def run_pr_static(
             xp=xp,
         )
 
+    def report_completion_phase(
+        phase: str,
+        *,
+        completed_units: int,
+        total_units: int,
+        message: str,
+    ) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(
+            RunProgress(
+                workflow=PR_STATIC_WORKFLOW,
+                status="running",
+                completed_units=int(completed_units),
+                total_units=int(total_units),
+                current_coordinate=float(completed_units),
+                coordinate_name="replay_slice",
+                coordinate_unit="1",
+                elapsed_wall_time=perf_counter() - started_at,
+                message=message,
+                diagnostics={"phase": phase},
+            )
+        )
+
     for k in range(grid.Nz):
         if cancellation_token is not None and cancellation_token.is_cancelled():
             cancelled = True
@@ -613,6 +637,7 @@ def run_pr_static(
                     checkpoint_available=False,
                     message="PR static z slice completed",
                     diagnostics={
+                        "phase": "solve",
                         "converged": converged,
                         "termination_reason": termination_reason,
                         "residual_rms": residual_rms,
@@ -628,10 +653,40 @@ def run_pr_static(
     completed_residual = residual_stack[:completed_slices]
     replay_source = xp.empty_like(completed_source)
     replay_residual = xp.empty_like(completed_residual)
+    report_completion_phase(
+        "replay",
+        completed_units=0,
+        total_units=completed_slices,
+        message=(
+            "Validating static solution: independent replay "
+            f"0/{completed_slices}"
+        ),
+    )
+    replay_progress_cadence = max(1, math.ceil(completed_slices / 100))
     for k in range(completed_slices):
         replay_A, replay_source[k] = advance_slice(replay_A, E_stack[k])
         replay_residual[k] = residual_at(E_stack[k], replay_source[k])
+        replay_completed = k + 1
+        if (
+            replay_completed % replay_progress_cadence == 0
+            or replay_completed == completed_slices
+        ):
+            report_completion_phase(
+                "replay",
+                completed_units=replay_completed,
+                total_units=completed_slices,
+                message=(
+                    "Validating static solution: independent replay "
+                    f"{replay_completed}/{completed_slices}"
+                ),
+            )
 
+    report_completion_phase(
+        "replay_validation",
+        completed_units=completed_slices,
+        total_units=completed_slices,
+        message="Validating replay consistency...",
+    )
     if completed_slices:
         replay_rms, replay_max = _residual_metrics(replay_residual, xp=xp)
     else:
@@ -687,6 +742,13 @@ def run_pr_static(
         and field_consistent
         and source_consistent
         and residual_consistent
+    )
+
+    report_completion_phase(
+        "scientific_result",
+        completed_units=completed_slices,
+        total_units=completed_slices,
+        message="Preparing scientific results...",
     )
 
     return PRStaticRunResult(

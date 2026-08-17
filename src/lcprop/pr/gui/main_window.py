@@ -340,6 +340,32 @@ class PRMainWindow(QWidget):
         raise TypeError("unsupported PR GUI request type")
 
     def _run_registered(self, request, **kwargs):
+        if isinstance(request, PRStaticRunRequest):
+            progress_callback = kwargs.get("progress_callback")
+            phase_started_at = monotonic()
+
+            def before_product_conversion(_operation, result) -> None:
+                if progress_callback is None:
+                    return
+                completed = int(result.completed_slices)
+                progress_callback(
+                    RunProgress(
+                        workflow=PR_STATIC_WORKFLOW,
+                        status="running",
+                        completed_units=completed,
+                        total_units=int(result.grid_summary["Nz"]),
+                        current_coordinate=float(
+                            completed * result.grid_summary["dz_um"]
+                        ),
+                        coordinate_name="z",
+                        coordinate_unit="um",
+                        elapsed_wall_time=monotonic() - phase_started_at,
+                        message="Preparing GUI results...",
+                        diagnostics={"phase": "gui_products"},
+                    )
+                )
+
+            kwargs["_before_product_conversion"] = before_product_conversion
         return self.runner.run_registered(
             PR_MATERIAL_ID,
             self._workflow_id_for_request(request),
@@ -585,6 +611,22 @@ class PRMainWindow(QWidget):
         self.last_progress = progress
         self.last_progress_thread = QThread.currentThread()
         if progress.workflow == PR_STATIC_WORKFLOW:
+            diagnostics = progress.diagnostics or {}
+            phase = diagnostics.get("phase", "solve")
+            if phase != "solve":
+                self.status_label.setText(progress.message)
+                if phase == "replay":
+                    self.results_panel.set_td_time_indicator(
+                        "Independent replay: "
+                        f"{progress.completed_units}/{progress.total_units}"
+                    )
+                else:
+                    self.results_panel.set_td_time_indicator(progress.message)
+                self.results_panel.append_console(
+                    f"{progress.message}; "
+                    f"elapsed={progress.elapsed_wall_time:.3f} s"
+                )
+                return
             self.status_label.setText(
                 f"Slice {progress.completed_units}/{progress.total_units}"
             )
@@ -630,6 +672,11 @@ class PRMainWindow(QWidget):
             result = runner_result.result
             self.last_runner_result = runner_result
             self.last_result = result
+            if runner_result.kind == PR_STATIC_WORKFLOW:
+                self.status_label.setText("Rendering results...")
+                self.status_label.repaint()
+                self.results_panel.set_td_time_indicator("Rendering results...")
+                self.results_panel.append_console("Rendering results...")
             self.results_panel.set_run_data(runner_result.run_data)
             if runner_result.kind == PR_TIMEDEPENDENT_WORKFLOW:
                 self.last_checkpoint = result.checkpoint
