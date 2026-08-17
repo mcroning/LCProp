@@ -37,10 +37,21 @@ from lcprop.pr.gui.material_panel import PRMaterialPanel
 from lcprop.pr.gui.request_adapter import (
     apply_pr_request,
     build_pr_request,
-    validate_pr_gui_request,
+    validate_pr_gui_workflow_request,
 )
-from lcprop.pr.operations import PR_TIMEDEPENDENT_OPERATION
-from lcprop.pr.specs import PR_MATERIAL_ID, PR_TIMEDEPENDENT_WORKFLOW
+from lcprop.pr.operations import (
+    PR_STATIC_OPERATION,
+    PR_TIMEDEPENDENT_OPERATION,
+)
+from lcprop.pr.specs import (
+    PRRunRequest,
+    PR_MATERIAL_ID,
+    PR_TIMEDEPENDENT_WORKFLOW,
+)
+from lcprop.pr.static_workflow import (
+    PRStaticRunRequest,
+    PR_STATIC_WORKFLOW,
+)
 from lcprop.pr.workflow import continue_pr_timedependent
 from lcprop.runners.base import RunnerResult
 from lcprop.runners.local import LocalRunner
@@ -77,11 +88,13 @@ def _continue_pr_operation(
 
 
 class PRMainWindow(QWidget):
-    """Focused GUI for the headless PR time-dependent operation."""
+    """Focused GUI for the registered PR workflow operations."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.runner = LocalRunner(operations=(PR_TIMEDEPENDENT_OPERATION,))
+        self.runner = LocalRunner(
+            operations=(PR_TIMEDEPENDENT_OPERATION, PR_STATIC_OPERATION)
+        )
         self.last_result = None
         self.last_runner_result = None
         self.last_progress: RunProgress | None = None
@@ -195,8 +208,11 @@ class PRMainWindow(QWidget):
 
     def _refresh_checkpoint_controls(self) -> None:
         checkpoint = self.last_checkpoint
+        workflow_id = self.evolution_panel.workflow_id()
         reason = None
-        if checkpoint is None:
+        if workflow_id != PR_TIMEDEPENDENT_WORKFLOW:
+            reason = "Continuation is available only for time-dependent runs."
+        elif checkpoint is None:
             reason = "No PR checkpoint is loaded or retained."
         else:
             try:
@@ -209,9 +225,11 @@ class PRMainWindow(QWidget):
         self.continue_button.setEnabled(actions_enabled and compatible)
         self.continue_button.setToolTip("" if compatible else reason or "")
         self.save_checkpoint_button.setEnabled(
-            actions_enabled and checkpoint is not None
+            actions_enabled
+            and workflow_id == PR_TIMEDEPENDENT_WORKFLOW
+            and checkpoint is not None
         )
-        if checkpoint is None:
+        if checkpoint is None or workflow_id != PR_TIMEDEPENDENT_WORKFLOW:
             return
         if compatible:
             self.status_label.setText(
@@ -235,10 +253,11 @@ class PRMainWindow(QWidget):
     def describe_request(self, request) -> str:
         """Return a durable, unit-explicit summary of one PR request."""
 
-        preflight = validate_pr_gui_request(request)
+        preflight = validate_pr_gui_workflow_request(request)
+        workflow_id = self._workflow_id_for_request(request)
         lines = [
             "Material: photorefractive",
-            f"Workflow: {PR_TIMEDEPENDENT_WORKFLOW}",
+            f"Workflow: {workflow_id}",
             f"Runner: {self.runner.name}",
             (
                 f"Grid: {request.grid.Nx} × {request.grid.Ny}, "
@@ -279,14 +298,25 @@ class PRMainWindow(QWidget):
                 f"{channel.tilt_y_rad_per_um:g}) rad/µm; "
                 f"phase={channel.phase_rad:g} rad; group={group}"
             )
+        if workflow_id == PR_TIMEDEPENDENT_WORKFLOW:
+            lines.extend([
+                f"Material steps: {request.solver.Nt}",
+                f"Material integrator: {request.solver.integrator}",
+                f"Normalized timestep: {request.solver.dt_normalized:g}",
+                (
+                    "Conservative normalized timestep limit: "
+                    f"{preflight.conservative_dt_limit:.8g}"
+                ),
+            ])
+        else:
+            lines.extend([
+                (
+                    "Maximum coupled passes per z slice: "
+                    f"{request.solver.max_coupled_passes}"
+                ),
+                "Static material solver: precision-aware automatic defaults",
+            ])
         lines.extend([
-            f"Material steps: {request.solver.Nt}",
-            f"Material integrator: {request.solver.integrator}",
-            f"Normalized timestep: {request.solver.dt_normalized:g}",
-            (
-                "Conservative normalized timestep limit: "
-                f"{preflight.conservative_dt_limit:.8g}"
-            ),
             f"Optical substeps per z slice: {request.solver.optical_substeps}",
             (
                 f"Backend: {request.backend.backend}; "
@@ -300,10 +330,18 @@ class PRMainWindow(QWidget):
             lines.append("Preflight warnings: none")
         return "\n".join(lines)
 
+    @staticmethod
+    def _workflow_id_for_request(request) -> str:
+        if isinstance(request, PRStaticRunRequest):
+            return PR_STATIC_WORKFLOW
+        if isinstance(request, PRRunRequest):
+            return PR_TIMEDEPENDENT_WORKFLOW
+        raise TypeError("unsupported PR GUI request type")
+
     def _run_registered(self, request, **kwargs):
         return self.runner.run_registered(
             PR_MATERIAL_ID,
-            PR_TIMEDEPENDENT_WORKFLOW,
+            self._workflow_id_for_request(request),
             request,
             **kwargs,
         )
@@ -386,7 +424,12 @@ class PRMainWindow(QWidget):
 
     @Slot()
     def continue_clicked(self) -> None:
-        if self._background_running or self.last_checkpoint is None:
+        if (
+            self._background_running
+            or self.last_checkpoint is None
+            or self.evolution_panel.workflow_id()
+            != PR_TIMEDEPENDENT_WORKFLOW
+        ):
             return
         checkpoint = self.last_checkpoint
         try:
@@ -433,7 +476,11 @@ class PRMainWindow(QWidget):
             self.tabs.setCurrentWidget(self.results_panel)
             return
 
-        if self.last_checkpoint is not None:
+        if (
+            self.last_checkpoint is not None
+            and self._workflow_id_for_request(request)
+            == PR_TIMEDEPENDENT_WORKFLOW
+        ):
             self.results_panel.append_console(
                 "Starting a fresh PR run; previous checkpoint cleared."
             )
@@ -455,11 +502,12 @@ class PRMainWindow(QWidget):
     ) -> None:
         self.results_panel.reset_field_color_scales()
         self.results_panel.set_request_summary(summary)
+        workflow_id = self._workflow_id_for_request(request)
         self.results_panel.append_console(
-            f"{run_label} {PR_TIMEDEPENDENT_WORKFLOW} "
+            f"{run_label} {workflow_id} "
             f"with {self.runner.name}..."
         )
-        preflight = validate_pr_gui_request(request)
+        preflight = validate_pr_gui_workflow_request(request)
         for warning in preflight.warnings:
             self.results_panel.append_console(f"WARNING: {warning}")
 
@@ -525,13 +573,31 @@ class PRMainWindow(QWidget):
         self.stop_button.setEnabled(False)
         self.stop_button.setText("Stopping…")
         self.results_panel.append_console(
-            "Stop requested; finishing the current material-time step."
+            "Stop requested; finishing the current accepted z slice."
+            if isinstance(self._active_request, PRStaticRunRequest)
+            else "Stop requested; finishing the current material-time step."
         )
 
     @Slot(object)
     def _on_progress(self, progress: RunProgress) -> None:
         self.last_progress = progress
         self.last_progress_thread = QThread.currentThread()
+        if progress.workflow == PR_STATIC_WORKFLOW:
+            self.status_label.setText(
+                f"Slice {progress.completed_units}/{progress.total_units}"
+            )
+            self.results_panel.set_td_time_indicator(
+                "PR static z: "
+                f"{float(progress.current_coordinate):.6g} µm; "
+                f"slices: {progress.completed_units}/{progress.total_units}"
+            )
+            self.results_panel.append_console(
+                "PR static progress: "
+                f"slice {progress.completed_units}/{progress.total_units}; "
+                f"z={float(progress.current_coordinate):.6g} µm; "
+                f"elapsed={progress.elapsed_wall_time:.3f} s"
+            )
+            return
         self.status_label.setText(
             f"Step {progress.completed_units}/{progress.total_units}"
         )
@@ -552,29 +618,57 @@ class PRMainWindow(QWidget):
         try:
             if runner_result.material_id != PR_MATERIAL_ID:
                 raise ValueError("PR window received a non-PR runner result")
-            if runner_result.kind != PR_TIMEDEPENDENT_WORKFLOW:
+            if runner_result.kind not in (
+                PR_TIMEDEPENDENT_WORKFLOW,
+                PR_STATIC_WORKFLOW,
+            ):
                 raise ValueError("PR window received an unexpected workflow")
             if runner_result.run_data is None:
                 raise ValueError("PR runner result has no prepared RunData")
             result = runner_result.result
             self.last_runner_result = runner_result
             self.last_result = result
-            self.last_checkpoint = result.checkpoint
             self.results_panel.set_run_data(runner_result.run_data)
-            if result.status == "cancelled":
-                self.run_status = "stopped"
-                self.status_label.setText("Stopped")
-                prefix = "PR time at stop"
-                message = "Run cancelled"
+            if runner_result.kind == PR_TIMEDEPENDENT_WORKFLOW:
+                self.last_checkpoint = result.checkpoint
+                if result.status == "cancelled":
+                    self.run_status = "stopped"
+                    self.status_label.setText("Stopped")
+                    prefix = "PR time at stop"
+                    message = "Run cancelled"
+                else:
+                    self.run_status = "completed"
+                    self.status_label.setText("Completed")
+                    prefix = "Final PR time"
+                    message = "Run complete"
+                self.results_panel.set_td_time_indicator(
+                    f"{prefix}: {float(result.time_normalized):.6g} normalized; "
+                    f"steps: {result.completed_steps}/{result.requested_steps}"
+                )
             else:
-                self.run_status = "completed"
-                self.status_label.setText("Completed")
-                prefix = "Final PR time"
-                message = "Run complete"
-            self.results_panel.set_td_time_indicator(
-                f"{prefix}: {float(result.time_normalized):.6g} normalized; "
-                f"steps: {result.completed_steps}/{result.requested_steps}"
-            )
+                total_slices = int(result.grid_summary["Nz"])
+                z_reached_um = float(
+                    result.completed_slices * result.grid_summary["dz_um"]
+                )
+                if result.status == "cancelled":
+                    self.run_status = "stopped"
+                    self.status_label.setText("Stopped")
+                    prefix = "PR static z at stop"
+                    message = "Static run cancelled"
+                elif result.status == "converged":
+                    self.run_status = "completed"
+                    self.status_label.setText("Converged")
+                    prefix = "Final PR static z"
+                    message = "Static solve converged"
+                else:
+                    self.run_status = "not_converged"
+                    self.status_label.setText("Not converged")
+                    prefix = "Final PR static z"
+                    message = "Static solve did not converge"
+                self.results_panel.set_td_time_indicator(
+                    f"{prefix}: {z_reached_um:.6g} µm; "
+                    f"slices: {result.completed_slices}/{total_slices}"
+                )
             self.results_panel.append_console(runner_result.message)
             self.results_panel.append_console(message)
             self.results_panel.append_console(

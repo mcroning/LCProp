@@ -14,7 +14,11 @@ from lcprop.pr.geometry import (
     PRBeamStackApertureReport,
     analyze_beam_stack_aperture,
 )
-from lcprop.pr.specs import PRRunRequest
+from lcprop.pr.specs import PRRunRequest, PR_TIMEDEPENDENT_WORKFLOW
+from lcprop.pr.static_workflow import (
+    PRStaticRunRequest,
+    PR_STATIC_WORKFLOW,
+)
 
 
 @dataclass(frozen=True)
@@ -27,11 +31,16 @@ class PRRequestPreflight:
         return self.aperture.warnings
 
 
-def validate_pr_gui_request(request: PRRunRequest) -> PRRequestPreflight:
-    """Validate one GUI request using PR-owned numerical rules."""
+@dataclass(frozen=True)
+class PRStaticRequestPreflight:
+    aperture: PRBeamStackApertureReport
 
-    if not isinstance(request, PRRunRequest):
-        raise TypeError("request must be a PRRunRequest")
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        return self.aperture.warnings
+
+
+def _validate_pr_gui_common(request) -> PRBeamStackApertureReport:
     request.grid.validate()
     request.beams.validate()
     request.material.validate()
@@ -49,22 +58,58 @@ def validate_pr_gui_request(request: PRRunRequest) -> PRRequestPreflight:
         xp=np,
         real_dtype=real_dtype,
     )
+    return analyze_beam_stack_aperture(
+        grid,
+        request.beams,
+        refractive_index=request.material.refractive_index,
+        strict=False,
+    )
+
+
+def validate_pr_gui_request(request: PRRunRequest) -> PRRequestPreflight:
+    """Validate one GUI request using PR-owned numerical rules."""
+
+    if not isinstance(request, PRRunRequest):
+        raise TypeError("request must be a PRRunRequest")
+    aperture = _validate_pr_gui_common(request)
+    real_dtype, _ = dtype_pair(request.backend.precision)
+    grid = make_grid(
+        request.grid,
+        xp=np,
+        real_dtype=real_dtype,
+    )
     dt_limit = validate_timestep(
         request.solver.dt_normalized,
         grid,
         request.material,
         integrator=request.solver.integrator,
     )
-    aperture = analyze_beam_stack_aperture(
-        grid,
-        request.beams,
-        refractive_index=request.material.refractive_index,
-        strict=False,
-    )
     return PRRequestPreflight(
         conservative_dt_limit=dt_limit,
         aperture=aperture,
     )
+
+
+def validate_pr_static_gui_request(
+    request: PRStaticRunRequest,
+) -> PRStaticRequestPreflight:
+    """Validate one static GUI request without transient-time rules."""
+
+    if not isinstance(request, PRStaticRunRequest):
+        raise TypeError("request must be a PRStaticRunRequest")
+    return PRStaticRequestPreflight(
+        aperture=_validate_pr_gui_common(request),
+    )
+
+
+def validate_pr_gui_workflow_request(request):
+    """Dispatch GUI preflight by the request's exact PR workflow type."""
+
+    if isinstance(request, PRRunRequest):
+        return validate_pr_gui_request(request)
+    if isinstance(request, PRStaticRunRequest):
+        return validate_pr_static_gui_request(request)
+    raise TypeError("unsupported PR GUI request type")
 
 
 def build_pr_request(
@@ -73,19 +118,31 @@ def build_pr_request(
     beam_panel,
     grid_panel,
     evolution_panel,
-) -> PRRunRequest:
+) -> PRRunRequest | PRStaticRunRequest:
     """Take one immutable, validated request snapshot from PR controls."""
 
-    request = PRRunRequest(
-        grid=grid_panel.grid(),
-        beams=beam_panel.beams(),
-        material=material_panel.material(),
-        solver=evolution_panel.solver(),
-        backend=evolution_panel.backend_spec(),
-        initial_A=None,
-        initial_E=None,
-    )
-    validate_pr_gui_request(request)
+    workflow_id = evolution_panel.workflow_id()
+    common = {
+        "grid": grid_panel.grid(),
+        "beams": beam_panel.beams(),
+        "material": material_panel.material(),
+        "backend": evolution_panel.backend_spec(),
+        "initial_A": None,
+        "initial_E": None,
+    }
+    if workflow_id == PR_TIMEDEPENDENT_WORKFLOW:
+        request = PRRunRequest(
+            **common,
+            solver=evolution_panel.solver(),
+        )
+    elif workflow_id == PR_STATIC_WORKFLOW:
+        request = PRStaticRunRequest(
+            **common,
+            solver=evolution_panel.static_solver(),
+        )
+    else:
+        raise ValueError(f"unsupported PR GUI workflow: {workflow_id!r}")
+    validate_pr_gui_workflow_request(request)
     return request
 
 
@@ -107,6 +164,7 @@ def apply_pr_request(
         )
     grid_panel.set_grid(request.grid)
     material_panel.set_material(request.material)
+    evolution_panel.set_workflow_id(PR_TIMEDEPENDENT_WORKFLOW)
     evolution_panel.set_solver(request.solver)
     evolution_panel.set_backend_spec(request.backend)
     beam_panel.set_aperture(
@@ -120,7 +178,10 @@ def apply_pr_request(
 
 __all__ = [
     "PRRequestPreflight",
+    "PRStaticRequestPreflight",
     "apply_pr_request",
     "build_pr_request",
     "validate_pr_gui_request",
+    "validate_pr_gui_workflow_request",
+    "validate_pr_static_gui_request",
 ]

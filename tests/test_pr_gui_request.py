@@ -24,9 +24,19 @@ from lcprop.pr.gui.request_adapter import (
     apply_pr_request,
     build_pr_request,
     validate_pr_gui_request,
+    validate_pr_static_gui_request,
 )
-from lcprop.pr.specs import PRMaterialSpec, PRRunRequest, PRSolverOptions
+from lcprop.pr.specs import (
+    PRMaterialSpec,
+    PRRunRequest,
+    PRSolverOptions,
+    PR_TIMEDEPENDENT_WORKFLOW,
+)
 from lcprop.pr.specs import PR_EULER_INTEGRATOR, PR_SEMI_IMPLICIT_INTEGRATOR
+from lcprop.pr.static_workflow import (
+    PRStaticRunRequest,
+    PR_STATIC_WORKFLOW,
+)
 
 
 @pytest.fixture(scope="module")
@@ -74,6 +84,7 @@ def test_pr_gui_defaults_are_pr_owned_valid_and_well_sampled(app):
     request = _build(controls)
     preflight = validate_pr_gui_request(request)
 
+    assert controls[-1].workflow_id() == PR_TIMEDEPENDENT_WORKFLOW
     assert request.grid == PR_DEFAULT_GRID
     assert request.grid != GridSpec()
     assert request.solver == PRSolverOptions(
@@ -102,6 +113,32 @@ def test_pr_gui_defaults_are_pr_owned_valid_and_well_sampled(app):
             for beam_margins in plane_margins
             for margin in beam_margins.values()
         ) > 0.0
+
+
+def test_static_selection_builds_only_static_semantics_and_auto_tolerances(app):
+    controls = _controls(app)
+    evolution_panel = controls[-1]
+    evolution_panel.set_workflow_id(PR_STATIC_WORKFLOW)
+    evolution_panel.max_coupled_passes.setValue(9)
+    evolution_panel.optical_substeps.setValue(3)
+    evolution_panel.precision.setCurrentText("float32")
+
+    request = _build(controls)
+    preflight = validate_pr_static_gui_request(request)
+
+    assert isinstance(request, PRStaticRunRequest)
+    assert request.solver.material_solver is None
+    assert request.backend.precision == "float32"
+    assert request.solver.max_coupled_passes == 9
+    assert request.solver.optical_substeps == 3
+    assert not hasattr(request.solver, "Nt")
+    assert not hasattr(request.solver, "dt_normalized")
+    assert not hasattr(request.solver, "integrator")
+    assert preflight.warnings == ()
+    assert evolution_panel.Nt.isHidden()
+    assert evolution_panel.dt_normalized.isHidden()
+    assert evolution_panel.integrator.isHidden()
+    assert not evolution_panel.max_coupled_passes.isHidden()
 
 
 def test_beam_stack_inverse_mapping_preserves_optical_fields_and_signs(app):
@@ -225,6 +262,7 @@ def test_apply_and_rebuild_saved_pr_request_is_lossless(app):
     _apply(request, controls)
     rebuilt = _build(controls)
 
+    assert controls[-1].workflow_id() == PR_TIMEDEPENDENT_WORKFLOW
     assert rebuilt == request
     assert rebuilt.beams.channels[0].tilt_x_rad_per_um > 0.0
     assert rebuilt.beams.channels[0].tilt_y_rad_per_um < 0.0
