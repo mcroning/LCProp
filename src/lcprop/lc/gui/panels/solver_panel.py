@@ -86,3 +86,48 @@ class SolverPanel(QWidget):
             dt=self.dt.value() * 1e-6,
             gamma_z=0.0,
         )
+
+    def set_solver(self, solver: StaticSolverOptions) -> None:
+        """Populate the exactly representable static solver controls."""
+
+        strategy = solver.workflow.strategy
+        expected_workflow = self._workflow_for_strategy(strategy)
+        expected = StaticSolverOptions(
+            workflow=expected_workflow,
+            max_iterations=solver.max_iterations,
+            static_max_coupled_passes=solver.max_iterations,
+        )
+        if solver != expected:
+            raise ValueError("LC GUI cannot represent these static solver options")
+        self.workflow.setCurrentText(strategy)
+        self.max_iterations.setValue(solver.max_iterations)
+
+    def set_td_solver(self, solver: TimeDependentSolverOptions) -> None:
+        """Populate the exactly representable time-dependent controls."""
+
+        expected = TimeDependentSolverOptions(Nt=solver.Nt, dt=solver.dt)
+        if solver != expected:
+            raise ValueError("LC GUI cannot represent these time-dependent solver options")
+        scaled_dt = solver.dt * 1e6
+        if not float(scaled_dt).is_integer():
+            raise ValueError("LC GUI TD dt must be an integer multiple of 1e-6")
+        self.Nt.setValue(solver.Nt)
+        self.dt.setValue(int(scaled_dt))
+
+    @staticmethod
+    def _workflow_for_strategy(strategy: str) -> StaticWorkflowOptions:
+        if strategy == "fixed_theta":
+            return StaticWorkflowOptions(
+                strategy="fixed_theta",
+                theta_solver="none",
+                optics_solver="splitstep",
+                coupling="frozen",
+            )
+        if strategy == "local_self_consistent":
+            return StaticWorkflowOptions(
+                strategy="local_self_consistent",
+                theta_solver="picard_cn",
+                optics_solver="splitstep",
+                coupling="self_consistent",
+            )
+        raise ValueError(f"unsupported LC GUI static strategy: {strategy!r}")

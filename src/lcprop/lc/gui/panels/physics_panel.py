@@ -99,6 +99,32 @@ class PhysicsPanel(QWidget):
             theta_bc=self.theta_bc.value(),
         )
 
+    def set_material(self, material: LCMaterial) -> None:
+        """Populate the material controls without discarding hidden fields."""
+
+        material.validate()
+        if material.name != LCMaterial().name:
+            raise ValueError("LC GUI cannot represent a non-default material name")
+        self.ne.setValue(material.ne)
+        self.no.setValue(material.no)
+        self.K_pN.setValue(material.K * 1e12)
+        self.delta_epsilon.setValue(material.delta_epsilon)
+
+    def set_bias(self, bias: BiasSpec) -> None:
+        """Populate the bias controls after hidden-option validation."""
+
+        bias.validate()
+        default = BiasSpec()
+        if (
+            bias.theta_min != default.theta_min
+            or bias.theta_max != default.theta_max
+            or bias.theta_center is not None
+            or bias.b_override is not None
+        ):
+            raise ValueError("LC GUI cannot represent non-default hidden bias options")
+        self.V_bias.setValue(bias.V_bias)
+        self.theta_bc.setValue(bias.theta_bc)
+
 
     def update_derived_readout(self) -> None:
         material = self.material()

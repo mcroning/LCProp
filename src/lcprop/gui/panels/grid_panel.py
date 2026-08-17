@@ -36,3 +36,14 @@ class GridPanel(QWidget):
             y_aperture_um=self.y_aperture_um.value(),
             z_length_um=self.z_length_um.value(),
         )
+
+    def set_grid(self, grid: GridSpec) -> None:
+        """Populate the controls from one exactly representable grid."""
+
+        grid.validate()
+        self.Nx.setValue(grid.Nx)
+        self.Ny.setValue(grid.Ny)
+        self.dz_um.setValue(grid.dz_um)
+        self.z_length_um.setValue(grid.z_length_um)
+        self.x_aperture_um.setValue(grid.x_aperture_um)
+        self.y_aperture_um.setValue(grid.y_aperture_um)

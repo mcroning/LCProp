@@ -99,6 +99,18 @@ class BeamPanel(QWidget):
     def set_beam_stack_definition(self, stack: BeamStackDefinition) -> None:
         """Replace the Beam tab state for replay and tests."""
 
+        stack.validate()
+        scene = self.launch_plane_widget.scene
+        x_values = [beam.x_um for beam in stack.beams]
+        y_values = [beam.y_um for beam in stack.beams]
+        self.launch_plane_widget.x_spin.setRange(
+            min([scene.x_min, *x_values]),
+            max([scene.x_max, *x_values]),
+        )
+        self.launch_plane_widget.y_spin.setRange(
+            min([scene.y_min, *y_values]),
+            max([scene.y_max, *y_values]),
+        )
         selected_index = 0 if stack.beams else None
         self.launch_plane_widget.set_beam_stack(stack, selected_index=selected_index)
 

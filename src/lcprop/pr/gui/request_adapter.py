@@ -146,26 +146,49 @@ def build_pr_request(
     return request
 
 
-def apply_pr_request(
-    request: PRRunRequest,
-    *,
-    material_panel,
-    beam_panel,
-    grid_panel,
-    evolution_panel,
-) -> None:
-    """Populate every representable PR control from a saved request."""
+def validate_pr_gui_request_representable(request) -> None:
+    """Reject headless PR settings that have no exact GUI representation."""
 
-    validate_pr_gui_request(request)
+    validate_pr_gui_workflow_request(request)
     if request.initial_A is not None or request.initial_E is not None:
         raise ValueError(
             "PR GUI controls cannot represent request-owned initial arrays; "
             "load a PR checkpoint for continuation"
         )
+    if request.backend.verbose:
+        raise ValueError("PR GUI cannot represent backend verbose=True")
+    if isinstance(request, PRStaticRunRequest):
+        represented = type(request.solver)(
+            material_solver=None,
+            max_coupled_passes=request.solver.max_coupled_passes,
+            optical_substeps=request.solver.optical_substeps,
+        )
+        if request.solver != represented:
+            raise ValueError(
+                "PR GUI cannot represent these static solver options"
+            )
+
+
+def apply_pr_request(
+    request: PRRunRequest | PRStaticRunRequest,
+    *,
+    material_panel,
+    beam_panel,
+    grid_panel,
+    evolution_panel,
+    beam_stack_definition=None,
+) -> None:
+    """Populate every representable PR control from a saved request."""
+
+    validate_pr_gui_request_representable(request)
     grid_panel.set_grid(request.grid)
     material_panel.set_material(request.material)
-    evolution_panel.set_workflow_id(PR_TIMEDEPENDENT_WORKFLOW)
-    evolution_panel.set_solver(request.solver)
+    if isinstance(request, PRStaticRunRequest):
+        evolution_panel.set_workflow_id(PR_STATIC_WORKFLOW)
+        evolution_panel.set_static_solver(request.solver)
+    else:
+        evolution_panel.set_workflow_id(PR_TIMEDEPENDENT_WORKFLOW)
+        evolution_panel.set_solver(request.solver)
     evolution_panel.set_backend_spec(request.backend)
     beam_panel.set_aperture(
         request.grid.x_aperture_um,
@@ -173,6 +196,8 @@ def apply_pr_request(
     )
     beam_panel.set_beam_stack_definition(
         beam_stack_to_launchplane(request.beams)
+        if beam_stack_definition is None
+        else beam_stack_definition
     )
 
 
@@ -182,6 +207,7 @@ __all__ = [
     "apply_pr_request",
     "build_pr_request",
     "validate_pr_gui_request",
+    "validate_pr_gui_request_representable",
     "validate_pr_gui_workflow_request",
     "validate_pr_static_gui_request",
 ]

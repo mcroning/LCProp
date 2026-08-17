@@ -39,6 +39,22 @@ from lcprop.lc.operations import (
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.runners.local import LocalRunner
 from lcprop.gui.workers import WorkflowWorker
+from lcprop.gui.experiment_files import (
+    ExperimentFileButtons,
+    choose_experiment_open_path,
+    choose_experiment_save_path,
+    launchplane_presentation_payload,
+    launchplane_stack_from_presentation,
+)
+from lcprop.persistence import load_experiment, save_experiment
+from lcprop.lc.gui.request_adapter import (
+    LC_STATIC_EXPERIMENT,
+    LC_STATIC_WORKFLOW_ID,
+    LC_TIMEDEPENDENT_EXPERIMENT,
+    LC_TIMEDEPENDENT_WORKFLOW_ID,
+    apply_lc_request,
+    validate_lc_gui_request_representable,
+)
 from lcprop.lc.gui.retained_results import (
     ExperimentFamily,
     RetainedResult,
@@ -105,6 +121,7 @@ class LCPropMainWindow(QWidget):
         self._td_cancellation_token = None
         self._td_outcome_received = False
         self._td_thread_done = False
+        self._hydrating_experiment = False
         self.setWindowTitle("LCProp")
         # Default to a wide scientific-visualization layout.
         self.setMinimumSize(1200, 760)
@@ -171,6 +188,15 @@ class LCPropMainWindow(QWidget):
         self.stop_button.setVisible(False)
         self.stop_button.clicked.connect(self.stop_workflow_clicked)
         header.addWidget(self.stop_button)
+
+        self.experiment_file_buttons = ExperimentFileButtons(self)
+        self.experiment_file_buttons.saveRequested.connect(
+            self.save_experiment_clicked
+        )
+        self.experiment_file_buttons.openRequested.connect(
+            self.open_experiment_clicked
+        )
+        header.addWidget(self.experiment_file_buttons)
 
         root.addLayout(header)
 
@@ -287,6 +313,8 @@ class LCPropMainWindow(QWidget):
         return True
 
     def _configuration_changed(self, *_args) -> None:
+        if self._hydrating_experiment:
+            return
         checkpoint = self.last_timedependent_checkpoint
         if self._background_running:
             return
@@ -301,6 +329,132 @@ class LCPropMainWindow(QWidget):
                     f"Continuation invalidated: {exc}"
                 )
         self.update_run_button()
+
+    def _active_experiment_request(self):
+        experiment = self.experiment_panel.current_experiment()
+        if experiment == LC_STATIC_EXPERIMENT:
+            return LC_STATIC_WORKFLOW_ID, self.build_request()
+        if experiment == LC_TIMEDEPENDENT_EXPERIMENT:
+            if self.td_initial_source_mode() is not TDInitialSourceMode.BEAM_LAUNCH:
+                raise ValueError(
+                    "Experiments cannot save retained-result initial state; "
+                    "select 'Beam pane launch' or use checkpoint persistence"
+                )
+            return LC_TIMEDEPENDENT_WORKFLOW_ID, self._build_timedependent_base_request()
+        raise ValueError(
+            "Save/Open Experiment currently supports only LC static and "
+            "time-dependent propagation"
+        )
+
+    def _capture_experiment_gui_state(self):
+        return {
+            "experiment": self.experiment_panel.current_experiment(),
+            "common": self.build_request(),
+            "td_solver": self.solver_panel.td_solver(),
+            "td_source": self.td_initial_source_mode(),
+            "beam_stack": self.beam_panel.beam_stack_definition,
+        }
+
+    def _restore_experiment_gui_state(self, state) -> None:
+        apply_lc_request(
+            state["common"],
+            workflow_id=LC_STATIC_WORKFLOW_ID,
+            physics_panel=self.physics_panel,
+            beam_panel=self.beam_panel,
+            grid_panel=self.grid_panel,
+            solver_panel=self.solver_panel,
+            experiment_panel=self.experiment_panel,
+            beam_stack_definition=state["beam_stack"],
+        )
+        self.solver_panel.set_td_solver(state["td_solver"])
+        self.experiment_panel.set_current_experiment(state["experiment"])
+        self._set_td_initial_source_mode(state["td_source"])
+
+    def save_experiment_to(self, path):
+        """Save the active LC experiment without running it."""
+
+        if self._background_running:
+            raise RuntimeError("cannot save an experiment while a run is active")
+        workflow_id, request = self._active_experiment_request()
+        validate_lc_gui_request_representable(request)
+        return save_experiment(
+            request,
+            path,
+            material_id=LC_MATERIAL_ID,
+            workflow_id=workflow_id,
+            presentation_payload=launchplane_presentation_payload(
+                self.beam_panel
+            ),
+        )
+
+    def load_experiment_from(self, path):
+        """Validate and transactionally restore one LC experiment file."""
+
+        if self._background_running:
+            raise RuntimeError("cannot open an experiment while a run is active")
+        loaded = load_experiment(path, expected_material_id=LC_MATERIAL_ID)
+        validate_lc_gui_request_representable(loaded.request)
+        prior = self._capture_experiment_gui_state()
+        stack = launchplane_stack_from_presentation(loaded)
+        self._hydrating_experiment = True
+        try:
+            apply_lc_request(
+                loaded.request,
+                workflow_id=loaded.workflow_id,
+                physics_panel=self.physics_panel,
+                beam_panel=self.beam_panel,
+                grid_panel=self.grid_panel,
+                solver_panel=self.solver_panel,
+                experiment_panel=self.experiment_panel,
+                beam_stack_definition=stack,
+            )
+            self._set_td_initial_source_mode(TDInitialSourceMode.BEAM_LAUNCH)
+            rebuilt = (
+                self.build_request()
+                if loaded.workflow_id == LC_STATIC_WORKFLOW_ID
+                else self._build_timedependent_base_request()
+            )
+            if rebuilt != loaded.request:
+                raise ValueError(
+                    "loaded LC request is not exactly representable by the GUI"
+                )
+        except Exception:
+            self._restore_experiment_gui_state(prior)
+            raise
+        finally:
+            self._hydrating_experiment = False
+        self.update_run_button()
+        return loaded
+
+    @Slot()
+    def save_experiment_clicked(self) -> None:
+        path = choose_experiment_save_path(self)
+        if path is None:
+            return
+        try:
+            saved = self.save_experiment_to(path)
+        except Exception:
+            self.results_panel.append_console("Experiment save failed")
+            self.results_panel.append_console(traceback.format_exc())
+            self.tabs.setCurrentWidget(self.results_panel)
+            return
+        self.results_panel.append_console(f"Saved LC experiment: {saved}")
+
+    @Slot()
+    def open_experiment_clicked(self) -> None:
+        path = choose_experiment_open_path(self)
+        if path is None:
+            return
+        try:
+            loaded = self.load_experiment_from(path)
+        except Exception:
+            self.results_panel.append_console("Experiment open failed")
+            self.results_panel.append_console(traceback.format_exc())
+            self.tabs.setCurrentWidget(self.results_panel)
+            return
+        self.results_panel.append_console(
+            f"Opened LC experiment: {loaded.workflow_id}"
+        )
 
     def _update_sweep_tab(self, experiment: str) -> None:
         sweep_enabled = experiment == "Soliton existence curve"
@@ -832,6 +986,7 @@ class LCPropMainWindow(QWidget):
             else self.last_static_checkpoint
         )
         self.run_button.setEnabled(enabled)
+        self.experiment_file_buttons.setEnabled(enabled)
         self.continue_button.setEnabled(
             enabled
             and experiment in {"Static propagation", "Time-dependent propagation"}

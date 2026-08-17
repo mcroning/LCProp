@@ -24,8 +24,20 @@ from PySide6.QtWidgets import (
 
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.gui.panels.results_panel import ResultsPanel
+from lcprop.gui.experiment_files import (
+    ExperimentFileButtons,
+    choose_experiment_open_path,
+    choose_experiment_save_path,
+    launchplane_presentation_payload,
+    launchplane_stack_from_presentation,
+)
 from lcprop.gui.workers import WorkflowWorker
-from lcprop.persistence import load_run_checkpoint, save_run_checkpoint
+from lcprop.persistence import (
+    load_experiment,
+    load_run_checkpoint,
+    save_experiment,
+    save_run_checkpoint,
+)
 from lcprop.pr.checkpoint import (
     PRTimeDependentCheckpoint,
     validate_pr_continuation,
@@ -38,6 +50,7 @@ from lcprop.pr.gui.request_adapter import (
     apply_pr_request,
     build_pr_request,
     validate_pr_gui_workflow_request,
+    validate_pr_gui_request_representable,
 )
 from lcprop.pr.operations import (
     PR_STATIC_OPERATION,
@@ -110,6 +123,7 @@ class PRMainWindow(QWidget):
         self._thread_done = False
         self._close_requested = False
         self._hydrating_checkpoint = False
+        self._hydrating_experiment = False
         self.checkpoint_compatibility_reason: str | None = None
 
         self.setWindowTitle("LCProp PR")
@@ -146,6 +160,14 @@ class PRMainWindow(QWidget):
         self.stop_button.setVisible(False)
         self.stop_button.clicked.connect(self.stop_clicked)
         header.addWidget(self.stop_button)
+        self.experiment_file_buttons = ExperimentFileButtons(self)
+        self.experiment_file_buttons.saveRequested.connect(
+            self.save_experiment_clicked
+        )
+        self.experiment_file_buttons.openRequested.connect(
+            self.open_experiment_clicked
+        )
+        header.addWidget(self.experiment_file_buttons)
         root.addLayout(header)
 
         self.tabs = QTabWidget()
@@ -203,7 +225,11 @@ class PRMainWindow(QWidget):
 
     @Slot()
     def _configuration_changed(self, *_args) -> None:
-        if self._hydrating_checkpoint or self._background_running:
+        if (
+            self._hydrating_checkpoint
+            or self._hydrating_experiment
+            or self._background_running
+        ):
             return
         self._refresh_checkpoint_controls()
 
@@ -249,6 +275,113 @@ class PRMainWindow(QWidget):
             beam_panel=self.beam_panel,
             grid_panel=self.grid_panel,
             evolution_panel=self.evolution_panel,
+        )
+
+    def _capture_experiment_gui_state(self):
+        return {
+            "workflow_id": self.evolution_panel.workflow_id(),
+            "grid": self.grid_panel.grid(),
+            "material": self.material_panel.material(),
+            "td_solver": self.evolution_panel.solver(),
+            "static_solver": self.evolution_panel.static_solver(),
+            "backend": self.evolution_panel.backend_spec(),
+            "beam_stack": self.beam_panel.beam_stack_definition,
+        }
+
+    def _restore_experiment_gui_state(self, state) -> None:
+        self.grid_panel.set_grid(state["grid"])
+        self.material_panel.set_material(state["material"])
+        self.evolution_panel.set_solver(state["td_solver"])
+        self.evolution_panel.set_static_solver(state["static_solver"])
+        self.evolution_panel.set_backend_spec(state["backend"])
+        self.beam_panel.set_aperture(
+            state["grid"].x_aperture_um,
+            state["grid"].y_aperture_um,
+        )
+        self.beam_panel.set_beam_stack_definition(state["beam_stack"])
+        self.evolution_panel.set_workflow_id(state["workflow_id"])
+
+    def save_experiment_to(self, path):
+        """Save the active PR experiment without running it."""
+
+        if self._background_running:
+            raise RuntimeError("cannot save an experiment while a run is active")
+        request = self.build_request()
+        validate_pr_gui_request_representable(request)
+        return save_experiment(
+            request,
+            path,
+            material_id=PR_MATERIAL_ID,
+            workflow_id=self._workflow_id_for_request(request),
+            presentation_payload=launchplane_presentation_payload(
+                self.beam_panel
+            ),
+        )
+
+    def load_experiment_from(self, path):
+        """Validate and transactionally restore one PR experiment file."""
+
+        if self._background_running:
+            raise RuntimeError("cannot open an experiment while a run is active")
+        loaded = load_experiment(path, expected_material_id=PR_MATERIAL_ID)
+        validate_pr_gui_request_representable(loaded.request)
+        prior = self._capture_experiment_gui_state()
+        stack = launchplane_stack_from_presentation(loaded)
+        self._hydrating_experiment = True
+        try:
+            apply_pr_request(
+                loaded.request,
+                material_panel=self.material_panel,
+                beam_panel=self.beam_panel,
+                grid_panel=self.grid_panel,
+                evolution_panel=self.evolution_panel,
+                beam_stack_definition=stack,
+            )
+            rebuilt = self.build_request()
+            if rebuilt != loaded.request:
+                raise ValueError(
+                    "loaded PR request is not exactly representable by the GUI"
+                )
+        except Exception:
+            self._restore_experiment_gui_state(prior)
+            raise
+        finally:
+            self._hydrating_experiment = False
+        self._refresh_checkpoint_controls()
+        return loaded
+
+    @Slot()
+    def save_experiment_clicked(self) -> None:
+        path = choose_experiment_save_path(self)
+        if path is None:
+            return
+        try:
+            saved = self.save_experiment_to(path)
+        except Exception:
+            self.status_label.setText("Experiment save failed")
+            self.results_panel.append_console("ERROR")
+            self.results_panel.append_console(traceback.format_exc())
+            self.tabs.setCurrentWidget(self.results_panel)
+            return
+        self.status_label.setText("Experiment saved")
+        self.results_panel.append_console(f"Saved PR experiment: {saved}")
+
+    @Slot()
+    def open_experiment_clicked(self) -> None:
+        path = choose_experiment_open_path(self)
+        if path is None:
+            return
+        try:
+            loaded = self.load_experiment_from(path)
+        except Exception:
+            self.status_label.setText("Experiment open failed")
+            self.results_panel.append_console("ERROR")
+            self.results_panel.append_console(traceback.format_exc())
+            self.tabs.setCurrentWidget(self.results_panel)
+            return
+        self.status_label.setText("Experiment opened")
+        self.results_panel.append_console(
+            f"Opened PR experiment: {loaded.workflow_id}"
         )
 
     def describe_request(self, request) -> str:
@@ -581,6 +714,7 @@ class PRMainWindow(QWidget):
         ):
             panel.setEnabled(enabled)
         self.run_button.setEnabled(enabled)
+        self.experiment_file_buttons.setEnabled(enabled)
         self.load_checkpoint_button.setEnabled(enabled)
         self.stop_button.setVisible(not enabled)
         self.stop_button.setEnabled(not enabled)
