@@ -13,7 +13,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gpu = ["cupy-cuda12x"]
-gui = ["PySide6", "pyqtgraph"]
+gui = ["PySide6", "pyqtgraph", "matplotlib"]
 
 [project.scripts]
 lcprop-pr = "lcprop.pr.gui.app:main"
