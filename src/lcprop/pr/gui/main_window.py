@@ -6,7 +6,7 @@ from functools import partial
 from time import monotonic
 import traceback
 
-from PySide6.QtCore import QCoreApplication, QThread, Qt, Slot
+from PySide6.QtCore import QCoreApplication, QThread, QTimer, Qt, Slot
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QFileDialog,
@@ -108,6 +108,7 @@ class PRMainWindow(QWidget):
         self._cancellation_token: CancellationToken | None = None
         self._outcome_received = False
         self._thread_done = False
+        self._close_requested = False
         self._hydrating_checkpoint = False
         self.checkpoint_compatibility_reason: str | None = None
 
@@ -426,6 +427,7 @@ class PRMainWindow(QWidget):
     def continue_clicked(self) -> None:
         if (
             self._background_running
+            or self._close_requested
             or self.last_checkpoint is None
             or self.evolution_panel.workflow_id()
             != PR_TIMEDEPENDENT_WORKFLOW
@@ -464,7 +466,7 @@ class PRMainWindow(QWidget):
 
     @Slot()
     def run_clicked(self) -> None:
-        if self._background_running:
+        if self._background_running or self._close_requested:
             return
         try:
             request = self.build_request()
@@ -694,10 +696,18 @@ class PRMainWindow(QWidget):
 
     @Slot()
     def _on_thread_finished(self) -> None:
+        thread = self._thread
+        if thread is not None:
+            # ``finished`` precedes completion of all native-thread cleanup.
+            # Join before dropping the last explicit reference or allowing
+            # the parent window to be destroyed.
+            thread.wait()
         self._thread = None
         self._worker = None
         self._thread_done = True
         self._maybe_finish_background()
+        if self._close_requested:
+            QTimer.singleShot(0, self.close)
 
     def _maybe_finish_background(self) -> None:
         if self._outcome_received and self._thread_done:
@@ -708,38 +718,63 @@ class PRMainWindow(QWidget):
         self._active_request = None
         self._cancellation_token = None
         self.stop_button.setText("Stop")
-        self._set_configuration_enabled(True)
+        if not self._close_requested:
+            self._set_configuration_enabled(True)
 
     def shutdown_background_run(self, timeout_ms: int = 30000) -> bool:
         """Cooperatively cancel and join the PR worker without GUI deadlock."""
 
-        thread = self._thread
-        if thread is None or not thread.isRunning():
+        if self._thread is None:
             return True
         if self._cancellation_token is not None:
             self._cancellation_token.cancel()
         self.run_status = "stopping"
         self.status_label.setText("Stopping…")
         deadline = monotonic() + max(0, timeout_ms) / 1000.0
-        while thread.isRunning() and monotonic() < deadline:
+        while self._thread is not None:
+            thread = self._thread
+            if not thread.isRunning():
+                thread.wait()
+                QCoreApplication.processEvents()
+                if self._thread is thread:
+                    self._thread = None
+                    self._worker = None
+                    self._background_running = False
+                return True
+            remaining_ms = int(max(0.0, deadline - monotonic()) * 1000)
+            if remaining_ms <= 0:
+                return False
+            thread.wait(min(10, remaining_ms))
+            # Blocking progress delivery requires the GUI thread to service
+            # queued signals. Do not retain/use ``thread`` after this call:
+            # the finished/deleteLater path may have run.
             QCoreApplication.processEvents()
-            thread.wait(10)
-        finished = not thread.isRunning()
-        if finished:
-            self._thread = None
-            self._worker = None
-            self._background_running = False
-        return finished
+        return True
 
     def closeEvent(self, event) -> None:
-        if self.shutdown_background_run():
-            event.accept()
-        else:
-            self.results_panel.append_console(
-                "Close delayed: PR workflow did not stop within the shutdown "
-                "timeout."
-            )
+        thread = self._thread
+        if self._background_running or (
+            thread is not None and thread.isRunning()
+        ):
+            first_request = not self._close_requested
+            self._close_requested = True
+            if self._cancellation_token is not None:
+                self._cancellation_token.cancel()
+            self.run_status = "stopping"
+            self.status_label.setText("Stopping…")
+            self.stop_button.setEnabled(False)
+            self.stop_button.setText("Stopping…")
+            if first_request:
+                self.results_panel.append_console(
+                    "Close requested; waiting for the active PR workflow to "
+                    "finish at a safe boundary."
+                )
             event.ignore()
+            return
+        if thread is not None:
+            thread.wait()
+        self._close_requested = False
+        event.accept()
 
 
 __all__ = ["PRMainWindow"]

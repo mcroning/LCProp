@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication
 import numpy as np
 import pytest
 
+import lcprop.pr.gui.main_window as pr_main_window_module
 from lcprop.pr.gui.main_window import PRMainWindow
 from lcprop.pr.operations import PR_STATIC_OPERATION, PR_TIMEDEPENDENT_OPERATION
 from lcprop.pr.specs import (
@@ -335,6 +336,32 @@ def test_pr_window_shutdown_cooperatively_joins_active_worker(app):
     app.processEvents()
     assert window._thread is None or not window._thread.isRunning()
     assert not window._background_running
+    window.close()
+
+
+def test_pr_window_joins_native_thread_before_normal_completion(app, monkeypatch):
+    threads = []
+
+    class ObservedThread(QThread):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.wait_calls = 0
+            threads.append(self)
+
+        def wait(self, *args, **kwargs):
+            self.wait_calls += 1
+            return super().wait(*args, **kwargs)
+
+    monkeypatch.setattr(pr_main_window_module, "QThread", ObservedThread)
+    window = _tiny_window(app, steps=1)
+
+    window.run_clicked()
+    _wait_for(app, lambda: not window._background_running)
+
+    assert len(threads) == 1
+    assert threads[0].wait_calls >= 1
+    assert window._thread is None
+    assert window.last_result.status == "completed"
     window.close()
 
 
