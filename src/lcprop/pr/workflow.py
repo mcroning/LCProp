@@ -26,6 +26,11 @@ from lcprop.pr.evolution import (
     validate_timestep,
 )
 from lcprop.pr.optical_response import half_step_response_from_E
+from lcprop.pr.scattering import (
+    canonical_scattering_phase_increment,
+    canonical_scattering_provenance,
+    canonical_slab_range,
+)
 from lcprop.pr.source import (
     channel_peak_intensity_reference,
     pr_driving_intensity,
@@ -57,6 +62,66 @@ def _raise_if_cancelled(
 ) -> None:
     if cancellation_token is not None and cancellation_token.is_cancelled():
         raise _PRCancellationRequested(stage)
+
+
+def _validate_canonical_scattering_for_grid(scattering, *, grid, z_length_um):
+    """Validate that every TD z interval is a union of canonical slabs."""
+
+    if scattering is None:
+        return
+    canonical_slab_range(
+        scattering,
+        z_start_um=0.0,
+        dz_um=float(grid.dz_um),
+        z_length_um=float(z_length_um),
+    )
+
+
+def _canonical_scattering_phase_for_slice(
+    scattering,
+    *,
+    z_index: int,
+    grid,
+    z_length_um: float,
+    xp,
+):
+    """Construct the canonical phase increment for one physical TD slice."""
+
+    return canonical_scattering_phase_increment(
+        scattering,
+        z_start_um=float(z_index) * float(grid.dz_um),
+        dz_um=float(grid.dz_um),
+        z_length_um=float(z_length_um),
+        Nx=grid.Nx,
+        Ny=grid.Ny,
+        x_aperture_um=float(grid.spec.x_aperture_um),
+        y_aperture_um=float(grid.spec.y_aperture_um),
+        real_dtype=grid.real_dtype,
+        xp=xp,
+    )
+
+
+def _apply_canonical_scattering_after_slice(
+    A,
+    *,
+    scattering,
+    z_index: int,
+    grid,
+    z_length_um: float,
+    xp,
+) -> None:
+    """Apply one canonical phase increment after an accepted optical slice."""
+
+    if scattering is None:
+        return
+    phase = _canonical_scattering_phase_for_slice(
+        scattering,
+        z_index=z_index,
+        grid=grid,
+        z_length_um=z_length_um,
+        xp=xp,
+    )
+    A *= xp.exp(1j * phase)[None, :, :]
 
 
 def _initial_fields(request: PRRunRequest, *, launch, grid, complex_dtype, real_dtype):
@@ -225,6 +290,14 @@ def _optical_pass(
                 _return_exit_intensity=True,
             )
         )
+        _apply_canonical_scattering_after_slice(
+            A,
+            scattering=request.scattering,
+            z_index=k,
+            grid=grid,
+            z_length_um=request.grid.z_length_um,
+            xp=xp,
+        )
     return A, source_stack
 
 
@@ -256,6 +329,8 @@ def run_pr_timedependent(
     request.material.validate()
     request.solver.validate()
     request.backend.validate()
+    if request.scattering is not None:
+        request.scattering.validate()
 
     wavelengths = tuple(
         float(channel.wavelength_um) for channel in request.beams.channels
@@ -268,6 +343,11 @@ def run_pr_timedependent(
         request.grid,
         xp=backend.xp,
         real_dtype=backend.real_dtype,
+    )
+    _validate_canonical_scattering_for_grid(
+        request.scattering,
+        grid=grid,
+        z_length_um=request.grid.z_length_um,
     )
     launch = build_launch(
         request.beams,
@@ -549,6 +629,58 @@ def run_pr_timedependent(
     )
     validate_pr_checkpoint(checkpoint)
 
+    diagnostics = {
+        "backend": backend.summary(),
+        "characteristic_wavenumber_per_um": (
+            request.material.characteristic_wavenumber_per_um
+        ),
+        "peak_intensity_reference": peak_reference,
+        "integrator": request.solver.integrator,
+        "cancellation_observed_stage": cancellation_stage,
+        "cancellation_observed_wall_time": (
+            None
+            if cancellation_observed_at is None
+            else cancellation_observed_at - started_at
+        ),
+        "final_optical_observation": optical_observation,
+        "complete_optical_replay_available": (
+            optical_observation != "unpropagated_launch_fallback"
+        ),
+        "optical_products_are_launch_fallback": (
+            optical_observation == "unpropagated_launch_fallback"
+        ),
+        "run_status": status,
+        "completed_material_steps": completed_steps,
+        "conservative_dt_limit": timestep_limit,
+        "paper_equation_15_dt_limit": paper_conservative_timestep_limit(
+            grid,
+            request.material,
+        ),
+        "legacy_prprop3d_dt_limit": legacy_conservative_timestep_limit(
+            grid,
+            request.material,
+        ),
+        "stepping_order": (
+            "frozen-E optical Strang pass, then synchronous E Euler update"
+            if request.solver.integrator == PR_EULER_INTEGRATOR
+            else (
+                "accepted/predicted frozen-E optical Strang passes with "
+                "synchronous linearly implicit trapezoidal E update"
+            )
+        ),
+    }
+    if request.scattering is not None:
+        diagnostics["canonical_scattering"] = canonical_scattering_provenance(
+            request.scattering,
+            z_length_um=request.grid.z_length_um,
+            Nx=grid.Nx,
+            Ny=grid.Ny,
+            x_aperture_um=request.grid.x_aperture_um,
+            y_aperture_um=request.grid.y_aperture_um,
+            real_dtype=grid.real_dtype,
+            xp=grid.xp,
+        )
+
     return PRRunResult(
         A_initial=A0_host,
         A_final=np.asarray(asnumpy(A_final)).copy(),
@@ -564,46 +696,7 @@ def run_pr_timedependent(
         status=status,
         requested_steps=requested_steps,
         checkpoint=checkpoint,
-        diagnostics={
-            "backend": backend.summary(),
-            "characteristic_wavenumber_per_um": (
-                request.material.characteristic_wavenumber_per_um
-            ),
-            "peak_intensity_reference": peak_reference,
-            "integrator": request.solver.integrator,
-            "cancellation_observed_stage": cancellation_stage,
-            "cancellation_observed_wall_time": (
-                None
-                if cancellation_observed_at is None
-                else cancellation_observed_at - started_at
-            ),
-            "final_optical_observation": optical_observation,
-            "complete_optical_replay_available": (
-                optical_observation != "unpropagated_launch_fallback"
-            ),
-            "optical_products_are_launch_fallback": (
-                optical_observation == "unpropagated_launch_fallback"
-            ),
-            "run_status": status,
-            "completed_material_steps": completed_steps,
-            "conservative_dt_limit": timestep_limit,
-            "paper_equation_15_dt_limit": paper_conservative_timestep_limit(
-                grid,
-                request.material,
-            ),
-            "legacy_prprop3d_dt_limit": legacy_conservative_timestep_limit(
-                grid,
-                request.material,
-            ),
-            "stepping_order": (
-                "frozen-E optical Strang pass, then synchronous E Euler update"
-                if request.solver.integrator == PR_EULER_INTEGRATOR
-                else (
-                    "accepted/predicted frozen-E optical Strang passes with "
-                    "synchronous linearly implicit trapezoidal E update"
-                )
-            ),
-        },
+        diagnostics=diagnostics,
     )
 
 

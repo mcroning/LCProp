@@ -13,6 +13,7 @@ from lcprop.core.grid import make_grid
 from lcprop.optics.launch import build_launch, normalized_power
 from lcprop.optics.splitstep import linear_kernel
 from lcprop.pr.source import channel_peak_intensity_reference
+from lcprop.pr.scattering import canonical_scattering_provenance
 from lcprop.pr.transverse.diagnostics import state_diagnostics
 from lcprop.pr.transverse.projection import project_active_field
 from lcprop.pr.transverse.specs import (
@@ -28,7 +29,11 @@ from lcprop.pr.transverse.transport import (
     imex_euler_step,
     state_from_potential,
 )
-from lcprop.pr.workflow import advance_pr_slice_with_midpoint_source
+from lcprop.pr.workflow import (
+    _apply_canonical_scattering_after_slice,
+    _validate_canonical_scattering_for_grid,
+    advance_pr_slice_with_midpoint_source,
+)
 
 
 ProgressCallback = Callable[[RunProgress], None]
@@ -55,6 +60,8 @@ def _validate_request(request: PRTransverseRunRequest) -> None:
     request.projection.validate()
     request.solver.validate()
     request.backend.validate()
+    if request.scattering is not None:
+        request.scattering.validate()
     if request.backend.backend != "numpy":
         raise ValueError("Profile v1 production reference currently requires backend='numpy'")
     if float(request.material.applied_field) != 0.0:
@@ -127,6 +134,14 @@ def _optical_pass(
             _intensity_before=intensity_before,
             _return_exit_intensity=True,
         )
+        _apply_canonical_scattering_after_slice(
+            A,
+            scattering=request.scattering,
+            z_index=z_index,
+            grid=grid,
+            z_length_um=request.grid.z_length_um,
+            xp=np,
+        )
     return A, source
 
 
@@ -148,6 +163,11 @@ def run_pr_transverse_timedependent(
     real_dtype = np.float32 if request.backend.precision == "float32" else np.float64
     complex_dtype = np.complex64 if real_dtype is np.float32 else np.complex128
     grid = make_grid(request.grid, xp=np, real_dtype=real_dtype)
+    _validate_canonical_scattering_for_grid(
+        request.scattering,
+        grid=grid,
+        z_length_um=request.grid.z_length_um,
+    )
     launch = build_launch(request.beams, grid, complex_dtype=complex_dtype)
     A0, psi = _initial_fields(
         request,
@@ -301,6 +321,19 @@ def run_pr_transverse_timedependent(
             "complete_final_optical_replay": True,
         }
     )
+    scattering_provenance = None
+    if request.scattering is not None:
+        scattering_provenance = canonical_scattering_provenance(
+            request.scattering,
+            z_length_um=request.grid.z_length_um,
+            Nx=grid.Nx,
+            Ny=grid.Ny,
+            x_aperture_um=request.grid.x_aperture_um,
+            y_aperture_um=request.grid.y_aperture_um,
+            real_dtype=grid.real_dtype,
+            xp=np,
+        )
+        diagnostics["canonical_scattering"] = scattering_provenance
     resolved_profile = {
         "physics_profile_id": PR_FULL_TRANSVERSE_PROFILE_V1,
         "grid_request": asdict(request.grid),
@@ -315,6 +348,8 @@ def run_pr_transverse_timedependent(
         "dx_normalized": dx_normalized,
         "dy_normalized": dy_normalized,
     }
+    if scattering_provenance is not None:
+        resolved_profile["canonical_scattering"] = scattering_provenance
     return PRTransverseRunResult(
         A_initial=np.asarray(A0).copy(),
         A_final=np.asarray(A_final).copy(),

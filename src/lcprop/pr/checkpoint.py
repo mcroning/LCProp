@@ -102,6 +102,7 @@ def validate_pr_continuation(
         (request.material, original.material, "material"),
         (request.beams, original.beams, "beams"),
         (request.backend, original.backend, "backend"),
+        (request.scattering, original.scattering, "scattering"),
         (
             replace(request.solver, Nt=0),
             replace(original.solver, Nt=0),

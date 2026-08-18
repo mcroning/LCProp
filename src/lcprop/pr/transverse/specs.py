@@ -9,6 +9,7 @@ from typing import Any
 from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
+from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.pr.specs import PRMaterialSpec
 
 
@@ -114,7 +115,12 @@ class PRTransverseSolverOptions:
 
 @dataclass(frozen=True)
 class PRTransverseRunRequest:
-    """Complete request for the frozen full-transverse NumPy TD workflow."""
+    """Complete request for the frozen full-transverse NumPy TD workflow.
+
+    ``scattering`` optionally supplies the same canonical physical-z phase
+    realization used by the reduced PR workflow. ``None`` preserves the
+    original no-scattering Profile v1 execution.
+    """
 
     grid: GridSpec
     beams: BeamStack
@@ -129,6 +135,7 @@ class PRTransverseRunRequest:
     )
     initial_A: Any | None = None
     initial_psi: Any | None = None
+    scattering: PRCanonicalScatteringSpec | None = None
 
 
 @dataclass(frozen=True)

@@ -9,6 +9,7 @@ from typing import Any
 from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
+from lcprop.pr.scattering import PRCanonicalScatteringSpec
 
 
 _ELEMENTARY_CHARGE_C = 1.602e-19
@@ -125,6 +126,8 @@ class PRRunRequest:
     ``initial_A``, when supplied, has shape ``(Nch, Nx, Ny)``. ``initial_E``
     is the normalized physical space-charge state with shape
     ``(Nz, Nx, Ny)``; omitting it selects the paper/reference zero state.
+    ``scattering`` is an optional canonical physical-z phase realization;
+    ``None`` preserves the historical no-scattering workflow exactly.
     """
 
     grid: GridSpec
@@ -138,6 +141,7 @@ class PRRunRequest:
     )
     initial_A: Any | None = None
     initial_E: Any | None = None
+    scattering: PRCanonicalScatteringSpec | None = None
 
 
 @dataclass(frozen=True)
