@@ -6,6 +6,7 @@ import math
 from typing import Any, Callable
 
 from lcprop.pr.cyclic import solve_cyclic_tridiagonal_rows
+from lcprop.pr.cyclic_gpu import solve_cyclic_tridiagonal_rows_gpu
 from lcprop.pr.specs import (
     PRMaterialSpec,
     PR_EULER_INTEGRATOR,
@@ -337,12 +338,15 @@ def solve_periodic_variable_diffusion(
     lower = -q
     upper = -q
     diagonal = 1.0 + 2.0 * q
+    if getattr(xp, "__name__", "") == "cupy":
+        return solve_cyclic_tridiagonal_rows_gpu(
+            lower,
+            diagonal,
+            upper,
+            rhs,
+        )
     return solve_cyclic_tridiagonal_rows(
-        lower,
-        diagonal,
-        upper,
-        rhs,
-        xp=xp,
+        lower, diagonal, upper, rhs, xp=xp
     )
 
 
