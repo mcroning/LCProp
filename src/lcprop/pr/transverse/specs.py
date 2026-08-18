@@ -92,7 +92,7 @@ class PRTransverseSolverOptions:
     """Material-time integrator and optical controls for Profile v1.
 
     First-order spectral IMEX Euler is the production default. Explicit Euler
-    remains available as the transparent NumPy reference integrator.
+    remains available as the transparent reference integrator.
     """
 
     Nt: int = 1
@@ -115,7 +115,7 @@ class PRTransverseSolverOptions:
 
 @dataclass(frozen=True)
 class PRTransverseRunRequest:
-    """Complete request for the frozen full-transverse NumPy TD workflow.
+    """Complete request for the frozen full-transverse TD workflow.
 
     ``scattering`` optionally supplies the same canonical physical-z phase
     realization used by the reduced PR workflow. ``None`` preserves the

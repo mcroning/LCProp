@@ -24,8 +24,12 @@ from typing import Any
 import numpy as np
 
 
-PR_CANONICAL_SCATTERING_ALGORITHM = "canonical_phase_slabs_v1"
+PR_CANONICAL_SCATTERING_V1 = "canonical_phase_slabs_v1"
+PR_CANONICAL_SCATTERING_V2 = "canonical_phase_slabs_v2_cross_backend"
+# Historical public name remains the v1 identity for source compatibility.
+PR_CANONICAL_SCATTERING_ALGORITHM = PR_CANONICAL_SCATTERING_V1
 _SEED_TAG = 0x4C435052  # ASCII-derived fixed namespace tag: "LCPR"
+_UINT32_SCALE = 1.0 / 4294967296.0
 
 
 @dataclass(frozen=True)
@@ -43,6 +47,7 @@ class PRCanonicalScatteringSpec:
     transverse_correlation_um: float
     realization_seed: int
     canonical_dz_um: float
+    algorithm_version: str = PR_CANONICAL_SCATTERING_V1
 
     def validate(self) -> None:
         epsilon = float(self.epsilon)
@@ -61,6 +66,11 @@ class PRCanonicalScatteringSpec:
             raise ValueError("realization_seed must be an unsigned 32-bit integer")
         if not math.isfinite(canonical_dz) or canonical_dz <= 0.0:
             raise ValueError("canonical_dz_um must be finite and positive")
+        if self.algorithm_version not in (
+            PR_CANONICAL_SCATTERING_V1,
+            PR_CANONICAL_SCATTERING_V2,
+        ):
+            raise ValueError("unsupported canonical scattering algorithm_version")
 
 
 def _aligned_index(value_um: float, quantum_um: float, *, name: str) -> int:
@@ -117,7 +127,81 @@ def canonical_slab_seed(spec: PRCanonicalScatteringSpec, slab_index: int) -> int
     )
 
 
+def _hash_u32(counter, *, seed: int, stream: int, xp: Any):
+    """Return a counter-addressed uint32 hash on NumPy or CuPy."""
+
+    value = counter ^ xp.asarray(seed, dtype=xp.uint32)
+    value ^= xp.asarray((stream * 0x9E3779B9) & 0xFFFFFFFF, dtype=xp.uint32)
+    value ^= value >> xp.uint32(16)
+    value *= xp.uint32(0x7FEB352D)
+    value ^= value >> xp.uint32(15)
+    value *= xp.uint32(0x846CA68B)
+    value ^= value >> xp.uint32(16)
+    return value
+
+
+def canonical_white_noise_field(
+    shape: tuple[int, int], *, seed: int, real_dtype: Any, xp: Any
+):
+    """Generate one backend-independent counter-addressed normal field.
+
+    Integer hashes define the realization exactly. Box--Muller conversion is
+    evaluated with backend-native float64 elementwise operations and then cast
+    to the requested precision; no backend RNG state or host field is used.
+    """
+
+    nx, ny = (int(shape[0]), int(shape[1]))
+    if nx < 1 or ny < 1:
+        raise ValueError("white-noise shape entries must be positive")
+    counter = xp.arange(nx * ny, dtype=xp.uint32)
+    first = _hash_u32(counter, seed=int(seed), stream=1, xp=xp)
+    second = _hash_u32(counter, seed=int(seed), stream=2, xp=xp)
+    u1 = (first.astype(xp.float64) + 0.5) * _UINT32_SCALE
+    u2 = (second.astype(xp.float64) + 0.5) * _UINT32_SCALE
+    normal = xp.sqrt(-2.0 * xp.log(u1)) * xp.cos(2.0 * math.pi * u2)
+    return normal.reshape(nx, ny).astype(real_dtype, copy=False)
+
+
+def _reflect_indices(length: int, offset: int, *, xp: Any):
+    """Return SciPy ``mode='reflect'`` indices for one correlation offset."""
+
+    coordinate = xp.arange(int(length), dtype=xp.int64) + int(offset)
+    folded = coordinate % (2 * int(length))
+    return xp.where(folded < length, folded, 2 * int(length) - 1 - folded)
+
+
+def _gaussian_kernel(sigma: float) -> tuple[np.ndarray, np.ndarray]:
+    radius = int(4.0 * float(sigma) + 0.5)
+    offsets = np.arange(-radius, radius + 1, dtype=np.int64)
+    if radius == 0:
+        return offsets, np.ones(1, dtype=np.float64)
+    weights = np.exp(-0.5 * (offsets.astype(np.float64) / float(sigma)) ** 2)
+    weights /= np.sum(weights)
+    return offsets, weights
+
+
+def _correlate_axis(field, *, sigma: float, axis: int, xp: Any):
+    offsets, weights = _gaussian_kernel(sigma)
+    if offsets.size == 1:
+        return field.copy()
+    result = xp.zeros_like(field)
+    length = field.shape[axis]
+    for offset, weight in zip(offsets, weights):
+        indices = _reflect_indices(length, int(offset), xp=xp)
+        result += xp.asarray(weight, dtype=field.dtype) * xp.take(
+            field, indices, axis=axis
+        )
+    return result
+
+
 def _gaussian_filter(raw, *, sigma: tuple[float, float], xp: Any):
+    """Apply one PR-owned separable Gaussian with SciPy reflect semantics."""
+
+    filtered = _correlate_axis(raw, sigma=float(sigma[0]), axis=0, xp=xp)
+    return _correlate_axis(filtered, sigma=float(sigma[1]), axis=1, xp=xp)
+
+
+def _legacy_gaussian_filter(raw, *, sigma: tuple[float, float], xp: Any):
     if getattr(xp, "__name__", "") == "cupy":
         from cupyx.scipy.ndimage import gaussian_filter  # type: ignore
     else:
@@ -178,12 +262,22 @@ def canonical_scattering_phase_increment(
     )
     for slab_index in slabs:
         seed = canonical_slab_seed(spec, slab_index)
-        raw += (
-            xp.random.RandomState(seed)
-            .normal(0.0, scale, size=(nx, ny))
-            .astype(real_dtype)
-        )
-    return _gaussian_filter(raw, sigma=(sigma_x, sigma_y), xp=xp) * math.sqrt(
+        if spec.algorithm_version == PR_CANONICAL_SCATTERING_V1:
+            raw += (
+                xp.random.RandomState(seed)
+                .normal(0.0, scale, size=(nx, ny))
+                .astype(real_dtype)
+            )
+        else:
+            raw += canonical_white_noise_field(
+                (nx, ny), seed=seed, real_dtype=real_dtype, xp=xp
+            ) * scale
+    filter_function = (
+        _legacy_gaussian_filter
+        if spec.algorithm_version == PR_CANONICAL_SCATTERING_V1
+        else _gaussian_filter
+    )
+    return filter_function(raw, sigma=(sigma_x, sigma_y), xp=xp) * math.sqrt(
         sigma_x * sigma_y
     )
 
@@ -220,15 +314,26 @@ def canonical_scattering_provenance(
     )
     backend_name = getattr(xp, "__name__", type(xp).__name__)
     backend_version = getattr(xp, "__version__", "unknown")
-    if backend_name == "cupy":
-        filter_library = f"cupyx.scipy from cupy {backend_version}"
-    else:
-        import scipy
+    if spec.algorithm_version == PR_CANONICAL_SCATTERING_V1:
+        if backend_name == "cupy":
+            filter_library = f"cupyx.scipy from cupy {backend_version}"
+        else:
+            import scipy
 
-        filter_library = f"scipy {scipy.__version__}"
+            filter_library = f"scipy {scipy.__version__}"
+        transverse_filter = "scipy-compatible gaussian_filter default boundary"
+        rng_backend = f"{backend_name}.random.RandomState"
+        rng_backend_version = str(backend_version)
+    else:
+        filter_library = "lcprop.pr.scattering backend-native primitives"
+        transverse_filter = (
+            "PR-owned separable Gaussian, truncate=4, half-sample reflect boundary"
+        )
+        rng_backend = "PR-owned uint32 counter hash plus Box-Muller float64"
+        rng_backend_version = PR_CANONICAL_SCATTERING_V2
     configuration = {
         "mode": "partition_independent_canonical_phase_slabs",
-        "algorithm_version": PR_CANONICAL_SCATTERING_ALGORITHM,
+        "algorithm_version": spec.algorithm_version,
         "epsilon_total_phase_variance": float(spec.epsilon),
         "transverse_correlation_um": float(spec.transverse_correlation_um),
         "realization_seed": int(spec.realization_seed),
@@ -249,11 +354,11 @@ def canonical_scattering_provenance(
             "Gaussian filter and sqrt(sigma_x*sigma_y) factor"
         ),
         "longitudinal_model": "independent white-in-z phase increments",
-        "transverse_filter": "scipy-compatible gaussian_filter default boundary",
+        "transverse_filter": transverse_filter,
         "transverse_filter_library": filter_library,
         "rng_addressing": "SeedSequence([realization_seed, LCPR_tag, slab_index])",
-        "rng_backend": f"{backend_name}.random.RandomState",
-        "rng_backend_version": str(backend_version),
+        "rng_backend": rng_backend,
+        "rng_backend_version": rng_backend_version,
         "seedsequence_numpy_version": np.__version__,
         "real_dtype": str(np.dtype(real_dtype)),
     }
@@ -275,7 +380,10 @@ def canonical_scattering_provenance(
 
 __all__ = [
     "PR_CANONICAL_SCATTERING_ALGORITHM",
+    "PR_CANONICAL_SCATTERING_V1",
+    "PR_CANONICAL_SCATTERING_V2",
     "PRCanonicalScatteringSpec",
+    "canonical_white_noise_field",
     "canonical_scattering_phase_increment",
     "canonical_scattering_provenance",
     "canonical_slab_range",

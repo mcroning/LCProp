@@ -11,10 +11,12 @@ from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
 from lcprop.pr.scattering import (
     PR_CANONICAL_SCATTERING_ALGORITHM,
+    PR_CANONICAL_SCATTERING_V2,
     PRCanonicalScatteringSpec,
     canonical_scattering_phase_increment,
     canonical_scattering_provenance,
     canonical_slab_seed,
+    canonical_white_noise_field,
 )
 from lcprop.pr.specs import PRMaterialSpec
 from lcprop.pr.static_streaming import (
@@ -28,12 +30,13 @@ from lcprop.pr.static_streaming import (
 from lcprop.pr.static_workflow import PRStaticWorkflowOptions
 
 
-def _spec(*, seed=12345):
+def _spec(*, seed=12345, algorithm_version=PR_CANONICAL_SCATTERING_ALGORITHM):
     return PRCanonicalScatteringSpec(
         epsilon=0.02,
         transverse_correlation_um=1.0,
         realization_seed=seed,
         canonical_dz_um=2.0,
+        algorithm_version=algorithm_version,
     )
 
 
@@ -59,8 +62,38 @@ def test_canonical_scattering_is_deterministic_across_independent_specs():
     assert np.array_equal(first, second)
 
 
-def test_canonical_scattering_is_access_order_independent():
+def test_v1_default_preserves_exact_historical_seed_mapping():
     spec = _spec()
+    actual = _phase(spec, z_start_um=0.0, dz_um=2.0)
+    scale = math.sqrt(0.02 * 2.0 / 100.0 * 4.0 * math.pi)
+    raw = np.random.RandomState(canonical_slab_seed(spec, 0)).normal(
+        0.0, scale, size=(32, 16)
+    )
+    expected = gaussian_filter(raw, sigma=(1.0, 1.0))
+
+    assert spec.algorithm_version == PR_CANONICAL_SCATTERING_ALGORITHM
+    np.testing.assert_array_equal(actual, expected)
+
+
+def test_counter_white_noise_is_deterministic_and_seed_addressed():
+    first = canonical_white_noise_field(
+        (31, 17), seed=9182, real_dtype=np.float64, xp=np
+    )
+    replay = canonical_white_noise_field(
+        (31, 17), seed=9182, real_dtype=np.float64, xp=np
+    )
+    different = canonical_white_noise_field(
+        (31, 17), seed=9183, real_dtype=np.float64, xp=np
+    )
+
+    np.testing.assert_array_equal(first, replay)
+    assert not np.array_equal(first, different)
+    assert abs(float(np.mean(first))) < 0.15
+    assert float(np.std(first)) == pytest.approx(1.0, rel=0.15)
+
+
+def test_canonical_scattering_is_access_order_independent():
+    spec = _spec(algorithm_version=PR_CANONICAL_SCATTERING_V2)
     forward = {
         z: _phase(spec, z_start_um=z, dz_um=2.0) for z in (0.0, 2.0, 20.0, 68.0)
     }
@@ -74,7 +107,7 @@ def test_canonical_scattering_is_access_order_independent():
 
 
 def test_coarse_interval_is_sum_of_same_fine_canonical_increments():
-    spec = _spec()
+    spec = _spec(algorithm_version=PR_CANONICAL_SCATTERING_V2)
     coarse = _phase(spec, z_start_um=0.0, dz_um=50.0)
     fine = np.sum(
         [_phase(spec, z_start_um=float(z), dz_um=2.0) for z in range(0, 50, 2)],
@@ -246,14 +279,20 @@ def test_small_coarse_and_fine_runs_share_scattering_identity_and_replay():
     assert np.all(np.isfinite(fine.A_final))
 
 
-def test_canonical_scattering_is_backend_native_on_cupy_when_available():
+@pytest.mark.parametrize(
+    ("dtype", "rtol", "atol"),
+    ((np.float32, 2e-6, 2e-7), (np.float64, 3e-13, 3e-14)),
+)
+def test_canonical_scattering_is_cross_backend_on_cupy_when_available(
+    dtype, rtol, atol
+):
     cp = pytest.importorskip("cupy")
     try:
         _ = cp.arange(1)
     except Exception as exc:
         pytest.skip(f"CuPy device unavailable: {exc}")
 
-    spec = _spec()
+    spec = _spec(algorithm_version=PR_CANONICAL_SCATTERING_V2)
     common = dict(
         spec=spec,
         z_length_um=20.0,
@@ -261,7 +300,7 @@ def test_canonical_scattering_is_backend_native_on_cupy_when_available():
         Ny=6,
         x_aperture_um=24.0,
         y_aperture_um=12.0,
-        real_dtype=cp.float64,
+        real_dtype=dtype,
         xp=cp,
     )
     coarse = canonical_scattering_phase_increment(
@@ -274,4 +313,20 @@ def test_canonical_scattering_is_backend_native_on_cupy_when_available():
         )
 
     assert isinstance(coarse, cp.ndarray)
-    assert bool(cp.allclose(coarse, fine, rtol=2e-14, atol=2e-15).item())
+    assert bool(cp.allclose(coarse, fine, rtol=rtol, atol=atol).item())
+    primitive_numpy = canonical_white_noise_field(
+        (12, 6), seed=canonical_slab_seed(spec, 0), real_dtype=dtype, xp=np
+    )
+    primitive_cupy = canonical_white_noise_field(
+        (12, 6), seed=canonical_slab_seed(spec, 0), real_dtype=dtype, xp=cp
+    )
+    np.testing.assert_allclose(
+        cp.asnumpy(primitive_cupy), primitive_numpy, rtol=rtol, atol=atol
+    )
+    numpy_common = {**common, "xp": np}
+    expected = canonical_scattering_phase_increment(
+        z_start_um=0.0, dz_um=10.0, **numpy_common
+    )
+    np.testing.assert_allclose(
+        cp.asnumpy(coarse), expected, rtol=rtol, atol=atol
+    )

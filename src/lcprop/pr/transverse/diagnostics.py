@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from lcprop.core.backend import asnumpy, scalar_float
+
 from lcprop.pr.transverse.transport import (
     PRTransverseState,
     spectral_derivatives,
@@ -17,18 +19,20 @@ def electrostatic_residuals(
     dx_normalized: float,
     dy_normalized: float,
     h_y: float = 1.0,
-) -> tuple[np.ndarray, np.ndarray]:
+    xp=np,
+):
     """Return discrete curl and Gauss residual volumes."""
 
     kx, ky = spectral_wavevectors(
         state.psi.shape[-2:],
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
+        xp=xp,
     )
-    E_y_x, _ = spectral_derivatives(state.E_y, kx=kx, ky=ky)
-    _, E_x_y = spectral_derivatives(state.E_x, kx=kx, ky=ky)
-    E_x_x, _ = spectral_derivatives(state.E_x, kx=kx, ky=ky)
-    _, E_y_y = spectral_derivatives(state.E_y, kx=kx, ky=ky)
+    E_y_x, _ = spectral_derivatives(state.E_y, kx=kx, ky=ky, xp=xp)
+    _, E_x_y = spectral_derivatives(state.E_x, kx=kx, ky=ky, xp=xp)
+    E_x_x, _ = spectral_derivatives(state.E_x, kx=kx, ky=ky, xp=xp)
+    _, E_y_y = spectral_derivatives(state.E_y, kx=kx, ky=ky, xp=xp)
     curl = E_y_x - E_x_y
     gauss = (
         state.carrier_density
@@ -45,22 +49,27 @@ def state_diagnostics(
     dx_normalized: float,
     dy_normalized: float,
     h_y: float = 1.0,
+    xp=np,
 ) -> dict[str, object]:
     curl, gauss = electrostatic_residuals(
         state,
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=h_y,
+        xp=xp,
     )
     carrier_integrals = (
-        np.sum(state.carrier_density, axis=(-2, -1))
+        xp.sum(state.carrier_density, axis=(-2, -1))
         * float(dx_normalized)
         * float(dy_normalized)
     )
 
     def metrics(value):
-        array = np.asarray(value, dtype=np.float64)
-        return float(np.sqrt(np.mean(array * array))), float(np.max(np.abs(array)))
+        array = xp.asarray(value, dtype=xp.float64)
+        return (
+            scalar_float(xp.sqrt(xp.mean(array * array))),
+            scalar_float(xp.max(xp.abs(array))),
+        )
 
     curl_rms, curl_max = metrics(curl)
     gauss_rms, gauss_max = metrics(gauss)
@@ -68,7 +77,7 @@ def state_diagnostics(
     ey_rms, ey_max = metrics(state.E_y)
     carrier_rms, carrier_max = metrics(state.carrier_density - 1.0)
     return {
-        "carrier_integrals_per_z": np.asarray(carrier_integrals).copy(),
+        "carrier_integrals_per_z": np.asarray(asnumpy(carrier_integrals)).copy(),
         "curl_rms": curl_rms,
         "curl_max": curl_max,
         "gauss_rms": gauss_rms,
@@ -79,17 +88,23 @@ def state_diagnostics(
         "E_y_max_abs": ey_max,
         "P_minus_one_rms": carrier_rms,
         "P_minus_one_max_abs": carrier_max,
-        "potential_mean_max_abs": float(
-            np.max(np.abs(np.mean(state.psi, axis=(-2, -1))))
+        "potential_mean_max_abs": scalar_float(
+            xp.max(xp.abs(xp.mean(state.psi, axis=(-2, -1))))
         ),
         "finite_material_state": bool(
-            all(
-                np.all(np.isfinite(value))
-                for value in (
-                    state.psi,
-                    state.carrier_density,
-                    state.E_x,
-                    state.E_y,
+            scalar_float(
+                xp.all(
+                    xp.stack(
+                        [
+                            xp.all(xp.isfinite(value))
+                            for value in (
+                                state.psi,
+                                state.carrier_density,
+                                state.E_x,
+                                state.E_y,
+                            )
+                        ]
+                    )
                 )
             )
         ),

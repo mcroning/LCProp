@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+from typing import Any
 
 import numpy as np
 
@@ -12,34 +13,37 @@ import numpy as np
 class PRTransverseState:
     """Potential and fields derived from one accepted potential volume."""
 
-    psi: np.ndarray
-    carrier_density: np.ndarray
-    E_x: np.ndarray
-    E_y: np.ndarray
+    psi: Any
+    carrier_density: Any
+    E_x: Any
+    E_y: Any
 
 
-def _real_array(value, *, name: str) -> np.ndarray:
-    array = np.asarray(value)
+def _real_array(value, *, name: str, xp=np):
+    array = xp.asarray(value)
     if array.dtype not in (np.dtype(np.float32), np.dtype(np.float64)):
         raise TypeError(f"{name} must have dtype float32 or float64")
     if array.ndim not in (2, 3) or min(array.shape[-2:]) < 3:
         raise ValueError(f"{name} must end in (Nx, Ny), each at least 3")
-    if not np.all(np.isfinite(array)):
+    # NumPy validation preserves the trusted reference behavior. CuPy callers
+    # validate at workflow boundaries so the material-step hot path has no
+    # device-to-host scalar synchronization.
+    if xp is np and not np.all(np.isfinite(array)):
         raise ValueError(f"{name} must contain only finite values")
     return array
 
 
 def spectral_wavevectors(
-    shape: tuple[int, int], *, dx_normalized: float, dy_normalized: float
-) -> tuple[np.ndarray, np.ndarray]:
+    shape: tuple[int, int], *, dx_normalized: float, dy_normalized: float, xp=np
+):
     """Return the reference-consistent periodic first-derivative symbols."""
 
     if min(shape) < 3:
         raise ValueError("both transverse dimensions must be at least 3")
     if dx_normalized <= 0.0 or dy_normalized <= 0.0:
         raise ValueError("normalized spacings must be positive")
-    kx = 2.0 * math.pi * np.fft.fftfreq(shape[0], d=dx_normalized)[:, None]
-    ky = 2.0 * math.pi * np.fft.fftfreq(shape[1], d=dy_normalized)[None, :]
+    kx = 2.0 * math.pi * xp.fft.fftfreq(shape[0], d=dx_normalized)[:, None]
+    ky = 2.0 * math.pi * xp.fft.fftfreq(shape[1], d=dy_normalized)[None, :]
     if shape[0] % 2 == 0:
         kx[shape[0] // 2, 0] = 0.0
     if shape[1] % 2 == 0:
@@ -48,17 +52,17 @@ def spectral_wavevectors(
 
 
 def spectral_derivatives(
-    field: np.ndarray, *, kx: np.ndarray, ky: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+    field, *, kx, ky, xp=np
+):
     # Preserve the analytically exact derivative of a spatially uniform plane.
     # FFT roundoff in a non-binary constant can otherwise seed a nonzero rate
     # in the required uniform-equilibrium regression.
-    if np.all(field == field[..., :1, :1]):
-        zeros = np.zeros_like(field)
+    if xp is np and np.all(field == field[..., :1, :1]):
+        zeros = xp.zeros_like(field)
         return zeros, zeros.copy()
-    transformed = np.fft.fft2(field, axes=(-2, -1))
-    dx = np.fft.ifft2(1j * kx * transformed, axes=(-2, -1)).real
-    dy = np.fft.ifft2(1j * ky * transformed, axes=(-2, -1)).real
+    transformed = xp.fft.fft2(field, axes=(-2, -1))
+    dx = xp.fft.ifft2(1j * kx * transformed, axes=(-2, -1)).real
+    dy = xp.fft.ifft2(1j * ky * transformed, axes=(-2, -1)).real
     return dx.astype(field.dtype, copy=False), dy.astype(field.dtype, copy=False)
 
 
@@ -69,23 +73,25 @@ def state_from_potential(
     dy_normalized: float,
     h_y: float = 1.0,
     applied_field_x: float = 0.0,
+    xp=np,
 ) -> PRTransverseState:
     """Reconstruct ``P``, ``E_x`` and ``E_y`` from zero-mean periodic ψ."""
 
-    potential = _real_array(psi, name="psi")
+    potential = _real_array(psi, name="psi", xp=xp)
     kx, ky = spectral_wavevectors(
         potential.shape[-2:],
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
+        xp=xp,
     )
     denominator = kx * kx + float(h_y) * ky * ky
-    potential_hat = np.fft.fft2(potential, axes=(-2, -1))
-    potential_hat = np.where(denominator == 0.0, 0.0, potential_hat)
-    resolved = np.fft.ifft2(potential_hat, axes=(-2, -1)).real.astype(
+    potential_hat = xp.fft.fft2(potential, axes=(-2, -1))
+    potential_hat = xp.where(denominator == 0.0, 0.0, potential_hat)
+    resolved = xp.fft.ifft2(potential_hat, axes=(-2, -1)).real.astype(
         potential.dtype, copy=False
     )
-    psi_x, psi_y = spectral_derivatives(resolved, kx=kx, ky=ky)
-    carrier = 1.0 + np.fft.ifft2(
+    psi_x, psi_y = spectral_derivatives(resolved, kx=kx, ky=ky, xp=xp)
+    carrier = 1.0 + xp.fft.ifft2(
         denominator * potential_hat, axes=(-2, -1)
     ).real
     return PRTransverseState(
@@ -105,14 +111,15 @@ def potential_rhs(
     m_y: float = 1.0,
     h_y: float = 1.0,
     applied_field_x: float = 0.0,
-) -> np.ndarray:
+    xp=np,
+):
     """Evaluate the frozen full-transverse potential-rate equation."""
 
-    potential = _real_array(psi, name="psi")
-    driving = _real_array(intensity, name="intensity")
+    potential = _real_array(psi, name="psi", xp=xp)
+    driving = _real_array(intensity, name="intensity", xp=xp)
     if driving.shape != potential.shape:
         raise ValueError("psi and intensity must have identical shapes")
-    if np.any(driving < 0.0):
+    if xp is np and np.any(driving < 0.0):
         raise ValueError("intensity must be nonnegative")
     state = state_from_potential(
         potential,
@@ -120,28 +127,43 @@ def potential_rhs(
         dy_normalized=dy_normalized,
         h_y=h_y,
         applied_field_x=applied_field_x,
+        xp=xp,
     )
     kx, ky = spectral_wavevectors(
         potential.shape[-2:],
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
+        xp=xp,
     )
     carrier_intensity = state.carrier_density * driving
-    grad_x, grad_y = spectral_derivatives(carrier_intensity, kx=kx, ky=ky)
+    grad_x, grad_y = spectral_derivatives(
+        carrier_intensity, kx=kx, ky=ky, xp=xp
+    )
     flux_x = grad_x - carrier_intensity * state.E_x
     flux_y = float(m_y) * (grad_y - carrier_intensity * state.E_y)
     carrier_rhs_hat = (
-        1j * kx * np.fft.fft2(flux_x, axes=(-2, -1))
-        + 1j * ky * np.fft.fft2(flux_y, axes=(-2, -1))
+        1j * kx * xp.fft.fft2(flux_x, axes=(-2, -1))
+        + 1j * ky * xp.fft.fft2(flux_y, axes=(-2, -1))
     )
     denominator = kx * kx + float(h_y) * ky * ky
-    psi_rhs_hat = np.divide(
-        carrier_rhs_hat,
-        denominator,
-        out=np.zeros_like(carrier_rhs_hat),
-        where=denominator > 0.0,
-    )
-    return np.fft.ifft2(psi_rhs_hat, axes=(-2, -1)).real.astype(
+    if xp is np:
+        psi_rhs_hat = np.divide(
+            carrier_rhs_hat,
+            denominator,
+            out=np.zeros_like(carrier_rhs_hat),
+            where=denominator > 0.0,
+        )
+    else:
+        # CuPy does not support NumPy's combined ``out``/``where`` ufunc
+        # keywords. The safe denominator prevents an eager zero-mode divide;
+        # the following mask restores the same zero-gauge result.
+        safe_denominator = xp.where(denominator > 0.0, denominator, 1.0)
+        psi_rhs_hat = xp.where(
+            denominator > 0.0,
+            carrier_rhs_hat / safe_denominator,
+            0.0,
+        )
+    return xp.fft.ifft2(psi_rhs_hat, axes=(-2, -1)).real.astype(
         potential.dtype, copy=False
     )
 
@@ -156,10 +178,11 @@ def explicit_euler_step(
     m_y: float = 1.0,
     h_y: float = 1.0,
     applied_field_x: float = 0.0,
-) -> np.ndarray:
+    xp=np,
+):
     """Advance one transparent reference step and restore the ψ gauge."""
 
-    potential = _real_array(psi, name="psi")
+    potential = _real_array(psi, name="psi", xp=xp)
     candidate = potential + float(dt_normalized) * potential_rhs(
         potential,
         intensity,
@@ -168,10 +191,11 @@ def explicit_euler_step(
         m_y=m_y,
         h_y=h_y,
         applied_field_x=applied_field_x,
+        xp=xp,
     )
-    candidate = candidate - np.mean(candidate, axis=(-2, -1), keepdims=True)
+    candidate = candidate - xp.mean(candidate, axis=(-2, -1), keepdims=True)
     candidate = candidate.astype(potential.dtype, copy=False)
-    if not np.all(np.isfinite(candidate)):
+    if xp is np and not np.all(np.isfinite(candidate)):
         raise FloatingPointError("nonfinite potential during transverse evolution")
     return candidate
 
@@ -186,7 +210,8 @@ def imex_euler_step(
     m_y: float = 1.0,
     h_y: float = 1.0,
     applied_field_x: float = 0.0,
-) -> np.ndarray:
+    xp=np,
+):
     """Advance one first-order spectral IMEX Euler material step.
 
     For every longitudinal plane, ``Istar`` is the maximum of the supplied
@@ -197,11 +222,11 @@ def imex_euler_step(
     not add dark or uniform background terms again.
     """
 
-    potential = _real_array(psi, name="psi")
-    driving = _real_array(intensity, name="intensity")
+    potential = _real_array(psi, name="psi", xp=xp)
+    driving = _real_array(intensity, name="intensity", xp=xp)
     if driving.shape != potential.shape:
         raise ValueError("psi and intensity must have identical shapes")
-    if np.any(driving < 0.0):
+    if xp is np and np.any(driving < 0.0):
         raise ValueError("intensity must be nonnegative")
     dt = float(dt_normalized)
     if not math.isfinite(dt) or dt <= 0.0:
@@ -215,30 +240,32 @@ def imex_euler_step(
         m_y=m_y,
         h_y=h_y,
         applied_field_x=applied_field_x,
+        xp=xp,
     )
     kx, ky = spectral_wavevectors(
         potential.shape[-2:],
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
+        xp=xp,
     )
     k_squared = kx * kx + ky * ky
-    potential_hat = np.fft.fft2(potential, axes=(-2, -1))
+    potential_hat = xp.fft.fft2(potential, axes=(-2, -1))
     if potential.ndim == 2:
-        Istar = np.max(driving).reshape(1, 1)
+        Istar = xp.max(driving).reshape(1, 1)
     else:
-        Istar = np.max(driving, axis=(-2, -1), keepdims=True)
+        Istar = xp.max(driving, axis=(-2, -1), keepdims=True)
     implicit_rate = Istar * (1.0 + k_squared)
     A_psi_hat = -implicit_rate * potential_hat
     nonlinear_hat = (
-        np.fft.fft2(full_rhs, axes=(-2, -1)) - A_psi_hat
+        xp.fft.fft2(full_rhs, axes=(-2, -1)) - A_psi_hat
     )
     candidate_hat = (
         potential_hat + dt * nonlinear_hat
     ) / (1.0 + dt * implicit_rate)
-    candidate_hat = np.where(k_squared == 0.0, 0.0, candidate_hat)
-    candidate = np.fft.ifft2(candidate_hat, axes=(-2, -1)).real
+    candidate_hat = xp.where(k_squared == 0.0, 0.0, candidate_hat)
+    candidate = xp.fft.ifft2(candidate_hat, axes=(-2, -1)).real
     candidate = candidate.astype(potential.dtype, copy=False)
-    if not np.all(np.isfinite(candidate)):
+    if xp is np and not np.all(np.isfinite(candidate)):
         raise FloatingPointError("nonfinite potential during transverse IMEX evolution")
     return candidate
 

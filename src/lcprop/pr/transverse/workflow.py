@@ -1,4 +1,4 @@
-"""NumPy time-dependent workflow for full-transverse PR Profile v1."""
+"""Backend-native time-dependent workflow for full-transverse PR Profile v1."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Callable
 
 import numpy as np
 
+from lcprop.core.backend import asnumpy, get_backend, scalar_float
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch import build_launch, normalized_power
@@ -62,31 +63,34 @@ def _validate_request(request: PRTransverseRunRequest) -> None:
     request.backend.validate()
     if request.scattering is not None:
         request.scattering.validate()
-    if request.backend.backend != "numpy":
-        raise ValueError("Profile v1 production reference currently requires backend='numpy'")
+    if request.backend.backend not in ("numpy", "cupy"):
+        raise ValueError(
+            "Profile v1 requires explicit backend='numpy' or backend='cupy'"
+        )
     if float(request.material.applied_field) != 0.0:
         raise ValueError("Profile v1 requires material.applied_field=0")
 
 
 def _initial_fields(request, *, launch, grid, complex_dtype, real_dtype):
+    xp = grid.xp
     if request.initial_A is None:
         A0 = launch.A0.copy()
     else:
-        A0 = np.asarray(request.initial_A, dtype=complex_dtype).copy()
+        A0 = xp.asarray(request.initial_A, dtype=complex_dtype).copy()
         if A0.shape != launch.A0.shape:
             raise ValueError(f"initial_A shape {A0.shape} does not match {launch.A0.shape}")
-        if not np.all(np.isfinite(A0)):
+        if not bool(asnumpy(xp.all(xp.isfinite(A0)))):
             raise ValueError("initial_A must contain only finite values")
     expected = (grid.Nz, grid.Nx, grid.Ny)
     if request.initial_psi is None:
-        psi = np.zeros(expected, dtype=real_dtype)
+        psi = xp.zeros(expected, dtype=real_dtype)
     else:
-        psi = np.asarray(request.initial_psi, dtype=real_dtype).copy()
+        psi = xp.asarray(request.initial_psi, dtype=real_dtype).copy()
         if psi.shape != expected:
             raise ValueError(f"initial_psi shape {psi.shape} does not match {expected}")
-        if not np.all(np.isfinite(psi)):
+        if not bool(asnumpy(xp.all(xp.isfinite(psi)))):
             raise ValueError("initial_psi must contain only finite values")
-    psi -= np.mean(psi, axis=(-2, -1), keepdims=True)
+    psi -= xp.mean(psi, axis=(-2, -1), keepdims=True)
     return A0, psi
 
 
@@ -103,8 +107,9 @@ def _optical_pass(
     dy_normalized,
     cancellation_token=None,
 ):
+    xp = grid.xp
     A = A0.copy()
-    source = np.empty(psi.shape, dtype=grid.real_dtype)
+    source = xp.empty(psi.shape, dtype=grid.real_dtype)
     intensity_before = None
     state = state_from_potential(
         psi,
@@ -112,9 +117,10 @@ def _optical_pass(
         dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
         applied_field_x=request.boundary.applied_field_x,
+        xp=xp,
     )
     active = project_active_field(
-        state.E_x, state.E_y, profile=request.projection
+        state.E_x, state.E_y, profile=request.projection, xp=xp
     )
     for z_index in range(grid.Nz):
         _check_cancel(cancellation_token, "material_source_optical_z_march")
@@ -130,7 +136,7 @@ def _optical_pass(
             peak_intensity_reference=peak_reference,
             background_intensity=request.material.background_intensity,
             coherence_groups=request.beams.coherence_groups,
-            xp=np,
+            xp=xp,
             _intensity_before=intensity_before,
             _return_exit_intensity=True,
         )
@@ -140,7 +146,7 @@ def _optical_pass(
             z_index=z_index,
             grid=grid,
             z_length_um=request.grid.z_length_um,
-            xp=np,
+            xp=xp,
         )
     return A, source
 
@@ -151,7 +157,7 @@ def run_pr_transverse_timedependent(
     cancellation_token: CancellationToken | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> PRTransverseRunResult:
-    """Run the first NumPy full-transverse PR reference workflow.
+    """Run the full-transverse PR workflow on the requested backend.
 
     A material candidate becomes physical only after its complete source pass
     and finite Euler update. Cancellation during either discardable stage
@@ -160,9 +166,11 @@ def run_pr_transverse_timedependent(
 
     started = perf_counter()
     _validate_request(request)
-    real_dtype = np.float32 if request.backend.precision == "float32" else np.float64
-    complex_dtype = np.complex64 if real_dtype is np.float32 else np.complex128
-    grid = make_grid(request.grid, xp=np, real_dtype=real_dtype)
+    backend = get_backend(request.backend)
+    xp = backend.xp
+    real_dtype = backend.real_dtype
+    complex_dtype = backend.complex_dtype
+    grid = make_grid(request.grid, xp=xp, real_dtype=real_dtype)
     _validate_canonical_scattering_for_grid(
         request.scattering,
         grid=grid,
@@ -186,9 +194,9 @@ def run_pr_transverse_timedependent(
         dz=grid.dz_um / int(request.solver.optical_substeps),
         wavelength=wavelength_um,
         n_ref=request.material.refractive_index,
-        xp=np,
+        xp=xp,
     )
-    peak_reference = channel_peak_intensity_reference(A0, xp=np)
+    peak_reference = channel_peak_intensity_reference(A0, xp=xp)
     k0 = request.material.characteristic_wavenumber_per_um
     dx_normalized = k0 * grid.dx_um
     dy_normalized = k0 * grid.dy_um
@@ -197,9 +205,10 @@ def run_pr_transverse_timedependent(
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
+        xp=xp,
     )
-    initial_carrier = np.sum(initial_state.carrier_density, axis=(-2, -1))
-    max_carrier_drift = 0.0
+    initial_carrier = xp.sum(initial_state.carrier_density, axis=(-2, -1))
+    max_carrier_drift = xp.asarray(0.0, dtype=real_dtype)
     completed_steps = 0
     cancelled = False
     cancellation_stage = None
@@ -236,6 +245,7 @@ def run_pr_transverse_timedependent(
                 m_y=request.transport.m_y,
                 h_y=request.dielectric.h_y,
                 applied_field_x=request.boundary.applied_field_x,
+                xp=xp,
             )
             _check_cancel(cancellation_token, "after_material_candidate")
         except _CancellationRequested as exc:
@@ -250,11 +260,15 @@ def run_pr_transverse_timedependent(
             dx_normalized=dx_normalized,
             dy_normalized=dy_normalized,
             h_y=request.dielectric.h_y,
+            xp=xp,
         )
-        current_carrier = np.sum(accepted_state.carrier_density, axis=(-2, -1))
-        max_carrier_drift = max(
+        current_carrier = xp.sum(accepted_state.carrier_density, axis=(-2, -1))
+        max_carrier_drift = xp.maximum(
             max_carrier_drift,
-            float(np.max(np.abs(current_carrier - initial_carrier) / np.abs(initial_carrier))),
+            xp.max(
+                xp.abs(current_carrier - initial_carrier)
+                / xp.abs(initial_carrier)
+            ),
         )
         if progress_callback is not None:
             material_time = completed_steps * float(request.solver.dt_normalized)
@@ -268,7 +282,9 @@ def run_pr_transverse_timedependent(
                     coordinate_name="material_time",
                     coordinate_unit="normalized",
                     elapsed_wall_time=perf_counter() - started,
-                    latest_field_state={"psi_current": psi.copy()},
+                    latest_field_state={
+                        "psi_current": np.asarray(asnumpy(psi)).copy()
+                    },
                     message="transverse PR material-time step accepted",
                     completed_step=completed_steps,
                     total_steps=int(request.solver.Nt),
@@ -298,20 +314,22 @@ def run_pr_transverse_timedependent(
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
+        xp=xp,
     )
     diagnostics = state_diagnostics(
         final_state,
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
+        xp=xp,
     )
     power_initial = normalized_power(A0, grid)
     power_final = normalized_power(A_final, grid)
     diagnostics.update(
         {
-            "carrier_relative_drift_max": max_carrier_drift,
+            "carrier_relative_drift_max": scalar_float(max_carrier_drift),
             "optical_power_relative_drift": (power_final - power_initial) / power_initial,
-            "finite_optical_state": bool(np.all(np.isfinite(A_final))),
+            "finite_optical_state": bool(asnumpy(xp.all(xp.isfinite(A_final)))),
             "cancellation_observed_stage": cancellation_stage,
             "integrator_policy": (
                 "production_first_order_spectral_imex"
@@ -331,7 +349,7 @@ def run_pr_transverse_timedependent(
             x_aperture_um=request.grid.x_aperture_um,
             y_aperture_um=request.grid.y_aperture_um,
             real_dtype=grid.real_dtype,
-            xp=np,
+            xp=xp,
         )
         diagnostics["canonical_scattering"] = scattering_provenance
     resolved_profile = {
@@ -351,22 +369,17 @@ def run_pr_transverse_timedependent(
     if scattering_provenance is not None:
         resolved_profile["canonical_scattering"] = scattering_provenance
     return PRTransverseRunResult(
-        A_initial=np.asarray(A0).copy(),
-        A_final=np.asarray(A_final).copy(),
-        psi_initial=np.asarray(psi_initial).copy(),
-        psi_final=np.asarray(psi).copy(),
+        A_initial=np.asarray(asnumpy(A0)).copy(),
+        A_final=np.asarray(asnumpy(A_final)).copy(),
+        psi_initial=np.asarray(asnumpy(psi_initial)).copy(),
+        psi_final=np.asarray(asnumpy(psi)).copy(),
         power_initial=power_initial,
         power_final=power_final,
         completed_steps=completed_steps,
         time_normalized=completed_steps * float(request.solver.dt_normalized),
         grid_summary=grid.summary(),
         launch_summary=launch.summary(),
-        backend_summary={
-            "backend": "numpy",
-            "real_dtype": str(np.dtype(real_dtype)),
-            "complex_dtype": str(np.dtype(complex_dtype)),
-            "is_gpu": False,
-        },
+        backend_summary=backend.summary(),
         resolved_profile=resolved_profile,
         status="cancelled" if cancelled else "completed",
         requested_steps=int(request.solver.Nt),
