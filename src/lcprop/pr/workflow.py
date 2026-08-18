@@ -94,6 +94,8 @@ def advance_pr_slice_with_midpoint_source(
     background_intensity: float,
     coherence_groups,
     xp,
+    _intensity_before=None,
+    _return_exit_intensity: bool = False,
 ):
     """Advance one frozen-E PR slice and return its midpoint source.
 
@@ -103,17 +105,60 @@ def advance_pr_slice_with_midpoint_source(
     workflow's established material-source definition.
     """
 
+    A_out, source, exit_intensity = (
+        _advance_pr_slice_with_midpoint_source_and_exit_intensity(
+            A_in,
+            E_slice,
+            kernel=kernel,
+            optical_substeps=optical_substeps,
+            dz_um=dz_um,
+            wavelength_um=wavelength_um,
+            interaction_length_um=interaction_length_um,
+            gain_length_product=gain_length_product,
+            peak_intensity_reference=peak_intensity_reference,
+            background_intensity=background_intensity,
+            coherence_groups=coherence_groups,
+            xp=xp,
+            intensity_before=_intensity_before,
+        )
+    )
+    if _return_exit_intensity:
+        return A_out, source, exit_intensity
+    return A_out, source
+
+
+def _advance_pr_slice_with_midpoint_source_and_exit_intensity(
+    A_in,
+    E_slice,
+    *,
+    kernel,
+    optical_substeps: int,
+    dz_um: float,
+    wavelength_um: float,
+    interaction_length_um: float,
+    gain_length_product: float,
+    peak_intensity_reference: float,
+    background_intensity: float,
+    coherence_groups,
+    xp,
+    intensity_before=None,
+):
+    """Advance one frozen-E slice and also return its exit intensity."""
+
     resolved_substeps = int(optical_substeps)
     if resolved_substeps < 1:
         raise ValueError("optical_substeps must be at least one")
     A_out = A_in.copy()
-    I_before = pr_driving_intensity(
-        A_out,
-        peak_intensity_reference=peak_intensity_reference,
-        background_intensity=background_intensity,
-        coherence_groups=coherence_groups,
-        xp=xp,
-    )
+    if intensity_before is None:
+        I_before = pr_driving_intensity(
+            A_out,
+            peak_intensity_reference=peak_intensity_reference,
+            background_intensity=background_intensity,
+            coherence_groups=coherence_groups,
+            xp=xp,
+        )
+    else:
+        I_before = intensity_before
     half_response = half_step_response_from_E(
         E_slice,
         dz_substep_um=float(dz_um) / resolved_substeps,
@@ -136,7 +181,7 @@ def advance_pr_slice_with_midpoint_source(
         coherence_groups=coherence_groups,
         xp=xp,
     )
-    return A_out, 0.5 * (I_before + I_after)
+    return A_out, 0.5 * (I_before + I_after), I_after
 
 
 def _optical_pass(
@@ -155,25 +200,30 @@ def _optical_pass(
     A = A0.copy()
     source_stack = xp.empty(E.shape, dtype=grid.real_dtype)
     groups = request.beams.coherence_groups
+    intensity_before = None
 
     for k in range(grid.Nz):
         _raise_if_cancelled(
             cancellation_token,
             stage=cancellation_stage,
         )
-        A, source_stack[k] = advance_pr_slice_with_midpoint_source(
-            A,
-            E[k],
-            kernel=kernel,
-            optical_substeps=request.solver.optical_substeps,
-            dz_um=grid.dz_um,
-            wavelength_um=wavelength_um,
-            interaction_length_um=request.grid.z_length_um,
-            gain_length_product=request.material.gain_length_product,
-            peak_intensity_reference=peak_reference,
-            background_intensity=request.material.background_intensity,
-            coherence_groups=groups,
-            xp=xp,
+        A, source_stack[k], intensity_before = (
+            advance_pr_slice_with_midpoint_source(
+                A,
+                E[k],
+                kernel=kernel,
+                optical_substeps=request.solver.optical_substeps,
+                dz_um=grid.dz_um,
+                wavelength_um=wavelength_um,
+                interaction_length_um=request.grid.z_length_um,
+                gain_length_product=request.material.gain_length_product,
+                peak_intensity_reference=peak_reference,
+                background_intensity=request.material.background_intensity,
+                coherence_groups=groups,
+                xp=xp,
+                _intensity_before=intensity_before,
+                _return_exit_intensity=True,
+            )
         )
     return A, source_stack
 
