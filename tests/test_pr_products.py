@@ -6,6 +6,7 @@ import pytest
 from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
+from lcprop.core.execution import CancellationToken
 from lcprop.pr.products import PR_TIMEDEPENDENT_WORKFLOW, pr_result_to_run_data
 from lcprop.pr.specs import (
     PRMaterialSpec,
@@ -216,8 +217,59 @@ def test_small_real_pr_run_converts_to_run_data():
     assert data.diagnostics["pr_workflow"].values["backend"][
         "backend"
     ] == "numpy"
+    assert data.fields["output_intensity"].display_name == (
+        "Output Plane Intensity"
+    )
+    assert data.fields["pr_driving_intensity_stack"].display_name == (
+        "Final PR-Driving Intensity"
+    )
 
 
 def test_pr_result_to_run_data_rejects_other_result_types():
     with pytest.raises(TypeError, match="PRRunResult"):
         pr_result_to_run_data(object())
+
+
+def test_td_volume_products_share_readonly_authoritative_result_memory():
+    grid = GridSpec(
+        Nx=8,
+        Ny=6,
+        x_aperture_um=80.0,
+        y_aperture_um=60.0,
+        dz_um=5.0,
+        z_length_um=10.0,
+    )
+    request = PRRunRequest(
+        grid=grid,
+        beams=BeamStack(
+            channels=(
+                BeamChannel(
+                    wavelength_um=0.633,
+                    waist_x_um=20.0,
+                    waist_y_um=20.0,
+                ),
+            ),
+        ),
+        solver=PRSolverOptions(Nt=1, dt_normalized=0.01),
+        backend=BackendSpec(
+            backend="numpy",
+            precision="float64",
+            verbose=False,
+        ),
+    )
+    token = CancellationToken()
+    token.cancel()
+    result = run_pr_timedependent(request, cancellation_token=token)
+    data = pr_result_to_run_data(result)
+
+    for key, authoritative in (
+        ("initial_E_stack", result.E_initial),
+        ("final_E_stack", result.E_final),
+        ("pr_driving_intensity_stack", result.source_intensity_stack),
+    ):
+        presented = data.fields[key].data
+        assert presented is not authoritative
+        assert np.shares_memory(presented, authoritative)
+        assert not presented.flags.writeable
+        with pytest.raises(ValueError, match="read-only"):
+            presented.flat[0] = -999.0

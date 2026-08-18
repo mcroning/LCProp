@@ -733,13 +733,18 @@ class PRMainWindow(QWidget):
             return
         token.cancel()
         self.run_status = "stopping"
-        self.status_label.setText("Stopping…")
+        is_static = isinstance(self._active_request, PRStaticRunRequest)
+        self.status_label.setText(
+            "Stopping…"
+            if is_static
+            else "Stopping at next safe internal boundary…"
+        )
         self.stop_button.setEnabled(False)
         self.stop_button.setText("Stopping…")
         self.results_panel.append_console(
             "Stop requested; finishing the current accepted z slice."
-            if isinstance(self._active_request, PRStaticRunRequest)
-            else "Stop requested; finishing the current material-time step."
+            if is_static
+            else "Stop requested; stopping at next safe internal boundary."
         )
 
     @Slot(object)

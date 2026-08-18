@@ -300,6 +300,10 @@ def test_pr_window_stop_returns_cancelled_result_and_checkpoint(app):
     assert not window.load_checkpoint_button.isEnabled()
     window.stop_button.click()
     assert window.run_status == "stopping"
+    assert window.status_label.text() == (
+        "Stopping at next safe internal boundary…"
+    )
+    assert "stopping at next safe internal boundary" in console.toPlainText()
     _wait_for(app, lambda: not window._background_running)
 
     assert window.run_status == "stopped"
@@ -308,6 +312,50 @@ def test_pr_window_stop_returns_cancelled_result_and_checkpoint(app):
     assert window.last_checkpoint.status == "cancelled"
     assert "Run cancelled" in console.toPlainText()
     assert window.run_button.isEnabled()
+    window.close()
+
+
+def test_large_numpy_pr_window_stops_during_first_material_step(app):
+    window = PRMainWindow()
+    window.grid_panel.Nx.setValue(384)
+    window.grid_panel.Ny.setValue(96)
+    window.grid_panel.dz_um.setValue(10.0)
+    window.grid_panel.z_length_um.setValue(1200.0)
+    window.evolution_panel.Nt.setValue(20)
+    integrator_index = window.evolution_panel.integrator.findData(
+        PR_SEMI_IMPLICIT_INTEGRATOR
+    )
+    window.evolution_panel.integrator.setCurrentIndex(integrator_index)
+    timing = {}
+
+    def request_stop():
+        timing["requested_at"] = time.monotonic()
+        window.stop_clicked()
+
+    QTimer.singleShot(200, request_stop)
+    window.run_clicked()
+    _wait_for(app, lambda: not window._background_running, timeout=5.0)
+    cancellation_latency = time.monotonic() - timing["requested_at"]
+
+    assert window.run_status == "stopped"
+    assert window.last_result.status == "cancelled"
+    assert window.last_result.completed_steps == 0
+    np.testing.assert_array_equal(
+        window.last_result.E_final,
+        window.last_result.E_initial,
+    )
+    assert window.last_result.diagnostics["cancellation_observed_stage"] == (
+        "material_source_optical_z_march"
+    )
+    run_data = window.last_runner_result.run_data
+    assert run_data.fields["output_intensity"].display_name == (
+        "Launch-Plane Intensity (Cancellation Fallback)"
+    )
+    assert run_data.fields["pr_driving_intensity_stack"].display_name == (
+        "Launch-Plane PR-Driving Intensity (Cancellation Fallback)"
+    )
+    assert cancellation_latency < 1.0
+    assert window._thread is None
     window.close()
 
 

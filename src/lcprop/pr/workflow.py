@@ -42,6 +42,23 @@ from lcprop.pr.specs import (
 ProgressCallback = Callable[[RunProgress], None]
 
 
+class _PRCancellationRequested(Exception):
+    """Internal cooperative unwind from discardable PR TD work."""
+
+    def __init__(self, stage: str):
+        super().__init__(stage)
+        self.stage = stage
+
+
+def _raise_if_cancelled(
+    cancellation_token: CancellationToken | None,
+    *,
+    stage: str,
+) -> None:
+    if cancellation_token is not None and cancellation_token.is_cancelled():
+        raise _PRCancellationRequested(stage)
+
+
 def _initial_fields(request: PRRunRequest, *, launch, grid, complex_dtype, real_dtype):
     xp = grid.xp
     if request.initial_A is None:
@@ -131,6 +148,8 @@ def _optical_pass(
     kernel,
     peak_reference: float,
     wavelength_um: float,
+    cancellation_token: CancellationToken | None = None,
+    cancellation_stage: str = "optical_z_march",
 ):
     xp = grid.xp
     A = A0.copy()
@@ -138,6 +157,10 @@ def _optical_pass(
     groups = request.beams.coherence_groups
 
     for k in range(grid.Nz):
+        _raise_if_cancelled(
+            cancellation_token,
+            stage=cancellation_stage,
+        )
         A, source_stack[k] = advance_pr_slice_with_midpoint_source(
             A,
             E[k],
@@ -168,9 +191,12 @@ def run_pr_timedependent(
 ) -> PRRunResult:
     """Run the frozen-state PR workflow with optional execution controls.
 
-    Cancellation is observed between complete material-time updates. Progress
-    snapshots contain the latest accepted ``E`` state and a detached optical
-    replay through that state; neither observation changes subsequent physics.
+    Cancellation is observed within discardable optical and material
+    substages as well as between complete material-time updates.  A candidate
+    material state is committed only after every required substage succeeds.
+    Progress snapshots contain the latest accepted ``E`` state and a detached
+    optical replay through that state; neither observation changes subsequent
+    physics.
     """
 
     started_at = perf_counter()
@@ -247,10 +273,14 @@ def run_pr_timedependent(
         initial_E=None,
     )
     cancelled = False
+    cancellation_stage: str | None = None
+    cancellation_observed_at: float | None = None
     source_stack = grid.xp.empty(E.shape, dtype=grid.real_dtype)
+    accepted_observation: tuple[int, Any, Any] | None = None
 
     def source_intensity_for_state(candidate_E):
-        _, candidate_source = _optical_pass(
+        nonlocal accepted_observation
+        candidate_A, candidate_source = _optical_pass(
             A0,
             candidate_E,
             request=request,
@@ -258,59 +288,107 @@ def run_pr_timedependent(
             kernel=kernel,
             peak_reference=peak_reference,
             wavelength_um=wavelength_um,
+            cancellation_token=cancellation_token,
+            cancellation_stage="material_source_optical_z_march",
         )
+        if candidate_E is E:
+            accepted_observation = (
+                completed_steps,
+                candidate_A,
+                candidate_source,
+            )
         return candidate_source
 
     for step_index in range(segment_total_steps):
         if cancellation_token is not None and cancellation_token.is_cancelled():
             cancelled = True
+            cancellation_stage = "material_step_boundary"
+            cancellation_observed_at = perf_counter()
             break
 
+        try:
+            if request.solver.integrator == PR_EULER_INTEGRATOR:
+                candidate_source_stack = source_intensity_for_state(E)
+                _raise_if_cancelled(
+                    cancellation_token,
+                    stage="euler_after_source",
+                )
+                candidate_E = euler_step(
+                    E,
+                    candidate_source_stack,
+                    dt_normalized=request.solver.dt_normalized,
+                    applied_field=request.material.applied_field,
+                    background_intensity=request.material.background_intensity,
+                    dx_normalized=(
+                        request.material.characteristic_wavenumber_per_um
+                        * grid.dx_um
+                    ),
+                    xp=grid.xp,
+                )
+                _raise_if_cancelled(
+                    cancellation_token,
+                    stage="euler_after_material_update",
+                )
+            elif request.solver.integrator == PR_SEMI_IMPLICIT_INTEGRATOR:
+                candidate_E = semi_implicit_trapezoidal_step(
+                    E,
+                    source_intensity_for_state,
+                    dt_normalized=request.solver.dt_normalized,
+                    applied_field=request.material.applied_field,
+                    background_intensity=request.material.background_intensity,
+                    dx_normalized=(
+                        request.material.characteristic_wavenumber_per_um
+                        * grid.dx_um
+                    ),
+                    xp=grid.xp,
+                    cancellation_check=lambda: _raise_if_cancelled(
+                        cancellation_token,
+                        stage="semi_implicit_predictor_corrector",
+                    ),
+                )
+            else:  # guarded by PRSolverOptions.validate()
+                raise ValueError(
+                    f"unknown PR integrator: {request.solver.integrator}"
+                )
+
+            candidate_observation = None
+            if progress_callback is not None:
+                candidate_observation = _optical_pass(
+                    A0,
+                    candidate_E,
+                    request=request,
+                    grid=grid,
+                    kernel=kernel,
+                    peak_reference=peak_reference,
+                    wavelength_um=wavelength_um,
+                    cancellation_token=cancellation_token,
+                    cancellation_stage="progress_optical_z_march",
+                )
+                _raise_if_cancelled(
+                    cancellation_token,
+                    stage="after_progress_optical_replay",
+                )
+        except _PRCancellationRequested as exc:
+            cancelled = True
+            cancellation_stage = exc.stage
+            cancellation_observed_at = perf_counter()
+            break
+
+        E = candidate_E
         if request.solver.integrator == PR_EULER_INTEGRATOR:
-            source_stack = source_intensity_for_state(E)
-            E = euler_step(
-                E,
-                source_stack,
-                dt_normalized=request.solver.dt_normalized,
-                applied_field=request.material.applied_field,
-                background_intensity=request.material.background_intensity,
-                dx_normalized=(
-                    request.material.characteristic_wavenumber_per_um
-                    * grid.dx_um
-                ),
-                xp=grid.xp,
-            )
-        elif request.solver.integrator == PR_SEMI_IMPLICIT_INTEGRATOR:
-            E = semi_implicit_trapezoidal_step(
-                E,
-                source_intensity_for_state,
-                dt_normalized=request.solver.dt_normalized,
-                applied_field=request.material.applied_field,
-                background_intensity=request.material.background_intensity,
-                dx_normalized=(
-                    request.material.characteristic_wavenumber_per_um
-                    * grid.dx_um
-                ),
-                xp=grid.xp,
-            )
-        else:  # guarded by PRSolverOptions.validate()
-            raise ValueError(
-                f"unknown PR integrator: {request.solver.integrator}"
-            )
+            source_stack = candidate_source_stack
         segment_completed_steps = step_index + 1
         completed_steps = (
             int(_completed_steps_offset) + segment_completed_steps
         )
 
         if progress_callback is not None:
-            A_display, display_source_stack = _optical_pass(
-                A0,
-                E,
-                request=request,
-                grid=grid,
-                kernel=kernel,
-                peak_reference=peak_reference,
-                wavelength_um=wavelength_um,
+            assert candidate_observation is not None
+            A_display, display_source_stack = candidate_observation
+            accepted_observation = (
+                completed_steps,
+                A_display,
+                display_source_stack,
             )
             segment_elapsed_time = (
                 segment_completed_steps
@@ -356,20 +434,51 @@ def run_pr_timedependent(
                 )
             )
 
-    A_final, source_stack = _optical_pass(
-        A0,
-        E,
-        request=request,
-        grid=grid,
-        kernel=kernel,
-        peak_reference=peak_reference,
-        wavelength_um=wavelength_um,
-    )
+    optical_observation = "complete_final_replay"
+    if (
+        cancelled
+        and accepted_observation is not None
+        and accepted_observation[0] == completed_steps
+    ):
+        _, A_final, source_stack = accepted_observation
+        optical_observation = "cached_accepted_state_replay"
+    elif cancelled:
+        # No complete optical replay of the latest accepted E is available.
+        # This can occur before the first material update or after one or more
+        # accepted headless updates. Returning the launch boundary and its
+        # finite driving intensity avoids both a misleading partial z-march
+        # and an unconditional full replay after Stop. The checkpoint's
+        # accepted E remains authoritative, and the diagnostics below make
+        # this cancellation-only fallback explicit.
+        A_final = A0.copy()
+        launch_source = pr_driving_intensity(
+            A0,
+            peak_intensity_reference=peak_reference,
+            background_intensity=request.material.background_intensity,
+            coherence_groups=request.beams.coherence_groups,
+            xp=grid.xp,
+        )
+        source_stack = grid.xp.broadcast_to(launch_source, E.shape)
+        optical_observation = "unpropagated_launch_fallback"
+    else:
+        A_final, source_stack = _optical_pass(
+            A0,
+            E,
+            request=request,
+            grid=grid,
+            kernel=kernel,
+            peak_reference=peak_reference,
+            wavelength_um=wavelength_um,
+        )
 
     status = "cancelled" if cancelled else "completed"
     A0_host = np.asarray(asnumpy(A0)).copy()
     E_initial_host = np.asarray(asnumpy(E_initial)).copy()
     E_final_host = np.asarray(asnumpy(E)).copy()
+    if optical_observation == "unpropagated_launch_fallback":
+        source_stack_host = np.asarray(asnumpy(source_stack))
+    else:
+        source_stack_host = np.asarray(asnumpy(source_stack)).copy()
     current_time = (
         float(_cumulative_start_time)
         + (completed_steps - int(_completed_steps_offset))
@@ -395,7 +504,7 @@ def run_pr_timedependent(
         A_final=np.asarray(asnumpy(A_final)).copy(),
         E_initial=E_initial_host,
         E_final=E_final_host,
-        source_intensity_stack=np.asarray(asnumpy(source_stack)).copy(),
+        source_intensity_stack=source_stack_host,
         power_initial=normalized_power(A0, grid),
         power_final=normalized_power(A_final, grid),
         completed_steps=completed_steps,
@@ -412,6 +521,21 @@ def run_pr_timedependent(
             ),
             "peak_intensity_reference": peak_reference,
             "integrator": request.solver.integrator,
+            "cancellation_observed_stage": cancellation_stage,
+            "cancellation_observed_wall_time": (
+                None
+                if cancellation_observed_at is None
+                else cancellation_observed_at - started_at
+            ),
+            "final_optical_observation": optical_observation,
+            "complete_optical_replay_available": (
+                optical_observation != "unpropagated_launch_fallback"
+            ),
+            "optical_products_are_launch_fallback": (
+                optical_observation == "unpropagated_launch_fallback"
+            ),
+            "run_status": status,
+            "completed_material_steps": completed_steps,
             "conservative_dt_limit": timestep_limit,
             "paper_equation_15_dt_limit": paper_conservative_timestep_limit(
                 grid,

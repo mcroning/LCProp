@@ -12,8 +12,12 @@ from lcprop.pr.specs import (
     PRMaterialSpec,
     PRRunRequest,
     PRSolverOptions,
+    PR_EULER_INTEGRATOR,
+    PR_SEMI_IMPLICIT_INTEGRATOR,
     PR_TIMEDEPENDENT_WORKFLOW,
 )
+import lcprop.pr.evolution as pr_evolution
+import lcprop.pr.workflow as pr_workflow
 from lcprop.pr.workflow import run_pr_timedependent
 
 
@@ -173,6 +177,15 @@ def test_cancellation_after_progress_returns_latest_complete_step():
     assert partial.time_normalized == pytest.approx(0.01)
     _assert_same_physical_result(partial, direct_one_step)
     assert np.max(np.abs(partial.E_final)) < 999.0
+    assert partial.diagnostics["complete_optical_replay_available"] is True
+    assert partial.diagnostics["optical_products_are_launch_fallback"] is False
+    data = pr_result_to_run_data(partial)
+    assert data.fields["output_intensity"].display_name == (
+        "Output Plane Intensity"
+    )
+    assert data.fields["pr_driving_intensity_stack"].display_name == (
+        "Final PR-Driving Intensity"
+    )
 
 
 def test_cancelled_result_converts_to_shared_product_data():
@@ -199,4 +212,192 @@ def test_cancelled_result_converts_to_shared_product_data():
     np.testing.assert_array_equal(
         data.fields["final_E_stack"].data,
         result.E_final,
+    )
+
+
+@pytest.mark.parametrize(
+    "integrator",
+    (PR_EULER_INTEGRATOR, PR_SEMI_IMPLICIT_INTEGRATOR),
+)
+def test_active_internal_cancellation_never_accepts_partial_step(
+    monkeypatch,
+    integrator,
+):
+    request = _request(steps=2)
+    request = replace(
+        request,
+        solver=replace(request.solver, integrator=integrator),
+    )
+    token = CancellationToken()
+
+    if integrator == PR_EULER_INTEGRATOR:
+        original_step = pr_workflow.euler_step
+
+        def cancelling_step(*args, **kwargs):
+            candidate = original_step(*args, **kwargs)
+            token.cancel()
+            return candidate
+
+        monkeypatch.setattr(pr_workflow, "euler_step", cancelling_step)
+        expected_stage = "euler_after_material_update"
+    else:
+        original_slice = pr_workflow.advance_pr_slice_with_midpoint_source
+        slice_calls = 0
+        longitudinal_slices = round(
+            request.grid.z_length_um / request.grid.dz_um
+        )
+
+        def cancelling_slice(*args, **kwargs):
+            nonlocal slice_calls
+            result = original_slice(*args, **kwargs)
+            slice_calls += 1
+            if slice_calls == longitudinal_slices + 1:
+                token.cancel()
+            return result
+
+        monkeypatch.setattr(
+            pr_workflow,
+            "advance_pr_slice_with_midpoint_source",
+            cancelling_slice,
+        )
+        expected_stage = "material_source_optical_z_march"
+
+    result = run_pr_timedependent(request, cancellation_token=token)
+
+    assert result.status == "cancelled"
+    assert result.completed_steps == 0
+    assert result.time_normalized == 0.0
+    np.testing.assert_array_equal(result.E_final, result.E_initial)
+    np.testing.assert_array_equal(result.checkpoint.E_current, result.E_initial)
+    assert result.diagnostics["cancellation_observed_stage"] == expected_stage
+    assert result.diagnostics["final_optical_observation"] == (
+        "cached_accepted_state_replay"
+    )
+
+
+def test_cancellation_during_first_optical_pass_discards_partial_march(monkeypatch):
+    base = _request(steps=2)
+    request = replace(
+        base,
+        solver=replace(
+            base.solver,
+            integrator=PR_SEMI_IMPLICIT_INTEGRATOR,
+        ),
+    )
+    token = CancellationToken()
+    original_slice = pr_workflow.advance_pr_slice_with_midpoint_source
+    slice_calls = 0
+
+    def cancelling_slice(*args, **kwargs):
+        nonlocal slice_calls
+        result = original_slice(*args, **kwargs)
+        slice_calls += 1
+        if slice_calls == 1:
+            token.cancel()
+        return result
+
+    monkeypatch.setattr(
+        pr_workflow,
+        "advance_pr_slice_with_midpoint_source",
+        cancelling_slice,
+    )
+
+    result = run_pr_timedependent(request, cancellation_token=token)
+
+    assert slice_calls == 1
+    assert result.status == "cancelled"
+    assert result.completed_steps == 0
+    np.testing.assert_array_equal(result.E_final, result.E_initial)
+    np.testing.assert_array_equal(result.A_final, result.A_initial)
+    assert result.diagnostics["final_optical_observation"] == (
+        "unpropagated_launch_fallback"
+    )
+    assert result.diagnostics["complete_optical_replay_available"] is False
+    assert result.diagnostics["optical_products_are_launch_fallback"] is True
+    data = pr_result_to_run_data(result)
+    assert data.fields["output_intensity"].display_name == (
+        "Launch-Plane Intensity (Cancellation Fallback)"
+    )
+    assert data.fields["pr_driving_intensity_stack"].display_name == (
+        "Launch-Plane PR-Driving Intensity (Cancellation Fallback)"
+    )
+
+
+def test_headless_cancellation_after_accepted_step_labels_launch_fallback():
+    base = _request(steps=3)
+    request = replace(
+        base,
+        solver=replace(base.solver, integrator=PR_EULER_INTEGRATOR),
+    )
+
+    class CancelAtSecondStepBoundary:
+        def __init__(self):
+            self.calls = 0
+
+        def is_cancelled(self):
+            self.calls += 1
+            return self.calls >= 6
+
+    result = run_pr_timedependent(
+        request,
+        cancellation_token=CancelAtSecondStepBoundary(),
+    )
+    data = pr_result_to_run_data(result)
+
+    assert result.status == "cancelled"
+    assert result.completed_steps == 1
+    assert result.checkpoint.completed_steps == 1
+    assert result.diagnostics["cancellation_observed_stage"] == (
+        "material_step_boundary"
+    )
+    assert result.diagnostics["final_optical_observation"] == (
+        "unpropagated_launch_fallback"
+    )
+    assert result.diagnostics["complete_optical_replay_available"] is False
+    assert result.diagnostics["optical_products_are_launch_fallback"] is True
+    assert data.fields["output_intensity"].display_name == (
+        "Launch-Plane Intensity (Cancellation Fallback)"
+    )
+    assert data.fields["pr_driving_intensity_stack"].display_name == (
+        "Launch-Plane PR-Driving Intensity (Cancellation Fallback)"
+    )
+
+
+def test_semi_implicit_cancellation_after_predictor_solve_discards_candidate(
+    monkeypatch,
+):
+    base = _request(steps=2)
+    request = replace(
+        base,
+        solver=replace(
+            base.solver,
+            integrator=PR_SEMI_IMPLICIT_INTEGRATOR,
+        ),
+    )
+    token = CancellationToken()
+    original_solve = pr_evolution.solve_periodic_variable_diffusion
+    solve_calls = 0
+
+    def cancelling_solve(*args, **kwargs):
+        nonlocal solve_calls
+        candidate = original_solve(*args, **kwargs)
+        solve_calls += 1
+        if solve_calls == 1:
+            token.cancel()
+        return candidate
+
+    monkeypatch.setattr(
+        pr_evolution,
+        "solve_periodic_variable_diffusion",
+        cancelling_solve,
+    )
+
+    result = run_pr_timedependent(request, cancellation_token=token)
+
+    assert solve_calls == 1
+    assert result.status == "cancelled"
+    assert result.completed_steps == 0
+    np.testing.assert_array_equal(result.E_final, result.E_initial)
+    assert result.diagnostics["cancellation_observed_stage"] == (
+        "semi_implicit_predictor_corrector"
     )

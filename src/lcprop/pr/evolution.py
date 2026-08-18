@@ -355,6 +355,7 @@ def semi_implicit_trapezoidal_step(
     background_intensity: float,
     dx_normalized: float,
     xp: Any,
+    cancellation_check: Callable[[], None] | None = None,
 ):
     """Advance one production second-order PR material step.
 
@@ -364,7 +365,10 @@ def semi_implicit_trapezoidal_step(
     prescribed intensity or the complete self-consistent optical mapping.
 
     This primitive is selected by the production PR workflow when the
-    ``semi_implicit_trapezoidal`` integrator is requested.
+    ``semi_implicit_trapezoidal`` integrator is requested.  The optional
+    ``cancellation_check`` is called only between discardable substages; an
+    exception from it prevents this function from returning a candidate
+    state and therefore cannot accept a partial material step.
     """
 
     dt = float(dt_normalized)
@@ -374,6 +378,8 @@ def semi_implicit_trapezoidal_step(
         raise TypeError("intensity_from_state must be callable")
 
     intensity_n = xp.asarray(intensity_from_state(E), dtype=E.dtype)
+    if cancellation_check is not None:
+        cancellation_check()
     implicit_n, explicit_n = diffusion_implicit_split(
         E,
         intensity_n,
@@ -389,11 +395,15 @@ def semi_implicit_trapezoidal_step(
         dx_normalized=dx_normalized,
         xp=xp,
     )
+    if cancellation_check is not None:
+        cancellation_check()
 
     intensity_predictor = xp.asarray(
         intensity_from_state(predictor),
         dtype=E.dtype,
     )
+    if cancellation_check is not None:
+        cancellation_check()
     _, explicit_predictor = diffusion_implicit_split(
         predictor,
         intensity_predictor,
@@ -405,13 +415,16 @@ def semi_implicit_trapezoidal_step(
     corrected_rhs = E + 0.5 * dt * (
         implicit_n + explicit_n + explicit_predictor
     )
-    return solve_periodic_variable_diffusion(
+    corrected = solve_periodic_variable_diffusion(
         corrected_rhs,
         intensity_predictor,
         alpha=0.5 * dt,
         dx_normalized=dx_normalized,
         xp=xp,
     )
+    if cancellation_check is not None:
+        cancellation_check()
+    return corrected
 
 
 def euler_step(

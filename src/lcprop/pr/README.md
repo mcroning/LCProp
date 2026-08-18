@@ -332,6 +332,20 @@ field `A0`. An intermediate propagated optical field is not checkpoint state:
 every material update reconstructs its optical source by propagating `A0`
 through the accepted `E_current`.
 
+Active cancellation is cooperative within otherwise discardable work. The
+workflow checks between longitudinal optical slices, after source evaluation,
+and between material predictor/corrector stages. A candidate material update
+is not assigned until all required work succeeds, so cancellation discards a
+partial optical march or material update and leaves the last accepted `E`
+authoritative. Whenever cancellation returns without a complete optical replay
+of the latest accepted state, the result explicitly identifies its optical
+products as an unpropagated launch fallback. This can occur before the first
+material update or after accepted headless updates when no matching replay was
+retained. Presentation labels identify the launch-plane intensity and source
+as cancellation fallbacks; no partial z-march is presented as propagated
+output. Checkpoint continuation still begins from the exact accepted `E` and
+entrance field `A0`.
+
 `continue_pr_timedependent()` resumes for an explicit number of additional
 steps. Completed steps, requested steps, normalized material time, and progress
 records remain cumulative, while `E_initial` continues to mean the initial

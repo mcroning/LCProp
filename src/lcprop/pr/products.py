@@ -41,11 +41,11 @@ def _copied_array(value: Any) -> np.ndarray:
 def _readonly_shared_numpy_array(value: Any) -> np.ndarray:
     """Share a canonical host array through a read-only presentation view.
 
-    ``run_pr_static`` already detaches its retained volumes at the workflow
-    result boundary.  A view avoids duplicating those volumes while preventing
-    GUI/presentation consumers from mutating the authoritative result.  Keep a
-    defensive copy for non-NumPy inputs whose ownership is not established by
-    the canonical static workflow.
+    Canonical PR workflows detach retained volumes at their result boundary.
+    A view avoids duplicating those volumes while preventing GUI/presentation
+    consumers from mutating the authoritative result.  Keep a defensive copy
+    for non-NumPy inputs whose ownership is not established by the canonical
+    workflow.
     """
 
     if not isinstance(value, np.ndarray):
@@ -89,9 +89,14 @@ def _validated_result_arrays(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     A_initial = _copied_array(result.A_initial)
     A_final = _copied_array(result.A_final)
-    E_initial = _copied_array(result.E_initial)
-    E_final = _copied_array(result.E_final)
-    source_intensity = _copied_array(result.source_intensity_stack)
+    volume_adapter = (
+        _readonly_shared_numpy_array
+        if result.status == "cancelled"
+        else _copied_array
+    )
+    E_initial = volume_adapter(result.E_initial)
+    E_final = volume_adapter(result.E_final)
+    source_intensity = volume_adapter(result.source_intensity_stack)
 
     nx = len(np.asarray(geometry.x))
     ny = len(np.asarray(geometry.y))
@@ -154,6 +159,11 @@ def pr_result_to_run_data(result: PRRunResult) -> RunData:
     input_intensity = _optical_intensity(A_initial, launch_summary)
     output_intensity = _optical_intensity(A_final, launch_summary)
     selected_z_index = E_final.shape[0] // 2
+    launch_fallback = (
+        result.status == "cancelled"
+        and result.diagnostics.get("final_optical_observation")
+        == "unpropagated_launch_fallback"
+    )
 
     spatial_units = {"x": "um", "y": "um"}
     volume_units = {"z": "um", "x": "um", "y": "um"}
@@ -175,7 +185,11 @@ def pr_result_to_run_data(result: PRRunResult) -> RunData:
             "output_intensity",
             make_field(
                 "output_intensity",
-                "Output Plane Intensity",
+                (
+                    "Launch-Plane Intensity (Cancellation Fallback)"
+                    if launch_fallback
+                    else "Output Plane Intensity"
+                ),
                 output_intensity,
                 ("x", "y"),
                 "intensity",
@@ -248,7 +262,12 @@ def pr_result_to_run_data(result: PRRunResult) -> RunData:
             "pr_driving_intensity_stack",
             make_field(
                 "pr_driving_intensity_stack",
-                "Final PR-Driving Intensity",
+                (
+                    "Launch-Plane PR-Driving Intensity "
+                    "(Cancellation Fallback)"
+                    if launch_fallback
+                    else "Final PR-Driving Intensity"
+                ),
                 source_intensity,
                 ("z", "x", "y"),
                 "pr_driving_intensity",
