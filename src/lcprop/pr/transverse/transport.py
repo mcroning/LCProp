@@ -176,9 +176,77 @@ def explicit_euler_step(
     return candidate
 
 
+def imex_euler_step(
+    psi,
+    intensity,
+    *,
+    dt_normalized: float,
+    dx_normalized: float,
+    dy_normalized: float,
+    m_y: float = 1.0,
+    h_y: float = 1.0,
+    applied_field_x: float = 0.0,
+) -> np.ndarray:
+    """Advance one first-order spectral IMEX Euler material step.
+
+    For every longitudinal plane, ``Istar`` is the maximum of the supplied
+    production transport intensity. The frozen split is
+
+    ``A psi = -Istar * (1 + L) psi``, with ``L = -laplacian``, and
+    ``N = F - A psi``. The supplied intensity is used unchanged; callers must
+    not add dark or uniform background terms again.
+    """
+
+    potential = _real_array(psi, name="psi")
+    driving = _real_array(intensity, name="intensity")
+    if driving.shape != potential.shape:
+        raise ValueError("psi and intensity must have identical shapes")
+    if np.any(driving < 0.0):
+        raise ValueError("intensity must be nonnegative")
+    dt = float(dt_normalized)
+    if not math.isfinite(dt) or dt <= 0.0:
+        raise ValueError("dt_normalized must be finite and positive")
+
+    full_rhs = potential_rhs(
+        potential,
+        driving,
+        dx_normalized=dx_normalized,
+        dy_normalized=dy_normalized,
+        m_y=m_y,
+        h_y=h_y,
+        applied_field_x=applied_field_x,
+    )
+    kx, ky = spectral_wavevectors(
+        potential.shape[-2:],
+        dx_normalized=dx_normalized,
+        dy_normalized=dy_normalized,
+    )
+    k_squared = kx * kx + ky * ky
+    potential_hat = np.fft.fft2(potential, axes=(-2, -1))
+    if potential.ndim == 2:
+        Istar = np.max(driving).reshape(1, 1)
+    else:
+        Istar = np.max(driving, axis=(-2, -1), keepdims=True)
+    implicit_rate = Istar * (1.0 + k_squared)
+    A_psi_hat = -implicit_rate * potential_hat
+    nonlinear_hat = (
+        np.fft.fft2(full_rhs, axes=(-2, -1)) - A_psi_hat
+    )
+    candidate_hat = (
+        potential_hat + dt * nonlinear_hat
+    ) / (1.0 + dt * implicit_rate)
+    candidate_hat = np.where(k_squared == 0.0, 0.0, candidate_hat)
+    candidate = np.fft.ifft2(candidate_hat, axes=(-2, -1)).real
+    candidate = candidate.astype(potential.dtype, copy=False)
+    if not np.all(np.isfinite(candidate)):
+        raise FloatingPointError("nonfinite potential during transverse IMEX evolution")
+    return candidate
+
+
 __all__ = [
     "PRTransverseState",
     "explicit_euler_step",
+    "imex_euler_step",
     "potential_rhs",
     "spectral_derivatives",
     "spectral_wavevectors",

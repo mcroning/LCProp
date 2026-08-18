@@ -15,6 +15,11 @@ from lcprop.pr.specs import PRMaterialSpec
 PR_FULL_TRANSVERSE_PROFILE_V1 = "pr_full_transverse_unbiased_reference_v1"
 PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW = "pr_transverse_timedependent"
 PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE = "explicit_euler_reference"
+PR_TRANSVERSE_IMEX_EULER = "spectral_imex_euler"
+PR_TRANSVERSE_INTEGRATORS = (
+    PR_TRANSVERSE_IMEX_EULER,
+    PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE,
+)
 
 
 @dataclass(frozen=True)
@@ -83,16 +88,16 @@ class PRTransverseBoundaryProfile:
 
 @dataclass(frozen=True)
 class PRTransverseSolverOptions:
-    """Reference material-time and optical controls for Profile v1.
+    """Material-time integrator and optical controls for Profile v1.
 
-    Explicit Euler is exposed only as the transparent first NumPy reference;
-    it is not designated as the future production-default integrator.
+    First-order spectral IMEX Euler is the production default. Explicit Euler
+    remains available as the transparent NumPy reference integrator.
     """
 
     Nt: int = 1
     dt_normalized: float = 1.0e-3
     optical_substeps: int = 1
-    integrator: str = PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE
+    integrator: str = PR_TRANSVERSE_IMEX_EULER
 
     def validate(self) -> None:
         if int(self.Nt) < 0:
@@ -101,8 +106,10 @@ class PRTransverseSolverOptions:
             raise ValueError("dt_normalized must be finite and positive")
         if int(self.optical_substeps) < 1:
             raise ValueError("optical_substeps must be at least one")
-        if self.integrator != PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE:
-            raise ValueError("the first NumPy transverse API supports explicit Euler only")
+        if self.integrator not in PR_TRANSVERSE_INTEGRATORS:
+            raise ValueError(
+                "integrator must be one of " + ", ".join(PR_TRANSVERSE_INTEGRATORS)
+            )
 
 
 @dataclass(frozen=True)
@@ -148,6 +155,8 @@ class PRTransverseRunResult:
 __all__ = [
     "PR_FULL_TRANSVERSE_PROFILE_V1",
     "PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE",
+    "PR_TRANSVERSE_IMEX_EULER",
+    "PR_TRANSVERSE_INTEGRATORS",
     "PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW",
     "PRTransverseBoundaryProfile",
     "PRTransverseDielectricProfile",

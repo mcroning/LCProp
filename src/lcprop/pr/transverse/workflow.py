@@ -17,11 +17,17 @@ from lcprop.pr.transverse.diagnostics import state_diagnostics
 from lcprop.pr.transverse.projection import project_active_field
 from lcprop.pr.transverse.specs import (
     PR_FULL_TRANSVERSE_PROFILE_V1,
+    PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE,
+    PR_TRANSVERSE_IMEX_EULER,
     PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
     PRTransverseRunRequest,
     PRTransverseRunResult,
 )
-from lcprop.pr.transverse.transport import explicit_euler_step, state_from_potential
+from lcprop.pr.transverse.transport import (
+    explicit_euler_step,
+    imex_euler_step,
+    state_from_potential,
+)
 from lcprop.pr.workflow import advance_pr_slice_with_midpoint_source
 
 
@@ -193,7 +199,15 @@ def run_pr_transverse_timedependent(
                 dy_normalized=dy_normalized,
                 cancellation_token=cancellation_token,
             )
-            candidate = explicit_euler_step(
+            if request.solver.integrator == PR_TRANSVERSE_IMEX_EULER:
+                step_function = imex_euler_step
+            elif request.solver.integrator == PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE:
+                step_function = explicit_euler_step
+            else:  # guarded by PRTransverseSolverOptions.validate()
+                raise ValueError(
+                    f"unknown transverse PR integrator: {request.solver.integrator}"
+                )
+            candidate = step_function(
                 psi,
                 source,
                 dt_normalized=request.solver.dt_normalized,
@@ -279,7 +293,11 @@ def run_pr_transverse_timedependent(
             "optical_power_relative_drift": (power_final - power_initial) / power_initial,
             "finite_optical_state": bool(np.all(np.isfinite(A_final))),
             "cancellation_observed_stage": cancellation_stage,
-            "integrator_policy": "transparent_reference_not_production_default",
+            "integrator_policy": (
+                "production_first_order_spectral_imex"
+                if request.solver.integrator == PR_TRANSVERSE_IMEX_EULER
+                else "transparent_reference_not_production_default"
+            ),
             "complete_final_optical_replay": True,
         }
     )
