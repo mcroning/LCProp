@@ -184,6 +184,41 @@ precision default without changing the fixed-intensity solver API. Results
 record every resolved value and whether it came from the precision policy, an
 explicit workflow override, or an explicitly supplied material-solver object.
 
+## Full-transverse zero-flux static equilibrium
+
+`run_pr_transverse_static()` solves the grid-discretized zero-flux steady
+equation derived from the continuum transverse PR transport model. For every
+frozen complete midpoint transport intensity, the backend-native Newton/PCG
+material solver requires both zero-flux residual RMS and maximum tolerances,
+finite zero-mean potential, positive normalized carrier density, and the
+resolved periodic spectral convention. Its nonlinear-aware PCG forcing keeps
+the ordinary linear tolerance away from convergence and tightens only when
+the zero-flux RMS gate is met while its pointwise maximum remains unresolved.
+The near-gate caps default to `1e-7` relative and `1e-9` absolute; existing
+float64 defaults are already tighter and therefore remain unchanged.
+After every PCG solution update, the solver recomputes the true linear
+residual `rhs - J(solution)`. This prevents a recursively accumulated float32
+residual from drifting below the actual residual near the spectral/projection
+noise floor and gives NumPy and CuPy the same convergence contract. The true
+residual is used consistently for convergence, preconditioning, `r^T z`,
+beta, and the next search direction.
+
+The coupled optical/material loop and its backtracking use the refreshed-source
+zero-flux residual as the authoritative merit. A complete independent optical
+replay reconstructs the midpoint source and re-evaluates the zero-flux gates
+before success is reported. The production transverse-TD residual from
+`potential_rhs(psi, transport_intensity)` remains available and clearly
+labeled as a finite-grid TD-discretization diagnostic; it is not a physical
+static acceptance condition.
+
+The matrix-free Newton–GMRES solver for the exact finite-resolution TD fixed
+point is retained as the explicitly invoked experimental function
+`solve_pr_transverse_discrete_static_intensity()`. It supports NumPy and CuPy
+for TD/static discretization studies but is not called by the canonical static
+workflow. Agreement of the long-time TD solution with the zero-flux static
+solution is a separate resolution, aliasing/dealiasing, and discretization
+validation problem.
+
 ## Image-amplification numerical readiness
 
 `run_image_amplification_readiness()` is a bounded headless acceptance case,

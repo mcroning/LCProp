@@ -162,14 +162,14 @@ def pr_transverse_static_result_to_run_data(
         ),
         (
             "equilibrium_residual",
-            "Static Equilibrium Residual",
+            "Authoritative Zero-Flux Static Residual",
             result.equilibrium_residual_stack,
             "residual",
             "coolwarm",
         ),
         (
             "td_rhs_residual",
-            "Production TD RHS at Static State",
+            "Diagnostic Production TD RHS at Zero-Flux Static State",
             result.td_rhs_residual_stack,
             "residual",
             "coolwarm",

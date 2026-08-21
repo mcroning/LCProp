@@ -76,14 +76,46 @@ def test_coupled_static_converges_with_refreshed_source_and_independent_replay()
     assert result.diagnostics["equilibrium_residual_max"] < 1e-7
     assert result.diagnostics["td_rhs_residual_rms"] < 1e-8
     assert result.diagnostics["td_rhs_residual_max"] < 1e-7
+    assert result.diagnostics["discrete_corrector"][
+        "authoritative_convergence"
+    ] == "zero_flux_equilibrium_rms_and_max"
+    assert result.diagnostics["discrete_corrector"]["invoked"] is False
+    assert result.diagnostics["td_rhs_residual_role"] == "diagnostic_only"
     assert np.min(result.source_intensity_stack) >= 0.5
     assert result.timing["material_solve_seconds"] > 0.0
+    assert result.timing["continuum_initializer_seconds"] > 0.0
+    assert result.timing["discrete_corrector_seconds"] == 0.0
     assert result.timing["optical_pass_seconds"] > 0.0
     assert all(record.material_pcg_iterations >= 0 for record in result.iteration_records)
     assert result.material_iteration_records
+    assert isinstance(result.discrete_iteration_records, tuple)
+    assert result.discrete_iteration_records == ()
     assert all(
         record.newton_record.plane_index in (0, 1)
         for record in result.material_iteration_records
+    )
+
+
+def test_outer_convergence_is_authoritative_on_refreshed_zero_flux_residual():
+    request = _request()
+    request = replace(
+        request,
+        solver=replace(
+            request.solver,
+            td_rhs_rms_tolerance=1.0e-30,
+            td_rhs_max_tolerance=1.0e-30,
+        ),
+    )
+    result = run_pr_transverse_static(request)
+    assert result.converged
+    assert result.diagnostics["equilibrium_residual_rms"] <= (
+        request.solver.equilibrium_rms_tolerance
+    )
+    assert result.diagnostics["equilibrium_residual_max"] <= (
+        request.solver.equilibrium_max_tolerance
+    )
+    assert result.diagnostics["td_rhs_residual_rms"] > (
+        request.solver.td_rhs_rms_tolerance
     )
 
 
@@ -148,12 +180,30 @@ def test_cancellation_during_material_trial_discards_partial_candidate(monkeypat
         token.cancel()
         return result
 
-    monkeypatch.setattr(module, "solve_pr_transverse_static_intensity", cancelling_solve)
+    monkeypatch.setattr(
+        module, "solve_pr_transverse_static_intensity", cancelling_solve
+    )
     result = run_pr_transverse_static(_request(), cancellation_token=token)
     assert result.status == "cancelled"
     assert result.completed_coupled_iterations == 0
     np.testing.assert_array_equal(result.psi_final, result.psi_initial)
     assert not any(record.accepted for record in result.iteration_records)
+
+
+def test_canonical_workflow_never_invokes_experimental_discrete_corrector(
+    monkeypatch,
+):
+    import lcprop.pr.transverse.static as static_module
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("canonical workflow invoked discrete corrector")
+
+    monkeypatch.setattr(
+        static_module, "solve_pr_transverse_discrete_static_intensity", forbidden
+    )
+    result = run_pr_transverse_static(_request())
+    assert result.converged
+    assert result.discrete_iteration_records == ()
 
 
 def test_nonconvergence_is_distinct_from_success():
@@ -189,11 +239,11 @@ def test_static_products_and_material_neutral_operation_reconstruct_state():
     assert composed.run_data.workflow == PR_TRANSVERSE_STATIC_WORKFLOW
 
 
-def test_static_workflow_rejects_backend_expansion_and_accepts_optical_only_intensity():
-    with pytest.raises(ValueError, match="backend='numpy'"):
+def test_static_workflow_rejects_auto_and_accepts_optical_only_intensity():
+    with pytest.raises(ValueError, match="explicit"):
         run_pr_transverse_static(replace(
             _request(),
-            backend=BackendSpec(backend="cupy", precision="float64", verbose=False),
+            backend=BackendSpec(backend="auto", precision="float64", verbose=False),
         ))
     with pytest.raises(ValueError, match="requires precision='float64'"):
         run_pr_transverse_static(replace(

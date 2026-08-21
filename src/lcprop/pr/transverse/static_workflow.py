@@ -1,4 +1,4 @@
-"""Self-consistent NumPy workflow for full-transverse PR equilibrium."""
+"""Backend-native self-consistent workflow for full-transverse PR equilibrium."""
 
 from __future__ import annotations
 
@@ -9,7 +9,13 @@ from typing import Any, Callable
 
 import numpy as np
 
-from lcprop.core.backend import BackendSpec, get_backend
+from lcprop.core.backend import (
+    BackendSpec,
+    asnumpy,
+    get_backend,
+    scalar_float,
+    synchronize,
+)
 from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken, RunProgress
@@ -31,8 +37,11 @@ from lcprop.pr.transverse.specs import (
     PRTransverseTransportProfile,
 )
 from lcprop.pr.transverse.static import (
+    PRTransverseDiscreteStaticCorrectorOptions,
+    PRTransverseDiscreteStaticNewtonRecord,
     PRTransverseStaticMaterialSolverOptions,
     PRTransverseStaticNewtonRecord,
+    _physical_state_validity,
     derivative_null_residual,
     project_production_resolved_modes,
     solve_pr_transverse_static_intensity,
@@ -52,10 +61,18 @@ ProgressCallback = Callable[[RunProgress], None]
 
 @dataclass(frozen=True)
 class PRTransverseStaticWorkflowOptions:
-    """Coupled full-volume static controls, distinct from transient controls."""
+    """Coupled full-volume zero-flux controls, distinct from transient controls.
+
+    The discrete-corrector and TD-residual fields remain compatibility and
+    diagnostic configuration.  They do not participate in canonical static
+    material, outer-loop, or final-replay acceptance.
+    """
 
     material_solver: PRTransverseStaticMaterialSolverOptions = field(
         default_factory=PRTransverseStaticMaterialSolverOptions
+    )
+    discrete_corrector: PRTransverseDiscreteStaticCorrectorOptions = field(
+        default_factory=PRTransverseDiscreteStaticCorrectorOptions
     )
     max_coupled_iterations: int = 20
     equilibrium_rms_tolerance: float = 1.0e-8
@@ -72,6 +89,7 @@ class PRTransverseStaticWorkflowOptions:
 
     def validate(self) -> None:
         self.material_solver.validate()
+        self.discrete_corrector.validate()
         if int(self.max_coupled_iterations) < 1:
             raise ValueError("max_coupled_iterations must be at least one")
         if int(self.max_backtracks) < 0:
@@ -138,6 +156,8 @@ class PRTransverseStaticCoupledRecord:
     backtracks: int
     material_newton_iterations: int
     material_pcg_iterations: int
+    material_discrete_newton_iterations: int
+    material_gmres_iterations: int
     accepted: bool
     termination_reason: str
 
@@ -148,6 +168,14 @@ class PRTransverseStaticMaterialIterationRecord:
 
     coupled_iteration: int
     newton_record: PRTransverseStaticNewtonRecord
+
+
+@dataclass(frozen=True)
+class PRTransverseStaticDiscreteIterationRecord:
+    """One discrete Newton/GMRES record associated with an outer iteration."""
+
+    coupled_iteration: int
+    newton_record: PRTransverseDiscreteStaticNewtonRecord
 
 
 @dataclass(frozen=True)
@@ -168,6 +196,9 @@ class PRTransverseStaticRunResult:
     iteration_records: tuple[PRTransverseStaticCoupledRecord, ...]
     material_iteration_records: tuple[
         PRTransverseStaticMaterialIterationRecord, ...
+    ]
+    discrete_iteration_records: tuple[
+        PRTransverseStaticDiscreteIterationRecord, ...
     ]
     grid_summary: dict[str, Any]
     launch_summary: dict[str, Any]
@@ -191,9 +222,12 @@ def _validate_request(request: PRTransverseStaticRunRequest) -> None:
     request.backend.validate()
     if request.scattering is not None:
         request.scattering.validate()
-    if request.backend.backend != "numpy":
-        raise ValueError("full-transverse static reference requires backend='numpy'")
-    if request.backend.precision != "float64":
+    if request.backend.backend not in ("numpy", "cupy"):
+        raise ValueError(
+            "full-transverse static workflow requires explicit "
+            "backend='numpy' or backend='cupy'"
+        )
+    if request.backend.backend == "numpy" and request.backend.precision != "float64":
         raise ValueError(
             "full-transverse static NumPy reference requires precision='float64'"
         )
@@ -201,14 +235,21 @@ def _validate_request(request: PRTransverseStaticRunRequest) -> None:
         raise ValueError("Profile v1 requires material.applied_field=0")
 
 
-def _metrics(value) -> tuple[float, float]:
-    work = np.asarray(value, dtype=np.float64)
-    return float(np.sqrt(np.mean(work * work))), float(np.max(np.abs(work)))
+def _metrics(value, *, xp) -> tuple[float, float]:
+    accumulator_dtype = xp.float64 if value.dtype == np.dtype(np.float64) else xp.float32
+    work = value.astype(accumulator_dtype, copy=False)
+    return (
+        scalar_float(xp.sqrt(xp.mean(work * work))),
+        scalar_float(xp.max(xp.abs(work))),
+    )
 
 
-def _difference_rms(left, right) -> float:
-    difference = np.asarray(left) - np.asarray(right)
-    return float(np.sqrt(np.mean(np.abs(difference) ** 2, dtype=np.float64)))
+def _difference_rms(left, right, *, xp) -> float:
+    difference = left - right
+    accumulator_dtype = xp.float64 if difference.real.dtype == np.dtype(np.float64) else xp.float32
+    return scalar_float(
+        xp.sqrt(xp.mean(xp.abs(difference) ** 2, dtype=accumulator_dtype))
+    )
 
 
 def _residuals(
@@ -218,6 +259,7 @@ def _residuals(
     dx_normalized: float,
     dy_normalized: float,
     h_y: float,
+    xp,
 ):
     equilibrium = static_equilibrium_residual(
         psi,
@@ -225,6 +267,7 @@ def _residuals(
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=h_y,
+        xp=xp,
     )
     td = potential_rhs(
         psi,
@@ -233,35 +276,27 @@ def _residuals(
         dy_normalized=dy_normalized,
         h_y=h_y,
         applied_field_x=0.0,
-        xp=np,
+        xp=xp,
     )
     resolved_equilibrium = project_production_resolved_modes(
         equilibrium,
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=h_y,
+        xp=xp,
     )
-    return equilibrium, td, (*_metrics(resolved_equilibrium), *_metrics(td))
+    return equilibrium, td, (
+        *_metrics(resolved_equilibrium, xp=xp),
+        *_metrics(td, xp=xp),
+    )
 
 
 def _criteria_met(metrics, options: PRTransverseStaticWorkflowOptions) -> bool:
-    equilibrium_rms, equilibrium_max, td_rms, td_max = metrics
+    equilibrium_rms, equilibrium_max, _, _ = metrics
     return (
         equilibrium_rms <= float(options.equilibrium_rms_tolerance)
         and equilibrium_max <= float(options.equilibrium_max_tolerance)
-        and td_rms <= float(options.td_rhs_rms_tolerance)
-        and td_max <= float(options.td_rhs_max_tolerance)
     )
-
-
-def _scaled_merit(metrics, options: PRTransverseStaticWorkflowOptions) -> float:
-    tolerances = (
-        options.equilibrium_rms_tolerance,
-        options.equilibrium_max_tolerance,
-        options.td_rhs_rms_tolerance,
-        options.td_rhs_max_tolerance,
-    )
-    return max(float(value) / float(tolerance) for value, tolerance in zip(metrics, tolerances))
 
 
 def run_pr_transverse_static(
@@ -270,12 +305,13 @@ def run_pr_transverse_static(
     cancellation_token: CancellationToken | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> PRTransverseStaticRunResult:
-    """Solve the self-consistent Profile-v1 static optical/material problem."""
+    """Solve the self-consistent Profile-v1 zero-flux static problem."""
 
     started = perf_counter()
     _validate_request(request)
     backend = get_backend(request.backend)
-    grid = make_grid(request.grid, xp=np, real_dtype=backend.real_dtype)
+    xp = backend.xp
+    grid = make_grid(request.grid, xp=xp, real_dtype=backend.real_dtype)
     _validate_canonical_scattering_for_grid(
         request.scattering, grid=grid, z_length_um=request.grid.z_length_um
     )
@@ -288,10 +324,11 @@ def run_pr_transverse_static(
         real_dtype=backend.real_dtype,
     )
     psi = project_production_resolved_modes(
-        np.asarray(psi),
+        psi,
         dx_normalized=request.material.characteristic_wavenumber_per_um * grid.dx_um,
         dy_normalized=request.material.characteristic_wavenumber_per_um * grid.dy_um,
         h_y=request.dielectric.h_y,
+        xp=xp,
     )
     psi_initial = psi.copy()
     initial_state = state_from_potential(
@@ -299,10 +336,16 @@ def run_pr_transverse_static(
         dx_normalized=request.material.characteristic_wavenumber_per_um * grid.dx_um,
         dy_normalized=request.material.characteristic_wavenumber_per_um * grid.dy_um,
         h_y=request.dielectric.h_y,
-        xp=np,
+        xp=xp,
     )
-    if np.any(initial_state.carrier_density <= 0.0):
-        raise ValueError("initial_psi reconstructs nonpositive carrier density")
+    initial_state_valid, _, initial_carrier_minimum, _ = _physical_state_validity(
+        initial_state, xp=xp
+    )
+    if not initial_state_valid:
+        raise ValueError(
+            "initial_psi violates the finite, positive, normalized, zero-mean "
+            f"static state contract (carrier minimum {initial_carrier_minimum})"
+        )
     wavelengths = tuple(float(channel.wavelength_um) for channel in request.beams.channels)
     if any(value != wavelengths[0] for value in wavelengths[1:]):
         raise ValueError("transverse PR workflow requires one shared wavelength")
@@ -312,18 +355,20 @@ def run_pr_transverse_static(
         dz=grid.dz_um / int(request.solver.optical_substeps),
         wavelength=wavelength_um,
         n_ref=request.material.refractive_index,
-        xp=np,
+        xp=xp,
     )
-    peak_reference = channel_peak_intensity_reference(A0, xp=np)
+    peak_reference = channel_peak_intensity_reference(A0, xp=xp)
     k0 = request.material.characteristic_wavenumber_per_um
     dx_normalized = k0 * grid.dx_um
     dy_normalized = k0 * grid.dy_um
 
     optical_seconds = 0.0
     material_seconds = 0.0
+    zero_flux_material_seconds = 0.0
 
     def optical_pass(state):
         nonlocal optical_seconds
+        synchronize(xp)
         pass_started = perf_counter()
         result = _optical_pass(
             A0,
@@ -337,6 +382,7 @@ def run_pr_transverse_static(
             dy_normalized=dy_normalized,
             cancellation_token=None,
         )
+        synchronize(xp)
         optical_seconds += perf_counter() - pass_started
         return result
 
@@ -347,9 +393,11 @@ def run_pr_transverse_static(
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
+        xp=xp,
     )
     records: list[PRTransverseStaticCoupledRecord] = []
     material_records: list[PRTransverseStaticMaterialIterationRecord] = []
+    discrete_records: list[PRTransverseStaticDiscreteIterationRecord] = []
     completed_iterations = 0
     converged = _criteria_met(metrics, request.solver)
     cancelled = False
@@ -362,6 +410,7 @@ def run_pr_transverse_static(
             break
         if converged:
             break
+        synchronize(xp)
         material_started = perf_counter()
         material = solve_pr_transverse_static_intensity(
             source_accepted,
@@ -370,14 +419,21 @@ def run_pr_transverse_static(
             initial_psi=psi,
             h_y=request.dielectric.h_y,
             options=request.solver.material_solver,
+            xp=xp,
         )
+        synchronize(xp)
         material_seconds += perf_counter() - material_started
+        zero_flux_material_seconds += material.elapsed_seconds
         material_newton = sum(
-            summary.newton_iterations for summary in material.plane_summaries
+            summary.newton_iterations
+            for summary in material.plane_summaries
         )
         material_pcg = sum(
-            summary.pcg_iterations for summary in material.plane_summaries
+            summary.pcg_iterations
+            for summary in material.plane_summaries
         )
+        material_discrete_newton = 0
+        material_gmres = 0
         if request.solver.record_iteration_history:
             material_records.extend(
                 PRTransverseStaticMaterialIterationRecord(
@@ -411,13 +467,14 @@ def run_pr_transverse_static(
                     backtracks=0,
                     material_newton_iterations=material_newton,
                     material_pcg_iterations=material_pcg,
+                    material_discrete_newton_iterations=material_discrete_newton,
+                    material_gmres_iterations=material_gmres,
                     accepted=False,
                     termination_reason=termination_reason,
                 ))
             break
 
         direction = material.psi - psi
-        merit = _scaled_merit(metrics, request.solver)
         step_scale = 1.0
         accepted = False
         backtracks = 0
@@ -433,15 +490,17 @@ def run_pr_transverse_static(
                 dx_normalized=dx_normalized,
                 dy_normalized=dy_normalized,
                 h_y=request.dielectric.h_y,
+                xp=xp,
             )
             trial_state = state_from_potential(
                 trial_psi,
                 dx_normalized=dx_normalized,
                 dy_normalized=dy_normalized,
                 h_y=request.dielectric.h_y,
-                xp=np,
+                xp=xp,
             )
-            if np.all(np.isfinite(trial_psi)) and np.all(trial_state.carrier_density > 0.0):
+            valid_trial, _, _, _ = _physical_state_validity(trial_state, xp=xp)
+            if valid_trial:
                 trial_A, trial_source = optical_pass(trial_psi)
                 trial_equilibrium, trial_td, trial_metrics = _residuals(
                     trial_psi,
@@ -449,15 +508,15 @@ def run_pr_transverse_static(
                     dx_normalized=dx_normalized,
                     dy_normalized=dy_normalized,
                     h_y=request.dielectric.h_y,
+                    xp=xp,
                 )
-                trial_merit = _scaled_merit(trial_metrics, request.solver)
                 if (
-                    math.isfinite(trial_merit)
-                    and trial_merit
+                    math.isfinite(trial_metrics[0])
+                    and math.isfinite(trial_metrics[1])
+                    and trial_metrics[0]
                     <= (1.0 - float(request.solver.armijo_fraction) * step_scale)
-                    * merit
+                    * metrics[0]
                     and trial_metrics[1] <= metrics[1]
-                    and trial_metrics[3] <= metrics[3]
                 ):
                     accepted = True
                     candidate_psi = trial_psi
@@ -487,7 +546,7 @@ def run_pr_transverse_static(
             candidate_td = td_residual
 
         delta = candidate_psi - psi
-        delta_rms, delta_max = _metrics(delta)
+        delta_rms, delta_max = _metrics(delta, xp=xp)
         if request.solver.record_iteration_history:
             records.append(PRTransverseStaticCoupledRecord(
                 coupled_iteration=coupled_iteration,
@@ -501,12 +560,18 @@ def run_pr_transverse_static(
                 td_rhs_max_after=candidate_metrics[3],
                 psi_change_rms=delta_rms,
                 psi_change_max=delta_max,
-                source_change_rms=_difference_rms(candidate_source, source_accepted),
-                optical_field_change_rms=_difference_rms(candidate_A, A_accepted),
+                source_change_rms=_difference_rms(
+                    candidate_source, source_accepted, xp=xp
+                ),
+                optical_field_change_rms=_difference_rms(
+                    candidate_A, A_accepted, xp=xp
+                ),
                 step_scale=step_scale if accepted else 0.0,
                 backtracks=backtracks,
                 material_newton_iterations=material_newton,
                 material_pcg_iterations=material_pcg,
+                material_discrete_newton_iterations=material_discrete_newton,
+                material_gmres_iterations=material_gmres,
                 accepted=accepted,
                 termination_reason=(
                     "accepted"
@@ -547,7 +612,9 @@ def run_pr_transverse_static(
                 coordinate_name="coupled_iteration",
                 coordinate_unit="1",
                 elapsed_wall_time=perf_counter() - started,
-                latest_field_state={"psi_current": psi.copy()},
+                latest_field_state={
+                    "psi_current": np.asarray(asnumpy(psi)).copy()
+                },
                 diagnostics={
                     "equilibrium_rms": metrics[0],
                     "equilibrium_max": metrics[1],
@@ -558,52 +625,84 @@ def run_pr_transverse_static(
             ))
 
     replay_A, replay_source = optical_pass(psi)
-    replay_field_match = np.allclose(
+    replay_field_match = bool(asnumpy(xp.allclose(
         replay_A,
         A_accepted,
         rtol=float(request.solver.replay_rtol),
         atol=float(request.solver.replay_atol),
-    )
-    replay_source_match = np.allclose(
+    )))
+    replay_source_match = bool(asnumpy(xp.allclose(
         replay_source,
         source_accepted,
         rtol=float(request.solver.replay_rtol),
         atol=float(request.solver.replay_atol),
+    )))
+    replay_equilibrium, replay_td_residual, replay_metrics = _residuals(
+        psi,
+        replay_source,
+        dx_normalized=dx_normalized,
+        dy_normalized=dy_normalized,
+        h_y=request.dielectric.h_y,
+        xp=xp,
     )
     replay_diagnostics = {
         "field_match": bool(replay_field_match),
         "source_match": bool(replay_source_match),
-        "field_relative_l2": _difference_rms(replay_A, A_accepted)
-        / max(_difference_rms(replay_A, np.zeros_like(replay_A)), np.finfo(float).tiny),
-        "source_relative_l2": _difference_rms(replay_source, source_accepted)
-        / max(_difference_rms(replay_source, np.zeros_like(replay_source)), np.finfo(float).tiny),
+        "field_relative_l2": _difference_rms(replay_A, A_accepted, xp=xp)
+        / max(
+            _difference_rms(replay_A, xp.zeros_like(replay_A), xp=xp),
+            np.finfo(float).tiny,
+        ),
+        "source_relative_l2": _difference_rms(
+            replay_source, source_accepted, xp=xp
+        )
+        / max(
+            _difference_rms(replay_source, xp.zeros_like(replay_source), xp=xp),
+            np.finfo(float).tiny,
+        ),
         "complete_independent_replay": True,
     }
     if converged and not (replay_field_match and replay_source_match):
         converged = False
         termination_reason = "replay_mismatch"
+    if converged and not _criteria_met(replay_metrics, request.solver):
+        converged = False
+        termination_reason = "final_zero_flux_residual_not_met"
+    equilibrium = replay_equilibrium
+    td_residual = replay_td_residual
+    metrics = replay_metrics
 
     final_state = state_from_potential(
         psi,
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
-        xp=np,
+        xp=xp,
     )
+    (
+        final_state_valid,
+        final_carrier_mean,
+        final_carrier_minimum,
+        final_potential_mean,
+    ) = _physical_state_validity(final_state, xp=xp)
+    if converged and not final_state_valid:
+        converged = False
+        termination_reason = "final_physical_state_invalid"
     diagnostics = state_diagnostics(
         final_state,
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
-        xp=np,
+        xp=xp,
     )
     null = derivative_null_residual(
         equilibrium,
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
+        xp=xp,
     )
-    null_rms, null_max = _metrics(null)
+    null_rms, null_max = _metrics(null, xp=xp)
     power_initial = normalized_power(A0, grid)
     power_final = normalized_power(replay_A, grid)
     diagnostics.update({
@@ -611,8 +710,39 @@ def run_pr_transverse_static(
         "equilibrium_residual_max": metrics[1],
         "td_rhs_residual_rms": metrics[2],
         "td_rhs_residual_max": metrics[3],
+        "authoritative_static_residual": "zero_flux_equilibrium",
+        "td_rhs_residual_role": "diagnostic_only",
+        "physical_state_valid": final_state_valid,
+        "carrier_mean": final_carrier_mean,
+        "carrier_minimum": final_carrier_minimum,
+        "potential_mean": final_potential_mean,
         "derivative_null_residual_rms": null_rms,
         "derivative_null_residual_max": null_max,
+        "discrete_corrector": {
+            "invoked": False,
+            "role": "experimental_td_fixed_point_diagnostic_only",
+            "continuum_newton_iterations_attempted": len(material_records),
+            "continuum_newton_iterations_accepted": sum(
+                int(record.newton_record.accepted) for record in material_records
+            ),
+            "continuum_pcg_iterations": sum(
+                record.newton_record.pcg_iterations for record in material_records
+            ),
+            "discrete_newton_iterations_attempted": len(discrete_records),
+            "discrete_newton_iterations_accepted": sum(
+                int(record.newton_record.accepted) for record in discrete_records
+            ),
+            "gmres_iterations": sum(
+                record.newton_record.gmres_iterations for record in discrete_records
+            ),
+            "gmres_restarts": sum(
+                record.newton_record.gmres_restarts for record in discrete_records
+            ),
+            "backtracks": sum(
+                record.newton_record.backtracks for record in discrete_records
+            ),
+            "authoritative_convergence": "zero_flux_equilibrium_rms_and_max",
+        },
         "optical_power_relative_drift": (power_final - power_initial) / power_initial,
         "termination_reason": termination_reason,
         "cancelled": cancelled,
@@ -627,7 +757,7 @@ def run_pr_transverse_static(
             x_aperture_um=request.grid.x_aperture_um,
             y_aperture_um=request.grid.y_aperture_um,
             real_dtype=grid.real_dtype,
-            xp=np,
+            xp=xp,
         )
         diagnostics["canonical_scattering"] = scattering_provenance
     resolved_profile = {
@@ -651,22 +781,26 @@ def run_pr_transverse_static(
         "total_seconds": perf_counter() - started,
         "optical_pass_seconds": optical_seconds,
         "material_solve_seconds": material_seconds,
+        "zero_flux_material_seconds": zero_flux_material_seconds,
+        "continuum_initializer_seconds": zero_flux_material_seconds,
+        "discrete_corrector_seconds": 0.0,
     }
     status = "cancelled" if cancelled else ("converged" if converged else "not_converged")
     return PRTransverseStaticRunResult(
-        A_initial=np.asarray(A0).copy(),
-        A_final=np.asarray(replay_A).copy(),
-        psi_initial=np.asarray(psi_initial).copy(),
-        psi_final=np.asarray(psi).copy(),
-        source_intensity_stack=np.asarray(replay_source).copy(),
-        equilibrium_residual_stack=np.asarray(equilibrium).copy(),
-        td_rhs_residual_stack=np.asarray(td_residual).copy(),
+        A_initial=np.asarray(asnumpy(A0)).copy(),
+        A_final=np.asarray(asnumpy(replay_A)).copy(),
+        psi_initial=np.asarray(asnumpy(psi_initial)).copy(),
+        psi_final=np.asarray(asnumpy(psi)).copy(),
+        source_intensity_stack=np.asarray(asnumpy(replay_source)).copy(),
+        equilibrium_residual_stack=np.asarray(asnumpy(equilibrium)).copy(),
+        td_rhs_residual_stack=np.asarray(asnumpy(td_residual)).copy(),
         power_initial=power_initial,
         power_final=power_final,
         converged=converged,
         completed_coupled_iterations=completed_iterations,
         iteration_records=tuple(records),
         material_iteration_records=tuple(material_records),
+        discrete_iteration_records=tuple(discrete_records),
         grid_summary=grid.summary(),
         launch_summary=launch.summary(),
         backend_summary=backend.summary(),
@@ -681,6 +815,7 @@ def run_pr_transverse_static(
 __all__ = [
     "PR_TRANSVERSE_STATIC_WORKFLOW",
     "PRTransverseStaticCoupledRecord",
+    "PRTransverseStaticDiscreteIterationRecord",
     "PRTransverseStaticMaterialIterationRecord",
     "PRTransverseStaticRunRequest",
     "PRTransverseStaticRunResult",
