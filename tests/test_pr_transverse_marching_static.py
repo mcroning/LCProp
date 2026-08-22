@@ -23,6 +23,9 @@ from lcprop.pr.transverse import (
     run_pr_transverse_static,
     run_pr_transverse_static_marching,
 )
+from lcprop.pr.transverse.marching_static import (
+    PR_MARCHING_FLOAT64_MATERIAL_COMPLEX64_OPTICS_V1,
+)
 from lcprop.pr.transverse.projection import project_active_field
 from lcprop.pr.transverse.static import (
     project_production_resolved_modes,
@@ -40,6 +43,8 @@ def _request(
     scattering=None,
     initial_A=None,
     solver=None,
+    backend: str = "numpy",
+    precision: str = "float64",
 ):
     return PRTransverseMarchingStaticRunRequest(
         grid=GridSpec(
@@ -66,7 +71,7 @@ def _request(
         ),
         solver=solver or PRTransverseMarchingStaticOptions(),
         backend=BackendSpec(
-            backend="numpy", precision="float64", verbose=False
+            backend=backend, precision=precision, verbose=False
         ),
         initial_A=initial_A,
         scattering=scattering,
@@ -251,6 +256,183 @@ def test_failure_preserves_bitwise_identical_accepted_upstream_prefix(monkeypatc
     )
     assert failed.psi_accepted.shape[0] == 2
     assert failed.source_intensity_stack.shape[0] == 2
+    assert failed.restart_state is not None
+    assert failed.restart_state.next_interval_index == 2
+    assert failed.failure_state is not None
+    assert failed.failure_state.interval_index == 2
+    np.testing.assert_array_equal(
+        failed.failure_state.A_incoming, baseline.incoming_field_stack[2]
+    )
+    assert failed.failure_state.midpoint_source.shape == (16, 16)
+    assert failed.failure_state.pre_scattering_output.shape == (1, 16, 16)
+    assert failed.failure_state.material_iteration_records
+
+
+def test_boundary_checkpoint_restart_matches_uninterrupted_scattering_run():
+    scattering = PRCanonicalScatteringSpec(
+        epsilon=1.0e-8,
+        transverse_correlation_um=2.0,
+        realization_seed=9182,
+        canonical_dz_um=5.0,
+        algorithm_version=PR_CANONICAL_SCATTERING_V2,
+    )
+    request = _request(scattering=scattering)
+    baseline = run_pr_transverse_static_marching(request)
+    partial = run_pr_transverse_static_marching(
+        request, stop_after_accepted_intervals=2
+    )
+
+    assert partial.status == "stopped_at_accepted_boundary"
+    assert partial.restart_state is not None
+    assert partial.restart_state.next_interval_index == 2
+    resumed = run_pr_transverse_static_marching(
+        request, restart_state=partial.restart_state
+    )
+
+    assert resumed.converged
+    assert resumed.start_interval == 2
+    assert resumed.completed_intervals == 3
+    np.testing.assert_array_equal(resumed.A_final, baseline.A_final)
+    np.testing.assert_array_equal(
+        np.concatenate((partial.psi_accepted, resumed.psi_accepted)),
+        baseline.psi_accepted,
+    )
+    np.testing.assert_array_equal(
+        np.concatenate(
+            (partial.source_intensity_stack, resumed.source_intensity_stack)
+        ),
+        baseline.source_intensity_stack,
+    )
+
+
+def test_streaming_recording_controls_do_not_change_final_solution():
+    request = _request()
+    baseline = run_pr_transverse_static_marching(request)
+    streaming = run_pr_transverse_static_marching(replace(
+        request,
+        solver=replace(
+            request.solver,
+            record_material_stacks=False,
+            record_residual_stack=False,
+            record_optical_audit_fields=False,
+        ),
+    ))
+
+    assert streaming.converged
+    np.testing.assert_array_equal(streaming.A_final, baseline.A_final)
+    assert streaming.psi_accepted.shape == (0, 16, 16)
+    assert streaming.source_intensity_stack.shape == (0, 16, 16)
+    assert streaming.equilibrium_residual_stack.shape == (0, 16, 16)
+    assert streaming.incoming_field_stack.shape == (0, 1, 16, 16)
+
+
+def test_float32_optics_retains_float64_material_and_explicit_screen_boundary(
+    monkeypatch,
+):
+    import lcprop.pr.transverse.marching_static as module
+
+    captured_response_dtypes = []
+    captured_material_dtypes = []
+    original_advance = module._advance_mixed_precision_slice
+    original_solve = module.solve_pr_transverse_static_intensity
+
+    def audited_advance(*args, **kwargs):
+        captured_response_dtypes.append(kwargs["optical_complex_dtype"])
+        return original_advance(*args, **kwargs)
+
+    def audited_solve(intensity, *args, **kwargs):
+        captured_material_dtypes.append(
+            (intensity.dtype, kwargs["initial_psi"].dtype)
+        )
+        return original_solve(intensity, *args, **kwargs)
+
+    monkeypatch.setattr(module, "_advance_mixed_precision_slice", audited_advance)
+    monkeypatch.setattr(module, "solve_pr_transverse_static_intensity", audited_solve)
+    result = run_pr_transverse_static_marching(_request(precision="float32"))
+
+    assert result.converged
+    assert result.A_initial.dtype == np.complex64
+    assert result.A_final.dtype == np.complex64
+    assert result.incoming_field_stack.dtype == np.complex64
+    assert result.pre_scattering_exit_stack.dtype == np.complex64
+    assert result.psi_accepted.dtype == np.float64
+    assert result.source_intensity_stack.dtype == np.float64
+    assert result.equilibrium_residual_stack.dtype == np.float64
+    assert captured_response_dtypes
+    assert all(np.dtype(value) == np.dtype(np.complex64) for value in captured_response_dtypes)
+    assert captured_material_dtypes
+    assert all(
+        np.dtype(source) == np.dtype(np.float64)
+        and np.dtype(psi) == np.dtype(np.float64)
+        for source, psi in captured_material_dtypes
+    )
+    assert (
+        result.diagnostics["precision_policy_id"]
+        == PR_MARCHING_FLOAT64_MATERIAL_COMPLEX64_OPTICS_V1
+    )
+
+
+def test_mixed_precision_restart_preserves_policy_and_dtypes_and_is_exact():
+    scattering = PRCanonicalScatteringSpec(
+        epsilon=1.0e-8,
+        transverse_correlation_um=2.0,
+        realization_seed=9182,
+        canonical_dz_um=5.0,
+        algorithm_version=PR_CANONICAL_SCATTERING_V2,
+    )
+    request = _request(precision="float32", scattering=scattering)
+    baseline = run_pr_transverse_static_marching(request)
+    partial = run_pr_transverse_static_marching(
+        request, stop_after_accepted_intervals=2
+    )
+    checkpoint = partial.restart_state
+
+    assert checkpoint is not None
+    assert (
+        checkpoint.precision_policy_id
+        == PR_MARCHING_FLOAT64_MATERIAL_COMPLEX64_OPTICS_V1
+    )
+    assert checkpoint.A_incoming.dtype == np.complex64
+    assert checkpoint.previous_psi is not None
+    assert checkpoint.previous_psi.dtype == np.float64
+    assert checkpoint.entrance_intensity.dtype == np.float32
+    assert checkpoint.previous_material_source is not None
+    assert checkpoint.previous_material_source.dtype == np.float64
+
+    resumed = run_pr_transverse_static_marching(
+        request, restart_state=checkpoint
+    )
+    assert resumed.converged
+    np.testing.assert_array_equal(resumed.A_final, baseline.A_final)
+    np.testing.assert_array_equal(
+        np.concatenate((partial.psi_accepted, resumed.psi_accepted)),
+        baseline.psi_accepted,
+    )
+
+
+def test_mixed_precision_restart_rejects_policy_or_material_downcast():
+    request = _request(precision="float32")
+    partial = run_pr_transverse_static_marching(
+        request, stop_after_accepted_intervals=2
+    )
+    checkpoint = partial.restart_state
+    assert checkpoint is not None
+
+    with np.testing.assert_raises_regex(ValueError, "precision policy"):
+        run_pr_transverse_static_marching(
+            request,
+            restart_state=replace(
+                checkpoint, precision_policy_id="incompatible_policy"
+            ),
+        )
+    with np.testing.assert_raises_regex(ValueError, "potential must remain float64"):
+        run_pr_transverse_static_marching(
+            request,
+            restart_state=replace(
+                checkpoint,
+                previous_psi=checkpoint.previous_psi.astype(np.float32),
+            ),
+        )
 
 
 def test_marching_and_global_workflows_agree_on_benign_case():

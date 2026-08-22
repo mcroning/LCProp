@@ -55,9 +55,13 @@ from lcprop.pr.transverse.static_workflow import (
     run_pr_transverse_static,
 )
 from lcprop.pr.transverse.marching_static import (
+    PR_MARCHING_FLOAT64_MATERIAL_COMPLEX64_OPTICS_V1,
+    PR_MARCHING_FULL_FLOAT64_REFERENCE_V1,
     PR_TRANSVERSE_MARCHING_STATIC_WORKFLOW,
+    PRTransverseMarchingFailureState,
     PRTransverseMarchingIntervalSummary,
     PRTransverseMarchingPicardRecord,
+    PRTransverseMarchingRestartState,
     PRTransverseMarchingStaticOptions,
     PRTransverseMarchingStaticRunRequest,
     PRTransverseMarchingStaticRunResult,
@@ -65,6 +69,8 @@ from lcprop.pr.transverse.marching_static import (
 )
 
 __all__ = [
+    "PR_MARCHING_FLOAT64_MATERIAL_COMPLEX64_OPTICS_V1",
+    "PR_MARCHING_FULL_FLOAT64_REFERENCE_V1",
     "PR_FULL_TRANSVERSE_PROFILE_V1",
     "PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE",
     "PR_TRANSVERSE_IMEX_EULER",
@@ -96,7 +102,9 @@ __all__ = [
     "PRTransverseStaticWorkflowOptions",
     "PRTransverseTransportProfile",
     "PRTransverseMarchingIntervalSummary",
+    "PRTransverseMarchingFailureState",
     "PRTransverseMarchingPicardRecord",
+    "PRTransverseMarchingRestartState",
     "PRTransverseMarchingStaticOptions",
     "PRTransverseMarchingStaticRunRequest",
     "PRTransverseMarchingStaticRunResult",

@@ -219,6 +219,35 @@ workflow. Agreement of the long-time TD solution with the zero-flux static
 solution is a separate resolution, aliasing/dealiasing, and discretization
 validation problem.
 
+The additive causal-marching path is a PR-owned transverse static alternative
+to the separate global coupled-static workflow. It assigns one
+interval-centered, piecewise-constant material state to each longitudinal
+interval and enforces local midpoint optical/material self-consistency before
+acceptance. Once accepted, upstream intervals are final and are never
+revisited. Canonical deterministic scattering is applied exactly once after
+local acceptance. A restart therefore resumes only at an accepted interval
+boundary and preserves the scattering provenance needed to avoid omission or
+double application.
+
+The causal-marching path has an explicit mixed-precision policy
+for float32 optical requests. Under
+`float64_material_complex64_optics_v1`, the accepted potential, reconstructed
+carrier and electric fields, midpoint material source, zero-flux residual,
+Newton/PCG solve, and line search remain float64. The optical field, kernel,
+FFT propagation, and optical intensity remain complex64/float32. The completed
+complex128 PR half-screen is explicitly cast to complex64 immediately before
+optical propagation, and the resulting float32 midpoint source is explicitly
+promoted to float64 before the material solve. Restart state records the
+policy identifier and preserves complex64 incoming optics plus float64
+potential and material source; incompatible or downcast restart state is
+rejected rather than converted silently. Float64 optical requests retain the
+existing all-float64 reference path.
+
+Stage 22G established GPU feasibility for this path at 512 × 512 with 50 µm
+and 20 µm longitudinal material spacing. Those two solutions differ
+materially, so this commissioning result is not evidence of longitudinal
+convergence; finer-spacing refinement remains a separate validation stage.
+
 ## Image-amplification numerical readiness
 
 `run_image_amplification_readiness()` is a bounded headless acceptance case,
