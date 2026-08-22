@@ -54,12 +54,22 @@ from lcprop.pr.transverse.static_workflow import (
     PRTransverseStaticWorkflowOptions,
     run_pr_transverse_static,
 )
+from lcprop.pr.transverse.marching_static import (
+    PR_TRANSVERSE_MARCHING_STATIC_WORKFLOW,
+    PRTransverseMarchingIntervalSummary,
+    PRTransverseMarchingPicardRecord,
+    PRTransverseMarchingStaticOptions,
+    PRTransverseMarchingStaticRunRequest,
+    PRTransverseMarchingStaticRunResult,
+    run_pr_transverse_static_marching,
+)
 
 __all__ = [
     "PR_FULL_TRANSVERSE_PROFILE_V1",
     "PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE",
     "PR_TRANSVERSE_IMEX_EULER",
     "PR_TRANSVERSE_INTEGRATORS",
+    "PR_TRANSVERSE_MARCHING_STATIC_WORKFLOW",
     "PR_TRANSVERSE_STATIC_OPERATION",
     "PR_TRANSVERSE_STATIC_WORKFLOW",
     "PR_TRANSVERSE_TIMEDEPENDENT_OPERATION",
@@ -85,6 +95,11 @@ __all__ = [
     "PRTransverseStaticRunResult",
     "PRTransverseStaticWorkflowOptions",
     "PRTransverseTransportProfile",
+    "PRTransverseMarchingIntervalSummary",
+    "PRTransverseMarchingPicardRecord",
+    "PRTransverseMarchingStaticOptions",
+    "PRTransverseMarchingStaticRunRequest",
+    "PRTransverseMarchingStaticRunResult",
     "derivative_null_residual",
     "project_production_resolved_modes",
     "production_steady_jvp",
@@ -92,6 +107,7 @@ __all__ = [
     "pr_transverse_result_to_run_data",
     "pr_transverse_static_result_to_run_data",
     "run_pr_transverse_static",
+    "run_pr_transverse_static_marching",
     "run_pr_transverse_timedependent",
     "solve_pr_transverse_discrete_static_intensity",
     "solve_pr_transverse_static_intensity",
