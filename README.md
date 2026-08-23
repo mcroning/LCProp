@@ -117,6 +117,13 @@ python -m lcprop.pr.gui.app
 The applications share framework components where useful but retain separate
 material controls and workflows.
 
+The LC application supports one- and multichannel propagation, including
+angled or colliding coherent beams, through the shared launch editor. It also
+provides single-power eigensoliton and bounded power-sweep workflows. LC result
+products include transverse and longitudinal optical/director views,
+convergence diagnostics, output far fields on in-medium direction-cosine axes,
+and selectable optical/director profiles for completed sweep members.
+
 ## Headless example
 
 This small LC example uses canonical material-owned imports:

@@ -1,5 +1,8 @@
+from dataclasses import replace
+
 import numpy as np
 
+from lcprop.core.beams import BeamStack
 from lcprop.core.requests import TimeDependentRunRequest, TimeDependentSolverOptions
 from lcprop.products.data_model import (
     from_static_result,
@@ -8,6 +11,7 @@ from lcprop.products.data_model import (
     from_soliton_existence_result,
     to_run_data,
 )
+from lcprop.optics.splitstep import total_intensity
 from lcprop.workflows import run_static, run_timedependent, run_soliton, run_soliton_existence
 from lcprop.workflows.soliton import SolitonRequest
 from lcprop.workflows.soliton_existence import SolitonExistenceRequest
@@ -25,6 +29,8 @@ def test_static_result_to_run_data():
         "Output Plane Intensity",
         "Input Plane Δθ",
         "Output Plane Δθ",
+        "Output Far-Field Intensity",
+        "Output Far Field (dB relative to peak)",
     ]
     assert [field.display_name for field in volume_fields] == ["Intensity", "Δθ"]
     assert "theta" not in data.fields
@@ -45,6 +51,19 @@ def test_static_result_to_run_data():
     assert data.fields["input_intensity"].value_unit == "1/µm²"
     assert data.fields["intensity_stack"].value_unit == "1/µm²"
     assert data.fields["output_delta_theta"].value_unit == "rad"
+    far_field = data.fields["far_field_intensity"]
+    assert far_field.axes == ("s_x", "s_y")
+    assert far_field.coordinates["s_x"].shape == (
+        result.grid_summary["Nx"],
+    )
+    dsx = np.diff(far_field.coordinates["s_x"])[0]
+    dsy = np.diff(far_field.coordinates["s_y"])[0]
+    assert np.isclose(
+        np.sum(far_field.data) * dsx * dsy,
+        result.power_final,
+        rtol=2e-14,
+    )
+    assert np.max(data.fields["far_field_log_db"].data) == 0.0
     summary = data.diagnostics["summary"].values
     assert summary["normalized_field_integral_initial"] == result.power_initial
     assert summary["physical_power_initial_mW"] == 0.05
@@ -73,7 +92,11 @@ def test_timedependent_result_to_run_data():
         "Initial Δθ",
         "Final Δθ",
     ]
-    assert [field.display_name for field in image_fields] == expected_labels
+    assert [field.display_name for field in image_fields] == [
+        *expected_labels,
+        "Output Far-Field Intensity",
+        "Output Far Field (dB relative to peak)",
+    ]
     assert [field.display_name for field in volume_fields] == [
         "Initial Intensity",
         "Final Intensity",
@@ -103,6 +126,9 @@ def test_timedependent_result_to_run_data():
     )
     assert data.fields["final_intensity"].value_unit == "1/µm²"
     assert data.fields["final_delta_theta_stack"].value_unit == "rad"
+    assert data.fields["far_field_intensity"].coordinates["s_x"].shape == (
+        base.grid.Nx,
+    )
     summary = data.diagnostics["summary"].values
     assert summary["segment_start_time"] == 0.0
     assert summary["segment_elapsed_time"] == result.segment_elapsed_time
@@ -124,6 +150,49 @@ def test_timedependent_result_to_run_data():
     np.testing.assert_allclose(x_curve.x, result.width_times)
 
 
+def test_lc_far_field_preserves_coherent_group_semantics():
+    base = make_base_static_request()
+    channel = base.beams.channels[0]
+    request = replace(
+        base,
+        beams=BeamStack(
+            channels=(
+                replace(
+                    channel,
+                    x0_um=-2.0,
+                    tilt_x_rad_per_um=0.08,
+                    coherence_group="shared",
+                ),
+                replace(
+                    channel,
+                    x0_um=2.0,
+                    tilt_x_rad_per_um=-0.08,
+                    phase_rad=0.3,
+                    coherence_group="shared",
+                ),
+            ),
+            coherence="coherent",
+        ),
+    )
+    result = run_static(request)
+    data = from_static_result(result)
+    far_field = data.fields["far_field_intensity"]
+    dsx = np.diff(far_field.coordinates["s_x"])[0]
+    dsy = np.diff(far_field.coordinates["s_y"])[0]
+    far_power = np.sum(far_field.data) * dsx * dsy
+    near_intensity = total_intensity(
+        np.asarray(result.A_final),
+        coherence_groups=("shared", "shared"),
+    )
+    near_power = (
+        np.sum(near_intensity)
+        * result.grid_summary["dx_um"]
+        * result.grid_summary["dy_um"]
+    )
+
+    assert np.isclose(far_power, near_power, rtol=2e-14)
+
+
 def test_soliton_result_to_run_data():
     result = run_soliton(
         SolitonRequest(
@@ -137,7 +206,42 @@ def test_soliton_result_to_run_data():
     data = from_soliton_result(result)
     assert data.workflow == "soliton"
     assert "final_intensity" in data.fields
+    assert "theta" in data.fields
+    assert "far_field_intensity" in data.fields
+    assert "far_field_log_db" in data.fields
     assert "summary" in data.diagnostics
+    summary = data.diagnostics["summary"].values
+    assert np.isfinite(summary["b"])
+    assert np.isfinite(summary["bi"])
+    assert np.isfinite(summary["beta"])
+    assert summary["physical_power_mW"] == result.metrics["physical_power_mW"]
+    base_grid = result.request.base.grid
+    assert np.isclose(
+        data.geometry.dx(),
+        base_grid.x_aperture_um / base_grid.Nx,
+    )
+    assert np.isclose(
+        data.geometry.dy(),
+        base_grid.y_aperture_um / base_grid.Ny,
+    )
+    far_field = data.fields["far_field_intensity"]
+    expected_sx = np.fft.fftshift(
+        np.fft.fftfreq(base_grid.Nx, d=data.geometry.dx())
+    ) * (result.request.base.beams.channels[0].wavelength_um / summary["n_ref"])
+    expected_sy = np.fft.fftshift(
+        np.fft.fftfreq(base_grid.Ny, d=data.geometry.dy())
+    ) * (result.request.base.beams.channels[0].wavelength_um / summary["n_ref"])
+    np.testing.assert_array_equal(far_field.coordinates["s_x"], expected_sx)
+    np.testing.assert_array_equal(far_field.coordinates["s_y"], expected_sy)
+    dsx = np.diff(expected_sx)[0]
+    dsy = np.diff(expected_sy)[0]
+    far_power = np.sum(far_field.data) * dsx * dsy
+    near_power = (
+        np.sum(np.asarray(result.intensity))
+        * data.geometry.dx()
+        * data.geometry.dy()
+    )
+    assert np.isclose(far_power, near_power, rtol=2e-14)
 
 
 def test_soliton_existence_result_to_run_data():
@@ -167,6 +271,14 @@ def test_soliton_existence_result_to_run_data():
     )
     assert widths.units["RMS width"] == "µm"
     assert widths.series_labels == ("xs", "ys")
+    assert list(data.fields.keys()) == [
+        "existence_0_intensity",
+        "existence_0_theta",
+        "existence_1_intensity",
+        "existence_1_theta",
+    ]
+    assert np.all(np.isfinite(data.curves["beta"].y))
+    assert len(data.diagnostics["table"].values["rows"]) == 2
 
 
 def test_to_run_data_dispatch():

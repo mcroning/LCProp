@@ -18,6 +18,7 @@ from lcprop.lc.static_torque_balance import (
     build_static_torque_balance_data,
     plot_static_torque_balance,
 )
+from lcprop.optics.farfield import direction_cosine_spectrum
 from lcprop.optics.splitstep import total_intensity
 from lcprop.products.data_model import (
     CurveCollection,
@@ -29,6 +30,9 @@ from lcprop.products.data_model import (
     RunData,
     make_field,
 )
+
+
+_FAR_FIELD_LOG_FLOOR_DB = -120.0
 
 
 def _geometry_from_grid_summary(grid_summary: dict) -> Geometry:
@@ -80,6 +84,127 @@ def _result_power_diagnostics(result) -> dict[str, float | None]:
         "normalized_field_integral_final": result.power_final,
         "physical_power_initial_mW": getattr(result, "physical_power_initial_mW", None),
         "physical_power_final_mW": getattr(result, "physical_power_final_mW", None),
+    }
+
+
+def _result_base_request(result):
+    """Return the underlying propagation request when retained on a result."""
+
+    request = getattr(result, "request", None)
+    if request is None:
+        request = getattr(getattr(result, "checkpoint", None), "request", None)
+    while request is not None and hasattr(request, "base"):
+        request = request.base
+    return request
+
+
+def _far_field_products(
+    result,
+    A,
+    geometry: Geometry,
+    *,
+    refractive_index: float | None = None,
+):
+    """Build portable output far-field products from canonical result metadata."""
+
+    request = _result_base_request(result)
+    if request is None or not getattr(request, "beams", None):
+        return []
+    channels = tuple(request.beams.channels)
+    if not channels:
+        return []
+
+    coherent, coherence_groups = _result_coherence(result)
+    if coherence_groups is None and coherent:
+        coherence_groups = tuple("coherent" for _ in channels)
+    resolved_refractive_index = (
+        float(request.material.no)
+        if refractive_index is None
+        else float(refractive_index)
+    )
+    spectrum = direction_cosine_spectrum(
+        asnumpy(A),
+        dx_um=float(geometry.dx()),
+        dy_um=float(geometry.dy()),
+        wavelength_um=float(channels[0].wavelength_um),
+        refractive_index=resolved_refractive_index,
+        coherence_groups=coherence_groups,
+        xp=np,
+    )
+    far_field = np.asarray(spectrum.intensity)
+    peak = float(np.max(far_field)) if far_field.size else 0.0
+    if peak > 0.0:
+        far_field_db = 10.0 * np.log10(
+            np.maximum(far_field / peak, 10.0 ** (_FAR_FIELD_LOG_FLOOR_DB / 10.0))
+        )
+    else:
+        far_field_db = np.full_like(far_field, _FAR_FIELD_LOG_FLOOR_DB)
+    coordinates = {
+        "s_x": np.asarray(spectrum.s_x),
+        "s_y": np.asarray(spectrum.s_y),
+    }
+    angular_units = {"s_x": "1", "s_y": "1"}
+    return [
+        (
+            "far_field_intensity",
+            make_field(
+                "far_field_intensity",
+                "Output Far-Field Intensity",
+                far_field,
+                ("s_x", "s_y"),
+                "far_field_intensity",
+                angular_units,
+                quantity="direction_cosine_power_density",
+                value_unit="normalized power / direction-cosine²",
+                colormap="magma",
+                coordinates=coordinates,
+            ),
+        ),
+        (
+            "far_field_log_db",
+            make_field(
+                "far_field_log_db",
+                "Output Far Field (dB relative to peak)",
+                far_field_db,
+                ("s_x", "s_y"),
+                "far_field_log",
+                angular_units,
+                quantity="relative_direction_cosine_power_density",
+                value_unit="dB",
+                colormap="magma",
+                coordinates=coordinates,
+            ),
+        ),
+    ]
+
+
+def _far_field_metadata(
+    result,
+    *,
+    refractive_index: float | None = None,
+) -> dict[str, Any]:
+    request = _result_base_request(result)
+    if request is None or not getattr(request, "beams", None):
+        return {}
+    channels = tuple(request.beams.channels)
+    if not channels:
+        return {}
+    resolved_refractive_index = (
+        float(request.material.no)
+        if refractive_index is None
+        else float(refractive_index)
+    )
+    return {
+        "far_field_coordinates": (
+            "in-medium direction cosines s=(wavelength/n_ref)*f"
+        ),
+        "far_field_reference_wavelength_um": float(channels[0].wavelength_um),
+        "far_field_reference_refractive_index": resolved_refractive_index,
+        "far_field_normalization": (
+            "integral I_far ds_x ds_y equals the coherence-aware near-field "
+            "intensity integral"
+        ),
+        "far_field_log_floor_db": _FAR_FIELD_LOG_FLOOR_DB,
     }
 
 
@@ -155,6 +280,7 @@ def from_static_result(result) -> RunData:
         ("intensity_stack", make_field("intensity_stack", "Intensity", asnumpy(intensity_stack), ("z", "x", "y"), "intensity", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="normalized_intensity", value_unit="1/µm²")),
         ("delta_theta_stack", make_field("delta_theta_stack", "Δθ", delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
     ]
+    fields.extend(_far_field_products(result, result.A_final, geometry))
 
     slice_summaries = tuple(getattr(result, "slice_summaries", ()) or ())
     iteration_records = tuple(getattr(result, "iteration_records", ()) or ())
@@ -197,6 +323,7 @@ def from_static_result(result) -> RunData:
 
     summary_values = {
         **_result_power_diagnostics(result),
+        **_far_field_metadata(result),
         "method": result.method,
         "n_steps": result.n_steps,
         "status": getattr(result, "status", "completed"),
@@ -482,6 +609,8 @@ def from_timedependent_result(
         ("final_delta_theta_stack", make_field("final_delta_theta_stack", "Delta Theta at Stop" if stopped else "Final Delta Theta", delta_theta_stack, ("z", "x", "y"), "theta_delta", {"z": "um", "x": "um", "y": "um"}, "longitudinal", quantity="theta", value_unit="rad")),
         ]
 
+    fields.extend(_far_field_products(result, result.A_final, geometry))
+
     width_curves = _timedependent_width_curves(
         getattr(result, "width_times", ()),
         getattr(result, "beam_x_rms_width_um", ()),
@@ -498,6 +627,7 @@ def from_timedependent_result(
                 "Summary",
                 {
                     **_result_power_diagnostics(result),
+                    **_far_field_metadata(result),
                     "Nt": result.Nt,
                     "status": getattr(result, "status", "completed"),
                     "completed_steps": getattr(result, "completed_steps", result.Nt),
@@ -697,24 +827,35 @@ def from_timedependent_live_state(
     )
 
 
-def from_soliton_result(result) -> RunData:
+def _soliton_profile_products(result):
     grid_summary = result.metrics.get("grid")
     if grid_summary is None:
-        A = asnumpy(result.A)
-        nx, ny = A.shape[-2], A.shape[-1]
-        grid_summary = {
-            "Nx": nx,
-            "Ny": ny,
-            "Nz": 1,
-            "dx_um": 1.0,
-            "dy_um": 1.0,
-            "dz_um": 1.0,
-        }
+        request = _result_base_request(result)
+        grid = getattr(request, "grid", None)
+        if grid is not None:
+            grid_summary = {
+                "Nx": int(grid.Nx),
+                "Ny": int(grid.Ny),
+                "Nz": max(1, int(round(grid.z_length_um / grid.dz_um))),
+                "dx_um": float(grid.x_aperture_um) / int(grid.Nx),
+                "dy_um": float(grid.y_aperture_um) / int(grid.Ny),
+                "dz_um": float(grid.dz_um),
+                "z_length_um": float(grid.z_length_um),
+            }
+        else:
+            A = asnumpy(result.A)
+            nx, ny = A.shape[-2], A.shape[-1]
+            grid_summary = {
+                "Nx": nx,
+                "Ny": ny,
+                "Nz": 1,
+                "dx_um": 1.0,
+                "dy_um": 1.0,
+                "dz_um": 1.0,
+            }
     geometry = _geometry_from_grid_summary(grid_summary)
-
     theta_2d = asnumpy(result.theta)
     intensity = asnumpy(result.intensity)
-
     intensity_label = (
         "Soliton result at Stop"
         if getattr(result, "status", "completed") == "stopped"
@@ -724,6 +865,20 @@ def from_soliton_result(result) -> RunData:
         ("final_intensity", make_field("final_intensity", intensity_label, intensity, ("x", "y"), "intensity", {"x": "um", "y": "um"}, quantity="normalized_intensity", value_unit="1/um²")),
         ("theta", make_field("theta", "Output Plane Theta", theta_2d, ("x", "y"), "theta", {"x": "um", "y": "um"}, quantity="theta", value_unit="rad")),
     ]
+    return geometry, fields
+
+
+def from_soliton_result(result) -> RunData:
+    geometry, fields = _soliton_profile_products(result)
+    soliton_n_ref = result.metrics.get("n_ref")
+    fields.extend(
+        _far_field_products(
+            result,
+            result.A,
+            geometry,
+            refractive_index=soliton_n_ref,
+        )
+    )
 
     curves = CurveCollection()
     history = getattr(result, "history", None) or getattr(result, "samples", None) or []
@@ -748,6 +903,9 @@ def from_soliton_result(result) -> RunData:
 
     summary = dict(result.metrics)
     summary["mode"] = getattr(result, "mode", "00")
+    summary.update(
+        _far_field_metadata(result, refractive_index=soliton_n_ref)
+    )
 
     return RunData(
         workflow="soliton",
@@ -813,8 +971,41 @@ def from_soliton_existence_result(result) -> RunData:
     summary.setdefault("kind", getattr(result, "kind", type(result).__name__))
     summary.setdefault("mode", getattr(result, "mode", summary.get("mode", "00")))
 
+    fields = FieldCollection()
+    geometry = Geometry()
+    member_results = ()
+    if type(result).__name__ == "SolitonExistenceResult":
+        member_results = getattr(result, "results", ()) or ()
+    for index, member_result in enumerate(member_results):
+        member_geometry, member_fields = _soliton_profile_products(member_result)
+        profile_fields = dict(member_fields)
+        if geometry.x is None:
+            geometry = member_geometry
+        power = member_result.metrics.get(
+            "requested_power_mW",
+            rows[index].get("requested_power_mW", np.nan)
+            if index < len(rows)
+            else np.nan,
+        )
+        power_text = np.format_float_positional(
+            float(power),
+            precision=12,
+            trim="-",
+        )
+        for source_key, suffix, label in (
+            ("final_intensity", "intensity", f"Soliton at {power_text} mW"),
+            ("theta", "theta", f"Soliton θ at {power_text} mW"),
+        ):
+            source = profile_fields.get(source_key)
+            if source is None:
+                continue
+            key = f"existence_{index}_{suffix}"
+            fields.add(key, replace(source, key=key, display_name=label))
+
     return RunData(
         workflow="soliton_existence",
+        geometry=geometry,
+        fields=fields,
         curves=curves,
         diagnostics=DiagnosticCollection([
             ("summary", DiagnosticData("summary", "Summary", summary)),
@@ -863,10 +1054,11 @@ def from_parameter_sweep_result(result) -> RunData:
         })
         if member.status != "completed" or member.result is None:
             continue
-        field_data = from_soliton_result(member.result)
+        member_geometry, member_fields = _soliton_profile_products(member.result)
         if geometry.x is None:
-            geometry = field_data.geometry
-        intensity = field_data.fields.get("final_intensity")
+            geometry = member_geometry
+        profile_fields = dict(member_fields)
+        intensity = profile_fields.get("final_intensity")
         if intensity is None:
             continue
         power_text = np.format_float_positional(
@@ -883,6 +1075,17 @@ def from_parameter_sweep_result(result) -> RunData:
                 display_name=f"Soliton at {power_text} mW",
             ),
         )
+        theta = profile_fields.get("theta")
+        if theta is not None:
+            theta_key = f"sweep_{member.requested_index}_theta"
+            fields.add(
+                theta_key,
+                replace(
+                    theta,
+                    key=theta_key,
+                    display_name=f"Soliton θ at {power_text} mW",
+                ),
+            )
 
     diagnostics = run_data.diagnostics
     diagnostics.add(

@@ -503,17 +503,31 @@ def test_six_sweep_members_produce_ordered_selectable_result_fields():
     window.results_panel.set_run_data(to_run_data(result))
     selector = window.results_panel.workspace.image_pane.field_selector
 
-    assert selector.count() == 6
+    assert selector.count() == 12
     assert [selector.itemText(i) for i in range(selector.count())] == [
-        f"Soliton at {power:g} mW" for power in powers
+        label
+        for power in powers
+        for label in (
+            f"Soliton at {power:g} mW",
+            f"Soliton θ at {power:g} mW",
+        )
     ]
     for index, power in enumerate(powers):
-        selector.setCurrentIndex(index)
+        selector.setCurrentIndex(2 * index)
         key = selector.currentData()
         field = window.results_panel.workspace.image_pane._run_data.fields[key]
         np.testing.assert_array_equal(
             field.data,
             np.full((16, 16), power * power),
+        )
+        selector.setCurrentIndex(2 * index + 1)
+        theta_key = selector.currentData()
+        theta_field = window.results_panel.workspace.image_pane._run_data.fields[
+            theta_key
+        ]
+        np.testing.assert_array_equal(
+            theta_field.data,
+            np.full((16, 16), power),
         )
     window._active_request = _request
     window._on_timedependent_finished(
@@ -605,11 +619,14 @@ def test_stopped_sweep_exposes_every_completed_member_and_no_unfinished_fields()
     window.results_panel.set_run_data(to_run_data(partial))
     selector = window.results_panel.workspace.image_pane.field_selector
 
-    assert selector.count() == 3
-    assert [selector.itemText(i) for i in range(3)] == [
+    assert selector.count() == 6
+    assert [selector.itemText(i) for i in range(6)] == [
         "Soliton at 0.5 mW",
+        "Soliton θ at 0.5 mW",
         "Soliton at 1 mW",
+        "Soliton θ at 1 mW",
         "Soliton at 2 mW",
+        "Soliton θ at 2 mW",
     ]
     window._active_request = _request
     window._on_timedependent_finished(
