@@ -14,6 +14,7 @@ import pytest
 import lcprop.pr.gui.main_window as pr_main_window_module
 from lcprop.pr.gui.main_window import PRMainWindow
 from lcprop.pr.operations import PR_STATIC_OPERATION, PR_TIMEDEPENDENT_OPERATION
+from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
 from lcprop.pr.specs import (
     PR_EULER_INTEGRATOR,
     PR_MATERIAL_ID,
@@ -55,6 +56,7 @@ def test_pr_window_is_standalone_and_registers_both_pr_operations(app):
     assert window.windowTitle() == "LCProp PR"
     assert window.runner.registered_operations == (
         PR_TIMEDEPENDENT_OPERATION,
+        PR_TRANSVERSE_STATIC_OPERATION,
         PR_STATIC_OPERATION,
     )
     assert [window.tabs.tabText(index) for index in range(window.tabs.count())] == [

@@ -19,6 +19,11 @@ from lcprop.pr.static_workflow import (
     PRStaticRunRequest,
     PR_STATIC_WORKFLOW,
 )
+from lcprop.pr.transverse.static_workflow import (
+    PRTransverseStaticRunRequest,
+    PRTransverseStaticWorkflowOptions,
+    PR_TRANSVERSE_STATIC_WORKFLOW,
+)
 
 
 @dataclass(frozen=True)
@@ -102,11 +107,44 @@ def validate_pr_static_gui_request(
     )
 
 
+def validate_pr_transverse_static_gui_request(
+    request: PRTransverseStaticRunRequest,
+) -> PRStaticRequestPreflight:
+    """Validate the GUI's canonical nonlinear 2D zero-flux request."""
+
+    if not isinstance(request, PRTransverseStaticRunRequest):
+        raise TypeError("request must be a PRTransverseStaticRunRequest")
+    aperture = _validate_pr_gui_common(request)
+    request.transport.validate()
+    request.dielectric.validate()
+    request.boundary.validate()
+    request.projection.validate()
+    if request.backend.backend not in ("numpy", "cupy"):
+        raise ValueError(
+            "2D zero-flux static workflow requires an explicit NumPy or "
+            "CuPy backend"
+        )
+    if (
+        request.backend.backend == "numpy"
+        and request.backend.precision != "float64"
+    ):
+        raise ValueError(
+            "2D zero-flux static NumPy execution requires float64 precision"
+        )
+    if float(request.material.applied_field) != 0.0:
+        raise ValueError(
+            "2D zero-flux Profile v1 requires zero normalized applied field"
+        )
+    return PRStaticRequestPreflight(aperture=aperture)
+
+
 def validate_pr_gui_workflow_request(request):
     """Dispatch GUI preflight by the request's exact PR workflow type."""
 
     if isinstance(request, PRRunRequest):
         return validate_pr_gui_request(request)
+    if isinstance(request, PRTransverseStaticRunRequest):
+        return validate_pr_transverse_static_gui_request(request)
     if isinstance(request, PRStaticRunRequest):
         return validate_pr_static_gui_request(request)
     raise TypeError("unsupported PR GUI request type")
@@ -118,7 +156,7 @@ def build_pr_request(
     beam_panel,
     grid_panel,
     evolution_panel,
-) -> PRRunRequest | PRStaticRunRequest:
+) -> PRRunRequest | PRStaticRunRequest | PRTransverseStaticRunRequest:
     """Take one immutable, validated request snapshot from PR controls."""
 
     workflow_id = evolution_panel.workflow_id()
@@ -140,6 +178,14 @@ def build_pr_request(
             **common,
             solver=evolution_panel.static_solver(),
         )
+    elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
+        transverse_common = dict(common)
+        transverse_common.pop("initial_E")
+        request = PRTransverseStaticRunRequest(
+            **transverse_common,
+            initial_psi=None,
+            solver=evolution_panel.transverse_static_solver(),
+        )
     else:
         raise ValueError(f"unsupported PR GUI workflow: {workflow_id!r}")
     validate_pr_gui_workflow_request(request)
@@ -150,14 +196,28 @@ def validate_pr_gui_request_representable(request) -> None:
     """Reject headless PR settings that have no exact GUI representation."""
 
     validate_pr_gui_workflow_request(request)
-    if request.initial_A is not None or request.initial_E is not None:
+    initial_material = (
+        request.initial_psi
+        if isinstance(request, PRTransverseStaticRunRequest)
+        else request.initial_E
+    )
+    if request.initial_A is not None or initial_material is not None:
         raise ValueError(
             "PR GUI controls cannot represent request-owned initial arrays; "
             "load a PR checkpoint for continuation"
         )
     if request.backend.verbose:
         raise ValueError("PR GUI cannot represent backend verbose=True")
-    if isinstance(request, PRStaticRunRequest):
+    if isinstance(request, PRTransverseStaticRunRequest):
+        represented = PRTransverseStaticWorkflowOptions(
+            max_coupled_iterations=request.solver.max_coupled_iterations,
+            optical_substeps=request.solver.optical_substeps,
+        )
+        if request.solver != represented:
+            raise ValueError(
+                "PR GUI cannot represent these transverse static solver options"
+            )
+    elif isinstance(request, PRStaticRunRequest):
         represented = type(request.solver)(
             material_solver=None,
             max_coupled_passes=request.solver.max_coupled_passes,
@@ -170,7 +230,7 @@ def validate_pr_gui_request_representable(request) -> None:
 
 
 def apply_pr_request(
-    request: PRRunRequest | PRStaticRunRequest,
+    request: PRRunRequest | PRStaticRunRequest | PRTransverseStaticRunRequest,
     *,
     material_panel,
     beam_panel,
@@ -183,7 +243,10 @@ def apply_pr_request(
     validate_pr_gui_request_representable(request)
     grid_panel.set_grid(request.grid)
     material_panel.set_material(request.material)
-    if isinstance(request, PRStaticRunRequest):
+    if isinstance(request, PRTransverseStaticRunRequest):
+        evolution_panel.set_workflow_id(PR_TRANSVERSE_STATIC_WORKFLOW)
+        evolution_panel.set_transverse_static_solver(request.solver)
+    elif isinstance(request, PRStaticRunRequest):
         evolution_panel.set_workflow_id(PR_STATIC_WORKFLOW)
         evolution_panel.set_static_solver(request.solver)
     else:
@@ -210,4 +273,5 @@ __all__ = [
     "validate_pr_gui_request_representable",
     "validate_pr_gui_workflow_request",
     "validate_pr_static_gui_request",
+    "validate_pr_transverse_static_gui_request",
 ]

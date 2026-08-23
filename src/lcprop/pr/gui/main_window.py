@@ -66,6 +66,12 @@ from lcprop.pr.static_workflow import (
     PRStaticRunRequest,
     PR_STATIC_WORKFLOW,
 )
+from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
+from lcprop.pr.transverse.static_workflow import (
+    PRTransverseStaticRunRequest,
+    PRTransverseStaticRunResult,
+    PR_TRANSVERSE_STATIC_WORKFLOW,
+)
 from lcprop.pr.workflow import continue_pr_timedependent
 from lcprop.runners.base import RunnerResult
 from lcprop.runners.local import LocalRunner
@@ -107,7 +113,11 @@ class PRMainWindow(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.runner = LocalRunner(
-            operations=(PR_TIMEDEPENDENT_OPERATION, PR_STATIC_OPERATION)
+            operations=(
+                PR_TIMEDEPENDENT_OPERATION,
+                PR_TRANSVERSE_STATIC_OPERATION,
+                PR_STATIC_OPERATION,
+            )
         )
         self.last_result = None
         self.last_runner_result = None
@@ -308,6 +318,11 @@ class PRMainWindow(QWidget):
         if self._background_running:
             raise RuntimeError("cannot save an experiment while a run is active")
         request = self.build_request()
+        if isinstance(request, PRTransverseStaticRunRequest):
+            raise ValueError(
+                "2D zero-flux static experiment persistence is not yet "
+                "available; persistence changes are outside this integration"
+            )
         validate_pr_gui_request_representable(request)
         return save_experiment(
             request,
@@ -444,6 +459,17 @@ class PRMainWindow(QWidget):
                     f"{preflight.conservative_dt_limit:.8g}"
                 ),
             ])
+        elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
+            lines.extend([
+                "Static material model: nonlinear 2D transverse zero-flux",
+                "Authoritative material state: periodic zero-mean psi",
+                "Solved material fields: E_x and E_y",
+                "Scalar optical projection: E_active = E_x",
+                (
+                    "Maximum coupled material/optical iterations: "
+                    f"{request.solver.max_coupled_iterations}"
+                ),
+            ])
         else:
             lines.extend([
                 (
@@ -468,6 +494,8 @@ class PRMainWindow(QWidget):
 
     @staticmethod
     def _workflow_id_for_request(request) -> str:
+        if isinstance(request, PRTransverseStaticRunRequest):
+            return PR_TRANSVERSE_STATIC_WORKFLOW
         if isinstance(request, PRStaticRunRequest):
             return PR_STATIC_WORKFLOW
         if isinstance(request, PRRunRequest):
@@ -475,25 +503,48 @@ class PRMainWindow(QWidget):
         raise TypeError("unsupported PR GUI request type")
 
     def _run_registered(self, request, **kwargs):
-        if isinstance(request, PRStaticRunRequest):
+        if isinstance(
+            request,
+            (PRStaticRunRequest, PRTransverseStaticRunRequest),
+        ):
             progress_callback = kwargs.get("progress_callback")
             phase_started_at = monotonic()
 
             def before_product_conversion(_operation, result) -> None:
                 if progress_callback is None:
                     return
-                completed = int(result.completed_slices)
+                transverse = isinstance(result, PRTransverseStaticRunResult)
+                completed = int(
+                    result.completed_coupled_iterations
+                    if transverse
+                    else result.completed_slices
+                )
+                total = int(
+                    request.solver.max_coupled_iterations
+                    if transverse
+                    else result.grid_summary["Nz"]
+                )
                 progress_callback(
                     RunProgress(
-                        workflow=PR_STATIC_WORKFLOW,
+                        workflow=(
+                            PR_TRANSVERSE_STATIC_WORKFLOW
+                            if transverse
+                            else PR_STATIC_WORKFLOW
+                        ),
                         status="running",
                         completed_units=completed,
-                        total_units=int(result.grid_summary["Nz"]),
-                        current_coordinate=float(
-                            completed * result.grid_summary["dz_um"]
+                        total_units=total,
+                        current_coordinate=(
+                            float(completed)
+                            if transverse
+                            else float(
+                                completed * result.grid_summary["dz_um"]
+                            )
                         ),
-                        coordinate_name="z",
-                        coordinate_unit="um",
+                        coordinate_name=(
+                            "coupled_iteration" if transverse else "z"
+                        ),
+                        coordinate_unit=("1" if transverse else "um"),
                         elapsed_wall_time=monotonic() - phase_started_at,
                         message="Preparing GUI results...",
                         diagnostics={"phase": "gui_products"},
@@ -733,7 +784,14 @@ class PRMainWindow(QWidget):
             return
         token.cancel()
         self.run_status = "stopping"
-        is_static = isinstance(self._active_request, PRStaticRunRequest)
+        is_transverse_static = isinstance(
+            self._active_request,
+            PRTransverseStaticRunRequest,
+        )
+        is_static = is_transverse_static or isinstance(
+            self._active_request,
+            PRStaticRunRequest,
+        )
         self.status_label.setText(
             "Stopping…"
             if is_static
@@ -742,7 +800,9 @@ class PRMainWindow(QWidget):
         self.stop_button.setEnabled(False)
         self.stop_button.setText("Stopping…")
         self.results_panel.append_console(
-            "Stop requested; finishing the current accepted z slice."
+            "Stop requested; finishing the current accepted coupled iteration."
+            if is_transverse_static
+            else "Stop requested; finishing the current accepted z slice."
             if is_static
             else "Stop requested; stopping at next safe internal boundary."
         )
@@ -751,6 +811,34 @@ class PRMainWindow(QWidget):
     def _on_progress(self, progress: RunProgress) -> None:
         self.last_progress = progress
         self.last_progress_thread = QThread.currentThread()
+        if progress.workflow == PR_TRANSVERSE_STATIC_WORKFLOW:
+            diagnostics = progress.diagnostics or {}
+            if diagnostics.get("phase") == "gui_products":
+                self.status_label.setText(progress.message)
+                self.results_panel.set_td_time_indicator(progress.message)
+                self.results_panel.append_console(
+                    f"{progress.message}; "
+                    f"elapsed={progress.elapsed_wall_time:.3f} s"
+                )
+                return
+            self.status_label.setText(
+                "2D zero-flux iteration "
+                f"{progress.completed_units}/{progress.total_units}"
+            )
+            self.results_panel.set_td_time_indicator(
+                "PR transverse static coupled iteration: "
+                f"{progress.completed_units}/{progress.total_units}"
+            )
+            self.results_panel.append_console(
+                "PR transverse static progress: "
+                f"iteration {progress.completed_units}/"
+                f"{progress.total_units}; "
+                "equilibrium RMS="
+                f"{diagnostics.get('equilibrium_rms', float('nan')):.6g}; "
+                f"max={diagnostics.get('equilibrium_max', float('nan')):.6g}; "
+                f"elapsed={progress.elapsed_wall_time:.3f} s"
+            )
+            return
         if progress.workflow == PR_STATIC_WORKFLOW:
             diagnostics = progress.diagnostics or {}
             phase = diagnostics.get("phase", "solve")
@@ -806,6 +894,7 @@ class PRMainWindow(QWidget):
             if runner_result.kind not in (
                 PR_TIMEDEPENDENT_WORKFLOW,
                 PR_STATIC_WORKFLOW,
+                PR_TRANSVERSE_STATIC_WORKFLOW,
             ):
                 raise ValueError("PR window received an unexpected workflow")
             if runner_result.run_data is None:
@@ -813,7 +902,10 @@ class PRMainWindow(QWidget):
             result = runner_result.result
             self.last_runner_result = runner_result
             self.last_result = result
-            if runner_result.kind == PR_STATIC_WORKFLOW:
+            if runner_result.kind in (
+                PR_STATIC_WORKFLOW,
+                PR_TRANSVERSE_STATIC_WORKFLOW,
+            ):
                 self.status_label.setText("Rendering results...")
                 self.status_label.repaint()
                 self.results_panel.set_td_time_indicator("Rendering results...")
@@ -834,6 +926,49 @@ class PRMainWindow(QWidget):
                 self.results_panel.set_td_time_indicator(
                     f"{prefix}: {float(result.time_normalized):.6g} normalized; "
                     f"steps: {result.completed_steps}/{result.requested_steps}"
+                )
+            elif runner_result.kind == PR_TRANSVERSE_STATIC_WORKFLOW:
+                diagnostics = result.diagnostics
+                if result.status == "cancelled":
+                    self.run_status = "stopped"
+                    self.status_label.setText("Stopped")
+                    message = "2D zero-flux static run cancelled"
+                elif result.status == "converged":
+                    self.run_status = "completed"
+                    self.status_label.setText("Converged")
+                    message = "2D zero-flux static solve converged"
+                else:
+                    self.run_status = "not_converged"
+                    self.status_label.setText("Not converged")
+                    message = "2D zero-flux static solve did not converge"
+                requested = int(
+                    result.resolved_profile["solver"][
+                        "max_coupled_iterations"
+                    ]
+                )
+                self.results_panel.set_td_time_indicator(
+                    "PR transverse static: "
+                    f"{result.completed_coupled_iterations}/{requested} "
+                    "coupled iterations"
+                )
+                self.results_panel.append_console(
+                    "Authoritative zero-flux residual: "
+                    f"RMS={diagnostics['equilibrium_residual_rms']:.8g}; "
+                    f"max={diagnostics['equilibrium_residual_max']:.8g}"
+                )
+                self.results_panel.append_console(
+                    "Material state diagnostics: "
+                    f"max|E_x|={diagnostics['E_x_max_abs']:.8g}; "
+                    f"max|E_y|={diagnostics['E_y_max_abs']:.8g}; "
+                    f"carrier minimum={diagnostics['carrier_minimum']:.8g}"
+                )
+                solver_summary = diagnostics["discrete_corrector"]
+                self.results_panel.append_console(
+                    "Material solve work: "
+                    "Newton="
+                    f"{solver_summary['continuum_newton_iterations_attempted']}; "
+                    f"PCG={solver_summary['continuum_pcg_iterations']}; "
+                    f"termination={diagnostics['termination_reason']}"
                 )
             else:
                 total_slices = int(result.grid_summary["Nz"])

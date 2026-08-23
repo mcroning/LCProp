@@ -20,6 +20,10 @@ from lcprop.pr.static_workflow import (
     PRStaticWorkflowOptions,
     PR_STATIC_WORKFLOW,
 )
+from lcprop.pr.transverse.static_workflow import (
+    PRTransverseStaticWorkflowOptions,
+    PR_TRANSVERSE_STATIC_WORKFLOW,
+)
 
 
 class PREvolutionPanel(QWidget):
@@ -38,7 +42,14 @@ class PREvolutionPanel(QWidget):
 
         self.workflow = QComboBox()
         self.workflow.addItem("Time dependent", PR_TIMEDEPENDENT_WORKFLOW)
-        self.workflow.addItem("Static (self-consistent)", PR_STATIC_WORKFLOW)
+        self.workflow.addItem(
+            "Static (2D transverse zero-flux)",
+            PR_TRANSVERSE_STATIC_WORKFLOW,
+        )
+        self.workflow.addItem(
+            "Static (legacy x-only)",
+            PR_STATIC_WORKFLOW,
+        )
         self.Nt = spin_box(0, 1_000_000_000, defaults.Nt)
         self.dt_normalized = QDoubleSpinBox()
         self.dt_normalized.setRange(1e-12, 1e6)
@@ -90,12 +101,24 @@ class PREvolutionPanel(QWidget):
 
     def _refresh_workflow_controls(self, *_args) -> None:
         is_time_dependent = self.workflow_id() == PR_TIMEDEPENDENT_WORKFLOW
+        is_transverse_static = (
+            self.workflow_id() == PR_TRANSVERSE_STATIC_WORKFLOW
+        )
         for widget in (self.Nt, self.dt_normalized, self.integrator):
             self._set_row_visible(widget, is_time_dependent)
         self._set_row_visible(
             self.max_coupled_passes,
             not is_time_dependent,
         )
+        static_iterations_label = self._form.labelForField(
+            self.max_coupled_passes
+        )
+        if static_iterations_label is not None:
+            static_iterations_label.setText(
+                "Maximum coupled iterations"
+                if is_transverse_static
+                else "Maximum coupled passes per slice"
+            )
 
     def solver(self) -> PRSolverOptions:
         return PRSolverOptions(
@@ -115,6 +138,14 @@ class PREvolutionPanel(QWidget):
         return PRStaticWorkflowOptions(
             material_solver=None,
             max_coupled_passes=self.max_coupled_passes.value(),
+            optical_substeps=self.optical_substeps.value(),
+        )
+
+    def transverse_static_solver(self) -> PRTransverseStaticWorkflowOptions:
+        """Return the bounded 2D zero-flux policy represented by the GUI."""
+
+        return PRTransverseStaticWorkflowOptions(
+            max_coupled_iterations=self.max_coupled_passes.value(),
             optical_substeps=self.optical_substeps.value(),
         )
 
@@ -142,6 +173,23 @@ class PREvolutionPanel(QWidget):
                 "PR GUI cannot represent an explicit static material solver"
             )
         self.max_coupled_passes.setValue(solver.max_coupled_passes)
+        self.optical_substeps.setValue(solver.optical_substeps)
+
+    def set_transverse_static_solver(
+        self,
+        solver: PRTransverseStaticWorkflowOptions,
+    ) -> None:
+        solver.validate()
+        represented = PRTransverseStaticWorkflowOptions(
+            max_coupled_iterations=solver.max_coupled_iterations,
+            optical_substeps=solver.optical_substeps,
+        )
+        if solver != represented:
+            raise ValueError(
+                "PR GUI cannot represent explicit transverse static solver "
+                "policy overrides"
+            )
+        self.max_coupled_passes.setValue(solver.max_coupled_iterations)
         self.optical_substeps.setValue(solver.optical_substeps)
 
     def set_backend_spec(self, backend: BackendSpec) -> None:
