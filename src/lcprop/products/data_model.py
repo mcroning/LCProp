@@ -92,6 +92,7 @@ class FieldData:
     value_unit: str = ""
     colormap: str = "viridis"
     source_volume_key: str | None = None
+    coordinates: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -129,6 +130,7 @@ def make_field(
     value_unit: str = "",
     colormap: str = "viridis",
     source_volume_key: str | None = None,
+    coordinates: dict[str, Any] | None = None,
 ) -> FieldData:
     return FieldData(
         key=key,
@@ -142,6 +144,7 @@ def make_field(
         value_unit=value_unit,
         colormap=colormap,
         source_volume_key=source_volume_key,
+        coordinates={} if coordinates is None else coordinates,
     )
 
 

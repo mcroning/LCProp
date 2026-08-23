@@ -106,9 +106,7 @@ class ImagePane(QWidget):
             return
 
         field = self._field_at_selected_z(self._run_data.fields[key])
-        extent = None
-        if field.axes == ("x", "y"):
-            extent = self._run_data.geometry.extent_xy()
+        extent = self._field_extent(field)
         vmin, vmax = self._limits_for_field(field)
         self.image_view.set_field(
             field,
@@ -116,6 +114,22 @@ class ImagePane(QWidget):
             vmin=vmin,
             vmax=vmax,
         )
+
+    def _field_extent(self, field):
+        if len(field.axes) != 2:
+            return None
+        horizontal, vertical = field.axes
+        coordinates = getattr(field, "coordinates", {}) or {}
+        h = coordinates.get(horizontal)
+        v = coordinates.get(vertical)
+        if h is not None and v is not None:
+            h = np.asarray(h)
+            v = np.asarray(v)
+            if h.size and v.size:
+                return [float(h[0]), float(h[-1]), float(v[0]), float(v[-1])]
+        if horizontal in ("x", "y", "z") and vertical in ("x", "y", "z"):
+            return self._run_data.geometry.extent(horizontal, vertical)
+        return None
 
     def reset_color_scales(self) -> None:
         """Start deterministic autoscaling for a fresh run."""
@@ -150,4 +164,14 @@ class ImagePane(QWidget):
         self.image_view.clear_crosshair()
 
     def _position_selected(self, ix: int, iy: int) -> None:
-        self.positionSelected.emit(ix, iy)
+        if self._run_data is None:
+            return
+        index = self.field_selector.currentIndex()
+        if index < 0:
+            return
+        key = self.field_selector.itemData(index)
+        if key is None:
+            return
+        field = self._field_at_selected_z(self._run_data.fields[key])
+        if field.axes == ("x", "y"):
+            self.positionSelected.emit(ix, iy)
