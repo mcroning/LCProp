@@ -10,6 +10,7 @@ import pytest
 from lcprop.runners.source_deployment import (
     SourceDeploymentError,
     SourceDeploymentManager,
+    _is_git_lfs_pointer,
     build_committed_source_archive,
     resolve_git_source,
 )
@@ -179,6 +180,77 @@ def test_archive_is_stable_committed_content_only(tmp_path):
 def test_non_git_install_fails_actionably(tmp_path):
     with pytest.raises(SourceDeploymentError, match="source_not_git_checkout"):
         resolve_git_source(tmp_path)
+
+
+def test_current_committed_source_deployment_module_is_not_an_lfs_pointer(tmp_path):
+    checkout = Path(__file__).resolve().parents[1]
+    blob = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(checkout),
+            "show",
+            "HEAD:src/lcprop/runners/source_deployment.py",
+        ],
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert b"version https://git-lfs.github.com/spec/v1" in blob
+    assert not _is_git_lfs_pointer(blob)
+    root, _sha = _repository(tmp_path)
+    deployed_module = root / "src/lcprop/source_deployment.py"
+    deployed_module.write_bytes(blob)
+    _run("git", "add", str(deployed_module.relative_to(root)), cwd=root)
+    _run("git", "commit", "-qm", "add detector source", cwd=root)
+    assert resolve_git_source(root).git_sha == _run(
+        "git", "rev-parse", "HEAD", cwd=root
+    )
+
+
+def test_lfs_signature_inside_ordinary_source_text_is_not_a_pointer():
+    signature = "version https://git-lfs.github.com/spec/v1"
+    python_source = (
+        f'LFS_SIGNATURE = "{signature}"\n'
+        'DOCUMENTATION = "oid sha256:' + "0" * 64 + '\\nsize 1"\n'
+    ).encode("ascii")
+    documentation = (
+        b"Git LFS pointers begin with "
+        + signature.encode("ascii")
+        + b", but this document is not one.\n"
+    )
+    assert not _is_git_lfs_pointer(python_source)
+    assert not _is_git_lfs_pointer(documentation)
+
+
+def test_complete_valid_git_lfs_pointer_is_recognized():
+    pointer = (
+        b"version https://git-lfs.github.com/spec/v1\n"
+        + b"oid sha256:"
+        + b"a" * 64
+        + b"\nsize 12345\n"
+    )
+    assert _is_git_lfs_pointer(pointer)
+
+
+@pytest.mark.parametrize(
+    "blob",
+    (
+        b"version https://git-lfs.github.com/spec/v1\n",
+        b"version https://git-lfs.github.com/spec/v1\nsize 1\n",
+        b"version https://git-lfs.github.com/spec/v1\n"
+        b"oid sha256:not-a-valid-oid\nsize 1\n",
+        b"version https://git-lfs.github.com/spec/v1\n"
+        + b"oid sha256:"
+        + b"0" * 64
+        + b"\n",
+        b"version https://git-lfs.github.com/spec/v1\n"
+        + b"oid sha256:"
+        + b"0" * 64
+        + b"\nsize 1\nunexpected trailing text\n",
+    ),
+)
+def test_malformed_or_partial_lfs_pointer_text_is_not_recognized(blob):
+    assert not _is_git_lfs_pointer(blob)
 
 
 def test_git_lfs_pointer_and_symlink_sources_are_rejected(tmp_path):

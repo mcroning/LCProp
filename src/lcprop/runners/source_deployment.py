@@ -18,6 +18,13 @@ from lcprop.runners.slurm import validate_remote_path
 DEPLOYABLE_PATHS = ("src", "pyproject.toml")
 _FULL_SHA = re.compile(r"[0-9a-f]{40}")
 _CHECKSUM = re.compile(r"[0-9a-f]{64}")
+_LFS_SIGNATURE = b"version https://git-lfs.github.com/spec/v1"
+_LFS_POINTER = re.compile(
+    rb"version https://git-lfs\.github\.com/spec/v1\r?\n"
+    rb"oid sha256:[0-9a-f]{64}\r?\n"
+    rb"size (?:0|[1-9][0-9]*)\r?\n?"
+)
+_MAX_LFS_POINTER_BYTES = 1024
 
 
 class SourceDeploymentError(RuntimeError):
@@ -64,6 +71,60 @@ def _git(repository: Path, *arguments: str, text: bool = True):
         if isinstance(message, bytes):
             message = message.decode("utf-8", errors="replace")
         raise SourceDeploymentError("source_identity_failed", message.strip()) from exc
+
+
+def _is_git_lfs_pointer(blob: bytes) -> bool:
+    """Return whether a complete committed blob is a canonical Git LFS pointer."""
+
+    return (
+        len(blob) <= _MAX_LFS_POINTER_BYTES and _LFS_POINTER.fullmatch(blob) is not None
+    )
+
+
+def _git_lfs_pointer_paths(
+    root: Path,
+    sha: str,
+    deployable_paths: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Inspect complete committed blobs selected by a cheap signature search."""
+
+    candidates = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "grep",
+            "-z",
+            "-l",
+            "-F",
+            _LFS_SIGNATURE.decode("ascii"),
+            sha,
+            "--",
+            *deployable_paths,
+        ],
+        capture_output=True,
+    )
+    if candidates.returncode not in {0, 1}:
+        raise SourceDeploymentError(
+            "source_identity_failed",
+            candidates.stderr.decode("utf-8", errors="replace").strip()
+            or "Git LFS candidate probe failed",
+        )
+    prefix = (sha + ":").encode("ascii")
+    pointers: list[str] = []
+    for reference in candidates.stdout.split(b"\0"):
+        if not reference:
+            continue
+        if not reference.startswith(prefix):
+            raise SourceDeploymentError(
+                "source_identity_failed",
+                "Git returned an invalid LFS candidate reference",
+            )
+        path = reference[len(prefix) :].decode("utf-8", errors="surrogateescape")
+        blob = _git(root, "show", f"{sha}:{path}", text=False).stdout
+        if _is_git_lfs_pointer(blob):
+            pointers.append(path)
+    return tuple(pointers)
 
 
 def resolve_git_source(
@@ -129,24 +190,12 @@ def resolve_git_source(
             "deployable source contains unsupported symbolic-link or submodule "
             f"entries:\n{chr(10).join(unsupported_modes)}",
         )
-    lfs = subprocess.run(
-        [
-            "git", "-C", str(root), "grep", "-l", "-F",
-            "version https://git-lfs.github.com/spec/v1", sha, "--",
-            *deployable_paths,
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if lfs.returncode not in {0, 1}:
-        raise SourceDeploymentError(
-            "source_identity_failed", lfs.stderr.strip() or "Git LFS probe failed"
-        )
-    if lfs.returncode == 0:
+    lfs_pointers = _git_lfs_pointer_paths(root, sha, tuple(deployable_paths))
+    if lfs_pointers:
         raise SourceDeploymentError(
             "source_archive_failed",
             "deployable source contains Git LFS pointer files, which automatic "
-            f"source staging does not support:\n{lfs.stdout.rstrip()}",
+            "source staging does not support:\n" + "\n".join(lfs_pointers),
         )
     return GitSourceIdentity(root, sha, tuple(deployable_paths))
 
