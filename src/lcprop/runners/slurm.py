@@ -135,20 +135,33 @@ class SlurmExecutionConfig:
     host: str
     remote_run_root: str
     remote_python: str
-    remote_source_path: str
-    source_git_sha: str
+    remote_source_path: str | None
+    source_git_sha: str | None
     local_artifact_root: Path
     resource_profiles: tuple[SlurmResourceProfile, ...]
+    cluster_profile: str | None = None
     default_resource_profile: str | None = None
     poll_interval: float = 5.0
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[A-Za-z0-9_.@-]+", self.host):
             raise ValueError("host must be an SSH hostname or user@hostname")
-        for value in (self.remote_run_root, self.remote_python, self.remote_source_path):
+        for value in (self.remote_run_root, self.remote_python):
             validate_remote_path(value)
-        if not re.fullmatch(r"[0-9a-f]{40}", self.source_git_sha):
+        if bool(self.remote_source_path) != bool(self.source_git_sha):
+            raise ValueError(
+                "remote_source_path and source_git_sha must be supplied together"
+            )
+        if self.remote_source_path is not None:
+            validate_remote_path(self.remote_source_path)
+        if self.source_git_sha is not None and not re.fullmatch(
+            r"[0-9a-f]{40}", self.source_git_sha
+        ):
             raise ValueError("source_git_sha must be an exact 40-character SHA")
+        if self.cluster_profile is not None and not re.fullmatch(
+            r"[A-Za-z0-9_.-]+", self.cluster_profile
+        ):
+            raise ValueError("cluster_profile contains unsupported characters")
         if self.poll_interval <= 0:
             raise ValueError("poll_interval must be positive")
         names = [profile.name for profile in self.resource_profiles]
@@ -225,6 +238,7 @@ class SlurmRunner:
         operations: Iterable[WorkflowOperation] = (),
         *,
         transport: RemoteTransport | None = None,
+        source_deployment_manager=None,
         registry,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -234,6 +248,7 @@ class SlurmRunner:
         if len(self._operations) != len(operation_values):
             raise ValueError("duplicate operation registration")
         self._transport = SubprocessRemoteTransport() if transport is None else transport
+        self._source_deployment_manager = source_deployment_manager
         self._registry = registry
         self._sleep = sleep
 
@@ -246,7 +261,16 @@ class SlurmRunner:
             raise ValueError(f"operation already registered for {operation.key!r}")
         self._operations[operation.key] = operation
 
-    def _script(self, remote_run: str, profile: SlurmResourceProfile) -> str:
+    def _script(
+        self,
+        remote_run: str,
+        profile: SlurmResourceProfile,
+        *,
+        remote_source_path: str | None = None,
+    ) -> str:
+        source_path = remote_source_path or self.config.remote_source_path
+        if source_path is None:
+            raise ValueError("remote source must be resolved before script construction")
         lines = [
             "#!/bin/bash",
             f"#SBATCH --partition={profile.partition}",
@@ -264,7 +288,7 @@ class SlurmRunner:
                 lines.append(f"#SBATCH --gpus={profile.gpus}")
         lines.append("set -euo pipefail")
         lines.extend(profile.setup_commands)
-        lines.append(f"export PYTHONPATH={self.config.remote_source_path}/src")
+        lines.append(f"export PYTHONPATH={source_path}/src")
         if profile.gpus:
             minimum = profile.minimum_device_count or profile.gpus
             pattern = profile.expected_device_pattern
@@ -337,6 +361,11 @@ class SlurmRunner:
                 "requested CuPy backend requires a GPU resource profile with "
                 "require_cupy=true"
             )
+        from lcprop.runners.source_deployment import (
+            SourceDeploymentError,
+            explicit_source_deployment,
+        )
+
         run_id = f"lcprop-{uuid4().hex}"
         local_run = self.config.local_artifact_root / run_id
         local_run.mkdir(parents=True, exist_ok=False)
@@ -351,26 +380,61 @@ class SlurmRunner:
         )
         if progress_callback:
             progress_callback(status)
-        actual_remote_sha = self._transport.ssh(
-            self.config.host, "cat",
-            f"{self.config.remote_source_path}/.lcprop-source-sha",
-        )
-        if actual_remote_sha != self.config.source_git_sha:
-            raise RuntimeError(
-                "remote source SHA mismatch: "
-                f"expected {self.config.source_git_sha}, got {actual_remote_sha}"
+        try:
+            if self.config.remote_source_path is not None:
+                source = explicit_source_deployment(
+                    remote_source_path=self.config.remote_source_path,
+                    source_git_sha=self.config.source_git_sha or "",
+                )
+                actual_remote_sha = self._transport.ssh(
+                    self.config.host,
+                    "cat",
+                    f"{source.remote_source_path}/.lcprop-source-sha",
+                )
+                if actual_remote_sha != source.source_git_sha:
+                    raise SourceDeploymentError(
+                        "snapshot_identity_mismatch",
+                        "remote source SHA mismatch: "
+                        f"expected {source.source_git_sha}, got {actual_remote_sha}",
+                    )
+            elif self._source_deployment_manager is not None:
+                source = self._source_deployment_manager.resolve_or_stage()
+            else:
+                raise SourceDeploymentError(
+                    "source_identity_failed",
+                    "no automatic source deployment manager or explicit pre-staged "
+                    "source override is configured",
+                )
+        except SourceDeploymentError as exc:
+            self._failed_status(
+                status,
+                exc.category,
+                exc,
+                progress_callback=progress_callback,
             )
+            raise RemoteExecutionError(exc.category, exc.reason) from exc
+        deployment_provenance = dict(source.provenance)
+        deployment_provenance.update(
+            {
+                "cluster_profile": self.config.cluster_profile,
+                "resource_profile": profile.name,
+            }
+        )
         write_request_package(
             local_run, registry=self._registry, material_id=material_id,
             workflow_id=workflow_id, request=request, run_id=run_id,
             resource_profile=profile.name,
-            provenance={
-                "local_git_sha": self.config.source_git_sha,
-                "remote_source_path": self.config.remote_source_path,
-            },
+            provenance=deployment_provenance,
         )
         script = local_run / "launch.sbatch"
-        script.write_text(self._script(remote_run, profile), encoding="utf-8")
+        script.write_text(
+            self._script(
+                remote_run,
+                profile,
+                remote_source_path=source.remote_source_path,
+            ),
+            encoding="utf-8",
+        )
         self._transport.ssh(self.config.host, "mkdir", "-p", remote_run)
         self._transport.upload(self.config.host, local_run / "request", remote_run)
         self._transport.upload(self.config.host, script, f"{remote_run}/launch.sbatch")

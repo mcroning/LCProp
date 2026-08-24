@@ -337,6 +337,22 @@ def test_user_config_discovery_composes_runner_without_source_edits(tmp_path):
     assert runner.config.profile("generic-gpu").gres == "gpu:1"
 
 
+def test_normal_profile_composition_no_longer_requires_manual_source_environment(
+    tmp_path,
+):
+    catalog = ClusterCatalog(
+        clusters=(_explicit_cluster(),), default_cluster="explicit"
+    )
+    runner = default_slurm_runner_from_environment(
+        catalog=catalog,
+        environ={"LCPROP_SLURM_LOCAL_ARTIFACT_ROOT": str(tmp_path)},
+    )
+    assert runner is not None
+    assert runner.config.remote_source_path is None
+    assert runner.config.source_git_sha is None
+    assert runner._source_deployment_manager is not None
+
+
 def test_explicit_source_pair_must_be_complete():
     catalog = ClusterCatalog(clusters=(_explicit_cluster(),), default_cluster="explicit")
     with pytest.raises(ClusterConfigError, match="must be set together"):

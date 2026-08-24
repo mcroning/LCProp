@@ -18,6 +18,10 @@ from lcprop.runners.slurm import (
     RemoteExecutionError, RemoteRunCancelled, SlurmExecutionConfig,
     SlurmResourceProfile, SlurmRunner,
 )
+from lcprop.runners.source_deployment import (
+    ResolvedSourceDeployment,
+    SourceDeploymentError,
+)
 from lcprop.pr.specs import PRMaterialSpec
 from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
 from lcprop.pr.transverse.static_workflow import (
@@ -123,6 +127,32 @@ class FakeTransport:
             )
             return
         raise AssertionError(f"unexpected download {remote}")
+
+
+class FakeDeploymentManager:
+    def __init__(self, *, fail=False):
+        self.calls = 0
+        self.fail = fail
+
+    def resolve_or_stage(self):
+        self.calls += 1
+        if self.fail:
+            raise SourceDeploymentError("source_dirty", "synthetic dirty source")
+        provenance = {
+            "source_kind": "committed_git_archive",
+            "source_git_sha": SHA,
+            "remote_source_path": "/snapshot",
+            "source_checksum_sha256": "a" * 64,
+            "snapshot_reused": self.calls > 1,
+        }
+        return ResolvedSourceDeployment(
+            source_kind="committed_git_archive",
+            source_git_sha=SHA,
+            remote_source_path="/snapshot",
+            source_checksum="a" * 64,
+            reused_existing_snapshot=self.calls > 1,
+            provenance=provenance,
+        )
 
 
 def _config(tmp_path, **changes):
@@ -396,6 +426,63 @@ def test_runner_rejects_remote_snapshot_mismatch_before_submission(tmp_path):
     with pytest.raises(RuntimeError, match="remote source SHA mismatch"):
         runner.run_registered("lc", "static", _request())
     assert transport.submissions == 0
+
+
+def test_runner_resolves_dynamic_source_and_records_deployment_provenance(tmp_path):
+    transport = FakeTransport()
+    deployment = FakeDeploymentManager()
+    config = _config(
+        tmp_path,
+        remote_source_path=None,
+        source_git_sha=None,
+        cluster_profile="test-cluster",
+    )
+    runner = SlurmRunner(
+        config,
+        (LC_STATIC_OPERATION,),
+        transport=transport,
+        source_deployment_manager=deployment,
+        registry=default_transport_registry(),
+        sleep=lambda _seconds: None,
+    )
+    runner.run_registered("lc", "static", _request())
+    assert deployment.calls == 1
+    assert transport.submissions == 1
+    local_run = next(tmp_path.iterdir())
+    envelope = json.loads(
+        (local_run / "request/request.json").read_text(encoding="utf-8")
+    )
+    assert envelope["provenance"] == {
+        "cluster_profile": "test-cluster",
+        "remote_source_path": "/snapshot",
+        "resource_profile": "CPU small",
+        "snapshot_reused": False,
+        "source_checksum_sha256": "a" * 64,
+        "source_git_sha": SHA,
+        "source_kind": "committed_git_archive",
+    }
+    assert f"export PYTHONPATH=/snapshot/src" in (
+        local_run / "launch.sbatch"
+    ).read_text(encoding="utf-8")
+
+
+def test_source_deployment_failure_prevents_submission(tmp_path):
+    transport = FakeTransport()
+    states = []
+    runner = SlurmRunner(
+        _config(tmp_path, remote_source_path=None, source_git_sha=None),
+        (LC_STATIC_OPERATION,),
+        transport=transport,
+        source_deployment_manager=FakeDeploymentManager(fail=True),
+        registry=default_transport_registry(),
+    )
+    with pytest.raises(RemoteExecutionError, match="source_dirty"):
+        runner.run_registered(
+            "lc", "static", _request(), progress_callback=states.append
+        )
+    assert transport.submissions == 0
+    assert states[-1].state == RemoteRunState.FAILED
+    assert states[-1].progress_metadata == {"failure_category": "source_dirty"}
 
 
 def test_pr_transverse_static_uses_same_remote_artifacts_and_product_adapter(tmp_path):

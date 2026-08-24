@@ -32,13 +32,33 @@ def default_transport_operations():
 def make_slurm_runner(
     *,
     cluster: ClusterProfile,
-    remote_source_path: str,
-    source_git_sha: str,
+    remote_source_path: str | None = None,
+    source_git_sha: str | None = None,
     local_artifact_root: Path | None = None,
+    local_source: Path | None = None,
+    transport=None,
+    source_deployment_manager=None,
 ):
-    """Compose one runner from explicit site and pre-staged source inputs."""
+    """Compose one runner with automatic deployment or an explicit override."""
 
     from lcprop.runners.slurm import SlurmExecutionConfig, SlurmRunner
+    from lcprop.runners.source_deployment import SourceDeploymentManager
+
+    if bool(remote_source_path) != bool(source_git_sha):
+        raise ClusterConfigError(
+            "remote_source_path and source_git_sha must be supplied together"
+        )
+    if remote_source_path is None and source_deployment_manager is None:
+        source_deployment_manager = SourceDeploymentManager(
+            host=cluster.host,
+            source_root=cluster.source_root,
+            local_source=(
+                Path(__file__).resolve().parents[3]
+                if local_source is None
+                else Path(local_source)
+            ),
+            transport=transport,
+        )
 
     config = SlurmExecutionConfig(
         host=cluster.host,
@@ -46,6 +66,7 @@ def make_slurm_runner(
         remote_python=cluster.remote_python,
         remote_source_path=remote_source_path,
         source_git_sha=source_git_sha,
+        cluster_profile=cluster.name,
         local_artifact_root=(
             Path.home() / "LCProp-results" / "remote"
             if local_artifact_root is None
@@ -58,6 +79,8 @@ def make_slurm_runner(
     return SlurmRunner(
         config,
         default_transport_operations(),
+        transport=transport,
+        source_deployment_manager=source_deployment_manager,
         registry=default_transport_registry(),
     )
 
@@ -68,7 +91,7 @@ def default_slurm_runner_from_environment(
     cluster_name: str | None = None,
     environ: Mapping[str, str] | None = None,
 ):
-    """Compose configured Slurm execution while source staging remains explicit."""
+    """Compose configured Slurm execution with automatic committed-source staging."""
 
     env = os.environ if environ is None else environ
     if catalog is None:
@@ -85,8 +108,6 @@ def default_slurm_runner_from_environment(
         raise ClusterConfigError(
             "LCPROP_SLURM_SOURCE_PATH and LCPROP_SLURM_SOURCE_SHA must be set together"
         )
-    if not source or not sha:
-        return None
     local_root = Path(
         env.get(
             "LCPROP_SLURM_LOCAL_ARTIFACT_ROOT",

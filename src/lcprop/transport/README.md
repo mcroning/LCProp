@@ -53,15 +53,29 @@ configured command rather than treating it as untrusted data. Cluster-profile
 files must therefore be protected and reviewed like shell configuration; do
 not place passwords, tokens, private keys, or other credentials in them.
 
-Stage 02A still requires `LCPROP_SLURM_SOURCE_PATH` and
-`LCPROP_SLURM_SOURCE_SHA` to identify a previously staged immutable source
-snapshot. Automatic committed-source staging is deliberately deferred to
-Stage 02B, and GUI profile setup/discovery is deferred to Stage 02C. Thus this
-stage provides portable configuration and runner composition, but not yet the
-complete end-user portable Slurm workflow. Until the Stage 02C profile selector
-exists, GUI remote runs use the selected cluster's
-`default_resource_profile`; they do not contain package-defined CPU or H200
-profile names.
+Normal profile-driven Slurm execution automatically resolves the exact local
+Git `HEAD`, builds a deterministic archive containing committed `src/` and
+`pyproject.toml` content, and stages it beneath the selected cluster's
+`source_root`. Both branch and detached clean checkouts are supported. Changes
+inside the deployable boundary—including untracked source files—block staging;
+untracked research results and other files outside that boundary are not read
+or uploaded.
+
+Snapshots are named by the full commit SHA, carry exact SHA and archive-SHA256
+markers, and are made operationally read-only before an atomic final link is
+published. An existing snapshot is reused only when its full SHA, checksum, and
+required `src/lcprop` layout match. A conflicting or incomplete snapshot fails
+before `sbatch`; it is never overwritten. Temporary staging paths cannot be
+mistaken for finalized snapshots.
+
+`LCPROP_SLURM_SOURCE_PATH` and `LCPROP_SLURM_SOURCE_SHA` remain a paired
+advanced override for CI, commissioning, and deliberately pre-staged sources,
+but ordinary configured users no longer need them. Automatic deployment from
+an installed package without a Git checkout remains deferred and fails with an
+actionable request to use that explicit override. GUI cluster setup and profile
+selection remain deferred to Stage 02C. Until then, GUI remote runs use the
+selected cluster's `default_resource_profile`; they do not contain
+package-defined CPU or H200 profile names.
 
 Minimal profile example:
 
