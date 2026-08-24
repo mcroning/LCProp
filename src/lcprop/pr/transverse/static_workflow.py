@@ -777,6 +777,16 @@ def _run_pr_transverse_static_at_visibility(
         xp=xp,
     )
     null_rms, null_max = _metrics(null, xp=xp)
+    # The authoritative scalar convergence gates use the production-resolved
+    # subspace. Export the same field while retaining the raw residual above
+    # for the separately reported derivative-null diagnostic.
+    authoritative_equilibrium = project_production_resolved_modes(
+        equilibrium,
+        dx_normalized=dx_normalized,
+        dy_normalized=dy_normalized,
+        h_y=request.dielectric.h_y,
+        xp=xp,
+    )
     power_initial = normalized_power(A0, grid)
     power_final = normalized_power(replay_A, grid)
     diagnostics.update({
@@ -866,7 +876,9 @@ def _run_pr_transverse_static_at_visibility(
         psi_initial=np.asarray(asnumpy(psi_initial)).copy(),
         psi_final=np.asarray(asnumpy(psi)).copy(),
         source_intensity_stack=np.asarray(asnumpy(replay_source)).copy(),
-        equilibrium_residual_stack=np.asarray(asnumpy(equilibrium)).copy(),
+        equilibrium_residual_stack=np.asarray(
+            asnumpy(authoritative_equilibrium)
+        ).copy(),
         td_rhs_residual_stack=np.asarray(asnumpy(td_residual)).copy(),
         power_initial=power_initial,
         power_final=power_final,

@@ -88,6 +88,22 @@ def _two_beam_request(*, coherent: bool):
     )
 
 
+def _assert_exported_equilibrium_matches_authoritative_diagnostics(result):
+    residual = np.asarray(result.equilibrium_residual_stack, dtype=np.float64)
+    residual_rms = float(np.sqrt(np.mean(residual * residual, dtype=np.float64)))
+    residual_max = float(np.max(np.abs(residual)))
+    assert residual_rms == pytest.approx(
+        result.diagnostics["equilibrium_residual_rms"],
+        rel=1e-12,
+        abs=1e-15,
+    )
+    assert residual_max == pytest.approx(
+        result.diagnostics["equilibrium_residual_max"],
+        rel=1e-12,
+        abs=1e-15,
+    )
+
+
 def test_coupled_static_converges_with_refreshed_source_and_independent_replay():
     result = run_pr_transverse_static(_request())
     assert result.status == "converged"
@@ -335,15 +351,27 @@ def test_visibility_endpoints_are_exact_coherent_and_incoherent_sources(
 def test_direct_success_bypasses_visibility_continuation(monkeypatch):
     import lcprop.pr.transverse.static_workflow as module
 
+    request = _two_beam_request(coherent=True)
+    expected = module._run_pr_transverse_static_at_visibility(
+        request, visibility=1.0
+    )
+
     def forbidden(*args, **kwargs):
         raise AssertionError("successful direct solve invoked continuation")
 
     monkeypatch.setattr(
         module, "_run_pr_transverse_static_visibility_continuation", forbidden
     )
-    result = run_pr_transverse_static(_two_beam_request(coherent=True))
+    result = run_pr_transverse_static(request)
     assert result.converged
     assert "continuation_used" not in result.diagnostics
+    np.testing.assert_array_equal(result.A_final, expected.A_final)
+    np.testing.assert_array_equal(result.psi_final, expected.psi_final)
+    np.testing.assert_array_equal(
+        result.equilibrium_residual_stack,
+        expected.equilibrium_residual_stack,
+    )
+    _assert_exported_equilibrium_matches_authoritative_diagnostics(result)
 
 
 def test_coherent_line_search_failure_uses_fixed_stage_schedule_and_warm_starts(
@@ -509,6 +537,9 @@ def test_forced_visibility_schedule_matches_easy_direct_solution():
         atol=1e-11,
     )
     assert abs(continued.power_final - direct.power_final) < 1e-12
+    assert continued.diagnostics["continuation_used"] is True
+    assert continued.diagnostics["final_visibility"] == 1.0
+    _assert_exported_equilibrium_matches_authoritative_diagnostics(continued)
 
 
 def test_incoherent_failure_does_not_invoke_visibility_continuation(monkeypatch):
