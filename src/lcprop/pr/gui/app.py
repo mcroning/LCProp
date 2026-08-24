@@ -7,15 +7,12 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from lcprop.pr.gui.main_window import PRMainWindow
-from lcprop.transport.defaults import default_slurm_runner_from_environment
 
 
 def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("LCProp PR")
-    window = PRMainWindow(
-        slurm_runner=default_slurm_runner_from_environment()
-    )
+    window = PRMainWindow()
     app.aboutToQuit.connect(window.shutdown_background_run)
     window.show()
     return app.exec()

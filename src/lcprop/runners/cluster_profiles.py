@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import json
 import os
 from pathlib import Path
 import re
 import sys
+import tempfile
 from typing import Mapping
 
 try:  # Python 3.11+
@@ -53,8 +55,29 @@ class ClusterConfigError(ValueError):
     """One actionable user-local cluster configuration error."""
 
 
+def compose_ssh_host(username: str, login_host: str) -> str:
+    """Compose the model's credential-free ``user@host`` SSH endpoint."""
+
+    username = username.strip()
+    login_host = login_host.strip()
+    if username and not re.fullmatch(r"[A-Za-z0-9_.-]+", username):
+        raise ClusterConfigError("SSH username contains unsupported characters")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", login_host):
+        raise ClusterConfigError("login host must be a hostname without a username")
+    return f"{username}@{login_host}" if username else login_host
+
+
+def split_ssh_host(host: str) -> tuple[str, str]:
+    """Split a validated SSH endpoint into user-facing username and host fields."""
+
+    if "@" not in host:
+        return "", host
+    return tuple(host.split("@", 1))  # type: ignore[return-value]
+
+
 def default_cluster_config_path(
-    *, environ: Mapping[str, str] | None = None,
+    *,
+    environ: Mapping[str, str] | None = None,
 ) -> Path:
     """Return the platform-appropriate default cluster configuration path."""
 
@@ -66,7 +89,9 @@ def default_cluster_config_path(
         base = Path(env.get("APPDATA", Path.home() / "AppData" / "Roaming"))
         return base / "LCProp" / "clusters.toml"
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "LCProp" / "clusters.toml"
+        return (
+            Path.home() / "Library" / "Application Support" / "LCProp" / "clusters.toml"
+        )
     base = Path(env.get("XDG_CONFIG_HOME", Path.home() / ".config"))
     return base / "lcprop" / "clusters.toml"
 
@@ -99,9 +124,7 @@ def _integer(
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
-        raise ClusterConfigError(
-            f"{context}.{field}: must be an integer >= {minimum}"
-        )
+        raise ClusterConfigError(f"{context}.{field}: must be an integer >= {minimum}")
     return value
 
 
@@ -138,7 +161,9 @@ class ClusterProfile:
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", self.name):
-            raise ValueError("cluster name must contain only letters, digits, '.', '_', '-'")
+            raise ValueError(
+                "cluster name must contain only letters, digits, '.', '_', '-'"
+            )
         if not re.fullmatch(r"[A-Za-z0-9_.@-]+", self.host):
             raise ValueError("host must be an SSH hostname or user@hostname")
         for field in ("remote_run_root", "remote_python", "source_root"):
@@ -162,7 +187,9 @@ class ClusterProfile:
     def profile(self, name: str) -> SlurmResourceProfile:
         matches = [value for value in self.resource_profiles if value.name == name]
         if len(matches) != 1:
-            raise KeyError(f"unknown resource profile {name!r} on cluster {self.name!r}")
+            raise KeyError(
+                f"unknown resource profile {name!r} on cluster {self.name!r}"
+            )
         return matches[0]
 
 
@@ -230,9 +257,7 @@ def _parse_resource_profile(
             qos=_required_string(values, "qos", context=context),
             time_limit=_required_string(values, "time_limit", context=context),
             cpus=int(_integer(values, "cpus", context=context, minimum=1)),
-            memory_gb=int(
-                _integer(values, "memory_gb", context=context, minimum=1)
-            ),
+            memory_gb=int(_integer(values, "memory_gb", context=context, minimum=1)),
             gpus=int(_integer(values, "gpus", context=context, default=0)),
             gres=gres,
             setup_commands=tuple(setup),
@@ -394,11 +419,152 @@ def select_cluster_profile(
         raise ClusterConfigError(f"environment override: {exc}") from exc
 
 
+def _toml_string(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _catalog_toml(catalog: ClusterCatalog) -> str:
+    """Serialize the deliberately small version-1 catalog deterministically."""
+
+    lines = [f"schema_version = {catalog.schema_version}"]
+    if catalog.default_cluster is not None:
+        lines.append(f"default_cluster = {_toml_string(catalog.default_cluster)}")
+    for cluster in catalog.clusters:
+        prefix = f"clusters.{cluster.name}"
+        lines.extend(
+            [
+                "",
+                f"[{prefix}]",
+                f"host = {_toml_string(cluster.host)}",
+                f"remote_run_root = {_toml_string(cluster.remote_run_root)}",
+                f"remote_python = {_toml_string(cluster.remote_python)}",
+                f"source_root = {_toml_string(cluster.source_root)}",
+                f"poll_interval = {cluster.poll_interval!r}",
+            ]
+        )
+        if cluster.default_resource_profile is not None:
+            lines.append(
+                "default_resource_profile = "
+                + _toml_string(cluster.default_resource_profile)
+            )
+        for profile in cluster.resource_profiles:
+            lines.extend(
+                [
+                    "",
+                    f"[{prefix}.profiles.{_toml_string(profile.name)}]",
+                    f"partition = {_toml_string(profile.partition)}",
+                    f"qos = {_toml_string(profile.qos)}",
+                    f"time_limit = {_toml_string(profile.time_limit)}",
+                    f"cpus = {profile.cpus}",
+                    f"memory_gb = {profile.memory_gb}",
+                    f"gpus = {profile.gpus}",
+                ]
+            )
+            if profile.gres is not None:
+                lines.append(f"gres = {_toml_string(profile.gres)}")
+            if profile.setup_commands:
+                commands = ", ".join(_toml_string(v) for v in profile.setup_commands)
+                lines.append(f"setup_commands = [{commands}]")
+            if profile.require_cupy:
+                lines.append("require_cupy = true")
+            if profile.minimum_device_count is not None:
+                lines.append(f"minimum_device_count = {profile.minimum_device_count}")
+            if profile.expected_device_pattern is not None:
+                lines.append(
+                    "expected_device_pattern = "
+                    + _toml_string(profile.expected_device_pattern)
+                )
+    return "\n".join(lines) + "\n"
+
+
+def write_cluster_profiles(
+    catalog: ClusterCatalog,
+    path: str | Path | None = None,
+) -> ClusterCatalog:
+    """Atomically validate and replace one user-local cluster catalog."""
+
+    resolved = Path(path or catalog.config_path or default_cluster_config_path())
+    resolved = resolved.expanduser()
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    text = _catalog_toml(replace(catalog, config_path=resolved))
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=resolved.parent,
+            prefix=f".{resolved.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        validated = load_cluster_profiles(temporary)
+        os.replace(temporary, resolved)
+        temporary = None
+        return replace(validated, config_path=resolved)
+    except (OSError, ClusterConfigError) as exc:
+        if isinstance(exc, ClusterConfigError):
+            raise
+        raise ClusterConfigError(f"{resolved}: cannot save TOML: {exc}") from exc
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def upsert_cluster_profile(
+    catalog: ClusterCatalog,
+    cluster: ClusterProfile,
+    *,
+    make_default: bool = False,
+) -> ClusterCatalog:
+    """Return a catalog with one cluster inserted or replaced in place."""
+
+    values = list(catalog.clusters)
+    for index, existing in enumerate(values):
+        if existing.name == cluster.name:
+            values[index] = cluster
+            break
+    else:
+        values.append(cluster)
+    default = (
+        cluster.name
+        if make_default or catalog.default_cluster is None
+        else catalog.default_cluster
+    )
+    return replace(catalog, clusters=tuple(values), default_cluster=default)
+
+
+def delete_cluster_profile(
+    catalog: ClusterCatalog,
+    name: str,
+) -> ClusterCatalog:
+    """Return a catalog without one named cluster."""
+
+    values = tuple(cluster for cluster in catalog.clusters if cluster.name != name)
+    if len(values) == len(catalog.clusters):
+        raise KeyError(f"unknown cluster {name!r}")
+    default = catalog.default_cluster
+    if default == name:
+        default = values[0].name if values else None
+    return replace(catalog, clusters=values, default_cluster=default)
+
+
 __all__ = [
     "ClusterCatalog",
     "ClusterConfigError",
     "ClusterProfile",
+    "compose_ssh_host",
+    "delete_cluster_profile",
     "default_cluster_config_path",
     "load_cluster_profiles",
     "select_cluster_profile",
+    "split_ssh_host",
+    "upsert_cluster_profile",
+    "write_cluster_profiles",
 ]

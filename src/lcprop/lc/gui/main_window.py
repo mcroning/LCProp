@@ -39,7 +39,11 @@ from lcprop.lc.operations import (
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.runners.local import LocalRunner
 from lcprop.gui.workers import WorkflowWorker
-from lcprop.gui.remote_execution import execution_target_selector, remote_status_text
+from lcprop.gui.remote_execution import (
+    RemoteExecutionControls,
+    execution_target_selector,
+    remote_status_text,
+)
 from lcprop.transport.status import RemoteRunState, RemoteRunStatus
 from lcprop.gui.experiment_files import (
     ExperimentFileButtons,
@@ -101,7 +105,13 @@ class LCPropMainWindow(QWidget):
                 LC_PARAMETER_SWEEP_OPERATION,
             )
         )
-        self.slurm_runner = slurm_runner
+        self._explicit_slurm_runner = slurm_runner
+        self.remote_execution_controls = RemoteExecutionControls()
+        self.slurm_runner = (
+            slurm_runner
+            if slurm_runner is not None
+            else self.remote_execution_controls.create_runner()
+        )
         self.runner = self.local_runner
         self.retained_results = RetainedResults()
         self.last_soliton_result = None
@@ -140,7 +150,7 @@ class LCPropMainWindow(QWidget):
         header.addStretch(1)
         header.addWidget(QLabel("Execution:"))
         self.execution_target_selector = execution_target_selector(
-            slurm_available=slurm_runner is not None
+            slurm_available=self.slurm_runner is not None
         )
         self.execution_target_selector.currentIndexChanged.connect(
             self._execution_target_changed
@@ -215,6 +225,10 @@ class LCPropMainWindow(QWidget):
         header.addWidget(self.experiment_file_buttons)
 
         root.addLayout(header)
+        root.addWidget(self.remote_execution_controls)
+        self.remote_execution_controls.selectionChanged.connect(
+            self._remote_profile_changed
+        )
 
         self.tabs = QTabWidget()
         root.addWidget(self.tabs)
@@ -263,6 +277,22 @@ class LCPropMainWindow(QWidget):
             self.grid_panel.x_aperture_um.value(),
             self.grid_panel.y_aperture_um.value(),
         )
+
+    @Slot()
+    def _remote_profile_changed(self) -> None:
+        if self.remote_execution_controls.slurm_available:
+            self.slurm_runner = self.remote_execution_controls.create_runner()
+        else:
+            self.slurm_runner = self._explicit_slurm_runner
+        item = self.execution_target_selector.model().item(1)
+        if item is not None:
+            item.setEnabled(self.slurm_runner is not None)
+            item.setToolTip(
+                "" if self.slurm_runner is not None
+                else self.remote_execution_controls.unavailable_reason
+            )
+        if self.execution_target_selector.currentData() == "slurm":
+            self._execution_target_changed()
 
     @Slot()
     def _execution_target_changed(self) -> None:
@@ -935,6 +965,9 @@ class LCPropMainWindow(QWidget):
     def _run_registered(self, operation, request, **kwargs):
         """Dispatch one canonical LC operation through the shared runner."""
 
+        if self.runner is self.slurm_runner:
+            kwargs.update(self.remote_execution_controls.runner_kwargs())
+
         runner_result = self.runner.run_registered(
             LC_MATERIAL_ID,
             operation.workflow_id,
@@ -994,6 +1027,7 @@ class LCPropMainWindow(QWidget):
             panel.setEnabled(enabled)
         self.td_initial_condition_selector.setEnabled(enabled)
         self.execution_target_selector.setEnabled(enabled)
+        self.remote_execution_controls.setEnabled(enabled)
         self.use_last_soliton.setEnabled(
             enabled and self.retained_results.selected_soliton_source is not None
         )
@@ -1541,6 +1575,11 @@ class LCPropMainWindow(QWidget):
 
     def shutdown_background_run(self, timeout_ms: int = 30000) -> bool:
         """Cooperatively stop and join the centralized workflow thread."""
+
+        if not self.remote_execution_controls.shutdown_connection_test(
+            min(timeout_ms, 16000)
+        ):
+            return False
 
         thread = self._td_thread
         if thread is None or not thread.isRunning():

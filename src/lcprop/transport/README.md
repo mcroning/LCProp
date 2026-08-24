@@ -72,10 +72,28 @@ mistaken for finalized snapshots.
 advanced override for CI, commissioning, and deliberately pre-staged sources,
 but ordinary configured users no longer need them. Automatic deployment from
 an installed package without a Git checkout remains deferred and fails with an
-actionable request to use that explicit override. GUI cluster setup and profile
-selection remain deferred to Stage 02C. Until then, GUI remote runs use the
-selected cluster's `default_resource_profile`; they do not contain
-package-defined CPU or H200 profile names.
+actionable request to use that explicit override.
+
+Both material GUIs provide **Configure Remote Execution…** beside the
+independent Local/Slurm execution selector. The shared dialog accepts a profile
+name, SSH username and login host, remote run/Python/source paths, polling
+interval, and one or more resource profiles. Profiles are saved atomically to
+the user-local TOML file and become selectable without restarting. Local stays
+selected until the user explicitly chooses Slurm. If the file is absent or
+invalid, Local remains usable and the GUI displays the reason Slurm is
+unavailable.
+
+Saving or editing through the GUI rewrites the complete cluster-profile
+catalog deterministically. Cluster and resource profile semantics and their
+ordering are preserved, but TOML whitespace, comments, and other original
+formatting are normalized and are not retained.
+
+**Test Connection** uses system `ssh` in batch mode to check login access,
+`sbatch`/`squeue`/`sacct` availability, the configured Python, and writable run
+and source roots. For a GPU profile it also checks that CuPy imports on the
+login node; it does not request a GPU or submit a scheduler job. LCProp never
+asks for or stores passwords, SSH keys, MFA codes, or tokens. Configure normal
+system SSH authentication or an SSH agent before testing.
 
 Minimal profile example:
 
@@ -102,6 +120,23 @@ setup_commands = ["module load cuda"]
 require_cupy = true
 minimum_device_count = 1
 ```
+
+A generic CPU resource can instead be kept alongside it:
+
+```toml
+[clusters.example.profiles.cpu-small]
+partition = "batch"
+qos = "normal"
+time_limit = "00:15:00"
+cpus = 2
+memory_gb = 8
+gpus = 0
+```
+
+A site-specific accelerator is just another profile. For example, a Tufts
+H200 profile may use `gres = "gpu:h200:1"`, `require_cupy = true`, and
+`expected_device_pattern = "H200"`. This is an example only; no Tufts path,
+partition, GPU model, or setup command is a package default.
 
 Remote GUI completion means scheduler success followed by artifact retrieval,
 checksum verification, canonical result reconstruction, and conversion by the
