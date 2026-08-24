@@ -935,8 +935,6 @@ class LCPropMainWindow(QWidget):
     def _run_registered(self, operation, request, **kwargs):
         """Dispatch one canonical LC operation through the shared runner."""
 
-        if self.runner is self.slurm_runner:
-            kwargs["resource_profile"] = "CPU small"
         runner_result = self.runner.run_registered(
             LC_MATERIAL_ID,
             operation.workflow_id,

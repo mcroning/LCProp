@@ -22,11 +22,72 @@ artifacts.  Application composition remains in `lcprop.transport.defaults`;
 the runner itself contains no LC- or PR-specific request/result logic.
 
 The LC and PR applications expose **Execution: Local | Slurm** separately
-from the scientific backend.  Remote execution is enabled only when
-`LCPROP_SLURM_SOURCE_PATH` and `LCPROP_SLURM_SOURCE_SHA` identify an immutable
-remote checkout. Optional environment variables configure the login host,
-remote run root, Python executable, and local artifact root. No credentials
-are stored in requests or transport artifacts.
+from the scientific backend. Cluster sites and resource profiles are loaded
+from a versioned user-local `clusters.toml`; multiple clusters and multiple
+CPU/GPU profiles can coexist without source changes. A missing configuration
+is safe and leaves ordinary Local execution available. No credentials are
+stored in cluster profiles, requests, or transport artifacts.
+
+The default configuration path is the platform application-config location:
+`~/.config/lcprop/clusters.toml` on a typical XDG system,
+`~/Library/Application Support/LCProp/clusters.toml` on macOS, and the LCProp
+directory under `%APPDATA%` on Windows. `LCPROP_CLUSTER_CONFIG` selects an
+explicit path. Explicit constructor values take precedence over environment
+overrides, which take precedence over the selected profile; only neutral
+values such as polling cadence and local artifact location have package
+defaults.
+
+Resource profiles define partition, QOS, time, CPU, memory, GPU count, optional
+site-specific GRES, setup commands, and GPU/CuPy preflight requirements. H200
+is not universal: a profile may request `gpu:1`, `gpu:h200:1`, `gpu:a100:1`, or
+another validated site value. Device-name matching is optional and
+profile-specific. Because CuPy is LCProp's only supported GPU scientific
+backend, every profile requesting GPUs must set `require_cupy = true`. GPU
+execution derives provenance from the scheduler-visible CUDA/CuPy device and
+always retrieves its actual name, visible-device count, CuPy version, and CUDA
+runtime/driver versions.
+
+`setup_commands` are trusted user-supplied executable shell commands. LCProp
+rejects multiline and NUL-containing values, but intentionally executes each
+configured command rather than treating it as untrusted data. Cluster-profile
+files must therefore be protected and reviewed like shell configuration; do
+not place passwords, tokens, private keys, or other credentials in them.
+
+Stage 02A still requires `LCPROP_SLURM_SOURCE_PATH` and
+`LCPROP_SLURM_SOURCE_SHA` to identify a previously staged immutable source
+snapshot. Automatic committed-source staging is deliberately deferred to
+Stage 02B, and GUI profile setup/discovery is deferred to Stage 02C. Thus this
+stage provides portable configuration and runner composition, but not yet the
+complete end-user portable Slurm workflow. Until the Stage 02C profile selector
+exists, GUI remote runs use the selected cluster's
+`default_resource_profile`; they do not contain package-defined CPU or H200
+profile names.
+
+Minimal profile example:
+
+```toml
+schema_version = 1
+default_cluster = "example"
+
+[clusters.example]
+host = "user@login.example.edu"
+remote_run_root = "/scratch/user/lcprop_runs"
+remote_python = "/scratch/user/env/bin/python"
+source_root = "/scratch/user/lcprop_sources"
+default_resource_profile = "gpu-standard"
+
+[clusters.example.profiles.gpu-standard]
+partition = "gpu"
+qos = "normal"
+time_limit = "00:30:00"
+cpus = 2
+memory_gb = 16
+gpus = 1
+gres = "gpu:1"
+setup_commands = ["module load cuda"]
+require_cupy = true
+minimum_device_count = 1
+```
 
 Remote GUI completion means scheduler success followed by artifact retrieval,
 checksum verification, canonical result reconstruction, and conversion by the

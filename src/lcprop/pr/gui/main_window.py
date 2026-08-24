@@ -575,8 +575,6 @@ class PRMainWindow(QWidget):
                 )
 
             kwargs["_before_product_conversion"] = before_product_conversion
-        if self.runner is self.slurm_runner:
-            kwargs["resource_profile"] = "H200 small"
         return self.runner.run_registered(
             PR_MATERIAL_ID,
             self._workflow_id_for_request(request),

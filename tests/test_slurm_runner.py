@@ -15,8 +15,8 @@ from lcprop.lc.operations import LC_STATIC_OPERATION
 from lcprop.lc.requests import OutputOptions, StaticRunRequest, StaticSolverOptions
 from lcprop.lc.specs import BiasSpec, LCMaterial
 from lcprop.runners.slurm import (
-    CPU_SMALL, H200_SMALL, RemoteExecutionError, RemoteRunCancelled,
-    SlurmExecutionConfig, SlurmResourceProfile, SlurmRunner,
+    RemoteExecutionError, RemoteRunCancelled, SlurmExecutionConfig,
+    SlurmResourceProfile, SlurmRunner,
 )
 from lcprop.pr.specs import PRMaterialSpec
 from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
@@ -31,6 +31,23 @@ from lcprop.transport.status import RemoteRunState
 
 SHA = "e366537b0825c0e2c02065c24756336e1bcd774c"
 COMMISSIONED_STAGE_D_SHA = "eb9382c0843a25136309728e57d0a7fb4dae333f"
+CPU_SMALL = SlurmResourceProfile(
+    "CPU small", "batch", "normal", "00:15:00", 2, 8
+)
+H200_SMALL = SlurmResourceProfile(
+    "H200 small",
+    "gpu",
+    "normal",
+    "00:15:00",
+    2,
+    16,
+    gpus=1,
+    setup_commands=("module load cuda/12.9.0",),
+    gres="gpu:h200:1",
+    require_cupy=True,
+    minimum_device_count=1,
+    expected_device_pattern="H200",
+)
 
 
 def _request():
@@ -134,6 +151,76 @@ def test_execution_config_and_resource_profiles_are_strict_and_credential_free(t
         SlurmResourceProfile("bad", "gpu", "normal", "1h", 1, 1)
     with pytest.raises(ValueError, match="default_resource_profile"):
         _config(tmp_path, default_resource_profile="missing")
+
+
+@pytest.mark.parametrize(
+    "unsafe_path",
+    (
+        "/runs/bad path",
+        "/runs/bad;command",
+        "/runs/$(command)",
+        "/runs/`command`",
+        "/runs/bad\npath",
+        "/runs/'quoted'",
+        "/runs/bad\\path",
+        "/runs/bad|pipe",
+        "/runs/bad>redirect",
+        "/runs/bad&command",
+    ),
+)
+@pytest.mark.parametrize(
+    "field", ("remote_run_root", "remote_python", "remote_source_path")
+)
+def test_direct_execution_config_rejects_shell_unsafe_remote_paths(
+    tmp_path, field, unsafe_path
+):
+    with pytest.raises(ValueError, match="remote paths"):
+        _config(tmp_path, **{field: unsafe_path})
+
+
+def test_direct_execution_config_accepts_required_safe_posix_path_characters(
+    tmp_path,
+):
+    safe = "/cluster/project/user/lcprop-runs_1.2+gpu@site%5=value:tag,part"
+    config = _config(
+        tmp_path,
+        remote_run_root=safe,
+        remote_python=f"{safe}/bin/python",
+        remote_source_path=f"{safe}/source",
+    )
+    assert config.remote_run_root == safe
+
+
+def test_direct_gpu_profile_requires_cupy():
+    with pytest.raises(ValueError, match="require_cupy=true"):
+        SlurmResourceProfile(
+            "GPU without CuPy",
+            "gpu",
+            "normal",
+            "00:15:00",
+            2,
+            16,
+            gpus=1,
+            gres="gpu:1",
+            require_cupy=False,
+        )
+
+
+@pytest.mark.parametrize("command", ("module load cuda\nwhoami", "module\0load"))
+def test_setup_commands_remain_single_line_and_nul_free(command):
+    with pytest.raises(ValueError, match="single lines"):
+        SlurmResourceProfile(
+            "GPU",
+            "gpu",
+            "normal",
+            "00:15:00",
+            2,
+            16,
+            gpus=1,
+            setup_commands=(command,),
+            gres="gpu:1",
+            require_cupy=True,
+        )
 
 
 def test_shared_runner_has_no_material_specific_resource_branching(tmp_path):
@@ -341,6 +428,10 @@ def test_slurm_script_keeps_execution_and_scientific_backend_separate(tmp_path):
     script = runner._script("/runs/test", CPU_SMALL)
     assert "lcprop.transport.executor" in script
     assert "--partition=batch" in script
+    assert "#SBATCH --gres" not in script
+    assert "#SBATCH --gpus" not in script
+    assert "execution_provenance.json" not in script
+    assert "nvidia-smi" not in script
     assert "backend" not in script.lower()
     lines = script.splitlines()
     assert max(i for i, line in enumerate(lines) if line.startswith("#SBATCH")) < lines.index(
@@ -365,9 +456,68 @@ def test_h200_preflight_precedes_scientific_executor(tmp_path):
         if "-m lcprop.transport.executor" in line
     )
     assert preflight_index < executor_index
-    assert 'assert "H200" in name' in lines[preflight_index]
-    assert 'backend="cupy"' in lines[preflight_index]
+    assert "re.search" in lines[preflight_index]
+    assert "H200" in lines[preflight_index]
+    assert "BackendSpec" in lines[preflight_index]
+    assert "cupy" in lines[preflight_index]
     assert any("gpu_memory_samples_mib.txt" in line for line in lines)
+
+
+def test_cupy_request_is_rejected_by_cpu_profile_before_submission(tmp_path):
+    request = replace(
+        _pr_request(),
+        backend=BackendSpec(backend="cupy", precision="float64", verbose=False),
+    )
+    transport = FakeTransport()
+    runner = SlurmRunner(
+        _config(tmp_path),
+        (PR_TRANSVERSE_STATIC_OPERATION,),
+        transport=transport,
+        registry=default_transport_registry(),
+    )
+    with pytest.raises(ValueError, match="requires a GPU resource profile"):
+        runner.run_registered(
+            "pr", "pr_transverse_static", request, resource_profile="CPU small"
+        )
+    assert transport.submissions == 0
+
+
+def test_generic_gpu_profile_and_setup_commands_are_profile_driven(tmp_path):
+    generic = SlurmResourceProfile(
+        "Generic GPU",
+        "gpu",
+        "normal",
+        "00:15:00",
+        2,
+        16,
+        gpus=1,
+        setup_commands=("module load cuda",),
+        gres="gpu:1",
+        require_cupy=True,
+        minimum_device_count=1,
+    )
+    runner = SlurmRunner(
+        _config(
+            tmp_path,
+            resource_profiles=(generic,),
+            default_resource_profile="Generic GPU",
+        ),
+        (PR_TRANSVERSE_STATIC_OPERATION,),
+        transport=FakeTransport(),
+        registry=default_transport_registry(),
+    )
+    script = runner._script("/runs/test", generic)
+    assert "#SBATCH --gres=gpu:1" in script
+    assert "module load cuda" in script
+    assert "H200" not in script
+    assert "execution_provenance.json" in script
+
+
+def test_shared_runner_has_no_universal_h200_request_or_assertion():
+    source = inspect.getsource(SlurmRunner)
+    assert "gpu:h200" not in source.lower()
+    assert "h200" not in source.lower()
+    assert "--query-gpu=name" not in source
 
 
 def test_unregistered_workflow_is_rejected_without_fallback(tmp_path):

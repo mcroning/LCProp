@@ -23,7 +23,11 @@ from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
 from lcprop.pr.transverse.static_workflow import PR_TRANSVERSE_STATIC_WORKFLOW
 from pr_coherent_grating_diagnosis import fixture as coherent_fixture
 from lcprop.runners.local import LocalRunner
-from lcprop.runners.slurm import SlurmExecutionConfig, SlurmRunner
+from lcprop.runners.slurm import (
+    SlurmExecutionConfig,
+    SlurmResourceProfile,
+    SlurmRunner,
+)
 from lcprop.transport.defaults import (
     default_transport_operations, default_transport_registry,
 )
@@ -31,9 +35,31 @@ from lcprop.transport.defaults import (
 
 SOURCE_SHA = "eb9382c0843a25136309728e57d0a7fb4dae333f"
 SOURCE_PATH = "/cluster/tufts/cglab/mcroning/lcprop_runs/lcprop-remote-eb9382c0843a"
+CPU_SMALL = SlurmResourceProfile(
+    name="CPU small",
+    partition="batch",
+    qos="normal",
+    time_limit="00:15:00",
+    cpus=2,
+    memory_gb=8,
+)
+H200_SMALL = SlurmResourceProfile(
+    name="H200 small",
+    partition="gpu",
+    qos="normal",
+    time_limit="00:15:00",
+    cpus=2,
+    memory_gb=16,
+    gpus=1,
+    gres="gpu:h200:1",
+    setup_commands=("module load cuda/12.9.0",),
+    require_cupy=True,
+    minimum_device_count=1,
+    expected_device_pattern="H200",
+)
 
 
-def _runner(local_root: Path) -> SlurmRunner:
+def _runner(local_root: Path, default_profile: str) -> SlurmRunner:
     return SlurmRunner(
         SlurmExecutionConfig(
             host="mcroning@login.pax.tufts.edu",
@@ -42,6 +68,8 @@ def _runner(local_root: Path) -> SlurmRunner:
             remote_source_path=SOURCE_PATH,
             source_git_sha=SOURCE_SHA,
             local_artifact_root=local_root,
+            resource_profiles=(CPU_SMALL, H200_SMALL),
+            default_resource_profile=default_profile,
             poll_interval=5.0,
         ),
         default_transport_operations(),
@@ -51,7 +79,9 @@ def _runner(local_root: Path) -> SlurmRunner:
 
 def run_lc(output: Path) -> dict:
     app = QApplication.instance() or QApplication([])
-    window = LCPropMainWindow(slurm_runner=_runner(output / "artifacts"))
+    window = LCPropMainWindow(
+        slurm_runner=_runner(output / "artifacts", "CPU small")
+    )
     window.grid_panel.Nx.setValue(16)
     window.grid_panel.Ny.setValue(16)
     window.grid_panel.dz_um.setValue(10.0)
@@ -98,7 +128,9 @@ def run_lc(output: Path) -> dict:
 
 def run_pr(output: Path) -> dict:
     app = QApplication.instance() or QApplication([])
-    window = PRMainWindow(slurm_runner=_runner(output / "artifacts"))
+    window = PRMainWindow(
+        slurm_runner=_runner(output / "artifacts", "H200 small")
+    )
     window.evolution_panel.set_workflow_id(PR_TRANSVERSE_STATIC_WORKFLOW)
     window.grid_panel.Nx.setValue(64)
     window.grid_panel.Ny.setValue(64)
@@ -169,7 +201,9 @@ def _seconds_between(left, right):
 
 def run_coherent(output: Path) -> dict:
     app = QApplication.instance() or QApplication([])
-    window = PRMainWindow(slurm_runner=_runner(output / "artifacts"))
+    window = PRMainWindow(
+        slurm_runner=_runner(output / "artifacts", "H200 small")
+    )
     request = coherent_fixture(
         n=512, coherent=True, backend="cupy", precision="float64"
     )

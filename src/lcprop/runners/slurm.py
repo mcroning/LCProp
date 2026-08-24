@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path, PurePosixPath
 import re
+import shlex
 import subprocess
 import time
 from typing import Callable, Iterable, Protocol
@@ -49,30 +50,82 @@ class SlurmResourceProfile:
     memory_gb: int
     gpus: int = 0
     setup_commands: tuple[str, ...] = ()
+    gres: str | None = None
+    require_cupy: bool = False
+    minimum_device_count: int | None = None
+    expected_device_pattern: str | None = None
 
     def __post_init__(self) -> None:
-        if not self.name.strip() or not self.partition.strip() or not self.qos.strip():
+        if not re.fullmatch(r"[A-Za-z0-9_. -]+", self.name):
+            raise ValueError("resource profile name contains unsupported characters")
+        if not self.partition.strip() or not self.qos.strip():
             raise ValueError("resource profile identifiers must be non-empty")
+        for field in (self.partition, self.qos):
+            if not re.fullmatch(r"[A-Za-z0-9_.:@/+,-]+", field):
+                raise ValueError("partition and qos must be safe Slurm identifiers")
         if not re.fullmatch(r"\d{1,3}:\d{2}:\d{2}", self.time_limit):
             raise ValueError("time_limit must use HH:MM:SS")
+        _hours, minutes, seconds = (int(value) for value in self.time_limit.split(":"))
+        if minutes >= 60 or seconds >= 60:
+            raise ValueError("time_limit minutes and seconds must be less than 60")
+        quantities = (self.cpus, self.memory_gb, self.gpus)
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in quantities):
+            raise ValueError("Slurm resource quantities must be integers")
         if self.cpus < 1 or self.memory_gb < 1 or self.gpus < 0:
             raise ValueError("invalid Slurm resource quantity")
+        if not isinstance(self.require_cupy, bool):
+            raise ValueError("require_cupy must be boolean")
+        if self.gres is not None:
+            if self.gpus < 1:
+                raise ValueError("gres requires a positive GPU count")
+            if not re.fullmatch(r"[A-Za-z0-9_.:+,=-]+", self.gres):
+                raise ValueError("gres contains unsupported characters")
+        if self.gpus > 0 and not self.require_cupy:
+            raise ValueError(
+                "GPU resource profiles require require_cupy=true because CuPy is "
+                "LCProp's only supported GPU scientific backend"
+            )
+        if self.require_cupy and self.gpus < 1:
+            raise ValueError("require_cupy requires a GPU resource")
+        if self.minimum_device_count is not None:
+            if (
+                isinstance(self.minimum_device_count, bool)
+                or not isinstance(self.minimum_device_count, int)
+                or self.gpus < 1
+                or self.minimum_device_count < 1
+                or self.minimum_device_count > self.gpus
+            ):
+                raise ValueError("minimum_device_count requires a GPU resource")
+        if self.expected_device_pattern is not None:
+            if self.gpus < 1:
+                raise ValueError("expected_device_pattern requires a GPU resource")
+            try:
+                re.compile(self.expected_device_pattern)
+            except re.error as exc:
+                raise ValueError("expected_device_pattern is not valid regex") from exc
+        for command in self.setup_commands:
+            if not command.strip() or "\n" in command or "\r" in command or "\0" in command:
+                raise ValueError("setup commands must be non-empty single lines")
 
 
-CPU_SMALL = SlurmResourceProfile("CPU small", "batch", "normal", "00:15:00", 2, 8)
-H200_SMALL = SlurmResourceProfile(
-    "H200 small", "gpu", "normal", "00:15:00", 2, 16, 1,
-    ("module load cuda/12.9.0",),
-)
-H200_STANDARD = SlurmResourceProfile(
-    "H200 standard", "gpu", "normal", "02:00:00", 4, 64, 1,
-    ("module load cuda/12.9.0",),
-)
+_SAFE_REMOTE_PATH = re.compile(r"/[A-Za-z0-9._/+@%=:,-]*")
 
 
-def _remote_path(value: str) -> str:
+def validate_remote_path(value: str) -> str:
+    """Validate one absolute POSIX path for current unquoted SSH/shell use."""
+
+    if not isinstance(value, str) or not _SAFE_REMOTE_PATH.fullmatch(value):
+        raise ValueError(
+            "remote paths must be absolute POSIX paths containing only ASCII "
+            "letters, digits, '/', '.', '_', '-', '+', '@', '%', '=', ':', or ','"
+        )
     path = PurePosixPath(value)
-    if not path.is_absolute() or ".." in path.parts:
+    if (
+        not path.is_absolute()
+        or value.startswith("//")
+        or ".." in path.parts
+        or str(path) != value
+    ):
         raise ValueError("remote paths must be absolute and normalized")
     return str(path)
 
@@ -85,9 +138,7 @@ class SlurmExecutionConfig:
     remote_source_path: str
     source_git_sha: str
     local_artifact_root: Path
-    resource_profiles: tuple[SlurmResourceProfile, ...] = (
-        CPU_SMALL, H200_SMALL, H200_STANDARD
-    )
+    resource_profiles: tuple[SlurmResourceProfile, ...]
     default_resource_profile: str | None = None
     poll_interval: float = 5.0
 
@@ -95,12 +146,14 @@ class SlurmExecutionConfig:
         if not re.fullmatch(r"[A-Za-z0-9_.@-]+", self.host):
             raise ValueError("host must be an SSH hostname or user@hostname")
         for value in (self.remote_run_root, self.remote_python, self.remote_source_path):
-            _remote_path(value)
+            validate_remote_path(value)
         if not re.fullmatch(r"[0-9a-f]{40}", self.source_git_sha):
             raise ValueError("source_git_sha must be an exact 40-character SHA")
         if self.poll_interval <= 0:
             raise ValueError("poll_interval must be positive")
         names = [profile.name for profile in self.resource_profiles]
+        if not names:
+            raise ValueError("at least one resource profile is required")
         if len(set(names)) != len(names):
             raise ValueError("resource profile names must be unique")
         if (
@@ -205,27 +258,37 @@ class SlurmRunner:
             f"#SBATCH --error={remote_run}/stderr.txt",
         ]
         if profile.gpus:
-            lines.append(f"#SBATCH --gres=gpu:h200:{profile.gpus}")
+            if profile.gres is not None:
+                lines.append(f"#SBATCH --gres={profile.gres}")
+            else:
+                lines.append(f"#SBATCH --gpus={profile.gpus}")
         lines.append("set -euo pipefail")
         lines.extend(profile.setup_commands)
         lines.append(f"export PYTHONPATH={self.config.remote_source_path}/src")
         if profile.gpus:
-            preflight = (
-                'import json,platform,cupy as cp; '
-                'from lcprop.core.backend import BackendSpec,get_backend; '
-                'device=cp.cuda.runtime.getDeviceProperties(0); '
-                'name=device["name"].decode() if isinstance(device["name"],bytes) else str(device["name"]); '
-                'backend=get_backend(BackendSpec(backend="cupy",precision="float64",verbose=False)); '
-                'assert "H200" in name, f"expected NVIDIA H200, got {name}"; '
-                'assert backend.name == "cupy"; '
-                'print(json.dumps({"python":platform.python_version(),"cupy":cp.__version__,'
-                '"cuda_runtime":cp.cuda.runtime.runtimeGetVersion(),'
-                '"cuda_driver":cp.cuda.runtime.driverGetVersion(),'
-                '"device":name,"device_count":cp.cuda.runtime.getDeviceCount(),'
-                '"preflight_backend":backend.name},sort_keys=True))'
-            )
+            minimum = profile.minimum_device_count or profile.gpus
+            pattern = profile.expected_device_pattern
+            preflight_parts = [
+                "import json,platform,re",
+                "import cupy as cp",
+                "from lcprop.core.backend import BackendSpec,get_backend",
+                "count=cp.cuda.runtime.getDeviceCount()",
+                f"assert count>={minimum}, f'expected at least {minimum} CUDA device(s), got {{count}}'",
+                "device=cp.cuda.runtime.getDeviceProperties(0)",
+                "name=device['name'].decode() if isinstance(device['name'],bytes) else str(device['name'])",
+                "backend=get_backend(BackendSpec(backend='cupy',precision='float64',verbose=False))",
+                "assert backend.name=='cupy'",
+                "record=dict(python=platform.python_version(),cupy=cp.__version__,cuda_runtime=cp.cuda.runtime.runtimeGetVersion(),cuda_driver=cp.cuda.runtime.driverGetVersion(),device=name,device_count=count,preflight_backend=backend.name)",
+            ]
+            if pattern is not None:
+                preflight_parts.insert(
+                    -1,
+                    f"assert re.search({pattern!r},name), f'expected device matching {pattern!r}, got {{name}}'",
+                )
+            preflight_parts.append("print(json.dumps(record,sort_keys=True))")
+            preflight = ";".join(preflight_parts)
             lines.append(
-                f"{self.config.remote_python} -c '{preflight}' "
+                f"{self.config.remote_python} -c {shlex.quote(preflight)} "
                 f"> {remote_run}/execution_provenance.json"
             )
         executor = (
@@ -264,6 +327,16 @@ class SlurmRunner:
                 "resource_profile is required when no configuration default exists"
             )
         profile = self.config.profile(profile_name)
+        requested_backend = getattr(
+            getattr(request, "backend", None), "backend", "numpy"
+        )
+        if requested_backend == "cupy" and (
+            profile.gpus < 1 or not profile.require_cupy
+        ):
+            raise ValueError(
+                "requested CuPy backend requires a GPU resource profile with "
+                "require_cupy=true"
+            )
         run_id = f"lcprop-{uuid4().hex}"
         local_run = self.config.local_artifact_root / run_id
         local_run.mkdir(parents=True, exist_ok=False)
@@ -272,7 +345,7 @@ class SlurmRunner:
             run_id=run_id, execution_target="slurm",
             state=RemoteRunState.SUBMITTING,
             state_message="Staging request", resource_profile=profile.name,
-            scientific_backend_requested=getattr(getattr(request, "backend", None), "backend", "numpy"),
+            scientific_backend_requested=requested_backend,
             remote_artifact_location=remote_run,
             local_artifact_location=str(local_run),
         )
@@ -482,8 +555,7 @@ class SlurmRunner:
 
 
 __all__ = [
-    "CPU_SMALL", "H200_SMALL", "H200_STANDARD", "RemoteTransport",
-    "RemoteExecutionError", "RemoteRunCancelled", "SlurmExecutionConfig",
-    "SlurmResourceProfile", "SlurmRunner",
+    "RemoteTransport", "RemoteExecutionError", "RemoteRunCancelled", "SlurmExecutionConfig",
+    "SlurmResourceProfile", "SlurmRunner", "validate_remote_path",
     "SubprocessRemoteTransport",
 ]
