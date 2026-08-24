@@ -5,7 +5,9 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
-from threading import Event
+import sys
+from threading import Event, Timer
+from time import monotonic
 
 import pytest
 
@@ -23,7 +25,11 @@ from lcprop.gui.remote_execution import (
 from lcprop.lc.gui.main_window import LCPropMainWindow
 from lcprop.pr.gui.main_window import PRMainWindow
 from lcprop.runners.cluster_connection import ClusterConnectionTester
-from lcprop.runners.cluster_connection import ClusterConnectionResult, ConnectionCheck
+from lcprop.runners.cluster_connection import (
+    ClusterConnectionResult,
+    ConnectionCheck,
+    ConnectionTestRemoteTransport,
+)
 from lcprop.runners.cluster_profiles import (
     ClusterCatalog,
     ClusterConfigError,
@@ -83,6 +89,7 @@ def _cluster(name="alpha", resources=(CPU, GPU)):
 class RecordingTransport:
     def __init__(self, fail_on=()):
         self.calls = []
+        self.bounded_calls = []
         self.fail_on = tuple(fail_on)
 
     def ssh(self, host, *args):
@@ -101,6 +108,18 @@ class RecordingTransport:
         if "import cupy" in joined:
             return "13.6.0"
         return ""
+
+    def ssh_with_timeout(
+        self,
+        host,
+        *args,
+        timeout_seconds,
+        cancellation_check,
+    ):
+        self.bounded_calls.append((host, args, timeout_seconds))
+        if cancellation_check():
+            raise RuntimeError("connection test cancelled")
+        return self.ssh(host, *args)
 
 
 def test_username_and_login_host_compose_without_credentials():
@@ -396,9 +415,61 @@ def test_connection_setup_command_arguments_remain_in_one_bounded_payload():
     )
     shell_arguments = shlex.split(arguments[0])
     assert len(arguments) == 1
-    assert shell_arguments[4].startswith(
-        setup + "; module load cuda/12.9.0; "
-    )
+    assert shell_arguments[4].startswith(setup + "; module load cuda/12.9.0; ")
+
+
+def test_connection_uses_longer_timeout_only_for_cupy_environment_probe():
+    transport = RecordingTransport()
+
+    assert ClusterConnectionTester(transport).test(_cluster(), "GPU").passed
+
+    assert transport.bounded_calls
+    for _host, arguments, timeout_seconds in transport.bounded_calls:
+        expected = 30.0 if "import cupy" in " ".join(arguments) else 7.5
+        assert timeout_seconds == expected
+
+
+def test_connection_timeout_is_reported_without_raw_subprocess_command():
+    class TimeoutTransport(RecordingTransport):
+        def ssh_with_timeout(
+            self,
+            host,
+            *args,
+            timeout_seconds,
+            cancellation_check,
+        ):
+            if "import cupy" in " ".join(args):
+                raise subprocess.TimeoutExpired(["ssh", host, *args], timeout_seconds)
+            return super().ssh_with_timeout(
+                host,
+                *args,
+                timeout_seconds=timeout_seconds,
+                cancellation_check=cancellation_check,
+            )
+
+    result = ClusterConnectionTester(TimeoutTransport()).test(_cluster(), "GPU")
+
+    cupy = next(check for check in result.checks if check.name == "CuPy import")
+    assert not cupy.passed
+    assert cupy.detail == "timed out after 30 seconds"
+    assert "ssh" not in cupy.detail
+
+
+def test_connection_transport_cancels_active_long_probe_boundedly():
+    cancelled = Event()
+    timer = Timer(0.05, cancelled.set)
+    started = monotonic()
+    timer.start()
+    try:
+        with pytest.raises(RuntimeError, match="connection test cancelled"):
+            ConnectionTestRemoteTransport._run_bounded(
+                [sys.executable, "-c", "import time; time.sleep(10)"],
+                timeout_seconds=30.0,
+                cancellation_check=cancelled.is_set,
+            )
+    finally:
+        timer.cancel()
+    assert monotonic() - started < 2.0
 
 
 def test_connection_test_refuses_scheduler_commands_in_gpu_setup():
@@ -480,6 +551,34 @@ class BlockingTester:
         )
 
 
+class BlockingEnvironmentProbeTransport(RecordingTransport):
+    def __init__(self):
+        super().__init__()
+        self.started = Event()
+        self.cancelled = Event()
+
+    def ssh_with_timeout(
+        self,
+        host,
+        *args,
+        timeout_seconds,
+        cancellation_check,
+    ):
+        if "import cupy" not in " ".join(args):
+            return super().ssh_with_timeout(
+                host,
+                *args,
+                timeout_seconds=timeout_seconds,
+                cancellation_check=cancellation_check,
+            )
+        assert timeout_seconds == 30.0
+        self.started.set()
+        while not cancellation_check():
+            self.cancelled.wait(0.005)
+        self.cancelled.set()
+        raise RuntimeError("connection test cancelled")
+
+
 def test_connection_test_disables_edits_and_duplicate_launches():
     _app()
     tester = BlockingTester()
@@ -543,6 +642,30 @@ def test_dialog_close_cancels_worker_and_ignores_late_result():
     assert all(widget.isEnabled() for widget in dialog._configuration_widgets)
 
 
+def test_dialog_close_cancels_longer_environment_probe_without_lingering_thread():
+    _app()
+    transport = BlockingEnvironmentProbeTransport()
+    dialog = RemoteExecutionDialog(
+        ClusterCatalog((_cluster(resources=(GPU,)),), "alpha"),
+        connection_tester=ClusterConnectionTester(transport),
+    )
+    dialog.show()
+    dialog.test_connection()
+    assert transport.started.wait(1)
+    thread = dialog._connection_thread
+
+    dialog.close_button.click()
+
+    loop = QEventLoop()
+    QTimer.singleShot(2000, loop.quit)
+    thread.finished.connect(loop.quit)
+    loop.exec()
+    QApplication.processEvents()
+    assert transport.cancelled.is_set()
+    assert dialog._connection_thread is None
+    assert not dialog.isVisible()
+
+
 @pytest.mark.parametrize("window_type", (LCPropMainWindow, PRMainWindow))
 def test_parent_window_shutdown_joins_active_connection_worker(window_type):
     _app()
@@ -557,6 +680,27 @@ def test_parent_window_shutdown_joins_active_connection_worker(window_type):
     dialog.test_connection()
     assert tester.started.wait(1)
     assert window.shutdown_background_run(timeout_ms=2000)
+    assert dialog._connection_thread is None
+    window.close()
+
+
+@pytest.mark.parametrize("window_type", (LCPropMainWindow, PRMainWindow))
+def test_parent_window_shutdown_cancels_longer_environment_probe(window_type):
+    _app()
+    transport = BlockingEnvironmentProbeTransport()
+    window = window_type()
+    dialog = RemoteExecutionDialog(
+        ClusterCatalog((_cluster(resources=(GPU,)),), "alpha"),
+        connection_tester=ClusterConnectionTester(transport),
+        parent=window.remote_execution_controls,
+    )
+    window.remote_execution_controls._dialog = dialog
+    dialog.test_connection()
+    assert transport.started.wait(1)
+
+    assert window.shutdown_background_run(timeout_ms=2000)
+
+    assert transport.cancelled.is_set()
     assert dialog._connection_thread is None
     window.close()
 
