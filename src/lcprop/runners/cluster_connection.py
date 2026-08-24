@@ -67,6 +67,21 @@ def _failure_detail(exc: Exception) -> str:
     return text or type(exc).__name__
 
 
+def _login_shell_command(commands: tuple[str, ...]) -> str:
+    """Return one SSH command with the trusted payload isolated in ``$1``."""
+
+    payload = "; ".join(commands)
+    return shlex.join(
+        (
+            "bash",
+            "-lc",
+            'eval "$1"',
+            "lcprop-connection-test",
+            payload,
+        )
+    )
+
+
 class ClusterConnectionTester:
     """Run harmless SSH/Python/path probes without invoking the scheduler."""
 
@@ -176,18 +191,20 @@ class ClusterConnectionTester:
                         )
                     )
                 else:
-                    python = shlex.quote(cluster.remote_python)
-                    code = shlex.quote("import cupy; print(cupy.__version__)")
-                    command = "; ".join(
-                        (*profile.setup_commands, f"{python} -c {code}")
+                    probe = shlex.join(
+                        (
+                            cluster.remote_python,
+                            "-c",
+                            "import cupy; print(cupy.__version__)",
+                        )
                     )
                     checks.append(
                         self._check(
                             "CuPy import",
                             cluster.host,
-                            "bash",
-                            "-lc",
-                            shlex.quote(command),
+                            _login_shell_command(
+                                (*profile.setup_commands, probe)
+                            ),
                         )
                     )
         if cancelled():

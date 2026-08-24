@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import os
 from pathlib import Path
+import shlex
 import subprocess
 from threading import Event
 
@@ -334,6 +335,69 @@ def test_connection_success_checks_commands_python_paths_and_optional_cupy():
     argument_lists = [args for _host, args in transport.calls]
     assert not any(
         args and args[0] in {"sbatch", "srun", "scancel"} for args in argument_lists
+    )
+
+
+def test_connection_cupy_probe_preserves_login_setup_and_python_code_quoting():
+    gpu = SlurmResourceProfile(
+        "Tufts H200",
+        "gpu",
+        "normal",
+        "00:20:00",
+        2,
+        16,
+        gpus=1,
+        require_cupy=True,
+        setup_commands=("module load cuda/12.9.0",),
+    )
+    cluster = _cluster(resources=(gpu,))
+    transport = RecordingTransport()
+
+    result = ClusterConnectionTester(transport).test(cluster, gpu.name)
+
+    assert result.passed
+    _host, arguments = next(
+        call for call in transport.calls if "import cupy" in " ".join(call[1])
+    )
+    assert len(arguments) == 1
+    shell_arguments = shlex.split(arguments[0])
+    assert shell_arguments[:4] == [
+        "bash",
+        "-lc",
+        'eval "$1"',
+        "lcprop-connection-test",
+    ]
+    assert shell_arguments[4] == (
+        "module load cuda/12.9.0; "
+        f"{cluster.remote_python} -c 'import cupy; print(cupy.__version__)'"
+    )
+
+
+def test_connection_setup_command_arguments_remain_in_one_bounded_payload():
+    setup = "export LCPROP_SITE_LABEL='Tufts H200 commissioned environment'"
+    gpu = SlurmResourceProfile(
+        "GPU",
+        "gpu",
+        "normal",
+        "00:20:00",
+        2,
+        16,
+        gpus=1,
+        require_cupy=True,
+        setup_commands=(setup, "module load cuda/12.9.0"),
+    )
+    cluster = _cluster(resources=(gpu,))
+    transport = RecordingTransport()
+
+    assert ClusterConnectionTester(transport).test(cluster, gpu.name).passed
+
+    _host, arguments = next(
+        call for call in transport.calls if "import cupy" in " ".join(call[1])
+    )
+    shell_arguments = shlex.split(arguments[0])
+    assert len(arguments) == 1
+    assert shell_arguments[4].startswith(
+        setup + "; module load cuda/12.9.0; "
     )
 
 
