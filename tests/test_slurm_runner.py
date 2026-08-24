@@ -3,6 +3,8 @@ from dataclasses import replace
 import inspect
 import json
 from pathlib import Path
+import re
+import shlex
 
 import pytest
 import lcprop.runners.slurm as slurm_module
@@ -16,7 +18,7 @@ from lcprop.lc.requests import OutputOptions, StaticRunRequest, StaticSolverOpti
 from lcprop.lc.specs import BiasSpec, LCMaterial
 from lcprop.runners.slurm import (
     RemoteExecutionError, RemoteRunCancelled, SlurmExecutionConfig,
-    SlurmResourceProfile, SlurmRunner,
+    SlurmResourceProfile, SlurmRunner, _device_pattern_preflight,
 )
 from lcprop.runners.source_deployment import (
     ResolvedSourceDeployment,
@@ -548,6 +550,56 @@ def test_h200_preflight_precedes_scientific_executor(tmp_path):
     assert "BackendSpec" in lines[preflight_index]
     assert "cupy" in lines[preflight_index]
     assert any("gpu_memory_samples_mib.txt" in line for line in lines)
+
+
+def _generated_gpu_preflight(tmp_path, profile):
+    runner = SlurmRunner(
+        _config(
+            tmp_path,
+            resource_profiles=(profile,),
+            default_resource_profile=profile.name,
+        ),
+        (PR_TRANSVERSE_STATIC_OPERATION,),
+        transport=FakeTransport(),
+        registry=default_transport_registry(),
+    )
+    line = next(
+        value
+        for value in runner._script("/runs/test", profile).splitlines()
+        if "execution_provenance.json" in value
+    )
+    arguments = shlex.split(line)
+    return arguments[arguments.index("-c") + 1]
+
+
+@pytest.mark.parametrize(
+    ("pattern", "matching_name", "nonmatching_name"),
+    (
+        ("H200", "NVIDIA H200", "NVIDIA A100"),
+        (r"NVIDIA (?:H200|'Hopper')$", "NVIDIA 'Hopper'", "NVIDIA L40S"),
+    ),
+)
+def test_gpu_preflight_pattern_is_a_safe_literal_and_constrains_device(
+    tmp_path, pattern, matching_name, nonmatching_name
+):
+    profile = replace(H200_SMALL, expected_device_pattern=pattern)
+    preflight = _generated_gpu_preflight(tmp_path, profile)
+    compile(preflight, "<gpu-preflight>", "exec")
+    pattern_check = ";".join(_device_pattern_preflight(pattern))
+    exec(pattern_check, {"re": re, "name": matching_name})
+    with pytest.raises(AssertionError, match="expected device matching"):
+        exec(pattern_check, {"re": re, "name": nonmatching_name})
+
+
+def test_gpu_preflight_without_expected_pattern_compiles_and_keeps_provenance(tmp_path):
+    profile = replace(H200_SMALL, expected_device_pattern=None)
+    preflight = _generated_gpu_preflight(tmp_path, profile)
+    compile(preflight, "<gpu-preflight>", "exec")
+    assert "expected_pattern" not in preflight
+    assert "cp.cuda.runtime.getDeviceProperties(0)" in preflight
+    assert "device=name" in preflight
+    assert "device_count=count" in preflight
+    assert "preflight_backend=backend.name" in preflight
 
 
 def test_cupy_request_is_rejected_by_cpu_profile_before_submission(tmp_path):

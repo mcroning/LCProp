@@ -130,6 +130,16 @@ def validate_remote_path(value: str) -> str:
     return str(path)
 
 
+def _device_pattern_preflight(pattern: str) -> tuple[str, str]:
+    """Generate safe Python statements for one validated device regex."""
+
+    return (
+        f"expected_pattern={pattern!r}",
+        "assert re.search(expected_pattern,name), "
+        "f'expected device matching {expected_pattern!r}, got {name}'",
+    )
+
+
 @dataclass(frozen=True)
 class SlurmExecutionConfig:
     host: str
@@ -305,10 +315,7 @@ class SlurmRunner:
                 "record=dict(python=platform.python_version(),cupy=cp.__version__,cuda_runtime=cp.cuda.runtime.runtimeGetVersion(),cuda_driver=cp.cuda.runtime.driverGetVersion(),device=name,device_count=count,preflight_backend=backend.name)",
             ]
             if pattern is not None:
-                preflight_parts.insert(
-                    -1,
-                    f"assert re.search({pattern!r},name), f'expected device matching {pattern!r}, got {{name}}'",
-                )
+                preflight_parts[-1:-1] = _device_pattern_preflight(pattern)
             preflight_parts.append("print(json.dumps(record,sort_keys=True))")
             preflight = ";".join(preflight_parts)
             lines.append(
