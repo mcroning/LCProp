@@ -211,6 +211,19 @@ before success is reported. The production transverse-TD residual from
 labeled as a finite-grid TD-discretization diagnostic; it is not a physical
 static acceptance condition.
 
+For a request containing deterministic coherent cross terms, the canonical
+static workflow first attempts the exact requested visibility directly. Only
+if that attempt ends in `coupled_line_search_failed` does the PR-owned solver
+restart from the canonical initializer and use the fixed visibility sequence
+`0, 0.25, 0.5, 0.75, 1` as a globalization strategy. Intermediate stages
+blend the incoherent and coherent midpoint transport intensities; they are
+initialization states, not altered user physics. Success still requires the
+final `v=1` stage to satisfy the unchanged zero-flux RMS and maximum-residual
+gates and independent replay. Successful direct solves bypass continuation
+unchanged, while continuation use and per-stage convergence evidence are
+recorded in result diagnostics. The internal schedule is deliberately not a
+GUI control.
+
 The matrix-free Newton–GMRES solver for the exact finite-resolution TD fixed
 point is retained as the explicitly invoked experimental function
 `solve_pr_transverse_discrete_static_intensity()`. It supports NumPy and CuPy

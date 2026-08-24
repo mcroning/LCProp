@@ -64,6 +64,30 @@ def _request(
     )
 
 
+def _two_beam_request(*, coherent: bool):
+    groups = ("shared", "shared") if coherent else ("beam-a", "beam-b")
+    request = _request(gain_length_product=1.0e-3)
+    return replace(
+        request,
+        beams=BeamStack(channels=(
+            replace(
+                request.beams.channels[0],
+                name="beam-a",
+                x0_um=-3.0,
+                tilt_x_rad_per_um=0.15,
+                coherence_group=groups[0],
+            ),
+            replace(
+                request.beams.channels[0],
+                name="beam-b",
+                x0_um=3.0,
+                tilt_x_rad_per_um=-0.15,
+                coherence_group=groups[1],
+            ),
+        )),
+    )
+
+
 def test_coupled_static_converges_with_refreshed_source_and_independent_replay():
     result = run_pr_transverse_static(_request())
     assert result.status == "converged"
@@ -263,3 +287,250 @@ def test_static_workflow_rejects_auto_and_accepts_optical_only_intensity():
     result = run_pr_transverse_static(zero_background)
     assert np.min(result.source_intensity_stack) > 0.0
     assert result.status in {"converged", "not_converged"}
+
+
+def test_visibility_endpoints_are_exact_coherent_and_incoherent_sources(
+    monkeypatch,
+):
+    import lcprop.pr.transverse.static_workflow as module
+
+    request = _two_beam_request(coherent=True)
+    A = np.ones((2, 3, 4), dtype=np.complex128)
+    psi = np.zeros((1, 3, 4), dtype=np.float64)
+    coherent_source = np.full((1, 3, 4), 7.0)
+    incoherent_source = np.full((1, 3, 4), 3.0)
+
+    def fake_pass(A0, state, *, request, **kwargs):
+        source = (
+            coherent_source
+            if len(set(request.beams.coherence_groups)) == 1
+            else incoherent_source
+        )
+        return A0.copy(), source.copy()
+
+    monkeypatch.setattr(module, "_optical_pass", fake_pass)
+    common = {
+        "request": request,
+        "grid": object(),
+        "kernel": object(),
+        "peak_reference": 1.0,
+        "wavelength_um": 0.633,
+        "dx_normalized": 1.0,
+        "dy_normalized": 1.0,
+    }
+    _, zero = module._optical_pass_at_visibility(
+        A, psi, visibility=0.0, **common
+    )
+    _, one = module._optical_pass_at_visibility(
+        A, psi, visibility=1.0, **common
+    )
+    _, quarter = module._optical_pass_at_visibility(
+        A, psi, visibility=0.25, **common
+    )
+    np.testing.assert_array_equal(zero, incoherent_source)
+    np.testing.assert_array_equal(one, coherent_source)
+    np.testing.assert_array_equal(quarter, np.full_like(incoherent_source, 4.0))
+
+
+def test_direct_success_bypasses_visibility_continuation(monkeypatch):
+    import lcprop.pr.transverse.static_workflow as module
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("successful direct solve invoked continuation")
+
+    monkeypatch.setattr(
+        module, "_run_pr_transverse_static_visibility_continuation", forbidden
+    )
+    result = run_pr_transverse_static(_two_beam_request(coherent=True))
+    assert result.converged
+    assert "continuation_used" not in result.diagnostics
+
+
+def test_coherent_line_search_failure_uses_fixed_stage_schedule_and_warm_starts(
+    monkeypatch,
+):
+    import lcprop.pr.transverse.static_workflow as module
+
+    request = _two_beam_request(coherent=True)
+    baseline = module._run_pr_transverse_static_at_visibility(
+        request, visibility=1.0
+    )
+    failed_diagnostics = dict(baseline.diagnostics)
+    failed_diagnostics["termination_reason"] = "coupled_line_search_failed"
+    failed = replace(
+        baseline,
+        converged=False,
+        status="not_converged",
+        diagnostics=failed_diagnostics,
+    )
+    calls = []
+
+    def staged(stage_request, *, visibility, **kwargs):
+        calls.append((visibility, stage_request.initial_psi))
+        if len(calls) == 1:
+            return failed
+        stage_psi = np.full_like(baseline.psi_final, visibility + len(calls))
+        return replace(baseline, psi_final=stage_psi)
+
+    monkeypatch.setattr(module, "_run_pr_transverse_static_at_visibility", staged)
+    result = run_pr_transverse_static(request)
+    assert [call[0] for call in calls] == [
+        1.0,
+        *module.PR_COHERENT_VISIBILITY_CONTINUATION_SCHEDULE,
+    ]
+    assert calls[1][1] is request.initial_psi
+    for index in range(2, len(calls)):
+        np.testing.assert_array_equal(
+            calls[index][1],
+            np.full_like(baseline.psi_final, calls[index - 1][0] + index),
+        )
+    assert result.converged
+    assert result.diagnostics["continuation_used"] is True
+    assert result.diagnostics["visibility_schedule"] == (
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0,
+    )
+    assert result.diagnostics["final_visibility"] == 1.0
+    assert result.diagnostics["direct_attempt_status"] == "not_converged"
+
+
+def test_failed_intermediate_visibility_never_becomes_reported_solution(
+    monkeypatch,
+):
+    import lcprop.pr.transverse.static_workflow as module
+
+    request = _two_beam_request(coherent=True)
+    converged = module._run_pr_transverse_static_at_visibility(
+        request, visibility=1.0
+    )
+    failed_diagnostics = dict(converged.diagnostics)
+    failed_diagnostics["termination_reason"] = "coupled_line_search_failed"
+    direct_failure = replace(
+        converged,
+        converged=False,
+        status="not_converged",
+        diagnostics=failed_diagnostics,
+    )
+
+    def staged(stage_request, *, visibility, **kwargs):
+        if visibility < 0.5:
+            return converged
+        return direct_failure
+
+    monkeypatch.setattr(module, "_run_pr_transverse_static_at_visibility", staged)
+    result = module._run_pr_transverse_static_visibility_continuation(
+        request, direct_result=direct_failure
+    )
+    assert result.status == "not_converged"
+    assert result.diagnostics["final_visibility"] is None
+    assert result.diagnostics["continuation_failure_visibility"] == 0.5
+    assert result.diagnostics["returned_state_source"] == (
+        "direct_full_visibility_failure"
+    )
+    np.testing.assert_array_equal(result.psi_final, direct_failure.psi_final)
+
+
+def test_cancellation_during_continuation_returns_last_accepted_stage_state(
+    monkeypatch,
+):
+    import lcprop.pr.transverse.static_workflow as module
+
+    request = _two_beam_request(coherent=True)
+    converged = module._run_pr_transverse_static_at_visibility(
+        request, visibility=1.0
+    )
+    direct_diagnostics = dict(converged.diagnostics)
+    direct_diagnostics["termination_reason"] = "coupled_line_search_failed"
+    direct_failure = replace(
+        converged,
+        converged=False,
+        status="not_converged",
+        diagnostics=direct_diagnostics,
+    )
+    accepted_psi = np.full_like(converged.psi_final, 3.0)
+    accepted_stage = replace(converged, psi_final=accepted_psi)
+    cancelled_psi = np.full_like(converged.psi_final, 4.0)
+    cancelled_diagnostics = dict(converged.diagnostics)
+    cancelled_diagnostics.update({
+        "termination_reason": "cancelled_at_accepted_boundary",
+        "cancelled": True,
+    })
+    cancelled_stage = replace(
+        converged,
+        psi_final=cancelled_psi,
+        converged=False,
+        status="cancelled",
+        diagnostics=cancelled_diagnostics,
+    )
+
+    def staged(stage_request, *, visibility, **kwargs):
+        if visibility == 0.0:
+            return accepted_stage
+        assert visibility == 0.25
+        np.testing.assert_array_equal(stage_request.initial_psi, accepted_psi)
+        return cancelled_stage
+
+    monkeypatch.setattr(module, "_run_pr_transverse_static_at_visibility", staged)
+    result = module._run_pr_transverse_static_visibility_continuation(
+        request, direct_result=direct_failure
+    )
+    assert result.status == "cancelled"
+    assert not result.converged
+    np.testing.assert_array_equal(result.psi_final, cancelled_psi)
+    assert result.diagnostics["final_visibility"] is None
+    assert result.diagnostics["continuation_cancelled"] is True
+    assert result.diagnostics["continuation_cancellation_visibility"] == 0.25
+    assert result.diagnostics["continuation_failure_visibility"] is None
+    assert result.diagnostics["returned_state_source"] == (
+        "cancelled_continuation_stage"
+    )
+
+
+def test_forced_visibility_schedule_matches_easy_direct_solution():
+    import lcprop.pr.transverse.static_workflow as module
+
+    request = _request()
+    direct = run_pr_transverse_static(request)
+    continued = module._run_pr_transverse_static_visibility_continuation(
+        request, direct_result=direct
+    )
+    assert direct.converged and continued.converged
+    overlap = np.vdot(continued.A_final.ravel(), direct.A_final.ravel())
+    phase = np.exp(-1j * np.angle(overlap))
+    np.testing.assert_allclose(phase * continued.A_final, direct.A_final, rtol=1e-10, atol=1e-11)
+    np.testing.assert_allclose(continued.psi_final, direct.psi_final, rtol=1e-9, atol=1e-10)
+    np.testing.assert_allclose(
+        continued.source_intensity_stack,
+        direct.source_intensity_stack,
+        rtol=1e-10,
+        atol=1e-11,
+    )
+    assert abs(continued.power_final - direct.power_final) < 1e-12
+
+
+def test_incoherent_failure_does_not_invoke_visibility_continuation(monkeypatch):
+    import lcprop.pr.transverse.static_workflow as module
+
+    request = _two_beam_request(coherent=False)
+    baseline = module._run_pr_transverse_static_at_visibility(
+        request, visibility=1.0
+    )
+    diagnostics = dict(baseline.diagnostics)
+    diagnostics["termination_reason"] = "coupled_line_search_failed"
+    failed = replace(
+        baseline,
+        converged=False,
+        status="not_converged",
+        diagnostics=diagnostics,
+    )
+    monkeypatch.setattr(
+        module,
+        "_run_pr_transverse_static_at_visibility",
+        lambda *args, **kwargs: failed,
+    )
+    result = run_pr_transverse_static(request)
+    assert result is failed
+    assert "continuation_used" not in result.diagnostics

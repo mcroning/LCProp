@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 import math
 from time import perf_counter
 from typing import Any, Callable
@@ -56,6 +56,7 @@ from lcprop.pr.workflow import _validate_canonical_scattering_for_grid
 
 
 PR_TRANSVERSE_STATIC_WORKFLOW = "pr_transverse_static"
+PR_COHERENT_VISIBILITY_CONTINUATION_SCHEDULE = (0.0, 0.25, 0.5, 0.75, 1.0)
 ProgressCallback = Callable[[RunProgress], None]
 
 
@@ -299,13 +300,86 @@ def _criteria_met(metrics, options: PRTransverseStaticWorkflowOptions) -> bool:
     )
 
 
-def run_pr_transverse_static(
+def _contains_coherent_interference(beams: BeamStack) -> bool:
+    """Return whether two or more channels contribute coherent cross terms."""
+
+    groups = beams.coherence_groups
+    return len(set(groups)) < len(groups)
+
+
+def _fully_incoherent_request(
+    request: PRTransverseStaticRunRequest,
+) -> PRTransverseStaticRunRequest:
+    """Return the same physical channels with all coherent cross terms removed."""
+
+    channels = tuple(
+        replace(channel, coherence_group=f"__pr_visibility_channel_{index}__")
+        for index, channel in enumerate(request.beams.channels)
+    )
+    return replace(request, beams=replace(request.beams, channels=channels))
+
+
+def _optical_pass_at_visibility(
+    A0,
+    psi,
+    *,
+    visibility: float,
+    request: PRTransverseStaticRunRequest,
+    grid,
+    kernel,
+    peak_reference: float,
+    wavelength_um: float,
+    dx_normalized: float,
+    dy_normalized: float,
+):
+    """Return the exact endpoint or blended-visibility midpoint source.
+
+    Optical propagation is channel-wise and therefore independent of the
+    coherence grouping.  Only the PR-driving intensity contains coherent
+    cross terms.  Intermediate continuation stages use
+    ``I_incoherent + visibility * (I_coherent - I_incoherent)``; the two
+    endpoints call the corresponding established optical pass exactly once.
+    """
+
+    resolved = float(visibility)
+    if not math.isfinite(resolved) or not 0.0 <= resolved <= 1.0:
+        raise ValueError("visibility must be finite and between zero and one")
+    common = {
+        "grid": grid,
+        "kernel": kernel,
+        "peak_reference": peak_reference,
+        "wavelength_um": wavelength_um,
+        "dx_normalized": dx_normalized,
+        "dy_normalized": dy_normalized,
+        "cancellation_token": None,
+    }
+    if resolved == 1.0:
+        return _optical_pass(A0, psi, request=request, **common)
+
+    incoherent_request = _fully_incoherent_request(request)
+    A_incoherent, source_incoherent = _optical_pass(
+        A0, psi, request=incoherent_request, **common
+    )
+    if resolved == 0.0:
+        return A_incoherent, source_incoherent
+
+    A_coherent, source_coherent = _optical_pass(
+        A0, psi, request=request, **common
+    )
+    source = source_incoherent + resolved * (
+        source_coherent - source_incoherent
+    )
+    return A_coherent, source
+
+
+def _run_pr_transverse_static_at_visibility(
     request: PRTransverseStaticRunRequest,
     *,
+    visibility: float,
     cancellation_token: CancellationToken | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> PRTransverseStaticRunResult:
-    """Solve the self-consistent Profile-v1 zero-flux static problem."""
+    """Solve one fixed coherent-visibility continuation stage."""
 
     started = perf_counter()
     _validate_request(request)
@@ -370,9 +444,10 @@ def run_pr_transverse_static(
         nonlocal optical_seconds
         synchronize(xp)
         pass_started = perf_counter()
-        result = _optical_pass(
+        result = _optical_pass_at_visibility(
             A0,
             state,
+            visibility=visibility,
             request=request,
             grid=grid,
             kernel=kernel,
@@ -380,7 +455,6 @@ def run_pr_transverse_static(
             wavelength_um=wavelength_um,
             dx_normalized=dx_normalized,
             dy_normalized=dy_normalized,
-            cancellation_token=None,
         )
         synchronize(xp)
         optical_seconds += perf_counter() - pass_started
@@ -812,8 +886,169 @@ def run_pr_transverse_static(
     )
 
 
+def _continuation_stage_record(
+    visibility: float,
+    result: PRTransverseStaticRunResult,
+) -> dict[str, Any]:
+    return {
+        "visibility": float(visibility),
+        "status": result.status,
+        "converged": bool(result.converged),
+        "termination_reason": result.diagnostics["termination_reason"],
+        "coupled_iterations": int(result.completed_coupled_iterations),
+        "final_equilibrium_rms": float(
+            result.diagnostics["equilibrium_residual_rms"]
+        ),
+        "final_equilibrium_max": float(
+            result.diagnostics["equilibrium_residual_max"]
+        ),
+        "backtracks": int(sum(record.backtracks for record in result.iteration_records)),
+        "material_newton_iterations": int(sum(
+            record.material_newton_iterations for record in result.iteration_records
+        )),
+        "material_pcg_iterations": int(sum(
+            record.material_pcg_iterations for record in result.iteration_records
+        )),
+    }
+
+
+def _run_pr_transverse_static_visibility_continuation(
+    request: PRTransverseStaticRunRequest,
+    *,
+    direct_result: PRTransverseStaticRunResult,
+    cancellation_token: CancellationToken | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> PRTransverseStaticRunResult:
+    """Restart canonically and advance the fixed visibility schedule."""
+
+    continuation_started = perf_counter()
+    stage_request = request
+    stage_results: list[PRTransverseStaticRunResult] = []
+    stage_records: list[dict[str, Any]] = []
+    last_attempted_visibility: float | None = None
+    for visibility in PR_COHERENT_VISIBILITY_CONTINUATION_SCHEDULE:
+        last_attempted_visibility = visibility
+        stage_result = _run_pr_transverse_static_at_visibility(
+            stage_request,
+            visibility=visibility,
+            cancellation_token=cancellation_token,
+            progress_callback=progress_callback,
+        )
+        stage_results.append(stage_result)
+        stage_records.append(_continuation_stage_record(visibility, stage_result))
+        if not stage_result.converged:
+            returned = (
+                stage_result
+                if stage_result.status == "cancelled"
+                else direct_result
+            )
+            break
+        stage_request = replace(request, initial_psi=stage_result.psi_final)
+    else:
+        returned = stage_results[-1]
+
+    succeeded = bool(
+        stage_results
+        and stage_results[-1].converged
+        and last_attempted_visibility == 1.0
+    )
+    diagnostics = dict(returned.diagnostics)
+    continuation_cancelled = returned.status == "cancelled"
+    diagnostics.update({
+        "continuation_used": True,
+        "visibility_schedule": PR_COHERENT_VISIBILITY_CONTINUATION_SCHEDULE,
+        "continuation_stages": tuple(stage_records),
+        "direct_attempt_status": direct_result.status,
+        "direct_attempt_termination_reason": direct_result.diagnostics[
+            "termination_reason"
+        ],
+        "requested_final_visibility": 1.0,
+        "last_attempted_visibility": last_attempted_visibility,
+        "final_visibility": 1.0 if succeeded else None,
+        "continuation_succeeded": succeeded,
+        "continuation_cancelled": continuation_cancelled,
+        "continuation_cancellation_visibility": (
+            last_attempted_visibility if continuation_cancelled else None
+        ),
+        "continuation_failure_visibility": (
+            None
+            if succeeded or continuation_cancelled
+            else last_attempted_visibility
+        ),
+        "returned_state_source": (
+            "final_full_visibility_stage"
+            if succeeded
+            else (
+                "cancelled_continuation_stage"
+                if continuation_cancelled
+                else "direct_full_visibility_failure"
+            )
+        ),
+    })
+    attempted_results = (direct_result, *stage_results)
+    timing = dict(returned.timing)
+    for key in (
+        "optical_pass_seconds",
+        "material_solve_seconds",
+        "zero_flux_material_seconds",
+        "continuum_initializer_seconds",
+        "discrete_corrector_seconds",
+    ):
+        timing[key] = sum(float(result.timing[key]) for result in attempted_results)
+    timing.update({
+        "total_seconds": sum(
+            float(result.timing["total_seconds"]) for result in attempted_results
+        ),
+        "direct_attempt_seconds": float(direct_result.timing["total_seconds"]),
+        "visibility_continuation_seconds": perf_counter() - continuation_started,
+    })
+    return replace(
+        returned,
+        psi_initial=direct_result.psi_initial,
+        diagnostics=diagnostics,
+        timing=timing,
+    )
+
+
+def run_pr_transverse_static(
+    request: PRTransverseStaticRunRequest,
+    *,
+    cancellation_token: CancellationToken | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> PRTransverseStaticRunResult:
+    """Solve the Profile-v1 zero-flux problem, with bounded globalization.
+
+    The exact requested coherent problem is always attempted first.  A
+    canonical restart through the internal fixed visibility schedule occurs
+    only for a coherent ``coupled_line_search_failed`` result.  Successful
+    direct results are returned unchanged.
+    """
+
+    direct_result = _run_pr_transverse_static_at_visibility(
+        request,
+        visibility=1.0,
+        cancellation_token=cancellation_token,
+        progress_callback=progress_callback,
+    )
+    if (
+        direct_result.converged
+        or direct_result.status == "cancelled"
+        or direct_result.diagnostics["termination_reason"]
+        != "coupled_line_search_failed"
+        or not _contains_coherent_interference(request.beams)
+    ):
+        return direct_result
+    return _run_pr_transverse_static_visibility_continuation(
+        request,
+        direct_result=direct_result,
+        cancellation_token=cancellation_token,
+        progress_callback=progress_callback,
+    )
+
+
 __all__ = [
     "PR_TRANSVERSE_STATIC_WORKFLOW",
+    "PR_COHERENT_VISIBILITY_CONTINUATION_SCHEDULE",
     "PRTransverseStaticCoupledRecord",
     "PRTransverseStaticDiscreteIterationRecord",
     "PRTransverseStaticMaterialIterationRecord",
