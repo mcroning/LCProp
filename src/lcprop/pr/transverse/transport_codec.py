@@ -1,0 +1,397 @@
+"""PR-owned portable transport codec for the transverse static workflow."""
+
+from __future__ import annotations
+
+from dataclasses import asdict, is_dataclass
+import math
+from typing import Any, Mapping
+
+import numpy as np
+
+from lcprop.core.backend import BackendSpec, asnumpy
+from lcprop.core.context import GridSpec
+from lcprop.persistence.experiments import decode_beam_stack, encode_beam_stack
+from lcprop.pr.scattering import PRCanonicalScatteringSpec
+from lcprop.pr.specs import PRMaterialSpec, PR_MATERIAL_ID
+from lcprop.pr.transverse.specs import (
+    PRTransverseBoundaryProfile,
+    PRTransverseDielectricProfile,
+    PRTransverseProjectionProfile,
+    PRTransverseTransportProfile,
+)
+from lcprop.pr.transverse.static import (
+    PRTransverseDiscreteStaticCorrectorOptions,
+    PRTransverseDiscreteStaticNewtonRecord,
+    PRTransverseStaticMaterialSolverOptions,
+    PRTransverseStaticNewtonRecord,
+)
+from lcprop.pr.transverse.static_workflow import (
+    PR_TRANSVERSE_STATIC_WORKFLOW,
+    PRTransverseStaticCoupledRecord,
+    PRTransverseStaticDiscreteIterationRecord,
+    PRTransverseStaticMaterialIterationRecord,
+    PRTransverseStaticRunRequest,
+    PRTransverseStaticRunResult,
+    PRTransverseStaticWorkflowOptions,
+)
+from lcprop.transport.codecs import EncodedRequest, EncodedResult, PortablePayload, TransportCodec
+from lcprop.transport.envelopes import TransportCodecError
+
+
+PR_TRANSVERSE_STATIC_REQUEST_CODEC_ID = "pr.transverse_static.request"
+PR_TRANSVERSE_STATIC_RESULT_CODEC_ID = "pr.transverse_static.result"
+PR_TRANSVERSE_STATIC_TRANSPORT_CODEC_VERSION = 1
+_ARRAY_MARKER = "__lcprop_array__"
+
+
+def _pack(value: Any, arrays: dict[str, np.ndarray], path: str) -> Any:
+    if is_dataclass(value):
+        value = asdict(value)
+    if isinstance(value, np.generic):
+        return value.item()
+    if hasattr(value, "shape") and hasattr(value, "dtype"):
+        key = path.replace(".", "__")
+        arrays[key] = np.asarray(asnumpy(value)).copy()
+        return {_ARRAY_MARKER: key}
+    if isinstance(value, Mapping):
+        return {str(k): _pack(v, arrays, f"{path}.{k}") for k, v in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_pack(v, arrays, f"{path}.{i}") for i, v in enumerate(value)]
+    return value
+
+
+def _unpack(value: Any, arrays: Mapping[str, np.ndarray]) -> Any:
+    if isinstance(value, Mapping):
+        if set(value) == {_ARRAY_MARKER}:
+            key = value[_ARRAY_MARKER]
+            if key not in arrays:
+                raise TransportCodecError(f"missing transported PR array {key!r}")
+            return np.asarray(arrays[key]).copy()
+        return {str(k): _unpack(v, arrays) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_unpack(v, arrays) for v in value]
+    return value
+
+
+def _validate_request(request: PRTransverseStaticRunRequest) -> None:
+    request.grid.validate()
+    request.beams.validate()
+    request.material.validate()
+    request.transport.validate()
+    request.dielectric.validate()
+    request.boundary.validate()
+    request.projection.validate()
+    request.solver.validate()
+    request.backend.validate()
+    if request.scattering is not None:
+        request.scattering.validate()
+
+
+def encode_pr_transverse_static_transport_request(request: PRTransverseStaticRunRequest) -> EncodedRequest:
+    if not isinstance(request, PRTransverseStaticRunRequest):
+        raise TypeError("request must be a PRTransverseStaticRunRequest")
+    _validate_request(request)
+    arrays: dict[str, np.ndarray] = {}
+    metadata = {
+        "grid": asdict(request.grid),
+        "beams": encode_beam_stack(request.beams),
+        "material": asdict(request.material),
+        "transport": asdict(request.transport),
+        "dielectric": asdict(request.dielectric),
+        "boundary": asdict(request.boundary),
+        "projection": asdict(request.projection),
+        "solver": _pack(request.solver, arrays, "solver"),
+        "backend": asdict(request.backend),
+        "initial_A": _pack(request.initial_A, arrays, "initial_A"),
+        "initial_psi": _pack(request.initial_psi, arrays, "initial_psi"),
+        "scattering": None if request.scattering is None else asdict(request.scattering),
+    }
+    return EncodedRequest(PortablePayload(metadata, arrays), request.backend.backend)
+
+
+def decode_pr_transverse_static_transport_request(metadata: Mapping[str, Any], arrays: Mapping[str, np.ndarray]) -> PRTransverseStaticRunRequest:
+    try:
+        values = _unpack(dict(metadata), arrays)
+        solver_values = dict(values["solver"])
+        material_solver = PRTransverseStaticMaterialSolverOptions(**solver_values.pop("material_solver"))
+        discrete_corrector = PRTransverseDiscreteStaticCorrectorOptions(**solver_values.pop("discrete_corrector"))
+        scattering = values["scattering"]
+        request = PRTransverseStaticRunRequest(
+            grid=GridSpec(**values["grid"]),
+            beams=decode_beam_stack(values["beams"]),
+            material=PRMaterialSpec(**values["material"]),
+            transport=PRTransverseTransportProfile(**values["transport"]),
+            dielectric=PRTransverseDielectricProfile(**values["dielectric"]),
+            boundary=PRTransverseBoundaryProfile(**values["boundary"]),
+            projection=PRTransverseProjectionProfile(**values["projection"]),
+            solver=PRTransverseStaticWorkflowOptions(
+                material_solver=material_solver,
+                discrete_corrector=discrete_corrector,
+                **solver_values,
+            ),
+            backend=BackendSpec(**values["backend"]),
+            initial_A=values["initial_A"],
+            initial_psi=values["initial_psi"],
+            scattering=None if scattering is None else PRCanonicalScatteringSpec(**scattering),
+        )
+        _validate_request(request)
+        return request
+    except TransportCodecError:
+        raise
+    except Exception as exc:
+        raise TransportCodecError(f"invalid PR transverse-static request payload: {exc}") from exc
+
+
+def encode_pr_transverse_static_transport_result(result: PRTransverseStaticRunResult) -> EncodedResult:
+    if not isinstance(result, PRTransverseStaticRunResult):
+        raise TypeError("result must be a PRTransverseStaticRunResult")
+    arrays: dict[str, np.ndarray] = {}
+    metadata = _pack(asdict(result), arrays, "result")
+    backend = str(result.backend_summary.get("backend", "unknown"))
+    device_summary = _pack(result.backend_summary, arrays, "device_summary")
+    termination = result.diagnostics.get("termination_reason", result.status)
+    return EncodedResult(
+        PortablePayload(metadata, arrays),
+        scientific_status=result.status,
+        converged=bool(result.converged),
+        cancelled=result.status == "cancelled",
+        termination_reason=None if termination is None else str(termination),
+        scientific_backend_resolved=backend,
+        device_summary=device_summary,
+    )
+
+
+def _summary_dimension(summary: Mapping[str, Any], name: str) -> int:
+    value = summary.get(name)
+    if type(value) is not int or value < 1:
+        raise TransportCodecError(f"PR result {name} must be a positive integer")
+    return value
+
+
+def _validate_result_shapes(values: Mapping[str, Any]) -> None:
+    grid = values.get("grid_summary")
+    launch = values.get("launch_summary")
+    if not isinstance(grid, Mapping) or not isinstance(launch, Mapping):
+        raise TransportCodecError("PR result lacks grid or launch summary")
+    nx = _summary_dimension(grid, "Nx")
+    ny = _summary_dimension(grid, "Ny")
+    nz = _summary_dimension(grid, "Nz")
+    nch = _summary_dimension(launch, "Nch")
+    expected = {
+        "A_initial": (nch, nx, ny),
+        "A_final": (nch, nx, ny),
+        "psi_initial": (nz, nx, ny),
+        "psi_final": (nz, nx, ny),
+        "source_intensity_stack": (nz, nx, ny),
+        "equilibrium_residual_stack": (nz, nx, ny),
+        "td_rhs_residual_stack": (nz, nx, ny),
+    }
+    for name, shape in expected.items():
+        value = values.get(name)
+        if not isinstance(value, np.ndarray):
+            raise TransportCodecError(f"PR result {name} must be a numeric array")
+        if value.dtype.hasobject:
+            raise TransportCodecError(f"PR result {name} has forbidden object dtype")
+        if value.shape != shape:
+            raise TransportCodecError(
+                f"PR result {name} shape {value.shape} does not match {shape}"
+            )
+
+
+def _same_visibility(left: Any, right: Any) -> bool:
+    try:
+        return math.isclose(float(left), float(right), rel_tol=0.0, abs_tol=1e-12)
+    except (TypeError, ValueError):
+        return False
+
+
+def _validate_continuation(values: Mapping[str, Any]) -> None:
+    diagnostics = values.get("diagnostics")
+    if not isinstance(diagnostics, Mapping):
+        raise TransportCodecError("PR result diagnostics must be a mapping")
+    continuation_keys = {
+        "visibility_schedule", "continuation_stages", "direct_attempt_status",
+        "direct_attempt_termination_reason", "requested_final_visibility",
+        "last_attempted_visibility", "final_visibility",
+        "continuation_succeeded", "continuation_cancelled",
+        "continuation_cancellation_visibility", "continuation_failure_visibility",
+        "returned_state_source",
+    }
+    used = diagnostics.get("continuation_used", False)
+    if type(used) is not bool:
+        raise TransportCodecError("continuation_used must be boolean")
+    if not used:
+        unexpected = continuation_keys.intersection(diagnostics)
+        if unexpected:
+            raise TransportCodecError(
+                "continuation provenance is present while continuation_used is false"
+            )
+        return
+    missing = continuation_keys - set(diagnostics)
+    if missing:
+        raise TransportCodecError(
+            "PR continuation provenance is missing: " + ", ".join(sorted(missing))
+        )
+    succeeded = diagnostics["continuation_succeeded"]
+    cancelled = diagnostics["continuation_cancelled"]
+    if type(succeeded) is not bool or type(cancelled) is not bool:
+        raise TransportCodecError("continuation success/cancellation flags must be boolean")
+    if succeeded and cancelled:
+        raise TransportCodecError("continuation cannot be successful and cancelled")
+    schedule = diagnostics["visibility_schedule"]
+    stages = diagnostics["continuation_stages"]
+    if not isinstance(schedule, (tuple, list)) or not schedule:
+        raise TransportCodecError("continuation visibility_schedule must be non-empty")
+    if not isinstance(stages, (tuple, list)) or not stages:
+        raise TransportCodecError("continuation_stages must be non-empty")
+    if len(stages) > len(schedule):
+        raise TransportCodecError("continuation stages exceed the visibility schedule")
+    stage_visibilities = []
+    stage_converged = []
+    stage_statuses = []
+    for index, stage in enumerate(stages):
+        if not isinstance(stage, Mapping) or not {
+            "visibility", "status", "converged"
+        }.issubset(stage):
+            raise TransportCodecError(
+                "each continuation stage requires visibility, status, and converged"
+            )
+        visibility = stage["visibility"]
+        if not _same_visibility(visibility, schedule[index]):
+            raise TransportCodecError("continuation stages are not a schedule prefix")
+        if type(stage["converged"]) is not bool:
+            raise TransportCodecError("continuation stage converged must be boolean")
+        stage_visibilities.append(visibility)
+        stage_converged.append(stage["converged"])
+        stage_statuses.append(stage["status"])
+    requested = diagnostics["requested_final_visibility"]
+    last = diagnostics["last_attempted_visibility"]
+    if not _same_visibility(requested, 1.0):
+        raise TransportCodecError("requested_final_visibility must be full visibility")
+    if not _same_visibility(schedule[-1], requested):
+        raise TransportCodecError("visibility schedule must end at requested visibility")
+    if not _same_visibility(last, stage_visibilities[-1]):
+        raise TransportCodecError("last_attempted_visibility disagrees with stages")
+    if not all(stage_converged[:-1]):
+        raise TransportCodecError("continuation advanced after an unconverged stage")
+    final = diagnostics["final_visibility"]
+    cancellation_visibility = diagnostics["continuation_cancellation_visibility"]
+    failure_visibility = diagnostics["continuation_failure_visibility"]
+    source = diagnostics["returned_state_source"]
+    if succeeded:
+        if (
+            cancelled
+            or not all(stage_converged)
+            or not _same_visibility(final, requested)
+            or not _same_visibility(last, requested)
+        ):
+            raise TransportCodecError("successful continuation must reach requested visibility")
+        if cancellation_visibility is not None or failure_visibility is not None:
+            raise TransportCodecError("successful continuation cannot record failure visibility")
+        if source != "final_full_visibility_stage":
+            raise TransportCodecError("successful continuation has invalid returned_state_source")
+    elif cancelled:
+        if (
+            values.get("status") != "cancelled"
+            or final is not None
+            or stage_converged[-1]
+            or stage_statuses[-1] != "cancelled"
+        ):
+            raise TransportCodecError("cancelled continuation must return cancelled state")
+        if not _same_visibility(cancellation_visibility, last) or failure_visibility is not None:
+            raise TransportCodecError("cancelled continuation visibility is inconsistent")
+        if source != "cancelled_continuation_stage":
+            raise TransportCodecError("cancelled continuation has invalid returned_state_source")
+    else:
+        if final is not None or cancellation_visibility is not None or stage_converged[-1]:
+            raise TransportCodecError("failed continuation cannot record final/cancel visibility")
+        if not _same_visibility(failure_visibility, last):
+            raise TransportCodecError("failed continuation visibility is inconsistent")
+        if source != "direct_full_visibility_failure":
+            raise TransportCodecError("failed continuation has invalid returned_state_source")
+
+
+def decode_pr_transverse_static_transport_result(metadata: Mapping[str, Any], arrays: Mapping[str, np.ndarray]) -> PRTransverseStaticRunResult:
+    try:
+        values = _unpack(dict(metadata), arrays)
+        _validate_result_shapes(values)
+        _validate_continuation(values)
+        material_records = []
+        for item in values["material_iteration_records"]:
+            item = dict(item)
+            material_records.append(PRTransverseStaticMaterialIterationRecord(
+                coupled_iteration=int(item["coupled_iteration"]),
+                newton_record=PRTransverseStaticNewtonRecord(**item["newton_record"]),
+            ))
+        discrete_records = []
+        for item in values["discrete_iteration_records"]:
+            item = dict(item)
+            discrete_records.append(PRTransverseStaticDiscreteIterationRecord(
+                coupled_iteration=int(item["coupled_iteration"]),
+                newton_record=PRTransverseDiscreteStaticNewtonRecord(**item["newton_record"]),
+            ))
+        diagnostics = dict(values["diagnostics"])
+        for key in ("visibility_schedule", "continuation_stages"):
+            if isinstance(diagnostics.get(key), list):
+                diagnostics[key] = tuple(diagnostics[key])
+        result = PRTransverseStaticRunResult(
+            A_initial=values["A_initial"], A_final=values["A_final"],
+            psi_initial=values["psi_initial"], psi_final=values["psi_final"],
+            source_intensity_stack=values["source_intensity_stack"],
+            equilibrium_residual_stack=values["equilibrium_residual_stack"],
+            td_rhs_residual_stack=values["td_rhs_residual_stack"],
+            power_initial=float(values["power_initial"]), power_final=float(values["power_final"]),
+            converged=bool(values["converged"]),
+            completed_coupled_iterations=int(values["completed_coupled_iterations"]),
+            iteration_records=tuple(PRTransverseStaticCoupledRecord(**v) for v in values["iteration_records"]),
+            material_iteration_records=tuple(material_records),
+            discrete_iteration_records=tuple(discrete_records),
+            grid_summary=dict(values["grid_summary"]), launch_summary=dict(values["launch_summary"]),
+            backend_summary=dict(values["backend_summary"]), resolved_profile=dict(values["resolved_profile"]),
+            replay_diagnostics=dict(values["replay_diagnostics"]), diagnostics=diagnostics,
+            timing=dict(values["timing"]), status=str(values["status"]),
+        )
+    except Exception as exc:
+        raise TransportCodecError(f"invalid PR transverse-static result payload: {exc}") from exc
+    residual = np.asarray(result.equilibrium_residual_stack)
+    rms = float(np.sqrt(np.mean(np.square(residual, dtype=np.float64))))
+    maximum = float(np.max(np.abs(residual)))
+    expected_rms = result.diagnostics.get(
+        "authoritative_equilibrium_rms",
+        result.diagnostics.get("equilibrium_residual_rms"),
+    )
+    expected_max = result.diagnostics.get(
+        "authoritative_equilibrium_max",
+        result.diagnostics.get("equilibrium_residual_max"),
+    )
+    tolerance = 5e-6 if residual.dtype == np.float32 else 1e-11
+    if expected_rms is not None and not np.isclose(rms, expected_rms, rtol=tolerance, atol=tolerance):
+        raise TransportCodecError("exported PR equilibrium residual RMS disagrees with diagnostics")
+    if expected_max is not None and not np.isclose(maximum, expected_max, rtol=tolerance, atol=tolerance):
+        raise TransportCodecError("exported PR equilibrium residual maximum disagrees with diagnostics")
+    return result
+
+
+PR_TRANSVERSE_STATIC_TRANSPORT_CODEC = TransportCodec(
+    material_id=PR_MATERIAL_ID,
+    workflow_id=PR_TRANSVERSE_STATIC_WORKFLOW,
+    request_codec_id=PR_TRANSVERSE_STATIC_REQUEST_CODEC_ID,
+    request_codec_version=PR_TRANSVERSE_STATIC_TRANSPORT_CODEC_VERSION,
+    request_type=PRTransverseStaticRunRequest,
+    encode_request=encode_pr_transverse_static_transport_request,
+    decode_request=decode_pr_transverse_static_transport_request,
+    result_codec_id=PR_TRANSVERSE_STATIC_RESULT_CODEC_ID,
+    result_codec_version=PR_TRANSVERSE_STATIC_TRANSPORT_CODEC_VERSION,
+    result_type=PRTransverseStaticRunResult,
+    encode_result=encode_pr_transverse_static_transport_result,
+    decode_result=decode_pr_transverse_static_transport_result,
+)
+
+
+__all__ = [
+    "PR_TRANSVERSE_STATIC_TRANSPORT_CODEC",
+    "decode_pr_transverse_static_transport_request",
+    "decode_pr_transverse_static_transport_result",
+    "encode_pr_transverse_static_transport_request",
+    "encode_pr_transverse_static_transport_result",
+]
