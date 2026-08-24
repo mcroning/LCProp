@@ -39,6 +39,8 @@ from lcprop.lc.operations import (
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.runners.local import LocalRunner
 from lcprop.gui.workers import WorkflowWorker
+from lcprop.gui.remote_execution import execution_target_selector, remote_status_text
+from lcprop.transport.status import RemoteRunState, RemoteRunStatus
 from lcprop.gui.experiment_files import (
     ExperimentFileButtons,
     choose_experiment_open_path,
@@ -89,9 +91,9 @@ from lcprop.lc.workflows import (
 from lcprop.lc.workflows.timedependent import timedependent_state_from_static_result
 
 class LCPropMainWindow(QWidget):
-    def __init__(self):
+    def __init__(self, *, slurm_runner=None):
         super().__init__()
-        self.runner = LocalRunner(
+        self.local_runner = LocalRunner(
             operations=(
                 LC_STATIC_OPERATION,
                 LC_TIMEDEPENDENT_OPERATION,
@@ -99,6 +101,8 @@ class LCPropMainWindow(QWidget):
                 LC_PARAMETER_SWEEP_OPERATION,
             )
         )
+        self.slurm_runner = slurm_runner
+        self.runner = self.local_runner
         self.retained_results = RetainedResults()
         self.last_soliton_result = None
         self.last_soliton_existence_result = None
@@ -106,6 +110,8 @@ class LCPropMainWindow(QWidget):
         self.last_timedependent_result = None
         self.last_timedependent_progress = None
         self.last_run_progress = None
+        self.last_remote_status = None
+        self.remote_status_history = []
         self.last_static_checkpoint = None
         self.last_static_result = None
         self._active_td_from_static = False
@@ -132,7 +138,16 @@ class LCPropMainWindow(QWidget):
         header = QHBoxLayout()
         header.addWidget(QLabel("LCProp"))
         header.addStretch(1)
-        header.addWidget(QLabel(f"Runner: {self.runner.name}"))
+        header.addWidget(QLabel("Execution:"))
+        self.execution_target_selector = execution_target_selector(
+            slurm_available=slurm_runner is not None
+        )
+        self.execution_target_selector.currentIndexChanged.connect(
+            self._execution_target_changed
+        )
+        header.addWidget(self.execution_target_selector)
+        self.runner_label = QLabel(f"Runner: {self.runner.name}")
+        header.addWidget(self.runner_label)
 
         self.td_initial_condition_label = QLabel("Initial condition:")
         self.td_initial_condition_label.setVisible(False)
@@ -249,6 +264,16 @@ class LCPropMainWindow(QWidget):
             self.grid_panel.y_aperture_um.value(),
         )
 
+    @Slot()
+    def _execution_target_changed(self) -> None:
+        target = self.execution_target_selector.currentData()
+        self.runner = self.slurm_runner if target == "slurm" else self.local_runner
+        if self.runner is None:
+            self.runner = self.local_runner
+            self.execution_target_selector.setCurrentIndex(0)
+        self.runner_label.setText(f"Runner: {self.runner.name}")
+        self.update_run_button()
+
     def update_run_button(self) -> None:
         if self._background_running:
             self.run_button.setText("Running…")
@@ -277,7 +302,12 @@ class LCPropMainWindow(QWidget):
         self.solver_panel.set_experiment_mode(experiment)
         self._update_sweep_tab(experiment)
         self._update_initial_condition_controls(experiment)
-        if experiment == "Time-dependent propagation":
+        if self.runner is self.slurm_runner and experiment != "Static propagation":
+            self.run_button.setEnabled(False)
+            self.run_button.setToolTip(
+                "Slurm commissioning currently supports canonical LC static only"
+            )
+        elif experiment == "Time-dependent propagation":
             available, reason = self._td_source_mode_availability()
             self.run_button.setEnabled(available)
             self.run_button.setToolTip("" if available else reason)
@@ -905,6 +935,8 @@ class LCPropMainWindow(QWidget):
     def _run_registered(self, operation, request, **kwargs):
         """Dispatch one canonical LC operation through the shared runner."""
 
+        if self.runner is self.slurm_runner:
+            kwargs["resource_profile"] = "CPU small"
         runner_result = self.runner.run_registered(
             LC_MATERIAL_ID,
             operation.workflow_id,
@@ -963,6 +995,7 @@ class LCPropMainWindow(QWidget):
         ):
             panel.setEnabled(enabled)
         self.td_initial_condition_selector.setEnabled(enabled)
+        self.execution_target_selector.setEnabled(enabled)
         self.use_last_soliton.setEnabled(
             enabled and self.retained_results.selected_soliton_source is not None
         )
@@ -1220,6 +1253,13 @@ class LCPropMainWindow(QWidget):
 
     @Slot(object)
     def _on_workflow_progress(self, progress: RunProgress) -> None:
+        if isinstance(progress, RemoteRunStatus):
+            self.last_remote_status = progress
+            self.remote_status_history.append(progress)
+            message = remote_status_text(progress)
+            self.results_panel.set_td_time_indicator(message)
+            self.results_panel.append_console(message)
+            return
         self.last_timedependent_progress = progress
         self.last_run_progress = progress
         self._last_td_progress_thread = QThread.currentThread()
@@ -1464,6 +1504,15 @@ class LCPropMainWindow(QWidget):
 
     @Slot(str)
     def _on_timedependent_failed(self, formatted_traceback: str) -> None:
+        if (
+            self.last_remote_status is not None
+            and self.last_remote_status.state == RemoteRunState.CANCELLED
+        ):
+            self.run_status = "stopped"
+            self.results_panel.append_console("Remote job cancelled")
+            self._td_outcome_received = True
+            self._maybe_finish_timedependent_background()
+            return
         self.run_status = "failed"
         self.results_panel.append_console("ERROR")
         self.results_panel.append_console(formatted_traceback)

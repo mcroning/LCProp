@@ -16,7 +16,28 @@ Supported in the initial transport contract:
 - PR canonical full-transverse static requests/results, including continuation
   provenance and exported authoritative residuals.
 
-This package does not implement Slurm submission, remote polling, SSH, or GUI
+The sibling `lcprop.runners.slurm` module implements material-neutral Slurm
+submission, polling, verified retrieval, and reconstruction using these
+artifacts.  Application composition remains in `lcprop.transport.defaults`;
+the runner itself contains no LC- or PR-specific request/result logic.
+
+The LC and PR applications expose **Execution: Local | Slurm** separately
+from the scientific backend.  Remote execution is enabled only when
+`LCPROP_SLURM_SOURCE_PATH` and `LCPROP_SLURM_SOURCE_SHA` identify an immutable
+remote checkout. Optional environment variables configure the login host,
+remote run root, Python executable, and local artifact root. No credentials
+are stored in requests or transport artifacts.
+
+Remote GUI completion means scheduler success followed by artifact retrieval,
+checksum verification, canonical result reconstruction, and conversion by the
+existing product adapter. Scheduler `COMPLETED` alone is not GUI completion.
+GPU resource profiles also retrieve the allocated-device execution provenance
+so the final status reports the actual device. Retrieval, verification,
+reconstruction, and product-conversion errors terminate in a categorized
+remote `FAILED` state; confirmed scheduler cancellation terminates in
+`CANCELLED`.
+
+This package does not implement GUI-specific scientific behavior or
 execution-target selection.
 
 ## Bundle and execution contract

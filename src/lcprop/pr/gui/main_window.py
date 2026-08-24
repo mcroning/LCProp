@@ -33,6 +33,8 @@ from lcprop.gui.experiment_files import (
     show_experiment_open_warning,
 )
 from lcprop.gui.workers import WorkflowWorker
+from lcprop.gui.remote_execution import execution_target_selector, remote_status_text
+from lcprop.transport.status import RemoteRunState, RemoteRunStatus
 from lcprop.persistence import (
     load_experiment,
     load_run_checkpoint,
@@ -110,18 +112,22 @@ def _continue_pr_operation(
 class PRMainWindow(QWidget):
     """Focused GUI for the registered PR workflow operations."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, slurm_runner=None) -> None:
         super().__init__()
-        self.runner = LocalRunner(
+        self.local_runner = LocalRunner(
             operations=(
                 PR_TIMEDEPENDENT_OPERATION,
                 PR_TRANSVERSE_STATIC_OPERATION,
                 PR_STATIC_OPERATION,
             )
         )
+        self.slurm_runner = slurm_runner
+        self.runner = self.local_runner
         self.last_result = None
         self.last_runner_result = None
         self.last_progress: RunProgress | None = None
+        self.last_remote_status = None
+        self.remote_status_history = []
         self.last_progress_thread = None
         self.last_checkpoint = None
         self.run_status = "idle"
@@ -145,6 +151,14 @@ class PRMainWindow(QWidget):
         header = QHBoxLayout()
         header.addWidget(QLabel("LCProp PR"))
         header.addStretch(1)
+        header.addWidget(QLabel("Execution:"))
+        self.execution_target_selector = execution_target_selector(
+            slurm_available=slurm_runner is not None
+        )
+        self.execution_target_selector.currentIndexChanged.connect(
+            self._execution_target_changed
+        )
+        header.addWidget(self.execution_target_selector)
         self.runner_label = QLabel(f"Runner: {self.runner.name}")
         header.addWidget(self.runner_label)
         self.status_label = QLabel("Idle")
@@ -502,6 +516,15 @@ class PRMainWindow(QWidget):
             return PR_TIMEDEPENDENT_WORKFLOW
         raise TypeError("unsupported PR GUI request type")
 
+    @Slot()
+    def _execution_target_changed(self) -> None:
+        target = self.execution_target_selector.currentData()
+        self.runner = self.slurm_runner if target == "slurm" else self.local_runner
+        if self.runner is None:
+            self.runner = self.local_runner
+            self.execution_target_selector.setCurrentIndex(0)
+        self.runner_label.setText(f"Runner: {self.runner.name}")
+
     def _run_registered(self, request, **kwargs):
         if isinstance(
             request,
@@ -552,6 +575,8 @@ class PRMainWindow(QWidget):
                 )
 
             kwargs["_before_product_conversion"] = before_product_conversion
+        if self.runner is self.slurm_runner:
+            kwargs["resource_profile"] = "H200 small"
         return self.runner.run_registered(
             PR_MATERIAL_ID,
             self._workflow_id_for_request(request),
@@ -683,6 +708,12 @@ class PRMainWindow(QWidget):
         try:
             request = self.build_request()
             summary = self.describe_request(request)
+            if self.runner is self.slurm_runner and not isinstance(
+                request, PRTransverseStaticRunRequest
+            ):
+                raise ValueError(
+                    "Slurm execution currently supports only pr_transverse_static"
+                )
         except Exception:
             self.status_label.setText("Invalid request")
             self.results_panel.append_console("ERROR")
@@ -766,6 +797,7 @@ class PRMainWindow(QWidget):
             self.evolution_panel,
         ):
             panel.setEnabled(enabled)
+        self.execution_target_selector.setEnabled(enabled)
         self.run_button.setEnabled(enabled)
         self.experiment_file_buttons.setEnabled(enabled)
         self.load_checkpoint_button.setEnabled(enabled)
@@ -811,6 +843,16 @@ class PRMainWindow(QWidget):
     def _on_progress(self, progress: RunProgress) -> None:
         self.last_progress = progress
         self.last_progress_thread = QThread.currentThread()
+        if isinstance(progress, RemoteRunStatus):
+            self.last_remote_status = progress
+            self.remote_status_history.append(progress)
+            message = remote_status_text(progress)
+            self.status_label.setText(
+                progress.state.value.replace("_", " ").title()
+            )
+            self.results_panel.set_td_time_indicator(message)
+            self.results_panel.append_console(message)
+            return
         if progress.workflow == PR_TRANSVERSE_STATIC_WORKFLOW:
             diagnostics = progress.diagnostics or {}
             if diagnostics.get("phase") == "gui_products":
@@ -1010,6 +1052,16 @@ class PRMainWindow(QWidget):
 
     @Slot(str)
     def _on_failed(self, formatted_traceback: str) -> None:
+        if (
+            self.last_remote_status is not None
+            and self.last_remote_status.state == RemoteRunState.CANCELLED
+        ):
+            self.run_status = "stopped"
+            self.status_label.setText("Stopped")
+            self.results_panel.append_console("Remote job cancelled")
+            self._outcome_received = True
+            self._maybe_finish_background()
+            return
         self.run_status = "failed"
         self.status_label.setText("Failed")
         self.results_panel.append_console("ERROR")
