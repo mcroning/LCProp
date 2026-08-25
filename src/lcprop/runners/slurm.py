@@ -152,6 +152,7 @@ class SlurmExecutionConfig:
     cluster_profile: str | None = None
     default_resource_profile: str | None = None
     poll_interval: float = 5.0
+    cleanup_remote_on_success: bool = True
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[A-Za-z0-9_.@-]+", self.host):
@@ -174,6 +175,8 @@ class SlurmExecutionConfig:
             raise ValueError("cluster_profile contains unsupported characters")
         if self.poll_interval <= 0:
             raise ValueError("poll_interval must be positive")
+        if not isinstance(self.cleanup_remote_on_success, bool):
+            raise ValueError("cleanup_remote_on_success must be boolean")
         names = [profile.name for profile in self.resource_profiles]
         if not names:
             raise ValueError("at least one resource profile is required")
@@ -270,6 +273,23 @@ class SlurmRunner:
         if operation.key in self._operations:
             raise ValueError(f"operation already registered for {operation.key!r}")
         self._operations[operation.key] = operation
+
+    def cleanup_remote_run(
+        self,
+        run_id: str,
+        remote_run_path: str,
+        *,
+        remote_source_path: str | None = None,
+    ) -> None:
+        """Delete exactly one validated per-run tree without following symlinks."""
+
+        target = _validated_remote_run_cleanup_target(
+            remote_run_root=self.config.remote_run_root,
+            run_id=run_id,
+            remote_run_path=remote_run_path,
+            remote_source_path=remote_source_path,
+        )
+        self._transport.ssh(self.config.host, "rm", "-rf", "--", target)
 
     def _script(
         self,
@@ -594,11 +614,45 @@ class SlurmRunner:
         )
         device_summary = dict(backend_summary) if backend_summary else {}
         device_summary.update(execution_provenance)
+        cleanup_requested = self.config.cleanup_remote_on_success
+        cleanup_succeeded = None
+        cleanup_completed_at = None
+        cleanup_error = None
+        remote_artifacts_retained = True
+        if cleanup_requested:
+            try:
+                self.cleanup_remote_run(
+                    run_id,
+                    remote_run,
+                    remote_source_path=source.remote_source_path,
+                )
+            except Exception as exc:
+                cleanup_succeeded = False
+                detail = " ".join(str(exc).splitlines()).strip() or "unknown error"
+                if len(detail) > 300:
+                    detail = detail[:297] + "..."
+                cleanup_error = f"{type(exc).__name__}: {detail}"
+                state_message = (
+                    "Completed; remote artifact cleanup failed; artifacts retained"
+                )
+            else:
+                cleanup_succeeded = True
+                cleanup_completed_at = _utc_now()
+                remote_artifacts_retained = False
+                state_message = "Completed; remote artifacts cleaned up"
+        else:
+            state_message = "Completed; remote artifacts retained"
         status = transition_remote_status(
             status, RemoteRunState.COMPLETED, completed_at=_utc_now(),
             scientific_backend_resolved=str(decoded_backend),
             device_summary=device_summary or None,
-            remote_job_id=job_id, state_message="Completed"
+            remote_job_id=job_id, state_message=state_message,
+            remote_cleanup_requested=cleanup_requested,
+            remote_cleanup_succeeded=cleanup_succeeded,
+            remote_cleanup_completed_at=cleanup_completed_at,
+            remote_cleanup_target=remote_run,
+            remote_artifacts_retained=remote_artifacts_retained,
+            remote_cleanup_error=cleanup_error,
         )
         if progress_callback:
             progress_callback(status)
@@ -623,6 +677,36 @@ class SlurmRunner:
         if progress_callback:
             progress_callback(failed)
         return failed
+
+
+_RUN_ID = re.compile(r"lcprop-[0-9a-f]{32}")
+
+
+def _validated_remote_run_cleanup_target(
+    *,
+    remote_run_root: str,
+    run_id: str,
+    remote_run_path: str,
+    remote_source_path: str | None = None,
+) -> str:
+    """Return the exact safe per-run deletion target or reject it."""
+
+    root = PurePosixPath(validate_remote_path(remote_run_root))
+    target = PurePosixPath(validate_remote_path(remote_run_path))
+    if str(root) == "/":
+        raise ValueError("remote_run_root '/' is not eligible for automatic cleanup")
+    if not isinstance(run_id, str) or not _RUN_ID.fullmatch(run_id):
+        raise ValueError("run_id is not an LCProp-generated run identifier")
+    if target == root:
+        raise ValueError("refusing to delete remote_run_root itself")
+    expected = root / run_id
+    if target != expected or target.parent != root or target.name != run_id:
+        raise ValueError("cleanup target must be the exact current per-run directory")
+    if remote_source_path is not None:
+        source = PurePosixPath(validate_remote_path(remote_source_path))
+        if source == target or target in source.parents or source in target.parents:
+            raise ValueError("cleanup target must be separate from the source snapshot")
+    return str(target)
 
 
 __all__ = [

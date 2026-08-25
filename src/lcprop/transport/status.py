@@ -121,6 +121,12 @@ class RemoteRunStatus:
     failure_reason: str | None = None
     remote_artifact_location: str | None = None
     local_artifact_location: str | None = None
+    remote_cleanup_requested: bool | None = None
+    remote_cleanup_succeeded: bool | None = None
+    remote_cleanup_completed_at: str | None = None
+    remote_cleanup_target: str | None = None
+    remote_artifacts_retained: bool | None = None
+    remote_cleanup_error: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.run_id, str) or not self.run_id.strip():
@@ -135,6 +141,14 @@ class RemoteRunStatus:
             "cupy",
         }:
             raise ValueError("invalid resolved scientific backend")
+        for name in (
+            "remote_cleanup_requested",
+            "remote_cleanup_succeeded",
+            "remote_artifacts_retained",
+        ):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, bool):
+                raise ValueError(f"{name} must be boolean or None")
 
     @property
     def terminal(self) -> bool:

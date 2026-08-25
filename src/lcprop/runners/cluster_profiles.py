@@ -25,6 +25,7 @@ _CLUSTER_FIELDS = {
     "remote_python",
     "source_root",
     "poll_interval",
+    "cleanup_remote_on_success",
     "default_resource_profile",
     "profiles",
 }
@@ -158,6 +159,7 @@ class ClusterProfile:
     resource_profiles: tuple[SlurmResourceProfile, ...]
     poll_interval: float = 5.0
     default_resource_profile: str | None = None
+    cleanup_remote_on_success: bool = True
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", self.name):
@@ -173,6 +175,8 @@ class ClusterProfile:
                 raise ValueError(f"{field}: {exc}") from exc
         if isinstance(self.poll_interval, bool) or self.poll_interval <= 0:
             raise ValueError("poll_interval must be positive")
+        if not isinstance(self.cleanup_remote_on_success, bool):
+            raise ValueError("cleanup_remote_on_success must be boolean")
         names = tuple(profile.name for profile in self.resource_profiles)
         if not names:
             raise ValueError("at least one resource profile is required")
@@ -321,6 +325,12 @@ def _parse_cluster(name: str, values: object, *, path: Path) -> ClusterProfile:
             resource_profiles=profile_values,
             poll_interval=float(poll),
             default_resource_profile=default_profile,
+            cleanup_remote_on_success=_boolean(
+                values,
+                "cleanup_remote_on_success",
+                context=context,
+                default=True,
+            ),
         )
     except ValueError as exc:
         raise ClusterConfigError(f"{context}: {exc}") from exc
@@ -440,6 +450,8 @@ def _catalog_toml(catalog: ClusterCatalog) -> str:
                 f"remote_python = {_toml_string(cluster.remote_python)}",
                 f"source_root = {_toml_string(cluster.source_root)}",
                 f"poll_interval = {cluster.poll_interval!r}",
+                "cleanup_remote_on_success = "
+                + ("true" if cluster.cleanup_remote_on_success else "false"),
             ]
         )
         if cluster.default_resource_profile is not None:

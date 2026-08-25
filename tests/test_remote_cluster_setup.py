@@ -21,6 +21,7 @@ from lcprop.gui.remote_execution import (
     RemoteExecutionDialog,
     RemoteExecutionDiscovery,
     discover_remote_execution,
+    remote_status_text,
 )
 from lcprop.lc.gui.main_window import LCPropMainWindow
 from lcprop.pr.gui.main_window import PRMainWindow
@@ -42,6 +43,7 @@ from lcprop.runners.cluster_profiles import (
     write_cluster_profiles,
 )
 from lcprop.runners.slurm import SlurmResourceProfile
+from lcprop.transport.status import RemoteRunState, RemoteRunStatus
 
 
 def _app():
@@ -174,12 +176,68 @@ def test_gui_fields_round_trip_through_existing_toml_model(tmp_path):
     dialog = RemoteExecutionDialog(catalog)
     dialog.remote_run_root.setText("/scratch/alpha/new-runs")
     dialog.poll_interval.setValue(7.5)
+    dialog.cleanup_remote_on_success.setChecked(False)
     dialog.save_profile()
     reloaded = load_cluster_profiles(path)
     assert reloaded["alpha"].remote_run_root == "/scratch/alpha/new-runs"
     assert reloaded["alpha"].poll_interval == 7.5
+    assert reloaded["alpha"].cleanup_remote_on_success is False
     assert reloaded["beta"] == catalog["beta"]
     dialog.close_button.click()
+
+
+def test_new_cluster_defaults_successful_remote_cleanup_on(tmp_path):
+    _app()
+    path = tmp_path / "clusters.toml"
+    catalog = ClusterCatalog(config_path=path)
+    dialog = RemoteExecutionDialog(catalog)
+
+    assert dialog.cleanup_remote_on_success.isChecked()
+    assert dialog.cleanup_remote_on_success in dialog._configuration_widgets
+    dialog.close()
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    (
+        (
+            {
+                "remote_cleanup_requested": True,
+                "remote_cleanup_succeeded": True,
+                "remote_cleanup_target": "/runs/lcprop-abc",
+                "remote_artifacts_retained": False,
+            },
+            "Remote artifacts cleaned up",
+        ),
+        (
+            {
+                "remote_cleanup_requested": False,
+                "remote_cleanup_target": "/runs/lcprop-abc",
+                "remote_artifacts_retained": True,
+            },
+            "Remote artifacts retained at /runs/lcprop-abc",
+        ),
+        (
+            {
+                "remote_cleanup_requested": True,
+                "remote_cleanup_succeeded": False,
+                "remote_cleanup_target": "/runs/lcprop-abc",
+                "remote_artifacts_retained": True,
+                "remote_cleanup_error": "OSError: denied",
+            },
+            "Warning: remote cleanup failed; artifacts retained",
+        ),
+    ),
+)
+def test_completed_remote_status_surfaces_cleanup_outcome(changes, expected):
+    status = RemoteRunStatus(
+        run_id="lcprop-abc",
+        execution_target="slurm",
+        state=RemoteRunState.COMPLETED,
+        **changes,
+    )
+
+    assert expected in remote_status_text(status)
 
 
 def test_gui_new_cluster_adds_without_replacing_selected_cluster(tmp_path):

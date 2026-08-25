@@ -75,6 +75,7 @@ def make_slurm_runner(
         resource_profiles=cluster.resource_profiles,
         default_resource_profile=cluster.default_resource_profile,
         poll_interval=cluster.poll_interval,
+        cleanup_remote_on_success=cluster.cleanup_remote_on_success,
     )
     return SlurmRunner(
         config,

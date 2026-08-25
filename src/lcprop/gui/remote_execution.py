@@ -141,6 +141,10 @@ class RemoteExecutionDialog(QDialog):
         self.poll_interval = QDoubleSpinBox()
         self.poll_interval.setRange(0.1, 3600)
         self.poll_interval.setValue(5)
+        self.cleanup_remote_on_success = QCheckBox(
+            "Delete remote run artifacts after successful retrieval"
+        )
+        self.cleanup_remote_on_success.setChecked(True)
         for label, widget in (
             ("Profile name", self.profile_name),
             ("SSH username", self.username),
@@ -149,6 +153,7 @@ class RemoteExecutionDialog(QDialog):
             ("Remote Python", self.remote_python),
             ("Remote source root", self.source_root),
             ("Polling interval (s)", self.poll_interval),
+            ("Successful-run cleanup", self.cleanup_remote_on_success),
         ):
             form.addRow(label, widget)
         root.addLayout(form)
@@ -234,6 +239,7 @@ class RemoteExecutionDialog(QDialog):
             self.remote_python,
             self.source_root,
             self.poll_interval,
+            self.cleanup_remote_on_success,
             self.saved_resource,
             self.new_resource_button,
             self.resource_name,
@@ -285,6 +291,7 @@ class RemoteExecutionDialog(QDialog):
         ):
             widget.clear()
         self.poll_interval.setValue(5)
+        self.cleanup_remote_on_success.setChecked(True)
         self.saved_resource.clear()
         self._new_resource()
 
@@ -306,6 +313,9 @@ class RemoteExecutionDialog(QDialog):
         ):
             widget.setText(value)
         self.poll_interval.setValue(cluster.poll_interval)
+        self.cleanup_remote_on_success.setChecked(
+            cluster.cleanup_remote_on_success
+        )
         self.saved_resource.blockSignals(True)
         self.saved_resource.clear()
         for profile in cluster.resource_profiles:
@@ -408,6 +418,7 @@ class RemoteExecutionDialog(QDialog):
             tuple(resources),
             self.poll_interval.value(),
             resource.name,
+            self.cleanup_remote_on_success.isChecked(),
         )
 
     @Slot()
@@ -710,6 +721,20 @@ def remote_status_text(status: RemoteRunStatus) -> str:
         )
         if device:
             parts.append(f"Device: {device}")
+    if status.state.value == "completed":
+        if status.remote_cleanup_succeeded:
+            parts.append("Remote artifacts cleaned up")
+        elif status.remote_cleanup_requested is False:
+            parts.append(
+                f"Remote artifacts retained at {status.remote_cleanup_target}"
+            )
+        elif status.remote_cleanup_succeeded is False:
+            parts.append(
+                "Warning: remote cleanup failed; artifacts retained at "
+                f"{status.remote_cleanup_target}"
+            )
+            if status.remote_cleanup_error:
+                parts.append(f"Reason: {status.remote_cleanup_error}")
     return "; ".join(parts)
 
 

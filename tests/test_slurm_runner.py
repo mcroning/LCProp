@@ -131,6 +131,14 @@ class FakeTransport:
         raise AssertionError(f"unexpected download {remote}")
 
 
+def _cleanup_commands(transport):
+    return [
+        arguments
+        for _host, arguments in transport.commands
+        if len(arguments) == 4 and arguments[:3] == ("rm", "-rf", "--")
+    ]
+
+
 class FakeDeploymentManager:
     def __init__(self, *, fail=False):
         self.calls = 0
@@ -307,6 +315,16 @@ def test_slurm_runner_submits_exactly_once_and_completes_only_after_reconstructi
     ]
     assert not states[-2].gui_product_ready
     assert states[-1].gui_product_ready
+    assert _cleanup_commands(transport) == [
+        ("rm", "-rf", "--", states[-1].remote_artifact_location)
+    ]
+    assert states[-1].remote_cleanup_requested is True
+    assert states[-1].remote_cleanup_succeeded is True
+    assert states[-1].remote_cleanup_completed_at is not None
+    assert states[-1].remote_cleanup_target == states[-1].remote_artifact_location
+    assert states[-1].remote_artifacts_retained is False
+    assert states[-1].remote_cleanup_error is None
+    assert (Path(states[-1].local_artifact_location) / "output").is_dir()
 
 
 @pytest.mark.parametrize("cancel_while", ("pending", "running"))
@@ -350,6 +368,7 @@ def test_cancellation_is_idempotent_monotonic_and_terminal(tmp_path, cancel_whil
         value.state not in {RemoteRunState.PENDING, RemoteRunState.RUNNING}
         for value in states[cancel_index + 1:]
     )
+    assert _cleanup_commands(transport) == []
 
 
 class RetrievalFailureTransport(FakeTransport):
@@ -359,10 +378,11 @@ class RetrievalFailureTransport(FakeTransport):
 
 def _run_phase_failure(tmp_path, *, transport=None, operation=None):
     states = []
+    active_transport = FakeTransport() if transport is None else transport
     runner = SlurmRunner(
         _config(tmp_path),
         (LC_STATIC_OPERATION if operation is None else operation,),
-        transport=FakeTransport() if transport is None else transport,
+        transport=active_transport,
         registry=default_transport_registry(),
         sleep=lambda _seconds: None,
     )
@@ -375,6 +395,7 @@ def _run_phase_failure(tmp_path, *, transport=None, operation=None):
     assert states[-1].progress_metadata == {
         "failure_category": caught.value.category
     }
+    assert _cleanup_commands(active_transport) == []
     return caught.value.category, states
 
 
@@ -507,6 +528,178 @@ def test_pr_transverse_static_uses_same_remote_artifacts_and_product_adapter(tmp
     assert states[-1].scientific_backend_resolved == "numpy"
     assert states[-1].device_summary["device"] == "NVIDIA H200"
     assert (Path(states[-1].local_artifact_location) / "execution_provenance.json").is_file()
+    assert _cleanup_commands(transport) == [
+        ("rm", "-rf", "--", states[-1].remote_artifact_location)
+    ]
+    assert states[-1].remote_cleanup_succeeded is True
+
+
+def test_cleanup_runs_only_after_product_conversion(tmp_path):
+    product_ready = False
+
+    def convert(result):
+        nonlocal product_ready
+        product_ready = True
+        return LC_STATIC_OPERATION.to_run_data(result)
+
+    class GateTransport(FakeTransport):
+        def ssh(self, host, *arguments):
+            if arguments and arguments[0] == "rm":
+                assert product_ready
+            return super().ssh(host, *arguments)
+
+    transport = GateTransport()
+    operation = replace(LC_STATIC_OPERATION, to_run_data=convert)
+    runner = SlurmRunner(
+        _config(tmp_path),
+        (operation,),
+        transport=transport,
+        registry=default_transport_registry(),
+        sleep=lambda _seconds: None,
+    )
+
+    result = runner.run_registered("lc", "static", _request())
+
+    assert result.run_data is not None
+    assert product_ready
+    assert len(_cleanup_commands(transport)) == 1
+
+
+def test_cleanup_disabled_retains_successful_remote_artifacts(tmp_path):
+    transport = FakeTransport()
+    states = []
+    runner = SlurmRunner(
+        _config(tmp_path, cleanup_remote_on_success=False),
+        (LC_STATIC_OPERATION,),
+        transport=transport,
+        registry=default_transport_registry(),
+        sleep=lambda _seconds: None,
+    )
+
+    result = runner.run_registered(
+        "lc", "static", _request(), progress_callback=states.append
+    )
+
+    assert result.run_data is not None
+    assert _cleanup_commands(transport) == []
+    assert states[-1].state == RemoteRunState.COMPLETED
+    assert states[-1].remote_cleanup_requested is False
+    assert states[-1].remote_cleanup_succeeded is None
+    assert states[-1].remote_artifacts_retained is True
+    assert "retained" in states[-1].state_message
+
+
+def test_cleanup_failure_is_nonblocking_and_preserves_local_result(tmp_path):
+    class CleanupFailureTransport(FakeTransport):
+        def ssh(self, host, *arguments):
+            if arguments and arguments[0] == "rm":
+                self.commands.append((host, arguments))
+                raise OSError("synthetic cleanup failure")
+            return super().ssh(host, *arguments)
+
+    transport = CleanupFailureTransport()
+    states = []
+    runner = SlurmRunner(
+        _config(tmp_path),
+        (LC_STATIC_OPERATION,),
+        transport=transport,
+        registry=default_transport_registry(),
+        sleep=lambda _seconds: None,
+    )
+
+    result = runner.run_registered(
+        "lc", "static", _request(), progress_callback=states.append
+    )
+
+    assert result.run_data is not None
+    completed = states[-1]
+    assert completed.state == RemoteRunState.COMPLETED
+    assert completed.gui_product_ready
+    assert completed.remote_cleanup_requested is True
+    assert completed.remote_cleanup_succeeded is False
+    assert completed.remote_artifacts_retained is True
+    assert "synthetic cleanup failure" in completed.remote_cleanup_error
+    assert "cleanup failed" in completed.state_message
+    assert (Path(completed.local_artifact_location) / "output").is_dir()
+
+
+@pytest.mark.parametrize(
+    "poll",
+    ("FAILED|1:0", "TIMEOUT|0:0", "OUT_OF_MEMORY|0:0"),
+)
+def test_scheduler_terminal_failures_never_trigger_cleanup(tmp_path, poll):
+    transport = FakeTransport(polls=(poll,))
+    runner = SlurmRunner(
+        _config(tmp_path),
+        (LC_STATIC_OPERATION,),
+        transport=transport,
+        registry=default_transport_registry(),
+        sleep=lambda _seconds: None,
+    )
+
+    with pytest.raises(RemoteExecutionError):
+        runner.run_registered("lc", "static", _request())
+
+    assert _cleanup_commands(transport) == []
+
+
+@pytest.mark.parametrize(
+    ("run_id", "remote_run_path", "source_path"),
+    (
+        ("bad", "/runs/bad", "/snapshot"),
+        ("lcprop-" + "a" * 32, "/runs", "/snapshot"),
+        ("lcprop-" + "a" * 32, "/other/lcprop-" + "a" * 32, "/snapshot"),
+        ("lcprop-" + "a" * 32, "/runs/lcprop-*", "/snapshot"),
+        (
+            "lcprop-" + "a" * 32,
+            "/runs/lcprop-" + "a" * 32,
+            "/runs/lcprop-" + "a" * 32 + "/source",
+        ),
+    ),
+)
+def test_cleanup_rejects_nonexact_or_source_related_targets(
+    tmp_path, run_id, remote_run_path, source_path
+):
+    transport = FakeTransport()
+    runner = SlurmRunner(
+        _config(tmp_path),
+        (LC_STATIC_OPERATION,),
+        transport=transport,
+        registry=default_transport_registry(),
+    )
+
+    with pytest.raises(ValueError):
+        runner.cleanup_remote_run(
+            run_id,
+            remote_run_path,
+            remote_source_path=source_path,
+        )
+
+    assert _cleanup_commands(transport) == []
+
+
+def test_cleanup_uses_exact_symlink_safe_rm_operand_and_never_source_snapshot(
+    tmp_path,
+):
+    transport = FakeTransport()
+    runner = SlurmRunner(
+        _config(tmp_path),
+        (LC_STATIC_OPERATION,),
+        transport=transport,
+        registry=default_transport_registry(),
+    )
+    run_id = "lcprop-" + "a" * 32
+    target = f"/runs/{run_id}"
+
+    runner.cleanup_remote_run(
+        run_id,
+        target,
+        remote_source_path="/sources/git-" + "b" * 40,
+    )
+
+    assert _cleanup_commands(transport) == [("rm", "-rf", "--", target)]
+    assert not target.endswith("/")
+    assert all("/sources" not in value for value in _cleanup_commands(transport)[0])
 
 
 def test_slurm_script_keeps_execution_and_scientific_backend_separate(tmp_path):

@@ -106,6 +106,7 @@ host = "user@login.example.edu"
 remote_run_root = "/scratch/user/lcprop_runs"
 remote_python = "/scratch/user/env/bin/python"
 source_root = "/scratch/user/lcprop_sources"
+cleanup_remote_on_success = true
 default_resource_profile = "gpu-standard"
 
 [clusters.example.profiles.gpu-standard]
@@ -146,6 +147,24 @@ so the final status reports the actual device. Retrieval, verification,
 reconstruction, and product-conversion errors terminate in a categorized
 remote `FAILED` state; confirmed scheduler cancellation terminates in
 `CANCELLED`.
+
+Successful remote runs delete their per-run directory by default, but only
+after the complete result package has been downloaded, checksum-verified,
+reconstructed as the canonical material result, and converted through the
+registered local product adapter. Set `cleanup_remote_on_success = false` on a
+cluster profile to retain successful remote artifacts. Existing profiles that
+omit the field use the safe storage default of cleanup enabled.
+The shared configuration dialog exposes the same policy as **Delete remote run
+artifacts after successful retrieval**, checked by default.
+
+Scheduler failures, timeouts, out-of-memory terminations, cancellations, and
+retrieval, verification, reconstruction, or product-conversion failures retain
+their remote artifacts for diagnosis. Cleanup failure is reported as a
+nonblocking warning and does not discard the verified local result or turn a
+successful scientific run into failure. Cleanup is restricted to the exact
+generated `<remote_run_root>/<run_id>` tree. Reusable immutable source
+snapshots under `source_root` are a separate lifecycle domain and are never
+cleanup targets.
 
 This package does not implement GUI-specific scientific behavior or
 execution-target selection.

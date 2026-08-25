@@ -13,6 +13,7 @@ from lcprop.runners.cluster_profiles import (
     ClusterProfile,
     load_cluster_profiles,
     select_cluster_profile,
+    write_cluster_profiles,
 )
 from lcprop.runners.slurm import SlurmResourceProfile
 from lcprop.lc.gui.main_window import LCPropMainWindow
@@ -125,6 +126,7 @@ def test_valid_toml_loads_cluster_and_multiple_resource_profiles(tmp_path):
     assert cluster.host == "user@login.alpha.edu"
     assert cluster.poll_interval == 2.5
     assert cluster.default_resource_profile == "cpu-small"
+    assert cluster.cleanup_remote_on_success is True
     assert tuple(profile.name for profile in cluster.resource_profiles) == (
         "cpu-small",
         "generic-gpu",
@@ -294,6 +296,39 @@ def test_explicit_constructor_values_are_not_replaced_by_environment(tmp_path):
     assert runner.config.host == "explicit@login.example.edu"
     assert runner.config.remote_run_root == "/explicit/runs"
     assert runner.config.profile("cpu").partition == "batch"
+    assert runner.config.cleanup_remote_on_success is True
+
+
+def test_cleanup_policy_round_trips_and_composes_into_runner(tmp_path):
+    path = _write(
+        tmp_path / "clusters.toml",
+        _catalog_text().replace(
+            'default_resource_profile = "cpu-small"',
+            'default_resource_profile = "cpu-small"\n'
+            "cleanup_remote_on_success = false",
+        ),
+    )
+    catalog = load_cluster_profiles(path)
+    assert catalog["alpha"].cleanup_remote_on_success is False
+
+    saved = write_cluster_profiles(catalog)
+    text = path.read_text(encoding="utf-8")
+    assert "cleanup_remote_on_success = false" in text
+    assert load_cluster_profiles(path) == saved
+
+    runner = default_slurm_runner_from_environment(catalog=saved, environ={})
+    assert runner is not None
+    assert runner.config.cleanup_remote_on_success is False
+
+
+def test_cleanup_policy_requires_boolean(tmp_path):
+    text = _catalog_text().replace(
+        'default_resource_profile = "cpu-small"',
+        'default_resource_profile = "cpu-small"\n'
+        'cleanup_remote_on_success = "yes"',
+    )
+    with pytest.raises(ClusterConfigError, match="cleanup_remote_on_success"):
+        load_cluster_profiles(_write(tmp_path / "clusters.toml", text))
 
 
 def test_default_composition_has_no_personal_or_tufts_defaults(tmp_path):
