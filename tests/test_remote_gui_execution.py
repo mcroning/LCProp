@@ -1,4 +1,5 @@
 import os
+from time import monotonic, sleep
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -7,6 +8,7 @@ from PySide6.QtWidgets import QApplication
 from lcprop.lc.gui.main_window import LCPropMainWindow
 from lcprop.pr.gui.main_window import PRMainWindow
 from lcprop.pr.transverse.static_workflow import PR_TRANSVERSE_STATIC_WORKFLOW
+from lcprop.runners.slurm import RemoteRunCancelled
 from lcprop.transport.status import RemoteRunState, RemoteRunStatus
 from lcprop.gui.remote_execution import remote_status_text
 
@@ -90,3 +92,60 @@ def test_remote_cancellation_is_presented_as_stopped_not_failed():
         pr_window.results_panel.workspace.console.toPlainText()
     )
     pr_window.close()
+
+
+def test_pr_window_close_after_remote_cancel_joins_worker_thread():
+    app = _app()
+    window = PRMainWindow(slurm_runner=DummySlurmRunner())
+    window.show()
+    request = window.build_request()
+
+    def cancelled_remote_run(
+        _request, *, cancellation_token, progress_callback
+    ):
+        base = {
+            "run_id": "lcprop-" + "a" * 32,
+            "execution_target": "slurm",
+            "remote_job_id": "456",
+        }
+        progress_callback(
+            RemoteRunStatus(state=RemoteRunState.PENDING, **base)
+        )
+        while not cancellation_token.is_cancelled():
+            sleep(0.001)
+        progress_callback(
+            RemoteRunStatus(state=RemoteRunState.CANCEL_REQUESTED, **base)
+        )
+        progress_callback(
+            RemoteRunStatus(state=RemoteRunState.CANCELLED, **base)
+        )
+        raise RemoteRunCancelled("456")
+
+    window._start_background(
+        request,
+        summary="remote cancellation lifecycle",
+        runner_callable=cancelled_remote_run,
+        run_label="Running",
+    )
+
+    deadline = monotonic() + 5.0
+    while (
+        window.last_remote_status is None
+        or window.last_remote_status.state != RemoteRunState.PENDING
+    ):
+        assert monotonic() < deadline
+        app.processEvents()
+        sleep(0.001)
+
+    window.stop_clicked()
+    window.close()
+    while window._thread is not None:
+        assert monotonic() < deadline
+        app.processEvents()
+        sleep(0.001)
+
+    app.processEvents()
+    assert window.run_status == "stopped"
+    assert not window._background_running
+    assert window.last_remote_status.state == RemoteRunState.CANCELLED
+    assert not window.isVisible()

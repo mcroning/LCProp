@@ -327,12 +327,22 @@ def test_slurm_runner_submits_exactly_once_and_completes_only_after_reconstructi
     assert (Path(states[-1].local_artifact_location) / "output").is_dir()
 
 
-@pytest.mark.parametrize("cancel_while", ("pending", "running"))
-def test_cancellation_is_idempotent_monotonic_and_terminal(tmp_path, cancel_while):
+@pytest.mark.parametrize(
+    ("cancel_while", "cancelled_state"),
+    (
+        ("pending", "CANCELLED"),
+        ("pending", "CANCELLED+"),
+        ("pending", "CANCELLED by 12345"),
+        ("running", "CANCELLED"),
+    ),
+)
+def test_cancellation_is_idempotent_monotonic_and_terminal(
+    tmp_path, cancel_while, cancelled_state
+):
     polls = (
-        ("PENDING|0:0", "CANCELLED|0:15")
+        ("PENDING|0:0", f"{cancelled_state}|0:15")
         if cancel_while == "pending"
-        else ("RUNNING|0:0", "CANCELLED|0:15")
+        else ("RUNNING|0:0", f"{cancelled_state}|0:15")
     )
     transport = FakeTransport(polls=polls)
     states = []
@@ -369,6 +379,10 @@ def test_cancellation_is_idempotent_monotonic_and_terminal(tmp_path, cancel_whil
         for value in states[cancel_index + 1:]
     )
     assert _cleanup_commands(transport) == []
+    assert sum(
+        1 for _host, arguments in transport.commands
+        if arguments and arguments[0] == "sacct"
+    ) == 2
 
 
 class RetrievalFailureTransport(FakeTransport):

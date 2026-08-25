@@ -122,6 +122,17 @@ def test_remote_status_distinguishes_scheduler_and_gui_ready_completion():
         transition_remote_status(running, RemoteRunState.COMPLETED)
 
 
+@pytest.mark.parametrize(
+    "scheduler_state",
+    ("CANCELLED", "CANCELLED+", "CANCELLED by 12345"),
+)
+def test_slurm_cancellation_variants_are_terminal(scheduler_state):
+    assert (
+        scheduler_state_to_remote_state(scheduler_state)
+        == RemoteRunState.CANCELLED
+    )
+
+
 @pytest.mark.parametrize("kind", ["lc", "pr"])
 def test_request_result_roundtrip_and_product_regeneration(tmp_path, kind):
     registry = default_transport_registry()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import Enum
+import re
 from typing import Any
 
 
@@ -189,7 +190,10 @@ def scheduler_state_to_remote_state(
 ) -> RemoteRunState:
     """Map a raw Slurm-like state to material-neutral GUI semantics."""
 
-    raw = str(scheduler_state).strip().upper().split("+")[0]
+    raw_state = str(scheduler_state).strip().upper()
+    if re.fullmatch(r"CANCELLED(?:\+|\s+BY(?:\s+.*)?)?", raw_state):
+        return RemoteRunState.CANCELLED
+    raw = raw_state.split("+")[0]
     if raw in {"PENDING", "CONFIGURING", "RESV_DEL_HOLD"} or raw.startswith(
         "REQUEUE"
     ):
@@ -202,8 +206,6 @@ def scheduler_state_to_remote_state(
             if exit_code in (None, "0:0", "0")
             else RemoteRunState.FAILED
         )
-    if raw == "CANCELLED":
-        return RemoteRunState.CANCELLED
     if raw == "TIMEOUT":
         return RemoteRunState.TIMEOUT
     if raw == "OUT_OF_MEMORY":
