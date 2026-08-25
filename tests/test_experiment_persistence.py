@@ -54,6 +54,19 @@ from lcprop.pr.static_workflow import (
     PRStaticWorkflowOptions,
     PR_STATIC_WORKFLOW,
 )
+from lcprop.pr.scattering import (
+    PR_CANONICAL_SCATTERING_V2,
+    PRCanonicalScatteringSpec,
+)
+from lcprop.pr.transverse.static import (
+    PRTransverseDiscreteStaticCorrectorOptions,
+    PRTransverseStaticMaterialSolverOptions,
+)
+from lcprop.pr.transverse.static_workflow import (
+    PRTransverseStaticRunRequest,
+    PRTransverseStaticWorkflowOptions,
+    PR_TRANSVERSE_STATIC_WORKFLOW,
+)
 
 
 def _angle_q() -> tuple[float, float]:
@@ -303,6 +316,68 @@ def _pr_timedependent_request() -> PRRunRequest:
     )
 
 
+def _pr_transverse_static_request() -> PRTransverseStaticRunRequest:
+    coherent_beams = BeamStack(
+        channels=tuple(
+            replace(channel, coherence_group="pr-laser")
+            for channel in _beams().channels
+        ),
+        coherence="coherent",
+    )
+    return PRTransverseStaticRunRequest(
+        grid=_grid(),
+        beams=coherent_beams,
+        material=replace(_pr_material(), applied_field=0.0),
+        solver=PRTransverseStaticWorkflowOptions(
+            material_solver=PRTransverseStaticMaterialSolverOptions(
+                max_newton_iterations=19,
+                max_pcg_iterations=73,
+                pcg_relative_tolerance=2.0e-8,
+                pcg_absolute_tolerance=3.0e-12,
+                pcg_near_gate_relative_tolerance=4.0e-7,
+                pcg_near_gate_absolute_tolerance=5.0e-9,
+                equilibrium_rms_tolerance=6.0e-9,
+                equilibrium_max_tolerance=7.0e-8,
+                td_rhs_rms_tolerance=8.0e-8,
+                td_rhs_max_tolerance=9.0e-7,
+                max_backtracks=14,
+                minimum_step_scale=2.0**-18,
+                armijo_fraction=3.0e-4,
+            ),
+            discrete_corrector=PRTransverseDiscreteStaticCorrectorOptions(
+                max_newton_iterations=7,
+                max_gmres_iterations=91,
+                gmres_restart=17,
+                gmres_relative_tolerance_float64=2.0e-9,
+                gmres_relative_tolerance_float32=3.0e-4,
+                max_backtracks=13,
+                minimum_step_scale=2.0**-17,
+                armijo_fraction=4.0e-4,
+            ),
+            max_coupled_iterations=23,
+            equilibrium_rms_tolerance=2.0e-8,
+            equilibrium_max_tolerance=3.0e-7,
+            td_rhs_rms_tolerance=4.0e-8,
+            td_rhs_max_tolerance=5.0e-7,
+            max_backtracks=10,
+            minimum_step_scale=2.0**-13,
+            armijo_fraction=5.0e-4,
+            optical_substeps=6,
+            replay_rtol=7.0e-6,
+            replay_atol=8.0e-7,
+            record_iteration_history=False,
+        ),
+        backend=BackendSpec(backend="cupy", precision="float32", verbose=True),
+        scattering=PRCanonicalScatteringSpec(
+            epsilon=0.02,
+            transverse_correlation_um=0.4,
+            realization_seed=123456,
+            canonical_dz_um=3.25,
+            algorithm_version=PR_CANONICAL_SCATTERING_V2,
+        ),
+    )
+
+
 @pytest.mark.parametrize(
     ("material_id", "workflow_id", "request_factory"),
     (
@@ -310,6 +385,11 @@ def _pr_timedependent_request() -> PRRunRequest:
         (LC_MATERIAL_ID, "timedependent", _lc_timedependent_request),
         (PR_MATERIAL_ID, PR_STATIC_WORKFLOW, _pr_static_request),
         (PR_MATERIAL_ID, PR_TIMEDEPENDENT_WORKFLOW, _pr_timedependent_request),
+        (
+            PR_MATERIAL_ID,
+            PR_TRANSVERSE_STATIC_WORKFLOW,
+            _pr_transverse_static_request,
+        ),
     ),
 )
 def test_initial_request_codecs_round_trip_exactly(
@@ -370,6 +450,22 @@ def test_pr_static_auto_tolerance_policy_round_trips_as_none(tmp_path):
     assert loaded.request == request
     assert loaded.request.solver.material_solver is None
     assert loaded.request.solver.residual_rms_tolerance is None
+
+
+def test_pr_transverse_static_malformed_profile_is_rejected_clearly(tmp_path):
+    path = tmp_path / "transverse-static-malformed.lcprop.json"
+    save_experiment(
+        _pr_transverse_static_request(),
+        path,
+        material_id=PR_MATERIAL_ID,
+        workflow_id=PR_TRANSVERSE_STATIC_WORKFLOW,
+    )
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["request_payload"]["transport"]["profile_id"] = "unknown-profile"
+    _write_document(path, document)
+
+    with pytest.raises(ExperimentPayloadError, match="transport profile"):
+        load_experiment(path)
 
 
 def test_registry_accepts_future_workflow_without_shared_io_changes(tmp_path):
@@ -489,6 +585,15 @@ def test_launchplane_presentation_cannot_override_canonical_q(tmp_path):
             PR_MATERIAL_ID,
             PR_TIMEDEPENDENT_WORKFLOW,
             "initial_A",
+        ),
+        (
+            replace(
+                _pr_transverse_static_request(),
+                initial_psi=np.zeros((1, 2, 2)),
+            ),
+            PR_MATERIAL_ID,
+            PR_TRANSVERSE_STATIC_WORKFLOW,
+            "initial_psi",
         ),
     ),
 )

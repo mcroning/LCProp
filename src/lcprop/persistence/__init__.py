@@ -46,6 +46,7 @@ from lcprop.lc.experiment_codec import (
 from lcprop.pr.experiment_codec import (
     PR_STATIC_EXPERIMENT_CODEC,
     PR_TIMEDEPENDENT_EXPERIMENT_CODEC,
+    PR_TRANSVERSE_STATIC_EXPERIMENT_CODEC,
 )
 
 
@@ -90,6 +91,7 @@ for _experiment_codec in (
     LC_TIMEDEPENDENT_EXPERIMENT_CODEC,
     PR_STATIC_EXPERIMENT_CODEC,
     PR_TIMEDEPENDENT_EXPERIMENT_CODEC,
+    PR_TRANSVERSE_STATIC_EXPERIMENT_CODEC,
 ):
     EXPERIMENT_CODECS.register(_experiment_codec)
 
@@ -161,6 +163,7 @@ __all__ = [
     "PR_STATIC_EXPERIMENT_CODEC",
     "PR_TIMEDEPENDENT_CHECKPOINT_CODEC",
     "PR_TIMEDEPENDENT_EXPERIMENT_CODEC",
+    "PR_TRANSVERSE_STATIC_EXPERIMENT_CODEC",
     "TD_CHECKPOINT_SCHEMA_VERSION",
     "TimeDependentCheckpoint",
     "load_timedependent_checkpoint",

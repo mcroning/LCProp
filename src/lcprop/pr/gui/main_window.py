@@ -346,11 +346,6 @@ class PRMainWindow(QWidget):
         if self._background_running:
             raise RuntimeError("cannot save an experiment while a run is active")
         request = self.build_request()
-        if isinstance(request, PRTransverseStaticRunRequest):
-            raise ValueError(
-                "2D zero-flux static experiment persistence is not yet "
-                "available; persistence changes are outside this integration"
-            )
         validate_pr_gui_request_representable(request)
         return save_experiment(
             request,

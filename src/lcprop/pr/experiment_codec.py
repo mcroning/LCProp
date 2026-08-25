@@ -31,6 +31,22 @@ from lcprop.pr.static_workflow import (
     PRStaticWorkflowOptions,
     PR_STATIC_WORKFLOW,
 )
+from lcprop.pr.scattering import PRCanonicalScatteringSpec
+from lcprop.pr.transverse.specs import (
+    PRTransverseBoundaryProfile,
+    PRTransverseDielectricProfile,
+    PRTransverseProjectionProfile,
+    PRTransverseTransportProfile,
+)
+from lcprop.pr.transverse.static import (
+    PRTransverseDiscreteStaticCorrectorOptions,
+    PRTransverseStaticMaterialSolverOptions,
+)
+from lcprop.pr.transverse.static_workflow import (
+    PRTransverseStaticRunRequest,
+    PRTransverseStaticWorkflowOptions,
+    PR_TRANSVERSE_STATIC_WORKFLOW,
+)
 
 
 PR_EXPERIMENT_REQUEST_SCHEMA_VERSION = 1
@@ -81,6 +97,56 @@ def encode_pr_static_request(request: PRStaticRunRequest) -> dict:
     if not isinstance(request, PRStaticRunRequest):
         raise TypeError("request must be a PRStaticRunRequest")
     return _encode_common(request)
+
+
+def _validate_transverse_static(request: PRTransverseStaticRunRequest) -> None:
+    request.grid.validate()
+    request.beams.validate()
+    request.material.validate()
+    request.transport.validate()
+    request.dielectric.validate()
+    request.boundary.validate()
+    request.projection.validate()
+    request.solver.validate()
+    request.backend.validate()
+    if request.scattering is not None:
+        request.scattering.validate()
+
+
+def encode_pr_transverse_static_request(
+    request: PRTransverseStaticRunRequest,
+) -> dict:
+    """Encode canonical transverse-static inputs without runtime state."""
+
+    if not isinstance(request, PRTransverseStaticRunRequest):
+        raise TypeError("request must be a PRTransverseStaticRunRequest")
+    populated = tuple(
+        name
+        for name in ("initial_A", "initial_psi")
+        if getattr(request, name) is not None
+    )
+    if populated:
+        raise ExperimentRuntimeStateError(
+            "PR transverse-static experiment requests cannot persist runtime "
+            f"state ({', '.join(populated)}); use result transport or an "
+            "explicit continuation mechanism for runtime state"
+        )
+    _validate_transverse_static(request)
+    return {
+        "schema_version": PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+        "grid": asdict(request.grid),
+        "material": asdict(request.material),
+        "beams": encode_beam_stack(request.beams),
+        "transport": asdict(request.transport),
+        "dielectric": asdict(request.dielectric),
+        "boundary": asdict(request.boundary),
+        "projection": asdict(request.projection),
+        "solver": asdict(request.solver),
+        "backend": asdict(request.backend),
+        "scattering": (
+            None if request.scattering is None else asdict(request.scattering)
+        ),
+    }
 
 
 def _payload(value: Any) -> dict[str, Any]:
@@ -188,6 +254,140 @@ def decode_pr_static_request(value: Any) -> PRStaticRunRequest:
     return request
 
 
+def decode_pr_transverse_static_request(
+    value: Any,
+) -> PRTransverseStaticRunRequest:
+    payload = require_mapping(value, name="PR transverse-static request_payload")
+    require_exact_keys(
+        payload,
+        required={
+            "schema_version",
+            "grid",
+            "material",
+            "beams",
+            "transport",
+            "dielectric",
+            "boundary",
+            "projection",
+            "solver",
+            "backend",
+            "scattering",
+        },
+        name="PR transverse-static request_payload",
+    )
+    version = payload["schema_version"]
+    if type(version) is not int or version != PR_EXPERIMENT_REQUEST_SCHEMA_VERSION:
+        raise ExperimentSchemaError(
+            "unsupported PR transverse-static experiment request schema "
+            f"version: {version!r}"
+        )
+    solver_values = dataclass_values(
+        PRTransverseStaticWorkflowOptions,
+        payload["solver"],
+        name="PR transverse-static request_payload.solver",
+    )
+    material_solver_values = solver_values.pop("material_solver")
+    discrete_corrector_values = solver_values.pop("discrete_corrector")
+    scattering_values = payload["scattering"]
+    try:
+        request = PRTransverseStaticRunRequest(
+            grid=GridSpec(
+                **dataclass_values(
+                    GridSpec,
+                    payload["grid"],
+                    name="PR transverse-static request_payload.grid",
+                )
+            ),
+            beams=decode_beam_stack(payload["beams"]),
+            material=PRMaterialSpec(
+                **dataclass_values(
+                    PRMaterialSpec,
+                    payload["material"],
+                    name="PR transverse-static request_payload.material",
+                )
+            ),
+            transport=PRTransverseTransportProfile(
+                **dataclass_values(
+                    PRTransverseTransportProfile,
+                    payload["transport"],
+                    name="PR transverse-static request_payload.transport",
+                )
+            ),
+            dielectric=PRTransverseDielectricProfile(
+                **dataclass_values(
+                    PRTransverseDielectricProfile,
+                    payload["dielectric"],
+                    name="PR transverse-static request_payload.dielectric",
+                )
+            ),
+            boundary=PRTransverseBoundaryProfile(
+                **dataclass_values(
+                    PRTransverseBoundaryProfile,
+                    payload["boundary"],
+                    name="PR transverse-static request_payload.boundary",
+                )
+            ),
+            projection=PRTransverseProjectionProfile(
+                **dataclass_values(
+                    PRTransverseProjectionProfile,
+                    payload["projection"],
+                    name="PR transverse-static request_payload.projection",
+                )
+            ),
+            solver=PRTransverseStaticWorkflowOptions(
+                material_solver=PRTransverseStaticMaterialSolverOptions(
+                    **dataclass_values(
+                        PRTransverseStaticMaterialSolverOptions,
+                        material_solver_values,
+                        name=(
+                            "PR transverse-static request_payload.solver."
+                            "material_solver"
+                        ),
+                    )
+                ),
+                discrete_corrector=PRTransverseDiscreteStaticCorrectorOptions(
+                    **dataclass_values(
+                        PRTransverseDiscreteStaticCorrectorOptions,
+                        discrete_corrector_values,
+                        name=(
+                            "PR transverse-static request_payload.solver."
+                            "discrete_corrector"
+                        ),
+                    )
+                ),
+                **solver_values,
+            ),
+            backend=BackendSpec(
+                **dataclass_values(
+                    BackendSpec,
+                    payload["backend"],
+                    name="PR transverse-static request_payload.backend",
+                )
+            ),
+            initial_A=None,
+            initial_psi=None,
+            scattering=(
+                None
+                if scattering_values is None
+                else PRCanonicalScatteringSpec(
+                    **dataclass_values(
+                        PRCanonicalScatteringSpec,
+                        scattering_values,
+                        name="PR transverse-static request_payload.scattering",
+                    )
+                )
+            ),
+        )
+        _validate_transverse_static(request)
+    except ExperimentPayloadError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise ExperimentPayloadError(
+            f"invalid PR transverse-static request: {exc}"
+        ) from exc
+    return request
+
+
 PR_STATIC_EXPERIMENT_CODEC = ExperimentRequestCodec(
     material_id=PR_MATERIAL_ID,
     workflow_id=PR_STATIC_WORKFLOW,
@@ -204,13 +404,24 @@ PR_TIMEDEPENDENT_EXPERIMENT_CODEC = ExperimentRequestCodec(
     decode_request=decode_pr_timedependent_request,
 )
 
+PR_TRANSVERSE_STATIC_EXPERIMENT_CODEC = ExperimentRequestCodec(
+    material_id=PR_MATERIAL_ID,
+    workflow_id=PR_TRANSVERSE_STATIC_WORKFLOW,
+    request_type=PRTransverseStaticRunRequest,
+    encode_request=encode_pr_transverse_static_request,
+    decode_request=decode_pr_transverse_static_request,
+)
+
 
 __all__ = [
     "PR_EXPERIMENT_REQUEST_SCHEMA_VERSION",
     "PR_STATIC_EXPERIMENT_CODEC",
     "PR_TIMEDEPENDENT_EXPERIMENT_CODEC",
+    "PR_TRANSVERSE_STATIC_EXPERIMENT_CODEC",
     "decode_pr_static_request",
     "decode_pr_timedependent_request",
+    "decode_pr_transverse_static_request",
     "encode_pr_static_request",
     "encode_pr_timedependent_request",
+    "encode_pr_transverse_static_request",
 ]

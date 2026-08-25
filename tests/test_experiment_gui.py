@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -25,6 +26,7 @@ from lcprop.pr.gui.main_window import PRMainWindow
 from lcprop.pr.specs import PR_MATERIAL_ID
 from lcprop.pr.static import PRStaticSolverOptions
 from lcprop.pr.static_workflow import PR_STATIC_WORKFLOW
+from lcprop.pr.transverse.static_workflow import PR_TRANSVERSE_STATIC_WORKFLOW
 
 
 @pytest.fixture(scope="module")
@@ -59,6 +61,42 @@ def _make_angle_stack():
                 launch_medium_index=None,
                 launch_input_mode="transverse_wavevector",
                 enabled=False,
+            ),
+        )
+    )
+
+
+def _make_coherent_two_beam_angle_stack():
+    model = pytest.importorskip("launchplane.model")
+    return model.BeamStackDefinition(
+        beams=(
+            model.BeamDefinition.from_launch_angles(
+                name="signal",
+                wavelength_um=0.633,
+                power_mW=1.75,
+                x_um=-12.0,
+                y_um=2.5,
+                waist_x_um=18.0,
+                waist_y_um=19.0,
+                angle_x_rad=0.013,
+                angle_y_rad=-0.004,
+                launch_medium_index=2.4,
+                phase_rad=0.25,
+                coherence_group="pr-laser",
+            ),
+            model.BeamDefinition.from_launch_angles(
+                name="pump",
+                wavelength_um=0.633,
+                power_mW=3.5,
+                x_um=13.0,
+                y_um=-1.5,
+                waist_x_um=21.0,
+                waist_y_um=22.0,
+                angle_x_rad=-0.011,
+                angle_y_rad=0.006,
+                launch_medium_index=2.4,
+                phase_rad=-0.35,
+                coherence_group="pr-laser",
             ),
         )
     )
@@ -127,6 +165,69 @@ def test_pr_experiment_cross_session_round_trip(app, tmp_path, workflow_id):
     assert beams[0].launch_medium_index == 1.6
     assert beams[1].enabled is False
     assert (beams[1].x_um, beams[1].y_um) == (500.0, -400.0)
+
+
+def test_pr_transverse_static_save_open_buttons_round_trip_exactly(
+    app, tmp_path, monkeypatch
+):
+    source = PRMainWindow()
+    source.evolution_panel.set_workflow_id(PR_TRANSVERSE_STATIC_WORKFLOW)
+    source.evolution_panel.backend.setCurrentText("cupy")
+    source.evolution_panel.precision.setCurrentText("float32")
+    source.evolution_panel.max_coupled_passes.setValue(37)
+    source.evolution_panel.optical_substeps.setValue(5)
+    source.beam_panel.set_beam_stack_definition(
+        _make_coherent_two_beam_angle_stack()
+    )
+    expected = source.build_request()
+    path = tmp_path / "coherent-transverse-static.lcprop.json"
+    monkeypatch.setattr(
+        pr_main_window,
+        "choose_experiment_save_path",
+        lambda _parent: path,
+    )
+
+    source.experiment_file_buttons.save_button.click()
+    app.processEvents()
+
+    assert path.is_file()
+    assert source.status_label.text() == "Experiment saved"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    assert document["workflow_id"] == PR_TRANSVERSE_STATIC_WORKFLOW
+    assert document["request_payload"]["backend"] == {
+        "backend": "cupy",
+        "precision": "float32",
+        "verbose": False,
+    }
+
+    target = PRMainWindow()
+    target._run_registered = lambda *_args, **_kwargs: pytest.fail(
+        "opening an experiment must not execute it"
+    )
+    monkeypatch.setattr(
+        pr_main_window,
+        "choose_experiment_open_path",
+        lambda _parent: path,
+    )
+    target.experiment_file_buttons.open_button.click()
+    app.processEvents()
+
+    assert target.status_label.text() == "Experiment opened"
+    assert target.build_request() == expected
+    assert target.evolution_panel.workflow_id() == PR_TRANSVERSE_STATIC_WORKFLOW
+    assert target.evolution_panel.backend.currentText() == "cupy"
+    assert target.evolution_panel.precision.currentText() == "float32"
+    restored = target.beam_panel.beam_stack_definition.beams
+    assert tuple(beam.coherence_group for beam in restored) == (
+        "pr-laser",
+        "pr-laser",
+    )
+    assert tuple(beam.launch_input_mode for beam in restored) == (
+        "angle",
+        "angle",
+    )
+    assert restored[0].angle_x_rad == pytest.approx(0.013)
+    assert restored[1].angle_y_rad == pytest.approx(0.006)
 
 
 def test_absent_presentation_uses_safe_canonical_q_mode(app, tmp_path):
