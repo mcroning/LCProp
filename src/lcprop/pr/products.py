@@ -14,7 +14,12 @@ from typing import Any
 import numpy as np
 
 from lcprop.core.backend import asnumpy
+from lcprop.optics.farfield import direction_cosine_spectrum
 from lcprop.optics.splitstep import total_intensity
+from lcprop.pr.image_amplification import (
+    PR_IMAGE_AMPLIFICATION_WORKFLOW,
+    PRImageAmplificationResult,
+)
 from lcprop.pr.specs import PRRunResult, PR_TIMEDEPENDENT_WORKFLOW
 from lcprop.pr.static_workflow import (
     PRStaticRunResult,
@@ -316,6 +321,220 @@ def pr_result_to_run_data(result: PRRunResult) -> RunData:
         fields=fields,
         curves=CurveCollection(),
         diagnostics=diagnostics,
+    )
+
+
+def pr_image_amplification_result_to_run_data(
+    result: PRImageAmplificationResult,
+) -> RunData:
+    """Expose the established image-amplification products in shared RunData."""
+
+    if not isinstance(result, PRImageAmplificationResult):
+        raise TypeError("result must be a PRImageAmplificationResult")
+    if result.image_request is None:
+        raise ValueError("image-amplification result lacks source provenance")
+    base = pr_result_to_run_data(result.run_result)
+    fields = FieldCollection(list(base.fields.items()))
+    image_request = result.image_request
+    source = np.asarray(
+        image_request.source.grayscale, dtype=np.float64
+    ).copy()
+    source /= float(np.max(source))
+    source_xy = source.T.copy()
+    spatial_units = {"x": "um", "y": "um"}
+    source_units = {"source_x": "pixel", "source_y": "pixel"}
+    source_coordinates = {
+        "source_x": np.arange(source_xy.shape[0], dtype=float),
+        "source_y": np.arange(source_xy.shape[1], dtype=float),
+    }
+    for key, display_name, values, axes, kind, units, coordinates in (
+        (
+            "image_source",
+            "Decoded Source Image",
+            source_xy,
+            ("source_x", "source_y"),
+            "image_source",
+            source_units,
+            source_coordinates,
+        ),
+        (
+            "image_transmission",
+            "Simulation-Grid Image Transmission",
+            result.image_transmission,
+            ("x", "y"),
+            "image_transmission",
+            spatial_units,
+            {},
+        ),
+        (
+            "input_signal_intensity",
+            "Image-Bearing Input Signal Intensity",
+            np.abs(result.input_signal_field) ** 2,
+            ("x", "y"),
+            "intensity",
+            spatial_units,
+            {},
+        ),
+        (
+            "output_signal_intensity",
+            "Isolated Output Signal Intensity",
+            np.abs(result.output_signal_field) ** 2,
+            ("x", "y"),
+            "intensity",
+            spatial_units,
+            {},
+        ),
+        (
+            "amplified_image",
+            "Back-Propagated Amplified Image",
+            np.abs(result.backpropagated_signal_field) ** 2,
+            ("x", "y"),
+            "intensity",
+            spatial_units,
+            {},
+        ),
+        (
+            "zero_response_image",
+            "Zero-Response Reconstruction",
+            np.abs(result.zero_response_backpropagated_signal_field) ** 2,
+            ("x", "y"),
+            "intensity",
+            spatial_units,
+            {},
+        ),
+    ):
+        fields.add(
+            key,
+            make_field(
+                key,
+                display_name,
+                np.asarray(values).copy(),
+                axes,
+                kind,
+                units,
+                quantity=key,
+                value_unit="1",
+                coordinates=coordinates,
+                colormap="gray" if kind in ("image_source", "mask") else "viridis",
+            ),
+        )
+
+    launch = image_request.launch
+    coherent_output = np.sum(np.asarray(result.run_result.A_final), axis=0)
+    spectrum = direction_cosine_spectrum(
+        coherent_output[None, ...],
+        dx_um=float(result.run_result.grid_summary["dx_um"]),
+        dy_um=float(result.run_result.grid_summary["dy_um"]),
+        wavelength_um=float(launch.wavelength_um),
+        refractive_index=float(image_request.material.refractive_index),
+        coherence_groups=(launch.coherence_group,),
+        xp=np,
+    )
+    far_field = np.asarray(spectrum.intensity)
+    far_relative = np.maximum(far_field / float(np.max(far_field)), 1e-12)
+    angular_coordinates = {
+        "s_x": np.asarray(spectrum.s_x),
+        "s_y": np.asarray(spectrum.s_y),
+    }
+    fields.add(
+        "signal_carrier_mask",
+        make_field(
+            "signal_carrier_mask",
+            "Signal-Carrier Fourier Mask",
+            np.fft.fftshift(result.signal_carrier_mask).astype(float),
+            ("s_x", "s_y"),
+            "mask",
+            {"s_x": "1", "s_y": "1"},
+            quantity="signal_carrier_mask",
+            value_unit="1",
+            coordinates=angular_coordinates,
+            colormap="gray",
+        ),
+    )
+    for key, name, values, kind in (
+        (
+            "far_field_intensity",
+            "Output Far-Field Intensity",
+            far_field,
+            "far_field_intensity",
+        ),
+        (
+            "far_field_log_db",
+            "Output Far Field (dB relative to peak)",
+            10.0 * np.log10(far_relative),
+            "far_field_log",
+        ),
+    ):
+        fields.add(
+            key,
+            make_field(
+                key,
+                name,
+                values,
+                ("s_x", "s_y"),
+                kind,
+                {"s_x": "1", "s_y": "1"},
+                quantity=key,
+                value_unit="1",
+                coordinates=angular_coordinates,
+                colormap="magma",
+            ),
+        )
+
+    diagnostics = DiagnosticCollection(list(base.diagnostics.items()))
+    diagnostics.add(
+        "image_amplification",
+        DiagnosticData(
+            "image_amplification",
+            "Image Amplification",
+            {
+                "source_kind": image_request.source.source_kind,
+                "source_asset_id": image_request.source.asset_id,
+                "source_basename": image_request.source.basename,
+                "source_sha256": image_request.source.sha256,
+                "source_dimensions_pixels": [
+                    image_request.source.width,
+                    image_request.source.height,
+                ],
+                "source_decoded_mode": image_request.source.decoded_mode,
+                "source_encoded_format": image_request.source.encoded_format,
+                "preprocessing_policy": image_request.source.preprocessing_policy,
+                "alpha_policy": "discarded_not_an_optical_mask",
+                "simulation_grid": [image_request.grid.Nx, image_request.grid.Ny],
+                "incident_pump_power_mW": result.incident_channel_powers_mW[0],
+                "incident_signal_power_mW": result.incident_channel_powers_mW[1],
+                "incident_total_power_mW": result.incident_total_power_mW,
+                "post_element_pump_power_mW": (
+                    result.post_element_channel_powers_mW[0]
+                ),
+                "post_element_signal_power_mW": (
+                    result.post_element_channel_powers_mW[1]
+                ),
+                "power_entering_pr_medium_mW": result.post_element_total_power_mW,
+                "signal_throughput_fraction": result.signal_throughput_fraction,
+                "transparency_policy": result.transparency_policy,
+                "derived_incident_signal_to_pump_power_ratio": (
+                    launch.incident_signal_to_pump_power_ratio
+                ),
+                "measured_absolute_signal_gain": result.measured_absolute_signal_gain,
+                "analytic_absolute_signal_gain": result.analytic_absolute_signal_gain,
+                "analytic_gamma_p_L": result.analytic_gamma_p_L,
+                "image_intensity_correlation": result.image_intensity_correlation,
+                "normalized_image_rmse": result.normalized_image_rmse,
+                "normalized_power_relative_drift": (
+                    result.normalized_power_relative_drift
+                ),
+            },
+        ),
+    )
+    return RunData(
+        workflow=PR_IMAGE_AMPLIFICATION_WORKFLOW,
+        geometry=base.geometry,
+        fields=fields,
+        curves=base.curves,
+        diagnostics=diagnostics,
+        longitudinal_enabled=base.longitudinal_enabled,
+        longitudinal_message=base.longitudinal_message,
     )
 
 
@@ -646,8 +865,10 @@ def pr_static_result_to_run_data(result: PRStaticRunResult) -> RunData:
 
 
 __all__ = [
+    "PR_IMAGE_AMPLIFICATION_WORKFLOW",
     "PR_STATIC_WORKFLOW",
     "PR_TIMEDEPENDENT_WORKFLOW",
+    "pr_image_amplification_result_to_run_data",
     "pr_result_to_run_data",
     "pr_static_result_to_run_data",
 ]

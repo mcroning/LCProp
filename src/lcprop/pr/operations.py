@@ -1,6 +1,11 @@
 """Explicit PR workflow compositions for shared execution."""
 
+from lcprop.pr.image_amplification import (
+    PR_IMAGE_AMPLIFICATION_WORKFLOW,
+    run_image_amplification_request,
+)
 from lcprop.pr.products import (
+    pr_image_amplification_result_to_run_data,
     pr_result_to_run_data,
     pr_static_result_to_run_data,
 )
@@ -20,6 +25,13 @@ PR_TIMEDEPENDENT_OPERATION = WorkflowOperation(
     to_run_data=pr_result_to_run_data,
 )
 
+PR_IMAGE_AMPLIFICATION_OPERATION = WorkflowOperation(
+    material_id=PR_MATERIAL_ID,
+    workflow_id=PR_IMAGE_AMPLIFICATION_WORKFLOW,
+    run=run_image_amplification_request,
+    to_run_data=pr_image_amplification_result_to_run_data,
+)
+
 PR_STATIC_OPERATION = WorkflowOperation(
     material_id=PR_MATERIAL_ID,
     workflow_id=PR_STATIC_WORKFLOW,
@@ -29,6 +41,8 @@ PR_STATIC_OPERATION = WorkflowOperation(
 
 
 __all__ = [
+    "PR_IMAGE_AMPLIFICATION_OPERATION",
+    "PR_IMAGE_AMPLIFICATION_WORKFLOW",
     "PR_MATERIAL_ID",
     "PR_STATIC_OPERATION",
     "PR_TIMEDEPENDENT_OPERATION",

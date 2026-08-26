@@ -205,9 +205,13 @@ def _extent_value_to_index(value: float, n: int, lo: float, hi: float) -> int:
 
 
 def _image_aspect(field) -> str:
-    """Use a fixed physical aspect ratio for transverse x-y images."""
+    """Preserve equal-coordinate aspect for transverse and angular images."""
     axes = tuple(getattr(field, "axes", ()))
-    return "equal" if axes == ("x", "y") else "auto"
+    return (
+        "equal"
+        if axes in (("x", "y"), ("s_x", "s_y"), ("source_x", "source_y"))
+        else "auto"
+    )
 
 
 def _label_with_unit(label: str, units: dict[str, str]) -> str:

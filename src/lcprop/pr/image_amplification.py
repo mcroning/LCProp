@@ -12,11 +12,16 @@ from scipy.ndimage import zoom
 from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
+from lcprop.core.execution import CancellationToken
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch import build_launch, channel_power_integrals
 from lcprop.optics.splitstep import linear_kernel
 from lcprop.pr.coupling import analytic_plane_wave_gain_length
 from lcprop.pr.geometry import crossing_beam_channels
+from lcprop.pr.image_sources import (
+    PR_IMAGE_PREPROCESSING_POLICY_V1,
+    PRImageSource,
+)
 from lcprop.pr.specs import (
     PRMaterialSpec,
     PRRunRequest,
@@ -31,6 +36,9 @@ from lcprop.pr.static_streaming import (
     PRStreamingStaticResult,
     run_pr_static_streaming,
 )
+
+
+PR_IMAGE_AMPLIFICATION_WORKFLOW = "pr_image_amplification"
 
 
 @dataclass(frozen=True)
@@ -74,6 +82,87 @@ class PRImageAmplificationSpec:
 
 
 @dataclass(frozen=True)
+class PRImageLaunchSpec:
+    """Image-bearing launch controls with pre-element incident powers."""
+
+    wavelength_um: float = 0.633
+    positive_mode_index: int = 2
+    beam_waist_x_um: float = 12.0
+    beam_waist_y_um: float = 12.0
+    image_physical_size_um: float = 12.0
+    pump_incident_power_mW: float = 1.0
+    signal_incident_power_mW: float = 1e-3
+    invert_image: bool = False
+    require_full_footprint: bool = False
+    coherence_group: str = "pr-image-amplification"
+    preprocessing_policy: str = PR_IMAGE_PREPROCESSING_POLICY_V1
+
+    def validate(self, *, grid: GridSpec, refractive_index: float) -> None:
+        if self.preprocessing_policy != PR_IMAGE_PREPROCESSING_POLICY_V1:
+            raise ValueError("unsupported PR image preprocessing policy")
+        for name in (
+            "wavelength_um",
+            "beam_waist_x_um",
+            "beam_waist_y_um",
+            "image_physical_size_um",
+            "pump_incident_power_mW",
+            "signal_incident_power_mW",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and positive")
+        if not isinstance(self.coherence_group, str) or not self.coherence_group:
+            raise ValueError("coherence_group must be non-empty")
+        mode = int(self.positive_mode_index)
+        if mode <= 0 or 4 * mode >= int(grid.Nx):
+            raise ValueError(
+                "positive_mode_index must place the two-beam grating below Nyquist"
+            )
+        kx = 2.0 * math.pi * mode / float(grid.x_aperture_um)
+        k_medium = (
+            2.0 * math.pi * float(refractive_index) / float(self.wavelength_um)
+        )
+        if kx >= k_medium:
+            raise ValueError("selected carrier is not a propagating mode")
+
+    @property
+    def incident_total_power_mW(self) -> float:
+        return float(self.pump_incident_power_mW) + float(
+            self.signal_incident_power_mW
+        )
+
+    @property
+    def incident_signal_to_pump_power_ratio(self) -> float:
+        return float(self.signal_incident_power_mW) / float(
+            self.pump_incident_power_mW
+        )
+
+
+@dataclass(frozen=True)
+class PRImageAmplificationRunRequest:
+    """Portable-in-design local request for the composite image workflow."""
+
+    grid: GridSpec
+    material: PRMaterialSpec
+    solver: PRSolverOptions
+    backend: BackendSpec
+    source: PRImageSource
+    launch: PRImageLaunchSpec
+
+    def validate(self) -> None:
+        self.grid.validate()
+        self.material.validate()
+        self.solver.validate()
+        self.backend.validate()
+        if not isinstance(self.source, PRImageSource):
+            raise TypeError("source must be a PRImageSource")
+        self.launch.validate(
+            grid=self.grid,
+            refractive_index=float(self.material.refractive_index),
+        )
+
+
+@dataclass(frozen=True)
 class PRImageAmplificationResult:
     """Optical, gain, and image-fidelity evidence from one benchmark."""
 
@@ -95,10 +184,21 @@ class PRImageAmplificationResult:
     zero_response_image_intensity_correlation: float
     normalized_image_rmse: float
     normalized_power_relative_drift: float
+    incident_channel_powers_mW: tuple[float, float]
+    post_element_channel_powers_mW: tuple[float, float]
+    incident_total_power_mW: float
+    post_element_total_power_mW: float
+    signal_throughput_fraction: float
+    transparency_policy: str
     pr_workflow_runtime_s: float
     reconstruction_optical_runtime_s: float
     reconstruction_runtime_s: float
     runtime_s: float
+    image_request: PRImageAmplificationRunRequest | None = None
+
+    @property
+    def status(self) -> str:
+        return self.run_result.status
 
 
 @dataclass(frozen=True)
@@ -246,6 +346,43 @@ def _validate_image(image_intensity) -> np.ndarray:
     return image / maximum
 
 
+def intensity_transmission_to_field_transmittance(
+    intensity_transmission,
+) -> np.ndarray:
+    """Map passive intensity transmission ``T`` to field multiplier ``sqrt(T)``."""
+
+    transmission = np.asarray(intensity_transmission)
+    if transmission.ndim != 2 or transmission.dtype.kind not in "fiu":
+        raise TypeError("intensity transmission must be a real two-dimensional array")
+    values = transmission.astype(np.float64, copy=False)
+    if not np.all(np.isfinite(values)):
+        raise ValueError("intensity transmission must be finite")
+    tolerance = 32.0 * np.finfo(values.dtype).eps
+    if np.any(values < -tolerance) or np.any(values > 1.0 + tolerance):
+        raise ValueError("passive intensity transmission must lie between zero and one")
+    return np.sqrt(np.clip(values, 0.0, 1.0))
+
+
+def apply_passive_field_transmittance(field, field_transmittance) -> np.ndarray:
+    """Apply a bounded passive complex field transmittance without renormalizing."""
+
+    supplied_field = np.asarray(field)
+    transmittance = np.asarray(field_transmittance)
+    if supplied_field.ndim != 2 or transmittance.shape != supplied_field.shape:
+        raise ValueError("field and field transmittance must have the same 2-D shape")
+    if not np.all(np.isfinite(transmittance)):
+        raise ValueError("field transmittance must be finite")
+    precision_dtype = (
+        transmittance.real.dtype
+        if transmittance.dtype.kind in "fc"
+        else np.dtype(np.float64)
+    )
+    tolerance = 64.0 * np.finfo(precision_dtype).eps
+    if np.any(np.abs(transmittance) > 1.0 + tolerance):
+        raise ValueError("passive field transmittance magnitude must not exceed one")
+    return supplied_field * transmittance
+
+
 def prepare_image_transmission(
     image_intensity,
     grid,
@@ -254,6 +391,7 @@ def prepare_image_transmission(
     center_y_um: float,
     physical_size_um: float,
     invert: bool = False,
+    require_full_footprint: bool = False,
 ) -> np.ndarray:
     """Place a legacy-compatible real intensity transparency on the grid.
 
@@ -302,6 +440,16 @@ def prepare_image_transmission(
     y_start = center_y - resized.shape[1] // 2
     x_stop = x_start + resized.shape[0]
     y_stop = y_start + resized.shape[1]
+    if bool(require_full_footprint) and (
+        x_start < 0
+        or y_start < 0
+        or x_stop > grid.Nx
+        or y_stop > grid.Ny
+    ):
+        raise ValueError(
+            "image footprint extends outside the simulation aperture; "
+            "increase the aperture, reduce image size, or adjust the launch"
+        )
     destination_x0 = max(0, x_start)
     destination_y0 = max(0, y_start)
     destination_x1 = min(grid.Nx, x_stop)
@@ -363,31 +511,117 @@ def _gain_geometry(
     return kx, internal_angle, normalized_grating, gain_length_product
 
 
-def make_image_amplification_request(
+def prepare_image_amplification_workflow_request(
+    request: PRImageAmplificationRunRequest,
+) -> tuple[PRRunRequest, np.ndarray, float]:
+    """Apply the passive image element to an incident-power-normalized launch.
+
+    The incident two-channel stack has unit normalized integral. Applying the
+    image may reduce that integral; no post-element renormalization occurs.
+    """
+
+    if not isinstance(request, PRImageAmplificationRunRequest):
+        raise TypeError("request must be a PRImageAmplificationRunRequest")
+    request.validate()
+    launch_spec = request.launch
+    grid = make_grid(request.grid, real_dtype=np.float64)
+    mode = int(launch_spec.positive_mode_index)
+    kx = 2.0 * math.pi * mode / float(request.grid.x_aperture_um)
+    k_medium = (
+        2.0
+        * math.pi
+        * float(request.material.refractive_index)
+        / float(launch_spec.wavelength_um)
+    )
+    internal_angle = math.asin(kx / k_medium)
+    normalized_grating = (
+        -2.0 * kx / float(request.material.characteristic_wavenumber_per_um)
+    )
+    channels = crossing_beam_channels(
+        wavelength_um=float(launch_spec.wavelength_um),
+        refractive_index=float(request.material.refractive_index),
+        interaction_length_um=float(request.grid.z_length_um),
+        polar_angles_rad=(internal_angle, internal_angle),
+        azimuths_rad=(0.0, math.pi),
+        waist_x_um=float(launch_spec.beam_waist_x_um),
+        waist_y_um=float(launch_spec.beam_waist_y_um),
+        powers_mW=(
+            float(launch_spec.pump_incident_power_mW),
+            float(launch_spec.signal_incident_power_mW),
+        ),
+        coherence_group=launch_spec.coherence_group,
+        names=("pump", "image signal"),
+    )
+    preliminary_beams = BeamStack(channels=channels, coherence="coherent")
+    preliminary = build_launch(
+        preliminary_beams,
+        grid,
+        complex_dtype=np.complex128,
+    )
+    A0 = np.asarray(preliminary.A0).copy()
+    half_size = 0.5 * float(launch_spec.image_physical_size_um)
+    if bool(launch_spec.require_full_footprint) and (
+        abs(float(channels[1].x0_um)) + half_size
+        > 0.5 * float(request.grid.x_aperture_um)
+        or abs(float(channels[1].y0_um)) + half_size
+        > 0.5 * float(request.grid.y_aperture_um)
+    ):
+        raise ValueError(
+            "image footprint extends outside the simulation aperture; "
+            "increase the aperture, reduce image size, or adjust the launch"
+        )
+    transmission = prepare_image_transmission(
+        request.source.grayscale,
+        grid,
+        center_x_um=channels[1].x0_um,
+        center_y_um=channels[1].y0_um,
+        physical_size_um=float(launch_spec.image_physical_size_um),
+        invert=bool(launch_spec.invert_image),
+        require_full_footprint=bool(launch_spec.require_full_footprint),
+    )
+    field_transmittance = intensity_transmission_to_field_transmittance(
+        transmission
+    )
+    A0[1] = apply_passive_field_transmittance(
+        A0[1],
+        field_transmittance,
+    )
+    beams = BeamStack(channels=channels, coherence="coherent")
+    workflow_request = PRRunRequest(
+        grid=request.grid,
+        beams=beams,
+        material=request.material,
+        solver=request.solver,
+        backend=request.backend,
+        initial_A=A0,
+    )
+    return workflow_request, transmission, normalized_grating
+
+
+def image_amplification_run_request(
     image_intensity,
     spec: PRImageAmplificationSpec = PRImageAmplificationSpec(),
-) -> tuple[PRRunRequest, np.ndarray, float, float]:
-    """Create an image-bearing signal and crossing coherent pump request."""
+    *,
+    backend: BackendSpec | None = None,
+    total_power_mW: float = 1.0,
+) -> PRImageAmplificationRunRequest:
+    """Translate the established benchmark specification to the composite API."""
 
     ratio = float(spec.input_peak_ratio)
     saturated_gain = spec.saturated_small_signal_gain
     if not math.isfinite(ratio) or ratio <= 0.0:
         raise ValueError("input_peak_ratio must be finite and positive")
-    if spec.gain_length_product_override is None:
-        if (
-            saturated_gain is None
-            or not math.isfinite(float(saturated_gain))
-            or float(saturated_gain) <= 1.0
-        ):
-            raise ValueError(
-                "saturated_small_signal_gain must be greater than one when "
-                "gain_length_product_override is not supplied"
-            )
-    if not math.isfinite(float(spec.beam_waist_um)) or spec.beam_waist_um <= 0.0:
-        raise ValueError("beam_waist_um must be finite and positive")
-
-    kx, internal_angle, normalized_grating, gain_length = _gain_geometry(spec)
-    grid_spec = GridSpec(
+    if spec.gain_length_product_override is None and (
+        saturated_gain is None
+        or not math.isfinite(float(saturated_gain))
+        or float(saturated_gain) <= 1.0
+    ):
+        raise ValueError(
+            "saturated_small_signal_gain must be greater than one when "
+            "gain_length_product_override is not supplied"
+        )
+    _kx, _angle, _grating, gain_length = _gain_geometry(spec)
+    grid = GridSpec(
         Nx=int(spec.Nx),
         Ny=int(spec.Ny),
         x_aperture_um=float(spec.x_aperture_um),
@@ -395,50 +629,6 @@ def make_image_amplification_request(
         z_length_um=float(spec.interaction_length_um),
         dz_um=float(spec.dz_um),
     )
-    grid = make_grid(grid_spec, real_dtype=np.float64)
-    channels = crossing_beam_channels(
-        wavelength_um=float(spec.wavelength_um),
-        refractive_index=float(spec.refractive_index),
-        interaction_length_um=float(spec.interaction_length_um),
-        polar_angles_rad=(internal_angle, internal_angle),
-        azimuths_rad=(0.0, math.pi),
-        waist_x_um=float(spec.beam_waist_um),
-        waist_y_um=float(spec.beam_waist_um),
-        beam_ratio=ratio,
-        coherence_group=spec.coherence_group,
-        names=("pump", "image signal"),
-    )
-    preliminary_beams = BeamStack(channels=channels, coherence="coherent")
-    launch = build_launch(
-        preliminary_beams,
-        grid,
-        complex_dtype=np.complex128,
-    )
-    A0 = np.asarray(launch.A0).copy()
-    transmission = prepare_image_transmission(
-        image_intensity,
-        grid,
-        center_x_um=channels[1].x0_um,
-        center_y_um=channels[1].y0_um,
-        physical_size_um=(float(spec.image_size_factor) * float(spec.beam_waist_um)),
-        invert=spec.invert_image,
-    )
-    A0[1] *= np.sqrt(transmission)
-
-    pump_peak = float(np.max(np.abs(A0[0]) ** 2))
-    signal_peak = float(np.max(np.abs(A0[1]) ** 2))
-    if signal_peak <= 0.0:
-        raise ValueError("image transparency blocks the complete signal beam")
-    A0[1] *= math.sqrt(ratio * pump_peak / signal_peak)
-    dxdy = float(grid.dx_um) * float(grid.dy_um)
-    A0 /= math.sqrt(float(np.sum(np.abs(A0) ** 2)) * dxdy)
-
-    powers = channel_power_integrals(A0, grid)
-    resolved_channels = (
-        replace(channels[0], power_mW=float(powers[0])),
-        replace(channels[1], power_mW=float(powers[1])),
-    )
-    beams = BeamStack(channels=resolved_channels, coherence="coherent")
     material = PRMaterialSpec(
         dark_intensity=float(spec.dark_intensity),
         applied_field=float(spec.applied_field),
@@ -453,23 +643,74 @@ def make_image_amplification_request(
             else float(spec.characteristic_wavenumber_per_um)
         ),
     )
-    request = PRRunRequest(
-        grid=grid_spec,
-        beams=beams,
+    resolved_backend = backend or BackendSpec(
+        backend="numpy", precision="float64", verbose=False
+    )
+    composite = PRImageAmplificationRunRequest(
+        grid=grid,
         material=material,
         solver=PRSolverOptions(
             Nt=int(spec.Nt),
             dt_normalized=float(spec.dt_normalized),
             integrator=PR_SEMI_IMPLICIT_INTEGRATOR,
         ),
-        backend=BackendSpec(
-            backend="numpy",
-            precision="float64",
-            verbose=False,
+        backend=resolved_backend,
+        source=PRImageSource.from_array(image_intensity),
+        launch=PRImageLaunchSpec(
+            wavelength_um=float(spec.wavelength_um),
+            positive_mode_index=int(spec.positive_mode_index),
+            beam_waist_x_um=float(spec.beam_waist_um),
+            beam_waist_y_um=float(spec.beam_waist_um),
+            image_physical_size_um=(
+                float(spec.image_size_factor) * float(spec.beam_waist_um)
+            ),
+            pump_incident_power_mW=float(total_power_mW) / (1.0 + ratio),
+            signal_incident_power_mW=(
+                float(total_power_mW) * ratio / (1.0 + ratio)
+            ),
+            invert_image=bool(spec.invert_image),
+            coherence_group=spec.coherence_group,
         ),
+    )
+    composite.validate()
+    return composite
+
+
+def make_image_amplification_request(
+    image_intensity,
+    spec: PRImageAmplificationSpec = PRImageAmplificationSpec(),
+) -> tuple[PRRunRequest, np.ndarray, float, float]:
+    """Create an image-bearing signal and crossing coherent pump request."""
+
+    composite = image_amplification_run_request(image_intensity, spec)
+    request, transmission, normalized_grating = (
+        prepare_image_amplification_workflow_request(composite)
+    )
+    grid = make_grid(request.grid, real_dtype=np.float64)
+    A0 = np.asarray(request.initial_A).copy()
+    pump_peak = float(np.max(np.abs(A0[0]) ** 2))
+    signal_peak = float(np.max(np.abs(A0[1]) ** 2))
+    if signal_peak <= 0.0:
+        raise ValueError("image transparency blocks the complete signal beam")
+    A0[1] *= math.sqrt(float(spec.input_peak_ratio) * pump_peak / signal_peak)
+    dxdy = float(grid.dx_um) * float(grid.dy_um)
+    A0 /= math.sqrt(float(np.sum(np.abs(A0) ** 2)) * dxdy)
+    powers = channel_power_integrals(A0, grid)
+    resolved_channels = tuple(
+        replace(channel, power_mW=float(power))
+        for channel, power in zip(request.beams.channels, powers)
+    )
+    request = replace(
+        request,
+        beams=BeamStack(channels=resolved_channels, coherence="coherent"),
         initial_A=A0,
     )
-    return request, transmission, normalized_grating, gain_length
+    return (
+        request,
+        transmission,
+        normalized_grating,
+        float(composite.material.gain_length_product),
+    )
 
 
 def signal_carrier_mask(
@@ -536,25 +777,21 @@ def _intensity_metrics(
     return correlation, normalized_rmse
 
 
-def run_image_amplification(
-    image_intensity,
-    spec: PRImageAmplificationSpec = PRImageAmplificationSpec(),
+def _run_prepared_image_amplification(
+    request: PRRunRequest,
+    transmission: np.ndarray,
+    normalized_grating: float,
     *,
-    backend: BackendSpec | None = None,
+    analytic_input_ratio: float,
+    wavelength_um: float,
+    image_request: PRImageAmplificationRunRequest | None,
+    transparency_policy: str,
+    incident_channel_powers_mW: tuple[float, float],
+    cancellation_token: CancellationToken | None = None,
+    progress_callback=None,
 ) -> PRImageAmplificationResult:
-    """Run and measure a finite coherent image-amplification benchmark.
+    """Measure one already-prepared image-bearing PR request."""
 
-    ``backend`` overrides the default NumPy execution backend without changing
-    the image-amplification physics or reconstruction. Workflow results are
-    returned on the host, so the existing NumPy reconstruction remains shared
-    by CPU and GPU runs.
-    """
-
-    request, transmission, normalized_grating, gain_length = (
-        make_image_amplification_request(image_intensity, spec)
-    )
-    if backend is not None:
-        request = replace(request, backend=backend)
     grid = make_grid(request.grid, real_dtype=np.float64)
     pump_kx = float(request.beams.channels[0].tilt_x_rad_per_um)
     signal_kx = float(request.beams.channels[1].tilt_x_rad_per_um)
@@ -568,7 +805,11 @@ def run_image_amplification(
 
     benchmark_started_at = perf_counter()
     workflow_started_at = perf_counter()
-    run_result = run_pr_timedependent(request)
+    run_result = run_pr_timedependent(
+        request,
+        cancellation_token=cancellation_token,
+        progress_callback=progress_callback,
+    )
     pr_workflow_runtime = perf_counter() - workflow_started_at
     reconstruction_started_at = perf_counter()
     coherent_output = np.sum(np.asarray(run_result.A_final), axis=0)
@@ -619,22 +860,33 @@ def run_image_amplification(
     measured_gain = output_signal_power / input_signal_power
     internal_angle = math.asin(
         pump_kx
-        * float(spec.wavelength_um)
-        / (2.0 * math.pi * float(spec.refractive_index))
+        * float(wavelength_um)
+        / (2.0 * math.pi * float(request.material.refractive_index))
     )
     analytic_gamma = analytic_plane_wave_gain_length(
-        gain_length_product=gain_length,
+        gain_length_product=float(request.material.gain_length_product),
         signed_grating_k_normalized=normalized_grating,
         internal_half_angle_rad=internal_angle,
     )
     analytic_gain = paper_absolute_signal_gain(
-        input_ratio=float(spec.input_peak_ratio),
+        input_ratio=float(analytic_input_ratio),
         gamma_p_L=analytic_gamma,
     )
     power_drift = float(
         (run_result.power_final - run_result.power_initial) / run_result.power_initial
     )
     reconstruction_runtime = perf_counter() - reconstruction_started_at
+    incident_powers = tuple(float(value) for value in incident_channel_powers_mW)
+    incident_total = float(sum(incident_powers))
+    post_element_powers = tuple(
+        float(value) * incident_total
+        for value in channel_power_integrals(request.initial_A, grid)
+    )
+    signal_throughput = (
+        post_element_powers[1] / incident_powers[1]
+        if incident_powers[1] > 0.0
+        else 0.0
+    )
 
     return PRImageAmplificationResult(
         request=request,
@@ -647,7 +899,7 @@ def run_image_amplification(
         zero_response_backpropagated_signal_field=zero_backpropagated,
         transverse_phase_gradients_rad_per_um=(pump_kx, signal_kx),
         normalized_grating_wavenumber=normalized_grating,
-        gain_length_product=gain_length,
+        gain_length_product=float(request.material.gain_length_product),
         analytic_gamma_p_L=analytic_gamma,
         analytic_absolute_signal_gain=analytic_gain,
         measured_absolute_signal_gain=measured_gain,
@@ -655,10 +907,73 @@ def run_image_amplification(
         zero_response_image_intensity_correlation=zero_correlation,
         normalized_image_rmse=normalized_rmse,
         normalized_power_relative_drift=power_drift,
+        incident_channel_powers_mW=incident_powers,
+        post_element_channel_powers_mW=post_element_powers,
+        incident_total_power_mW=incident_total,
+        post_element_total_power_mW=float(sum(post_element_powers)),
+        signal_throughput_fraction=signal_throughput,
+        transparency_policy=transparency_policy,
         pr_workflow_runtime_s=pr_workflow_runtime,
         reconstruction_optical_runtime_s=reconstruction_optical_runtime,
         reconstruction_runtime_s=reconstruction_runtime,
         runtime_s=perf_counter() - benchmark_started_at,
+        image_request=image_request,
+    )
+
+
+def run_image_amplification_request(
+    image_request: PRImageAmplificationRunRequest,
+    *,
+    cancellation_token: CancellationToken | None = None,
+    progress_callback=None,
+) -> PRImageAmplificationResult:
+    """Execute a physical incident-power image request through existing PR TD."""
+
+    request, transmission, normalized_grating = (
+        prepare_image_amplification_workflow_request(image_request)
+    )
+    launch = image_request.launch
+    return _run_prepared_image_amplification(
+        request,
+        transmission,
+        normalized_grating,
+        analytic_input_ratio=launch.incident_signal_to_pump_power_ratio,
+        wavelength_um=launch.wavelength_um,
+        image_request=image_request,
+        transparency_policy="passive_intensity_transmission_v1",
+        incident_channel_powers_mW=(
+            launch.pump_incident_power_mW,
+            launch.signal_incident_power_mW,
+        ),
+        cancellation_token=cancellation_token,
+        progress_callback=progress_callback,
+    )
+
+
+def run_image_amplification(
+    image_intensity,
+    spec: PRImageAmplificationSpec = PRImageAmplificationSpec(),
+    *,
+    backend: BackendSpec | None = None,
+) -> PRImageAmplificationResult:
+    """Run and measure the established finite image-amplification benchmark."""
+
+    request, transmission, normalized_grating, _gain_length = (
+        make_image_amplification_request(image_intensity, spec)
+    )
+    if backend is not None:
+        request = replace(request, backend=backend)
+    return _run_prepared_image_amplification(
+        request,
+        transmission,
+        normalized_grating,
+        analytic_input_ratio=float(spec.input_peak_ratio),
+        wavelength_um=float(spec.wavelength_um),
+        image_request=None,
+        transparency_policy="historical_normalized_benchmark",
+        incident_channel_powers_mW=tuple(
+            float(channel.power_mW) for channel in request.beams.channels
+        ),
     )
 
 
@@ -762,16 +1077,24 @@ def run_streaming_image_amplification(
 
 
 __all__ = [
+    "PR_IMAGE_AMPLIFICATION_WORKFLOW",
+    "PRImageAmplificationRunRequest",
     "PRImageAmplificationResult",
     "PRImageAmplificationSpec",
+    "PRImageLaunchSpec",
     "PRStreamingImageAmplificationResult",
+    "apply_passive_field_transmittance",
+    "image_amplification_run_request",
+    "intensity_transmission_to_field_transmittance",
     "isolate_signal_carrier",
     "make_image_amplification_request",
     "paper_absolute_signal_gain",
     "paper_figure4_spec",
     "paper_figure6_spec",
+    "prepare_image_amplification_workflow_request",
     "prepare_image_transmission",
     "run_image_amplification",
+    "run_image_amplification_request",
     "run_streaming_image_amplification",
     "signal_carrier_mask",
 ]

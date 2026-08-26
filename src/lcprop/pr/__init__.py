@@ -65,15 +65,29 @@ from lcprop.pr.readiness import (
     run_image_amplification_readiness,
 )
 from lcprop.pr.image_amplification import (
+    PR_IMAGE_AMPLIFICATION_WORKFLOW,
+    PRImageAmplificationRunRequest,
     PRImageAmplificationResult,
     PRImageAmplificationSpec,
+    PRImageLaunchSpec,
     PRStreamingImageAmplificationResult,
+    apply_passive_field_transmittance,
+    image_amplification_run_request,
+    intensity_transmission_to_field_transmittance,
     make_image_amplification_request,
     paper_absolute_signal_gain,
     paper_figure4_spec,
     paper_figure6_spec,
+    prepare_image_amplification_workflow_request,
     run_image_amplification,
+    run_image_amplification_request,
     run_streaming_image_amplification,
+)
+from lcprop.pr.image_sources import (
+    PR_IMAGE_PREPROCESSING_POLICY_V1,
+    PRImageSource,
+    PRStandardImageAsset,
+    standard_image_catalog,
 )
 from lcprop.pr.geometry import crossing_beam_channels, paraxial_kernel_slope
 from lcprop.pr.coupling import (
@@ -89,6 +103,9 @@ from lcprop.pr.workflow import (
 )
 
 __all__ = [
+    "PR_IMAGE_AMPLIFICATION_WORKFLOW",
+    "PR_IMAGE_PREPROCESSING_POLICY_V1",
+    "PRImageAmplificationRunRequest",
     "PRMaterialSpec",
     "PR_EULER_INTEGRATOR",
     "PR_INTEGRATORS",
@@ -119,6 +136,9 @@ __all__ = [
     "PRImageAmplificationReadinessSpec",
     "PRImageAmplificationResult",
     "PRImageAmplificationSpec",
+    "PRImageLaunchSpec",
+    "PRImageSource",
+    "PRStandardImageAsset",
     "PRStreamingImageAmplificationResult",
     "PRTimeDependentCheckpoint",
     "PR_CHECKPOINT_SCHEMA_VERSION",
@@ -134,12 +154,18 @@ __all__ = [
     "run_finite_gaussian_coupling",
     "make_image_amplification_readiness_request",
     "run_image_amplification_readiness",
+    "image_amplification_run_request",
+    "apply_passive_field_transmittance",
+    "intensity_transmission_to_field_transmittance",
     "make_image_amplification_request",
     "paper_absolute_signal_gain",
     "paper_figure4_spec",
     "paper_figure6_spec",
+    "prepare_image_amplification_workflow_request",
     "run_image_amplification",
+    "run_image_amplification_request",
     "run_streaming_image_amplification",
+    "standard_image_catalog",
     "solve_pr_static_intensity",
     "solve_pr_static_intensity_batched",
     "canonical_scattering_phase_increment",

@@ -52,6 +52,11 @@ from lcprop.pr.checkpoint import (
 from lcprop.pr.gui.beam_panel import make_pr_beam_panel
 from lcprop.pr.gui.evolution_panel import PREvolutionPanel
 from lcprop.pr.gui.grid_panel import PRGridPanel
+from lcprop.pr.gui.image_input_panel import (
+    PR_GAUSSIAN_INPUT_MODE,
+    PR_IMAGE_AMPLIFICATION_INPUT_MODE,
+    PRImageInputPanel,
+)
 from lcprop.pr.gui.material_panel import PRMaterialPanel
 from lcprop.pr.gui.request_adapter import (
     apply_pr_request,
@@ -60,6 +65,7 @@ from lcprop.pr.gui.request_adapter import (
     validate_pr_gui_request_representable,
 )
 from lcprop.pr.operations import (
+    PR_IMAGE_AMPLIFICATION_OPERATION,
     PR_STATIC_OPERATION,
     PR_TIMEDEPENDENT_OPERATION,
 )
@@ -67,6 +73,11 @@ from lcprop.pr.specs import (
     PRRunRequest,
     PR_MATERIAL_ID,
     PR_TIMEDEPENDENT_WORKFLOW,
+)
+from lcprop.pr.image_amplification import (
+    PR_IMAGE_AMPLIFICATION_WORKFLOW,
+    PRImageAmplificationRunRequest,
+    prepare_image_amplification_workflow_request,
 )
 from lcprop.pr.static_workflow import (
     PRStaticRunRequest,
@@ -121,6 +132,7 @@ class PRMainWindow(QWidget):
         self.local_runner = LocalRunner(
             operations=(
                 PR_TIMEDEPENDENT_OPERATION,
+                PR_IMAGE_AMPLIFICATION_OPERATION,
                 PR_TRANSVERSE_STATIC_OPERATION,
                 PR_STATIC_OPERATION,
             )
@@ -213,6 +225,7 @@ class PRMainWindow(QWidget):
         root.addWidget(self.tabs)
         self.material_panel = PRMaterialPanel()
         self.grid_panel = PRGridPanel()
+        self.input_panel = PRImageInputPanel()
         self.beam_panel = make_pr_beam_panel(
             x_aperture_um=self.grid_panel.x_aperture_um.value(),
             y_aperture_um=self.grid_panel.y_aperture_um.value(),
@@ -220,6 +233,7 @@ class PRMainWindow(QWidget):
         self.evolution_panel = PREvolutionPanel()
         self.results_panel = ResultsPanel()
         self.tabs.addTab(self.material_panel, "PR Material")
+        self.tabs.addTab(self.input_panel, "Input")
         self.tabs.addTab(self.beam_panel, "Beam")
         self.tabs.addTab(self.grid_panel, "Grid")
         self.tabs.addTab(self.evolution_panel, "Evolution")
@@ -231,7 +245,23 @@ class PRMainWindow(QWidget):
         self.grid_panel.y_aperture_um.valueChanged.connect(
             self._sync_beam_aperture
         )
+        self.input_panel.modeChanged.connect(self._input_mode_changed)
+        self.input_panel.configurationChanged.connect(
+            self._configuration_changed
+        )
+        self._input_mode_changed(self.input_panel.mode_id())
         self._connect_checkpoint_compatibility_signals()
+
+    @Slot(str)
+    def _input_mode_changed(self, mode_id: str) -> None:
+        image_mode = mode_id == PR_IMAGE_AMPLIFICATION_INPUT_MODE
+        beam_index = self.tabs.indexOf(self.beam_panel)
+        self.tabs.setTabEnabled(beam_index, not image_mode)
+        if image_mode:
+            self.evolution_panel.set_workflow_id(PR_TIMEDEPENDENT_WORKFLOW)
+        self.evolution_panel.workflow.setEnabled(not image_mode)
+        if hasattr(self, "checkpoint_compatibility_reason"):
+            self._refresh_checkpoint_controls()
 
     def _sync_beam_aperture(self) -> None:
         self.beam_panel.set_aperture(
@@ -242,6 +272,7 @@ class PRMainWindow(QWidget):
     def _connect_checkpoint_compatibility_signals(self) -> None:
         for panel in (
             self.material_panel,
+            self.input_panel,
             self.beam_panel,
             self.grid_panel,
             self.evolution_panel,
@@ -276,7 +307,9 @@ class PRMainWindow(QWidget):
         checkpoint = self.last_checkpoint
         workflow_id = self.evolution_panel.workflow_id()
         reason = None
-        if workflow_id != PR_TIMEDEPENDENT_WORKFLOW:
+        if self.input_panel.is_image_amplification():
+            reason = "Continuation is not available for image amplification."
+        elif workflow_id != PR_TIMEDEPENDENT_WORKFLOW:
             reason = "Continuation is available only for time-dependent runs."
         elif checkpoint is None:
             reason = "No PR checkpoint is loaded or retained."
@@ -309,6 +342,17 @@ class PRMainWindow(QWidget):
     def build_request(self):
         """Construct the immutable request represented by the controls."""
 
+        if self.input_panel.is_image_amplification():
+            if self.evolution_panel.workflow_id() != PR_TIMEDEPENDENT_WORKFLOW:
+                raise ValueError(
+                    "Image Amplification Stage A uses only Time dependent PR"
+                )
+            return self.input_panel.build_request(
+                grid=self.grid_panel.grid(),
+                material=self.material_panel.material(),
+                solver=self.evolution_panel.solver(),
+                backend=self.evolution_panel.backend_spec(),
+            )
         return build_pr_request(
             material_panel=self.material_panel,
             beam_panel=self.beam_panel,
@@ -318,6 +362,7 @@ class PRMainWindow(QWidget):
 
     def _capture_experiment_gui_state(self):
         return {
+            "input_mode": self.input_panel.mode_id(),
             "workflow_id": self.evolution_panel.workflow_id(),
             "grid": self.grid_panel.grid(),
             "material": self.material_panel.material(),
@@ -328,6 +373,8 @@ class PRMainWindow(QWidget):
         }
 
     def _restore_experiment_gui_state(self, state) -> None:
+        mode_index = self.input_panel.input_mode.findData(state["input_mode"])
+        self.input_panel.input_mode.setCurrentIndex(mode_index)
         self.grid_panel.set_grid(state["grid"])
         self.material_panel.set_material(state["material"])
         self.evolution_panel.set_solver(state["td_solver"])
@@ -346,6 +393,10 @@ class PRMainWindow(QWidget):
         if self._background_running:
             raise RuntimeError("cannot save an experiment while a run is active")
         request = self.build_request()
+        if isinstance(request, PRImageAmplificationRunRequest):
+            raise ValueError(
+                "Image Amplification experiment persistence is deferred to Stage B"
+            )
         validate_pr_gui_request_representable(request)
         return save_experiment(
             request,
@@ -368,6 +419,10 @@ class PRMainWindow(QWidget):
         stack = launchplane_stack_from_presentation(loaded)
         self._hydrating_experiment = True
         try:
+            gaussian_index = self.input_panel.input_mode.findData(
+                PR_GAUSSIAN_INPUT_MODE
+            )
+            self.input_panel.input_mode.setCurrentIndex(gaussian_index)
             apply_pr_request(
                 loaded.request,
                 material_panel=self.material_panel,
@@ -427,6 +482,74 @@ class PRMainWindow(QWidget):
     def describe_request(self, request) -> str:
         """Return a durable, unit-explicit summary of one PR request."""
 
+        if isinstance(request, PRImageAmplificationRunRequest):
+            prepared, _transmission, _grating = (
+                prepare_image_amplification_workflow_request(request)
+            )
+            preflight = validate_pr_gui_workflow_request(prepared)
+            launch = request.launch
+            source = request.source
+            lines = [
+                "Material: photorefractive",
+                f"Workflow: {PR_IMAGE_AMPLIFICATION_WORKFLOW}",
+                "Input mode: Image Amplification",
+                f"Runner: {self.runner.name}",
+                (
+                    f"Grid: {request.grid.Nx} × {request.grid.Ny}, "
+                    f"Nz={round(request.grid.z_length_um / request.grid.dz_um)}"
+                ),
+                (
+                    "Periodic aperture: "
+                    f"x={request.grid.x_aperture_um:g} µm, "
+                    f"y={request.grid.y_aperture_um:g} µm"
+                ),
+                (
+                    f"Source: {source.display_name}; "
+                    f"pixels={source.width} × {source.height}; "
+                    f"format={source.encoded_format}; SHA-256={source.sha256}"
+                ),
+                f"Preprocessing: {source.preprocessing_policy}",
+                "Alpha policy: discarded; alpha is not an optical mask",
+                (
+                    f"Image footprint: {launch.image_physical_size_um:g} µm "
+                    "square; nearest-neighbor resampling"
+                ),
+                f"Invert image: {launch.invert_image}",
+                (
+                    "Incident channel powers: "
+                    f"pump={launch.pump_incident_power_mW:g} mW; "
+                    f"signal={launch.signal_incident_power_mW:g} mW"
+                ),
+                (
+                    "Derived incident signal/pump power ratio: "
+                    f"{launch.incident_signal_to_pump_power_ratio:g}"
+                ),
+                (
+                    "Prepared incident channel powers: "
+                    + ", ".join(
+                        f"{channel.power_mW:.8g} mW"
+                        for channel in prepared.beams.channels
+                    )
+                ),
+                f"Material steps: {request.solver.Nt}",
+                f"Material integrator: {request.solver.integrator}",
+                f"Normalized timestep: {request.solver.dt_normalized:g}",
+                (
+                    "Conservative normalized timestep limit: "
+                    f"{preflight.conservative_dt_limit:.8g}"
+                ),
+                f"Optical substeps per z slice: {request.solver.optical_substeps}",
+                (
+                    f"Backend: {request.backend.backend}; "
+                    f"precision={request.backend.precision}"
+                ),
+            ]
+            if preflight.warnings:
+                lines.append("Preflight warnings:")
+                lines.extend(f"- {warning}" for warning in preflight.warnings)
+            else:
+                lines.append("Preflight warnings: none")
+            return "\n".join(lines)
         preflight = validate_pr_gui_workflow_request(request)
         workflow_id = self._workflow_id_for_request(request)
         lines = [
@@ -517,6 +640,8 @@ class PRMainWindow(QWidget):
 
     @staticmethod
     def _workflow_id_for_request(request) -> str:
+        if isinstance(request, PRImageAmplificationRunRequest):
+            return PR_IMAGE_AMPLIFICATION_WORKFLOW
         if isinstance(request, PRTransverseStaticRunRequest):
             return PR_TRANSVERSE_STATIC_WORKFLOW
         if isinstance(request, PRStaticRunRequest):
@@ -691,6 +816,7 @@ class PRMainWindow(QWidget):
             self._background_running
             or self._close_requested
             or self.last_checkpoint is None
+            or self.input_panel.is_image_amplification()
             or self.evolution_panel.workflow_id()
             != PR_TIMEDEPENDENT_WORKFLOW
         ):
@@ -753,7 +879,7 @@ class PRMainWindow(QWidget):
         if (
             self.last_checkpoint is not None
             and self._workflow_id_for_request(request)
-            == PR_TIMEDEPENDENT_WORKFLOW
+            in (PR_TIMEDEPENDENT_WORKFLOW, PR_IMAGE_AMPLIFICATION_WORKFLOW)
         ):
             self.results_panel.append_console(
                 "Starting a fresh PR run; previous checkpoint cleared."
@@ -781,7 +907,12 @@ class PRMainWindow(QWidget):
             f"{run_label} {workflow_id} "
             f"with {self.runner.name}..."
         )
-        preflight = validate_pr_gui_workflow_request(request)
+        preflight_request = request
+        if isinstance(request, PRImageAmplificationRunRequest):
+            preflight_request, _transmission, _grating = (
+                prepare_image_amplification_workflow_request(request)
+            )
+        preflight = validate_pr_gui_workflow_request(preflight_request)
         for warning in preflight.warnings:
             self.results_panel.append_console(f"WARNING: {warning}")
 
@@ -965,6 +1096,7 @@ class PRMainWindow(QWidget):
                 raise ValueError("PR window received a non-PR runner result")
             if runner_result.kind not in (
                 PR_TIMEDEPENDENT_WORKFLOW,
+                PR_IMAGE_AMPLIFICATION_WORKFLOW,
                 PR_STATIC_WORKFLOW,
                 PR_TRANSVERSE_STATIC_WORKFLOW,
             ):
@@ -983,7 +1115,32 @@ class PRMainWindow(QWidget):
                 self.results_panel.set_td_time_indicator("Rendering results...")
                 self.results_panel.append_console("Rendering results...")
             self.results_panel.set_run_data(runner_result.run_data)
-            if runner_result.kind == PR_TIMEDEPENDENT_WORKFLOW:
+            if runner_result.kind == PR_IMAGE_AMPLIFICATION_WORKFLOW:
+                td_result = result.run_result
+                self.last_checkpoint = None
+                if td_result.status == "cancelled":
+                    self.run_status = "stopped"
+                    self.status_label.setText("Stopped")
+                    prefix = "PR image time at stop"
+                    message = "Image-amplification run cancelled"
+                else:
+                    self.run_status = "completed"
+                    self.status_label.setText("Completed")
+                    prefix = "Final PR image time"
+                    message = "Image-amplification run complete"
+                self.results_panel.set_td_time_indicator(
+                    f"{prefix}: {float(td_result.time_normalized):.6g} "
+                    f"normalized; steps: {td_result.completed_steps}/"
+                    f"{td_result.requested_steps}"
+                )
+                self.results_panel.append_console(
+                    "Image amplification: "
+                    f"measured gain={result.measured_absolute_signal_gain:.8g}; "
+                    f"analytic gain={result.analytic_absolute_signal_gain:.8g}; "
+                    f"correlation={result.image_intensity_correlation:.8g}; "
+                    f"NRMSE={result.normalized_image_rmse:.8g}"
+                )
+            elif runner_result.kind == PR_TIMEDEPENDENT_WORKFLOW:
                 self.last_checkpoint = result.checkpoint
                 if result.status == "cancelled":
                     self.run_status = "stopped"
