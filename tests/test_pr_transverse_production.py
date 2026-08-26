@@ -11,6 +11,10 @@ from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken
 from lcprop.pr.evolution import hopping_rhs
 from lcprop.pr.specs import PRMaterialSpec
+from lcprop.pr.scattering import (
+    PR_CANONICAL_SCATTERING_V2,
+    PRCanonicalScatteringSpec,
+)
 from lcprop.pr.transverse import (
     PR_FULL_TRANSVERSE_PROFILE_V1,
     PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
@@ -264,6 +268,48 @@ def test_workflow_is_deterministic_finite_and_power_conserving(precision):
     tolerance = 2e-6 if precision == "float32" else 2e-13
     assert abs(first.diagnostics["optical_power_relative_drift"]) < tolerance
     assert first.diagnostics["carrier_relative_drift_max"] < tolerance
+
+
+def test_cached_scattering_preserves_td_trajectory_exactly(monkeypatch):
+    import lcprop.pr.transverse.workflow as module
+    import lcprop.pr.workflow as pr_workflow
+
+    request = _request(steps=2)
+    request = PRTransverseRunRequest(
+        **{
+            **request.__dict__,
+            "scattering": PRCanonicalScatteringSpec(
+                epsilon=1.0e-8,
+                transverse_correlation_um=2.0,
+                realization_seed=9182,
+                canonical_dz_um=5.0,
+                algorithm_version=PR_CANONICAL_SCATTERING_V2,
+            ),
+        }
+    )
+    stack_builder = module._canonical_scattering_phase_stack
+
+    monkeypatch.setattr(module, "_canonical_scattering_phase_stack", lambda *a, **k: None)
+    uncached = run_pr_transverse_timedependent(request)
+    monkeypatch.setattr(module, "_canonical_scattering_phase_stack", stack_builder)
+    phase_builder = pr_workflow._canonical_scattering_phase_for_slice
+    phase_builds = 0
+
+    def counted_phase(*args, **kwargs):
+        nonlocal phase_builds
+        phase_builds += 1
+        return phase_builder(*args, **kwargs)
+
+    monkeypatch.setattr(
+        pr_workflow, "_canonical_scattering_phase_for_slice", counted_phase
+    )
+    cached = run_pr_transverse_timedependent(request)
+
+    assert phase_builds == round(request.grid.z_length_um / request.grid.dz_um)
+    assert cached.status == uncached.status
+    assert cached.completed_steps == uncached.completed_steps
+    np.testing.assert_array_equal(cached.A_final, uncached.A_final)
+    np.testing.assert_array_equal(cached.psi_final, uncached.psi_final)
 
 
 def test_cancellation_returns_only_last_accepted_state():

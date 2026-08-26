@@ -32,6 +32,7 @@ from lcprop.pr.transverse.transport import (
 )
 from lcprop.pr.workflow import (
     _apply_canonical_scattering_after_slice,
+    _canonical_scattering_phase_stack,
     _validate_canonical_scattering_for_grid,
     advance_pr_slice_with_midpoint_source,
 )
@@ -106,6 +107,7 @@ def _optical_pass(
     dx_normalized,
     dy_normalized,
     cancellation_token=None,
+    scattering_phase_stack=None,
 ):
     xp = grid.xp
     A = A0.copy()
@@ -147,6 +149,11 @@ def _optical_pass(
             grid=grid,
             z_length_um=request.grid.z_length_um,
             xp=xp,
+            phase=(
+                None
+                if scattering_phase_stack is None
+                else scattering_phase_stack[z_index]
+            ),
         )
     return A, source
 
@@ -197,6 +204,12 @@ def run_pr_transverse_timedependent(
         xp=xp,
     )
     peak_reference = channel_peak_intensity_reference(A0, xp=xp)
+    scattering_phase_stack = _canonical_scattering_phase_stack(
+        request.scattering,
+        grid=grid,
+        z_length_um=request.grid.z_length_um,
+        xp=xp,
+    )
     k0 = request.material.characteristic_wavenumber_per_um
     dx_normalized = k0 * grid.dx_um
     dy_normalized = k0 * grid.dy_um
@@ -227,6 +240,7 @@ def run_pr_transverse_timedependent(
                 dx_normalized=dx_normalized,
                 dy_normalized=dy_normalized,
                 cancellation_token=cancellation_token,
+                scattering_phase_stack=scattering_phase_stack,
             )
             if request.solver.integrator == PR_TRANSVERSE_IMEX_EULER:
                 step_function = imex_euler_step
@@ -308,6 +322,7 @@ def run_pr_transverse_timedependent(
         wavelength_um=wavelength_um,
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
+        scattering_phase_stack=scattering_phase_stack,
     )
     final_state = state_from_potential(
         psi,

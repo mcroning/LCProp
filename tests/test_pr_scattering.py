@@ -28,6 +28,10 @@ from lcprop.pr.static_streaming import (
     volume_noise_seed_for_slice,
 )
 from lcprop.pr.static_workflow import PRStaticWorkflowOptions
+from lcprop.pr.workflow import (
+    _canonical_scattering_phase_for_slice,
+    _canonical_scattering_phase_stack,
+)
 
 
 def _spec(*, seed=12345, algorithm_version=PR_CANONICAL_SCATTERING_ALGORITHM):
@@ -104,6 +108,43 @@ def test_canonical_scattering_is_access_order_independent():
 
     for z in forward:
         assert np.array_equal(forward[z], reverse[z])
+
+
+def test_canonical_scattering_phase_stack_is_exact_slice_replay():
+    spec = _spec(algorithm_version=PR_CANONICAL_SCATTERING_V2)
+    grid = make_grid(
+        GridSpec(
+            Nx=12,
+            Ny=6,
+            x_aperture_um=24.0,
+            y_aperture_um=12.0,
+            z_length_um=20.0,
+            dz_um=4.0,
+        ),
+        real_dtype=np.float64,
+    )
+
+    phases = _canonical_scattering_phase_stack(
+        spec, grid=grid, z_length_um=20.0, xp=np
+    )
+
+    assert phases.shape == (grid.Nz, grid.Nx, grid.Ny)
+    assert phases.dtype == grid.real_dtype
+    for z_index in range(grid.Nz):
+        expected = _canonical_scattering_phase_for_slice(
+            spec,
+            z_index=z_index,
+            grid=grid,
+            z_length_um=20.0,
+            xp=np,
+        )
+        np.testing.assert_array_equal(phases[z_index], expected)
+    assert (
+        _canonical_scattering_phase_stack(
+            None, grid=grid, z_length_um=20.0, xp=np
+        )
+        is None
+    )
 
 
 def test_coarse_interval_is_sum_of_same_fine_canonical_increments():
@@ -330,3 +371,28 @@ def test_canonical_scattering_is_cross_backend_on_cupy_when_available(
     np.testing.assert_allclose(
         cp.asnumpy(coarse), expected, rtol=rtol, atol=atol
     )
+    grid = make_grid(
+        GridSpec(
+            Nx=12,
+            Ny=6,
+            x_aperture_um=24.0,
+            y_aperture_um=12.0,
+            z_length_um=20.0,
+            dz_um=10.0,
+        ),
+        xp=cp,
+        real_dtype=dtype,
+    )
+    phases = _canonical_scattering_phase_stack(
+        spec, grid=grid, z_length_um=20.0, xp=cp
+    )
+    assert isinstance(phases, cp.ndarray)
+    for z_index in range(grid.Nz):
+        direct = _canonical_scattering_phase_for_slice(
+            spec,
+            z_index=z_index,
+            grid=grid,
+            z_length_um=20.0,
+            xp=cp,
+        )
+        assert bool(cp.array_equal(phases[z_index], direct).item())

@@ -109,19 +109,44 @@ def _apply_canonical_scattering_after_slice(
     grid,
     z_length_um: float,
     xp,
+    phase=None,
 ) -> None:
     """Apply one canonical phase increment after an accepted optical slice."""
 
     if scattering is None:
         return
-    phase = _canonical_scattering_phase_for_slice(
-        scattering,
-        z_index=z_index,
-        grid=grid,
-        z_length_um=z_length_um,
-        xp=xp,
-    )
+    if phase is None:
+        phase = _canonical_scattering_phase_for_slice(
+            scattering,
+            z_index=z_index,
+            grid=grid,
+            z_length_um=z_length_um,
+            xp=xp,
+        )
     A *= xp.exp(1j * phase)[None, :, :]
+
+
+def _canonical_scattering_phase_stack(
+    scattering,
+    *,
+    grid,
+    z_length_um: float,
+    xp,
+):
+    """Precompute deterministic per-interval scattering phases for replay."""
+
+    if scattering is None:
+        return None
+    phases = xp.empty((grid.Nz, grid.Nx, grid.Ny), dtype=grid.real_dtype)
+    for z_index in range(grid.Nz):
+        phases[z_index] = _canonical_scattering_phase_for_slice(
+            scattering,
+            z_index=z_index,
+            grid=grid,
+            z_length_um=z_length_um,
+            xp=xp,
+        )
+    return phases
 
 
 def _initial_fields(request: PRRunRequest, *, launch, grid, complex_dtype, real_dtype):

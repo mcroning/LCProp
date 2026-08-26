@@ -52,7 +52,10 @@ from lcprop.pr.transverse.workflow import (
     _initial_fields,
     _optical_pass,
 )
-from lcprop.pr.workflow import _validate_canonical_scattering_for_grid
+from lcprop.pr.workflow import (
+    _canonical_scattering_phase_stack,
+    _validate_canonical_scattering_for_grid,
+)
 
 
 PR_TRANSVERSE_STATIC_WORKFLOW = "pr_transverse_static"
@@ -331,6 +334,7 @@ def _optical_pass_at_visibility(
     wavelength_um: float,
     dx_normalized: float,
     dy_normalized: float,
+    scattering_phase_stack=None,
 ):
     """Return the exact endpoint or blended-visibility midpoint source.
 
@@ -352,6 +356,7 @@ def _optical_pass_at_visibility(
         "dx_normalized": dx_normalized,
         "dy_normalized": dy_normalized,
         "cancellation_token": None,
+        "scattering_phase_stack": scattering_phase_stack,
     }
     if resolved == 1.0:
         return _optical_pass(A0, psi, request=request, **common)
@@ -432,6 +437,12 @@ def _run_pr_transverse_static_at_visibility(
         xp=xp,
     )
     peak_reference = channel_peak_intensity_reference(A0, xp=xp)
+    scattering_phase_stack = _canonical_scattering_phase_stack(
+        request.scattering,
+        grid=grid,
+        z_length_um=request.grid.z_length_um,
+        xp=xp,
+    )
     k0 = request.material.characteristic_wavenumber_per_um
     dx_normalized = k0 * grid.dx_um
     dy_normalized = k0 * grid.dy_um
@@ -455,6 +466,7 @@ def _run_pr_transverse_static_at_visibility(
             wavelength_um=wavelength_um,
             dx_normalized=dx_normalized,
             dy_normalized=dy_normalized,
+            scattering_phase_stack=scattering_phase_stack,
         )
         synchronize(xp)
         optical_seconds += perf_counter() - pass_started

@@ -197,6 +197,50 @@ def test_canonical_scattering_is_deterministic_and_phase_only():
     assert "canonical_scattering" in first.diagnostics
 
 
+def test_cached_scattering_preserves_static_trajectory_exactly(monkeypatch):
+    import lcprop.pr.transverse.static_workflow as module
+    import lcprop.pr.workflow as pr_workflow
+
+    scattering = PRCanonicalScatteringSpec(
+        epsilon=1.0e-8,
+        transverse_correlation_um=2.0,
+        realization_seed=9182,
+        canonical_dz_um=5.0,
+        algorithm_version=PR_CANONICAL_SCATTERING_V2,
+    )
+    request = _request(scattering=scattering)
+    stack_builder = module._canonical_scattering_phase_stack
+
+    monkeypatch.setattr(module, "_canonical_scattering_phase_stack", lambda *a, **k: None)
+    uncached = run_pr_transverse_static(request)
+    monkeypatch.setattr(module, "_canonical_scattering_phase_stack", stack_builder)
+    phase_builder = pr_workflow._canonical_scattering_phase_for_slice
+    phase_builds = 0
+
+    def counted_phase(*args, **kwargs):
+        nonlocal phase_builds
+        phase_builds += 1
+        return phase_builder(*args, **kwargs)
+
+    monkeypatch.setattr(
+        pr_workflow, "_canonical_scattering_phase_for_slice", counted_phase
+    )
+    cached = run_pr_transverse_static(request)
+
+    assert phase_builds == round(request.grid.z_length_um / request.grid.dz_um)
+    assert cached.status == uncached.status
+    assert cached.completed_coupled_iterations == uncached.completed_coupled_iterations
+    assert cached.iteration_records == uncached.iteration_records
+    np.testing.assert_array_equal(cached.A_final, uncached.A_final)
+    np.testing.assert_array_equal(cached.psi_final, uncached.psi_final)
+    np.testing.assert_array_equal(
+        cached.source_intensity_stack, uncached.source_intensity_stack
+    )
+    np.testing.assert_array_equal(
+        cached.equilibrium_residual_stack, uncached.equilibrium_residual_stack
+    )
+
+
 def test_cancellation_before_work_retains_last_complete_accepted_state():
     token = CancellationToken()
     token.cancel()
