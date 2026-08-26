@@ -255,13 +255,17 @@ def project_production_resolved_modes(
     """Project onto the modes resolved by production transverse derivatives."""
 
     array = _validate_real_array(value, name="value", xp=xp)
-    denominator, null_mask = _symbols(
+    _, null_mask = _symbols(
         array.shape[-2:],
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=h_y,
         xp=xp,
     )
+    return _project_resolved_modes(array, null_mask=null_mask, xp=xp)
+
+
+def _project_resolved_modes(array, *, null_mask, xp: Any):
     transformed = xp.fft.fft2(array, axes=(-2, -1))
     transformed[..., null_mask] = 0.0
     projected = xp.fft.ifft2(transformed, axes=(-2, -1)).real
@@ -302,13 +306,37 @@ def static_equilibrium_residual(
         raise ValueError("psi and intensity must have identical shapes")
     if bool(asnumpy(xp.any(driving <= 0.0))):
         raise ValueError("static transport intensity must be strictly positive")
-    resolved = project_production_resolved_modes(
-        potential,
+    _, null_mask = _symbols(
+        potential.shape[-2:],
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=h_y,
         xp=xp,
     )
+    return _static_equilibrium_residual_arrays(
+        potential,
+        driving,
+        null_mask=null_mask,
+        dx_normalized=dx_normalized,
+        dy_normalized=dy_normalized,
+        h_y=h_y,
+        xp=xp,
+    )
+
+
+def _static_equilibrium_residual_arrays(
+    potential,
+    driving,
+    *,
+    null_mask,
+    dx_normalized: float,
+    dy_normalized: float,
+    h_y: float,
+    xp: Any,
+):
+    """Evaluate validated backend arrays without repeating host-side checks."""
+
+    resolved = _project_resolved_modes(potential, null_mask=null_mask, xp=xp)
     state = state_from_potential(
         resolved,
         dx_normalized=dx_normalized,
@@ -364,6 +392,10 @@ def derivative_null_residual(
         h_y=h_y,
         xp=xp,
     )
+    return _derivative_null_residual_array(residual, null_mask=null_mask, xp=xp)
+
+
+def _derivative_null_residual_array(residual, *, null_mask, xp: Any):
     transformed = xp.fft.fft2(residual, axes=(-2, -1))
     transformed[..., ~null_mask] = 0.0
     return xp.fft.ifft2(transformed, axes=(-2, -1)).real.astype(
@@ -861,6 +893,7 @@ def _solve_plane(
     dy_normalized: float,
     h_y: float,
     options: PRTransverseStaticMaterialSolverOptions,
+    spectral_operators=None,
     xp: Any = np,
 ) -> tuple[
     Any,
@@ -869,19 +902,17 @@ def _solve_plane(
     PRTransverseStaticPlaneSummary,
     list[PRTransverseStaticNewtonRecord],
 ]:
-    denominator, null_mask = _symbols(
-        intensity.shape,
-        dx_normalized=dx_normalized,
-        dy_normalized=dy_normalized,
-        h_y=h_y,
-        xp=xp,
-    )
-    psi = project_production_resolved_modes(
-        initial_psi,
-        dx_normalized=dx_normalized,
-        dy_normalized=dy_normalized,
-        h_y=h_y,
-        xp=xp,
+    if spectral_operators is None:
+        spectral_operators = _symbols(
+            intensity.shape,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=h_y,
+            xp=xp,
+        )
+    denominator, null_mask = spectral_operators
+    psi = _project_resolved_modes(
+        initial_psi, null_mask=null_mask, xp=xp
     ).copy()
     initial_state = state_from_potential(
         psi,
@@ -898,9 +929,10 @@ def _solve_plane(
     status = "maximum_newton_iterations"
 
     for newton_iteration in range(int(options.max_newton_iterations) + 1):
-        residual = static_equilibrium_residual(
+        residual = _static_equilibrium_residual_arrays(
             psi,
             intensity,
+            null_mask=null_mask,
             dx_normalized=dx_normalized,
             dy_normalized=dy_normalized,
             h_y=h_y,
@@ -915,12 +947,8 @@ def _solve_plane(
             applied_field_x=0.0,
             xp=xp,
         )
-        resolved_residual = project_production_resolved_modes(
-            residual,
-            dx_normalized=dx_normalized,
-            dy_normalized=dy_normalized,
-            h_y=h_y,
-            xp=xp,
+        resolved_residual = _project_resolved_modes(
+            residual, null_mask=null_mask, xp=xp
         )
         equilibrium_rms, equilibrium_max = _metrics(resolved_residual, xp=xp)
         td_rhs_rms, td_rhs_max = _metrics(td_residual, xp=xp)
@@ -983,11 +1011,9 @@ def _solve_plane(
         after_max = equilibrium_max
         backtracks = 0
         for backtracks in range(int(options.max_backtracks) + 1):
-            trial = project_production_resolved_modes(
+            trial = _project_resolved_modes(
                 psi + step_scale * direction,
-                dx_normalized=dx_normalized,
-                dy_normalized=dy_normalized,
-                h_y=h_y,
+                null_mask=null_mask,
                 xp=xp,
             )
             trial_state = state_from_potential(
@@ -1001,19 +1027,18 @@ def _solve_plane(
                 xp.isfinite(trial) & (trial_state.carrier_density > 0.0)
             )
             if bool(asnumpy(valid_trial)):
-                trial_residual = static_equilibrium_residual(
+                trial_residual = _static_equilibrium_residual_arrays(
                     trial,
                     intensity,
+                    null_mask=null_mask,
                     dx_normalized=dx_normalized,
                     dy_normalized=dy_normalized,
                     h_y=h_y,
                     xp=xp,
                 )
-                trial_resolved_residual = project_production_resolved_modes(
+                trial_resolved_residual = _project_resolved_modes(
                     trial_residual,
-                    dx_normalized=dx_normalized,
-                    dy_normalized=dy_normalized,
-                    h_y=h_y,
+                    null_mask=null_mask,
                     xp=xp,
                 )
                 after_rms, after_max = _metrics(trial_resolved_residual, xp=xp)
@@ -1051,9 +1076,10 @@ def _solve_plane(
             status = "line_search_failed"
             break
 
-    residual = static_equilibrium_residual(
+    residual = _static_equilibrium_residual_arrays(
         psi,
         intensity,
+        null_mask=null_mask,
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=h_y,
@@ -1068,22 +1094,17 @@ def _solve_plane(
         applied_field_x=0.0,
         xp=xp,
     )
-    resolved_residual = project_production_resolved_modes(
-        residual,
-        dx_normalized=dx_normalized,
-        dy_normalized=dy_normalized,
-        h_y=h_y,
-        xp=xp,
+    resolved_residual = _project_resolved_modes(
+        residual, null_mask=null_mask, xp=xp
     )
     equilibrium_rms, equilibrium_max = _metrics(resolved_residual, xp=xp)
     td_rhs_rms, td_rhs_max = _metrics(td_residual, xp=xp)
-    null_rms, null_max = _metrics(derivative_null_residual(
-        residual,
-        dx_normalized=dx_normalized,
-        dy_normalized=dy_normalized,
-        h_y=h_y,
+    null_rms, null_max = _metrics(
+        _derivative_null_residual_array(
+            residual, null_mask=null_mask, xp=xp
+        ),
         xp=xp,
-    ), xp=xp)
+    )
     state = state_from_potential(
         psi,
         dx_normalized=dx_normalized,
@@ -1169,6 +1190,13 @@ def _solve_continuum_static_intensity(
     td_volume = xp.empty_like(driving_volume)
     summaries: list[PRTransverseStaticPlaneSummary] = []
     records: list[PRTransverseStaticNewtonRecord] = []
+    spectral_operators = _symbols(
+        driving_volume.shape[-2:],
+        dx_normalized=dx_normalized,
+        dy_normalized=dy_normalized,
+        h_y=h_y,
+        xp=xp,
+    )
     for plane_index in range(driving_volume.shape[0]):
         psi_plane, residual_plane, td_plane, summary, plane_records = _solve_plane(
             driving_volume[plane_index],
@@ -1178,6 +1206,7 @@ def _solve_continuum_static_intensity(
             dy_normalized=dy_normalized,
             h_y=h_y,
             options=resolved_options,
+            spectral_operators=spectral_operators,
             xp=xp,
         )
         psi_volume[plane_index] = psi_plane

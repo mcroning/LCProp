@@ -6,6 +6,7 @@ import math
 import numpy as np
 import pytest
 
+import lcprop.pr.transverse.static as static_module
 from lcprop.pr.transverse.static import (
     PRTransverseDiscreteStaticCorrectorOptions,
     PRTransverseStaticMaterialSolverOptions,
@@ -275,6 +276,25 @@ def test_analytic_projected_jacobian_is_symmetric_for_pcg():
         rtol=2e-14,
         atol=2e-13,
     )
+
+
+def test_volume_solve_constructs_invariant_spectral_operators_once(monkeypatch):
+    calls = 0
+    original = static_module._symbols
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(static_module, "_symbols", counted)
+    result = solve_pr_transverse_static_intensity(
+        np.ones((3, 9, 7), dtype=np.float64),
+        dx_normalized=0.4,
+        dy_normalized=0.5,
+    )
+    assert result.converged
+    assert calls == 1
 
 
 @pytest.mark.parametrize("shape", ((17, 15), (18, 16)))
