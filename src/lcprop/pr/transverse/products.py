@@ -19,7 +19,7 @@ from lcprop.pr.transverse.static_workflow import (
     PR_TRANSVERSE_STATIC_WORKFLOW,
     PRTransverseStaticRunResult,
 )
-from lcprop.pr.transverse.transport import state_from_potential
+from lcprop.pr.transverse.transport import PRTransverseState, state_from_potential
 from lcprop.products.data_model import (
     CurveCollection,
     CurveData,
@@ -33,12 +33,85 @@ from lcprop.products.data_model import (
 
 
 _FAR_FIELD_LOG_FLOOR_DB = -120.0
+_STATE_RECONSTRUCTION_CHUNK_BYTES = 2 * 1024 * 1024
+_STATE_RECONSTRUCTION_MIN_PLANE_CELLS = 512 * 512
 
 
 def _readonly_view(value) -> np.ndarray:
     view = np.asarray(value).view()
     view.flags.writeable = False
     return view
+
+
+def _state_from_potential_for_products(
+    psi,
+    *,
+    dx_normalized: float,
+    dy_normalized: float,
+    h_y: float,
+    applied_field_x: float,
+) -> PRTransverseState:
+    """Reconstruct a presentation state with bounded FFT temporaries.
+
+    ``state_from_potential`` treats longitudinal planes independently, but a
+    complete static result can contain tens of millions of transverse cells.
+    Processing a small number of z planes at a time preserves the authoritative
+    reconstruction operation while avoiding full-volume FFT work arrays.
+
+    The direct path is retained for 2-D inputs, small volumes, and uniform
+    blocks.  The latter preserves the transport helper's whole-volume uniform
+    shortcut exactly when a mixed volume contains a locally uniform chunk.
+    """
+
+    potential = np.asarray(psi)
+
+    def reconstruct(value) -> PRTransverseState:
+        return state_from_potential(
+            value,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=h_y,
+            applied_field_x=applied_field_x,
+            xp=np,
+        )
+
+    if potential.ndim != 3 or potential.dtype not in (
+        np.dtype(np.float32),
+        np.dtype(np.float64),
+    ):
+        return reconstruct(potential)
+
+    plane_cells = potential.shape[-2] * potential.shape[-1]
+    if plane_cells < _STATE_RECONSTRUCTION_MIN_PLANE_CELLS:
+        return reconstruct(potential)
+    plane_bytes = plane_cells * potential.itemsize
+    chunk_planes = max(1, _STATE_RECONSTRUCTION_CHUNK_BYTES // plane_bytes)
+    chunk_planes = min(potential.shape[0], chunk_planes)
+    if chunk_planes >= potential.shape[0]:
+        return reconstruct(potential)
+
+    for start in range(0, potential.shape[0], chunk_planes):
+        block = potential[start : start + chunk_planes]
+        if np.all(block == block[..., :1, :1]):
+            return reconstruct(potential)
+
+    resolved = np.empty_like(potential)
+    carrier = np.empty_like(potential)
+    field_x = np.empty_like(potential)
+    field_y = np.empty_like(potential)
+    for start in range(0, potential.shape[0], chunk_planes):
+        stop = min(start + chunk_planes, potential.shape[0])
+        state = reconstruct(potential[start:stop])
+        resolved[start:stop] = state.psi
+        carrier[start:stop] = state.carrier_density
+        field_x[start:stop] = state.E_x
+        field_y[start:stop] = state.E_y
+    return PRTransverseState(
+        psi=resolved,
+        carrier_density=carrier,
+        E_x=field_x,
+        E_y=field_y,
+    )
 
 
 def _carrier_exclusion_mask(
@@ -338,7 +411,7 @@ def pr_transverse_result_to_run_data(result: PRTransverseRunResult) -> RunData:
     if psi.shape != (nz, nx, ny):
         raise ValueError("psi_final does not match grid_summary")
     profile = result.resolved_profile
-    state = state_from_potential(
+    state = _state_from_potential_for_products(
         psi,
         dx_normalized=float(profile["dx_normalized"]),
         dy_normalized=float(profile["dy_normalized"]),
@@ -422,7 +495,7 @@ def pr_transverse_static_result_to_run_data(
     if psi.shape != (nz, nx, ny):
         raise ValueError("psi_final does not match grid_summary")
     profile = result.resolved_profile
-    state = state_from_potential(
+    state = _state_from_potential_for_products(
         psi,
         dx_normalized=float(profile["dx_normalized"]),
         dy_normalized=float(profile["dy_normalized"]),
