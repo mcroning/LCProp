@@ -10,4 +10,5 @@ outputs/
 *.npz
 *.npy
 src/lc_reference/
+docs/codex/instances/
 src/lc_reference/

@@ -45,15 +45,45 @@ launch manifest, and preserved evidence.
 docs/codex/
     README.md
     TEMPLATE.md
-    01_Architecture/
-    02_Development/
-    03_Commissioning/
-    04_Research/
+    01_Architecture/       # tracked reusable standards
+    02_Development/        # tracked reusable standards
+    03_Commissioning/      # tracked reusable standards
+    04_Research/           # tracked standards; currently category README only
+    instances/             # local-only execution/history prompts
+        01_Architecture/
+        02_Development/
+        03_Commissioning/
+        04_Research/
 ```
 
-Do not add empty categories in anticipation of future work. Add a new
-category when the library contains a prompt whose primary purpose does
-not fit the existing lifecycle.
+The four numbered top-level directories contain tracked, curated, and
+versioned reusable standard prompts: general procedures intended to be
+instantiated repeatedly. Task-specific prompts belong under the matching
+`instances/` category. Instances are local-only execution/history state,
+are ignored by Git, and may accumulate without cluttering the published
+standard library. An instance records one concrete application of a
+standard procedure, such as a named LC/PR milestone, exact file manifest,
+commit SHA, scheduler job, benchmark, or physics configuration.
+
+Every instance filename begins with its mandatory lifecycle category:
+`01` for Architecture, `02` for Development, `03` for Commissioning, or
+`04` for Research. A second numeric prefix is optional and task-local.
+Sequenced tasks begin at `01` and increment only within that task; an
+unrelated task may reuse the same category/sequence pair. Standalone
+tasks may omit a sequence. Complete filenames, rather than category and
+sequence pairs, must be unique. Historical instances are not renumbered
+merely to impose a global chronology. New files should be classified by
+their actual procedure, not merely by their title or original location.
+
+Standard prompts may deliberately point to an instance as an example or
+next workflow only when the reference is labeled as instance-specific.
+Do not treat an instance as a reusable standard merely because it was
+successful once.
+
+The four established lifecycle categories are retained even when one has
+no reusable prompt. Do not add further empty categories in anticipation
+of future work; add a new category only when a reusable prompt does not
+fit the existing lifecycle.
 
 ## Prompt Status
 
@@ -81,7 +111,12 @@ changes materially.
 | `03_Commissioning/cluster_onboarding.md`                | Validated | Characterize a cluster without modifying it                   | Approved cluster access                         | Local and remote read-only discovery | Cluster Checkout Preparation (planned)                 |
 | `03_Commissioning/cpu_smoke.md`                         | Validated | Execute one approved CPU commissioning job                    | Approved checkout and scheduler-job preparation | Exactly one CPU submission           | GPU Smoke Test                                         |
 | `03_Commissioning/gpu_smoke.md`                         | Validated | Verify CuPy GPU execution against an identified CPU reference | Passed CPU smoke test                           | Exactly one GPU submission           | PR Image Amplification Pilot                           |
-| `04_Research/pr_image_amplification_pilot.md`           | Validated | Execute one reproducible PR image-amplification pilot         | Passed GPU smoke test                           | Exactly one GPU research submission  | Material-Time Approach-to-Steady-State Study (planned) |
+
+The library currently has no reusable prompt in `04_Research/`.
+Research procedures may remain preserved locally as task-specific
+instances until a genuinely general research protocol is extracted;
+those local instances are intentionally absent from the published Git
+repository.
 
 Prompts marked `(planned)` are intended workflow stages that are not yet
 present in the library. Until they exist, an equivalent explicitly
