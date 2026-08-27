@@ -79,6 +79,30 @@ Selecting another product resets the shared viewer to that product's canonical
 recommended extent, or to its full physical extent when no recommendation is
 present. Per-product zoom history is intentionally not retained.
 
+### Physical-Boundary Clamp
+
+Manual testing raised a concern that repeated zoom-out could shift a transverse
+image off axis by allowing the viewport to escape its physical domain. That
+behavior could not be reproduced at current HEAD
+`26eb12ea88e4458357ec36faf250fcd2f3432082`. Inspection confirmed that the
+physical-bound clamp was already present in the committed
+`ImageView._bounded_limits()` implementation. This follow-up correction adds
+regression coverage and records the existing contract; it introduces no new
+production behavior.
+
+The navigation boundary is the selected product's complete physical display
+extent. Repeated zoom-out, including zoom about an off-center cursor, stops
+independently at the full x and y bounds. Additional zoom-out at the full
+aperture is a no-op. Right-drag panning translates a smaller viewport without
+changing its span and stops at the left, right, bottom, and top boundaries, so
+no blank region outside the retained data can be exposed. Rectangular products
+retain their independent physical x/y ranges.
+
+Regression coverage exercises repeated and off-center zoom-out, all four pan
+boundaries, Full Aperture followed by additional navigation, Fit restoration,
+product switching between different coordinate domains, color-scale
+preservation, data immutability, and stable physical crosshair coordinates.
+
 ## Validation
 
 The local validation covers all three currently compatible Image
