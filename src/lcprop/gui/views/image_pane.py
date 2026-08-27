@@ -5,7 +5,14 @@ from dataclasses import replace
 import numpy as np
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QComboBox, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from lcprop.gui.views.image_view import ImageView
 
@@ -67,9 +74,27 @@ class ImagePane(QWidget):
         self.field_selector.currentIndexChanged.connect(self._field_changed)
         layout.addWidget(self.field_selector)
 
+        view_controls = QHBoxLayout()
+        self.fit_button = QPushButton("Fit")
+        self.fit_button.setToolTip("Restore this product's recommended view")
+        self.full_aperture_button = QPushButton("Full Aperture")
+        self.full_aperture_button.setToolTip("Show the complete field extent")
+        self.fit_button.clicked.connect(self.image_view_fit)
+        self.full_aperture_button.clicked.connect(self.image_view_full_aperture)
+        view_controls.addWidget(self.fit_button)
+        view_controls.addWidget(self.full_aperture_button)
+        view_controls.addStretch(1)
+        layout.addLayout(view_controls)
+
         self.image_view = ImageView()
         self.image_view.positionSelected.connect(self._position_selected)
         layout.addWidget(self.image_view)
+
+    def image_view_fit(self) -> None:
+        self.image_view.fit_default()
+
+    def image_view_full_aperture(self) -> None:
+        self.image_view.fit_full_aperture()
 
     def set_run_data(self, run_data) -> None:
         self._run_data = run_data

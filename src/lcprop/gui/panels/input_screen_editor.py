@@ -39,6 +39,7 @@ from lcprop.optics.screens import (
     RasterSource,
     ScreenPlacement,
     prepare_intensity_raster_screen,
+    validate_channel_launch_elements,
 )
 
 
@@ -607,6 +608,47 @@ class InputScreenEditor(QGroupBox):
         if not self._editor_enabled:
             raise ValueError(self._disabled_reason)
         self._bindings.clear()
+        self._load_selected_binding()
+        self.configurationChanged.emit()
+
+    def set_launch_elements(
+        self,
+        assignments: tuple[ChannelLaunchElements, ...],
+    ) -> None:
+        """Restore a declarative screen plan onto canonical enabled channels."""
+
+        if not self._editor_enabled:
+            raise ValueError(self._disabled_reason)
+        definitions = self._current_enabled_definitions()
+        validate_channel_launch_elements(
+            assignments,
+            n_channels=len(definitions),
+        )
+        bindings = []
+        for assignment in assignments:
+            if len(assignment.elements) > 1:
+                raise ValueError(
+                    "the input-screen editor cannot represent multiple ordered "
+                    "screens on one channel"
+                )
+            for screen in assignment.elements:
+                if (
+                    screen.placement.resampling != "nearest"
+                    or screen.placement.outside_intensity_transmission != 1.0
+                    or screen.placement.boundary_policy != "reject"
+                ):
+                    raise ValueError(
+                        "the input-screen editor cannot represent this screen "
+                        "sampling or boundary policy"
+                    )
+                bindings.append(
+                    _ScreenBinding(
+                        definitions[assignment.channel_index],
+                        screen,
+                    )
+                )
+        self._enabled_definitions = definitions
+        self._bindings = bindings
         self._load_selected_binding()
         self.configurationChanged.emit()
 

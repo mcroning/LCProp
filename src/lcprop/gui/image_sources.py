@@ -90,10 +90,12 @@ def decode_user_raster(
         raise ValueError("image file size is outside the supported bounded range")
 
     digest = hashlib.sha256()
+    encoded = bytearray()
     try:
         with source_path.open("rb") as stream:
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(chunk)
+                encoded.extend(chunk)
     except OSError as exc:
         raise ValueError(f"cannot read image file: {exc}") from exc
 
@@ -145,6 +147,7 @@ def decode_user_raster(
         encoded_format=encoded_format,
         decoded_mode="L",
         grayscale=grayscale,
+        encoded_bytes=bytes(encoded),
     )
     return DecodedRasterImage(source=source, preview=preview)
 

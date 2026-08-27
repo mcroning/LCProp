@@ -209,6 +209,22 @@ class PRImageInputPanel(QWidget):
         )
         self.configurationChanged.emit()
 
+    def set_role_indices(self, pump_index: int, signal_index: int) -> None:
+        """Restore pump/signal roles in canonical enabled-channel ordering."""
+
+        self.sync_channels()
+        count = len(self._enabled_channel_names)
+        for name, value in (
+            ("pump_channel_index", pump_index),
+            ("signal_channel_index", signal_index),
+        ):
+            if type(value) is not int or not 0 <= value < count:
+                raise ValueError(f"{name} does not identify an enabled channel")
+        if pump_index == signal_index:
+            raise ValueError("pump and signal channels must be distinct")
+        self.pump_channel.setCurrentIndex(pump_index)
+        self.signal_channel.setCurrentIndex(signal_index)
+
     def build_request(self, *, grid, material, solver, backend, launch_configuration):
         if not self.is_image_amplification():
             raise ValueError("image-amplification input mode is not selected")

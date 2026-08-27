@@ -488,6 +488,14 @@ def test_image_products_default_to_offset_rectangular_signal_screen_frame(app):
     assert tuple(pane.image_view.image.get_extent()) == pytest.approx(full_extent)
     assert pane.image_view.ax.get_xlim() == pytest.approx(expected[:2])
     assert pane.image_view.ax.get_ylim() == pytest.approx(expected[2:])
+    pane.image_view.ax.set_xlim(10.0, 20.0)
+    pane.image_view.ax.set_ylim(-15.0, -5.0)
+    pane.fit_button.click()
+    assert pane.image_view.ax.get_xlim() == pytest.approx(expected[:2])
+    assert pane.image_view.ax.get_ylim() == pytest.approx(expected[2:])
+    pane.full_aperture_button.click()
+    assert pane.image_view.ax.get_xlim() == pytest.approx(full_extent[:2])
+    assert pane.image_view.ax.get_ylim() == pytest.approx(full_extent[2:])
     pane.close()
 
 
@@ -688,8 +696,9 @@ def test_gui_user_mode_builds_and_dispatches_registered_operation(app, tmp_path)
     assert window.last_runner_result.kind == PR_IMAGE_AMPLIFICATION_WORKFLOW
     assert "amplified_image" in window.last_runner_result.run_data.fields
     assert "image_amplification" in window.last_runner_result.run_data.diagnostics
-    with pytest.raises(ValueError, match="unsupported in C1"):
-        window.save_experiment_to(tmp_path / "image.lcprop.json")
+    saved_path = tmp_path / "image.lcprop.json"
+    window.save_experiment_to(saved_path)
+    assert saved_path.is_file()
     window.close()
 
 

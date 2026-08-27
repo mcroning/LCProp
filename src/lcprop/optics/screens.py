@@ -47,6 +47,7 @@ class RasterSource:
     grayscale: Any
     preprocessing_policy: str = RASTER_SOURCE_IDENTITY_V1
     asset_id: str | None = None
+    encoded_bytes: bytes | None = None
 
     def __post_init__(self) -> None:
         if self.source_kind not in ("standard", "user", "array"):
@@ -72,6 +73,12 @@ class RasterSource:
             raise ValueError("grayscale shape must match source width and height")
         if not np.all(np.isfinite(pixels)) or np.any(pixels < 0):
             raise ValueError("grayscale must be finite and nonnegative")
+        encoded = self.encoded_bytes
+        if encoded is not None and not isinstance(encoded, bytes):
+            raise TypeError("encoded_bytes must be bytes or None")
+        if self.source_kind == "user" and encoded is not None:
+            if hashlib.sha256(encoded).hexdigest() != self.sha256:
+                raise ValueError("encoded_bytes do not match source sha256")
         owned = pixels.copy()
         owned.flags.writeable = False
         object.__setattr__(self, "grayscale", owned)
@@ -90,6 +97,7 @@ class RasterSource:
             "decoded_mode",
             "preprocessing_policy",
             "asset_id",
+            "encoded_bytes",
         )
         return all(
             getattr(self, name) == getattr(other, name) for name in scalar_names

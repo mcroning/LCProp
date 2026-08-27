@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.backend_bases import MouseButton
 from matplotlib.figure import Figure
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QSizePolicy
@@ -29,6 +30,9 @@ class ImageView(FigureCanvasQTAgg):
         self._field = None
         self._raw_shape = None
         self._extent = None
+        self._full_display_extent = None
+        self._default_display_extent = None
+        self._pan_anchor = None
         if compact_vertical:
             # Longitudinal views share the available height. Raise the axes so
             # tick labels and the z-axis label stay inside a short canvas.
@@ -59,6 +63,13 @@ class ImageView(FigureCanvasQTAgg):
         self._hline = None
         self._crosshair_index = None
         self._button_press_cid = self.mpl_connect("button_press_event", self._on_mouse_press)
+        self._button_release_cid = self.mpl_connect(
+            "button_release_event", self._on_mouse_release
+        )
+        self._motion_cid = self.mpl_connect(
+            "motion_notify_event", self._on_mouse_motion
+        )
+        self._scroll_cid = self.mpl_connect("scroll_event", self._on_scroll)
 
     def set_field(
         self,
@@ -97,6 +108,9 @@ class ImageView(FigureCanvasQTAgg):
                 tuple(float(value) for value in default_display_extent)
             )
         )
+        self._full_display_extent = display_extent
+        self._default_display_extent = initial_limits
+        self._pan_anchor = None
         self.image.set_data(data)
         self.image.set_extent(display_extent)
         self.image.set_cmap(getattr(field, "colormap", "viridis"))
@@ -122,6 +136,26 @@ class ImageView(FigureCanvasQTAgg):
             ix, iy = self._crosshair_index
             self.set_crosshair(ix, iy, emit=False)
 
+        self.draw_idle()
+
+    def fit_default(self) -> None:
+        """Restore the product's canonical recommended display extent."""
+
+        if self._default_display_extent is None:
+            return
+        xmin, xmax, ymin, ymax = self._default_display_extent
+        self.ax.set_xlim(xmin, xmax)
+        self.ax.set_ylim(ymin, ymax)
+        self.draw_idle()
+
+    def fit_full_aperture(self) -> None:
+        """Restore the complete physical extent retained by the field."""
+
+        if self._full_display_extent is None:
+            return
+        xmin, xmax, ymin, ymax = self._full_display_extent
+        self.ax.set_xlim(xmin, xmax)
+        self.ax.set_ylim(ymin, ymax)
         self.draw_idle()
 
     def set_crosshair(self, ix: int, iy: int, *, emit: bool = False) -> None:
@@ -162,6 +196,18 @@ class ImageView(FigureCanvasQTAgg):
     def _on_mouse_press(self, event) -> None:
         if event.inaxes is not self.ax:
             return
+        if event.button == MouseButton.RIGHT:
+            if event.x is None or event.y is None:
+                return
+            self._pan_anchor = (
+                float(event.x),
+                float(event.y),
+                tuple(float(value) for value in self.ax.get_xlim()),
+                tuple(float(value) for value in self.ax.get_ylim()),
+            )
+            return
+        if event.button != MouseButton.LEFT:
+            return
         if event.xdata is None or event.ydata is None:
             return
         if self._raw_shape is None:
@@ -169,6 +215,91 @@ class ImageView(FigureCanvasQTAgg):
 
         ix, iy = self._display_coordinates_to_index(float(event.xdata), float(event.ydata))
         self.set_crosshair(ix, iy, emit=True)
+
+    def _on_mouse_release(self, event) -> None:
+        if event.button == MouseButton.RIGHT:
+            self._pan_anchor = None
+
+    def _on_mouse_motion(self, event) -> None:
+        if self._pan_anchor is None or event.x is None or event.y is None:
+            return
+        start_x, start_y, initial_x, initial_y = self._pan_anchor
+        width = max(float(self.ax.bbox.width), 1.0)
+        height = max(float(self.ax.bbox.height), 1.0)
+        dx = (float(event.x) - start_x) * ((initial_x[1] - initial_x[0]) / width)
+        dy = (float(event.y) - start_y) * ((initial_y[1] - initial_y[0]) / height)
+        x_limits = self._bounded_limits(
+            initial_x[0] - dx,
+            initial_x[1] - dx,
+            axis=0,
+        )
+        y_limits = self._bounded_limits(
+            initial_y[0] - dy,
+            initial_y[1] - dy,
+            axis=1,
+        )
+        self.ax.set_xlim(*x_limits)
+        self.ax.set_ylim(*y_limits)
+        self.draw_idle()
+
+    def _on_scroll(self, event) -> None:
+        if (
+            event.inaxes is not self.ax
+            or event.xdata is None
+            or event.ydata is None
+        ):
+            return
+        direction = getattr(event, "button", None)
+        if direction == "up":
+            scale = 0.8
+        elif direction == "down":
+            scale = 1.25
+        else:
+            step = float(getattr(event, "step", 0.0))
+            if step == 0.0:
+                return
+            scale = 0.8 if step > 0.0 else 1.25
+        x_limits = self._scaled_limits(
+            self.ax.get_xlim(),
+            center=float(event.xdata),
+            scale=scale,
+            axis=0,
+        )
+        y_limits = self._scaled_limits(
+            self.ax.get_ylim(),
+            center=float(event.ydata),
+            scale=scale,
+            axis=1,
+        )
+        self.ax.set_xlim(*x_limits)
+        self.ax.set_ylim(*y_limits)
+        self.draw_idle()
+
+    def _scaled_limits(self, limits, *, center: float, scale: float, axis: int):
+        lower, upper = (float(value) for value in limits)
+        new_lower = center - (center - lower) * scale
+        new_upper = center + (upper - center) * scale
+        return self._bounded_limits(new_lower, new_upper, axis=axis)
+
+    def _bounded_limits(self, lower: float, upper: float, *, axis: int):
+        if self._full_display_extent is None:
+            return lower, upper
+        full_lower, full_upper = (
+            self._full_display_extent[:2]
+            if axis == 0
+            else self._full_display_extent[2:]
+        )
+        full_span = full_upper - full_lower
+        span = upper - lower
+        if span >= full_span:
+            return full_lower, full_upper
+        if lower < full_lower:
+            upper += full_lower - lower
+            lower = full_lower
+        if upper > full_upper:
+            lower -= upper - full_upper
+            upper = full_upper
+        return lower, upper
 
     def _index_to_display_coordinates(self, ix: int, iy: int) -> tuple[float, float]:
         nx, ny = self._raw_shape

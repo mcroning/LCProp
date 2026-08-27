@@ -103,6 +103,10 @@ class PRImageAmplificationExperimentRequest:
         return self.base_request.material
 
     @property
+    def beams(self):
+        return self.launch_configuration.beams
+
+    @property
     def backend(self):
         return self.base_request.backend
 

@@ -379,6 +379,9 @@ class PRMainWindow(QWidget):
             "static_solver": self.evolution_panel.static_solver(),
             "backend": self.evolution_panel.backend_spec(),
             "beam_stack": self.beam_panel.beam_stack_definition,
+            "launch_elements": self.beam_panel.launch_elements(),
+            "pump_channel_index": self.input_panel.pump_channel.currentData(),
+            "signal_channel_index": self.input_panel.signal_channel.currentData(),
         }
 
     def _restore_experiment_gui_state(self, state) -> None:
@@ -394,7 +397,37 @@ class PRMainWindow(QWidget):
             state["grid"].y_aperture_um,
         )
         self.beam_panel.set_beam_stack_definition(state["beam_stack"])
+        self.beam_panel.input_screen_editor.set_launch_elements(
+            state["launch_elements"]
+        )
+        if (
+            state["pump_channel_index"] is not None
+            and state["signal_channel_index"] is not None
+        ):
+            self.input_panel.set_role_indices(
+                state["pump_channel_index"],
+                state["signal_channel_index"],
+            )
         self.evolution_panel.set_workflow_id(state["workflow_id"])
+
+    @staticmethod
+    def _validate_experiment_request_representable(request) -> None:
+        if isinstance(request, PRImageAmplificationExperimentRequest):
+            request.validate()
+            validate_pr_gui_request_representable(request.base_request)
+            if request.base_request.beams != request.launch_configuration.beams:
+                raise ValueError(
+                    "Image Amplification base and launch beams must agree"
+                )
+            if (
+                request.base_request.launch_elements
+                != request.launch_configuration.channel_elements
+            ):
+                raise ValueError(
+                    "Image Amplification base and launch screen plans must agree"
+                )
+            return
+        validate_pr_gui_request_representable(request)
 
     def save_experiment_to(self, path):
         """Save the active PR experiment without running it."""
@@ -402,18 +435,7 @@ class PRMainWindow(QWidget):
         if self._background_running:
             raise RuntimeError("cannot save an experiment while a run is active")
         request = self.build_request()
-        if isinstance(
-            request,
-            (
-                PRImageAmplificationRunRequest,
-                PRBeamPanelImageAmplificationRunRequest,
-                PRImageAmplificationExperimentRequest,
-            ),
-        ):
-            raise ValueError(
-                "Image Amplification experiment persistence is unsupported in C1"
-            )
-        validate_pr_gui_request_representable(request)
+        self._validate_experiment_request_representable(request)
         return save_experiment(
             request,
             path,
@@ -430,23 +452,43 @@ class PRMainWindow(QWidget):
         if self._background_running:
             raise RuntimeError("cannot open an experiment while a run is active")
         loaded = load_experiment(path, expected_material_id=PR_MATERIAL_ID)
-        validate_pr_gui_request_representable(loaded.request)
+        self._validate_experiment_request_representable(loaded.request)
         prior = self._capture_experiment_gui_state()
         stack = launchplane_stack_from_presentation(loaded)
         self._hydrating_experiment = True
         try:
-            gaussian_index = self.input_panel.input_mode.findData(
-                PR_GAUSSIAN_INPUT_MODE
-            )
-            self.input_panel.input_mode.setCurrentIndex(gaussian_index)
-            apply_pr_request(
+            image_experiment = isinstance(
                 loaded.request,
+                PRImageAmplificationExperimentRequest,
+            )
+            mode = (
+                PR_IMAGE_AMPLIFICATION_INPUT_MODE
+                if image_experiment
+                else PR_GAUSSIAN_INPUT_MODE
+            )
+            mode_index = self.input_panel.input_mode.findData(mode)
+            self.input_panel.input_mode.setCurrentIndex(mode_index)
+            ordinary_request = (
+                loaded.request.base_request
+                if image_experiment
+                else loaded.request
+            )
+            apply_pr_request(
+                ordinary_request,
                 material_panel=self.material_panel,
                 beam_panel=self.beam_panel,
                 grid_panel=self.grid_panel,
                 evolution_panel=self.evolution_panel,
                 beam_stack_definition=stack,
             )
+            self.beam_panel.input_screen_editor.set_launch_elements(
+                ordinary_request.launch_elements
+            )
+            if image_experiment:
+                self.input_panel.set_role_indices(
+                    loaded.request.pump_channel_index,
+                    loaded.request.signal_channel_index,
+                )
             rebuilt = self.build_request()
             if rebuilt != loaded.request:
                 raise ValueError(

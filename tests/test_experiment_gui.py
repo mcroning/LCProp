@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import json
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import numpy as np
 import pytest
+from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 
 import lcprop.gui.experiment_files as experiment_files
@@ -21,8 +24,16 @@ from lcprop.lc.gui.request_adapter import (
     LC_TIMEDEPENDENT_WORKFLOW_ID,
 )
 from lcprop.lc.requests import OutputOptions
-from lcprop.persistence import ExperimentMaterialError, save_experiment
+from lcprop.persistence import (
+    ExperimentMaterialError,
+    ExperimentPayloadError,
+    ExperimentRuntimeStateError,
+    load_experiment,
+    save_experiment,
+)
+from lcprop.pr.gui.image_input_panel import PR_IMAGE_AMPLIFICATION_INPUT_MODE
 from lcprop.pr.gui.main_window import PRMainWindow
+from lcprop.pr.image_amplification import PR_IMAGE_AMPLIFICATION_WORKFLOW
 from lcprop.pr.specs import PR_MATERIAL_ID
 from lcprop.pr.static import PRStaticSolverOptions
 from lcprop.pr.static_workflow import PR_STATIC_WORKFLOW
@@ -100,6 +111,297 @@ def _make_coherent_two_beam_angle_stack():
             ),
         )
     )
+
+
+def _configure_image_amplification_window(window, image_path, workflow_id):
+    model = pytest.importorskip("launchplane.model")
+    mode_index = window.input_panel.input_mode.findData(
+        PR_IMAGE_AMPLIFICATION_INPUT_MODE
+    )
+    window.input_panel.input_mode.setCurrentIndex(mode_index)
+    window.evolution_panel.set_workflow_id(workflow_id)
+    window.grid_panel.Nx.setValue(32)
+    window.grid_panel.Ny.setValue(16)
+    window.grid_panel.x_aperture_um.setValue(80.0)
+    window.grid_panel.y_aperture_um.setValue(40.0)
+    window.grid_panel.z_length_um.setValue(20.0)
+    window.grid_panel.dz_um.setValue(10.0)
+    window.beam_panel.set_beam_stack_definition(
+        model.BeamStackDefinition(
+            beams=(
+                model.BeamDefinition(
+                    name="pump",
+                    wavelength_um=0.633,
+                    power_mW=2.5,
+                    x_um=-8.0,
+                    y_um=1.0,
+                    waist_x_um=12.0,
+                    waist_y_um=7.0,
+                    tilt_x_rad_per_um=0.2,
+                    phase_rad=0.35,
+                    coherence_group="image-laser",
+                ),
+                model.BeamDefinition(
+                    name="signal",
+                    wavelength_um=0.633,
+                    power_mW=0.25,
+                    x_um=9.0,
+                    y_um=-2.0,
+                    waist_x_um=10.0,
+                    waist_y_um=6.0,
+                    tilt_x_rad_per_um=-0.2,
+                    phase_rad=-0.15,
+                    coherence_group="image-laser",
+                ),
+            )
+        )
+    )
+    editor = window.beam_panel.input_screen_editor
+    editor.channel.setCurrentIndex(1)
+    editor.load_user_image(image_path)
+    editor.width_um.setValue(18.0)
+    editor.height_um.setValue(9.0)
+    editor.center_x_um.setValue(11.0)
+    editor.center_y_um.setValue(-3.0)
+    editor.invert.setChecked(True)
+    window.input_panel.set_role_indices(0, 1)
+
+
+@pytest.mark.parametrize(
+    "workflow_id",
+    ("pr_timedependent", PR_STATIC_WORKFLOW, PR_TRANSVERSE_STATIC_WORKFLOW),
+)
+def test_pr_image_experiment_survives_original_file_deletion(
+    app,
+    tmp_path,
+    workflow_id,
+):
+    source_path = tmp_path / f"source-{workflow_id}.png"
+    image = QImage(11, 7, QImage.Format.Format_RGBA8888)
+    image.fill(0x6080A0FF)
+    assert image.save(str(source_path), "PNG")
+    encoded = source_path.read_bytes()
+    encoded_sha = hashlib.sha256(encoded).hexdigest()
+
+    source = PRMainWindow()
+    _configure_image_amplification_window(source, source_path, workflow_id)
+    expected = source.build_request()
+    path = tmp_path / f"image-{workflow_id}.lcprop.json"
+    source.save_experiment_to(path)
+    source.close()
+    document = json.loads(path.read_text(encoding="utf-8"))
+    assert document["request_payload"]["base_request"]["launch_elements"] == []
+    assert len(
+        document["request_payload"]["launch_configuration"]["channel_elements"]
+    ) == 1
+    source_path.unlink()
+
+    loaded = load_experiment(path, expected_material_id=PR_MATERIAL_ID)
+    assert loaded.workflow_id == PR_IMAGE_AMPLIFICATION_WORKFLOW
+    assert loaded.request == expected
+    assert loaded.request.source.sha256 == encoded_sha
+    assert loaded.request.source.encoded_bytes == encoded
+    assert loaded.request.source.basename == source_path.name
+    assert loaded.request.source.encoded_format == "png"
+    assert (loaded.request.source.width, loaded.request.source.height) == (11, 7)
+    assert loaded.request.source.decoded_mode == "L"
+    screen = loaded.request.launch_configuration.channel_elements[0].elements[0]
+    assert loaded.request.source.preprocessing_policy == "raster_source_identity_v1"
+    assert screen.preprocessing_policy == "even_square_nearest_transparent_v1"
+    assert screen.invert is True
+    assert screen.placement.center_x_um == pytest.approx(11.0)
+    assert screen.placement.center_y_um == pytest.approx(-3.0)
+    assert screen.placement.width_um == pytest.approx(18.0)
+    assert screen.placement.height_um == pytest.approx(9.0)
+
+    target = PRMainWindow()
+    target._run_registered = lambda *_args, **_kwargs: pytest.fail(
+        "opening an image experiment must not execute it"
+    )
+    target.load_experiment_from(path)
+    rebuilt = target.build_request()
+
+    assert rebuilt == expected
+    assert rebuilt.base_workflow_id == workflow_id
+    assert rebuilt.pump_channel_index == 0
+    assert rebuilt.signal_channel_index == 1
+    assert rebuilt.launch_configuration.channel_elements == (
+        expected.launch_configuration.channel_elements
+    )
+    assert rebuilt.source.encoded_bytes == encoded
+    assert target.input_panel.is_image_amplification()
+    assert target.evolution_panel.workflow_id() == workflow_id
+    target.close()
+
+
+def test_pr_image_experiment_save_open_buttons_round_trip(app, tmp_path, monkeypatch):
+    source_path = tmp_path / "button-source.png"
+    image = QImage(9, 5, QImage.Format.Format_RGBA8888)
+    image.fill(0x406080FF)
+    assert image.save(str(source_path), "PNG")
+    source = PRMainWindow()
+    _configure_image_amplification_window(
+        source,
+        source_path,
+        PR_TRANSVERSE_STATIC_WORKFLOW,
+    )
+    source.evolution_panel.backend.setCurrentText("cupy")
+    source.evolution_panel.precision.setCurrentText("float32")
+    expected = source.build_request()
+    path = tmp_path / "button-image.lcprop.json"
+    monkeypatch.setattr(
+        pr_main_window,
+        "choose_experiment_save_path",
+        lambda _parent: path,
+    )
+
+    source.experiment_file_buttons.save_button.click()
+    app.processEvents()
+    assert source.status_label.text() == "Experiment saved"
+    assert path.is_file()
+
+    target = PRMainWindow()
+    monkeypatch.setattr(
+        pr_main_window,
+        "choose_experiment_open_path",
+        lambda _parent: path,
+    )
+    target.experiment_file_buttons.open_button.click()
+    app.processEvents()
+
+    assert target.status_label.text() == "Experiment opened"
+    assert target.build_request() == expected
+    assert target.evolution_panel.backend.currentText() == "cupy"
+    assert target.evolution_panel.precision.currentText() == "float32"
+    source.close()
+    target.close()
+
+
+def test_pr_image_experiment_rejects_runtime_base_state(app, tmp_path):
+    source_path = tmp_path / "runtime-source.png"
+    image = QImage(8, 6, QImage.Format.Format_RGBA8888)
+    image.fill(0x204060FF)
+    assert image.save(str(source_path), "PNG")
+    window = PRMainWindow()
+    _configure_image_amplification_window(
+        window,
+        source_path,
+        "pr_timedependent",
+    )
+    request = window.build_request()
+    request = replace(
+        request,
+        base_request=replace(
+            request.base_request,
+            initial_A=np.zeros((1, 1, 1), dtype=np.complex128),
+        ),
+    )
+
+    with pytest.raises(ExperimentRuntimeStateError, match="runtime state"):
+        save_experiment(
+            request,
+            tmp_path / "runtime.lcprop.json",
+            material_id=PR_MATERIAL_ID,
+            workflow_id=PR_IMAGE_AMPLIFICATION_WORKFLOW,
+        )
+    window.close()
+
+
+def test_legacy_pr_schema_one_empty_launch_plan_still_loads(app, tmp_path):
+    window = PRMainWindow()
+    request = window.build_request()
+    path = tmp_path / "legacy-pr.lcprop.json"
+    window.save_experiment_to(path)
+    window.close()
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["request_payload"]["schema_version"] = 1
+    document["request_payload"].pop("launch_elements")
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    loaded = load_experiment(path, expected_material_id=PR_MATERIAL_ID)
+    assert loaded.request == request
+
+
+def test_pr_image_experiment_rejects_corrupt_embedded_source(app, tmp_path):
+    source_path = tmp_path / "source.png"
+    image = QImage(8, 6, QImage.Format.Format_RGBA8888)
+    image.fill(0x204060FF)
+    assert image.save(str(source_path), "PNG")
+    source = PRMainWindow()
+    _configure_image_amplification_window(
+        source,
+        source_path,
+        "pr_timedependent",
+    )
+    path = tmp_path / "corrupt-image.lcprop.json"
+    source.save_experiment_to(path)
+    source.close()
+    document = json.loads(path.read_text(encoding="utf-8"))
+    image_payload = document["request_payload"]["launch_configuration"][
+        "channel_elements"
+    ][0]["elements"][0]["source"]
+    image_payload["encoded_bytes_base64"] = "AAAA"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ExperimentPayloadError, match="checksum mismatch"):
+        load_experiment(path, expected_material_id=PR_MATERIAL_ID)
+
+
+def test_pr_image_experiment_rejects_unregistered_base_operation(app, tmp_path):
+    source_path = tmp_path / "source.png"
+    image = QImage(8, 6, QImage.Format.Format_RGBA8888)
+    image.fill(0x204060FF)
+    assert image.save(str(source_path), "PNG")
+    source = PRMainWindow()
+    _configure_image_amplification_window(
+        source,
+        source_path,
+        "pr_timedependent",
+    )
+    path = tmp_path / "unsupported-operation.lcprop.json"
+    source.save_experiment_to(path)
+    source.close()
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["request_payload"]["base_workflow_id"] = "pr_removed_operation"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ExperimentPayloadError, match="not registered"):
+        load_experiment(path, expected_material_id=PR_MATERIAL_ID)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("pump_channel_index", 7, "canonical enabled beam channel"),
+        ("signal_channel_index", 0, "must be distinct"),
+    ),
+)
+def test_pr_image_experiment_rejects_invalid_roles(
+    app,
+    tmp_path,
+    field,
+    value,
+    message,
+):
+    source_path = tmp_path / f"invalid-{field}.png"
+    image = QImage(8, 6, QImage.Format.Format_RGBA8888)
+    image.fill(0x204060FF)
+    assert image.save(str(source_path), "PNG")
+    source = PRMainWindow()
+    _configure_image_amplification_window(
+        source,
+        source_path,
+        "pr_timedependent",
+    )
+    path = tmp_path / f"invalid-{field}.lcprop.json"
+    source.save_experiment_to(path)
+    source.close()
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["request_payload"][field] = value
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ExperimentPayloadError, match=message):
+        load_experiment(path, expected_material_id=PR_MATERIAL_ID)
 
 
 @pytest.mark.parametrize(

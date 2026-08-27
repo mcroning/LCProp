@@ -22,12 +22,16 @@ from lcprop.optics.screens import (
     RasterSource,
     ScreenPlacement,
 )
-from lcprop.persistence.experiments import ExperimentPayloadError
-from lcprop.pr.experiment_codec import encode_pr_static_request
+from lcprop.persistence import load_experiment, save_experiment
 from lcprop.pr.gui.main_window import PRMainWindow
 from lcprop.pr.gui.request_adapter import apply_pr_request
 from lcprop.pr.persistence import save_pr_checkpoint
-from lcprop.pr.specs import PRMaterialSpec, PRRunRequest, PRSolverOptions
+from lcprop.pr.specs import (
+    PRMaterialSpec,
+    PRRunRequest,
+    PRSolverOptions,
+    PR_MATERIAL_ID,
+)
 from lcprop.pr.static_workflow import (
     PRStaticRunRequest,
     PRStaticWorkflowOptions,
@@ -255,12 +259,18 @@ def test_explicit_initial_A_with_launch_elements_is_rejected(kind):
         runner(request)
 
 
-def test_unsupported_persistence_and_remote_paths_reject_without_dropping_plan(tmp_path):
+def test_experiment_persistence_supports_plan_while_remote_paths_reject_it(tmp_path):
     static = PRStaticRunRequest(
         grid=_grid(), beams=_beams(), launch_elements=_assignments(1)
     )
-    with pytest.raises(ExperimentPayloadError, match="launch_elements"):
-        encode_pr_static_request(static)
+    path = tmp_path / "screen-plan.lcprop.json"
+    save_experiment(
+        static,
+        path,
+        material_id=PR_MATERIAL_ID,
+        workflow_id=PR_STATIC_WORKFLOW,
+    )
+    assert load_experiment(path).request == static
 
     transverse = PRTransverseStaticRunRequest(
         grid=_grid(), beams=_beams(), launch_elements=_assignments(1)
