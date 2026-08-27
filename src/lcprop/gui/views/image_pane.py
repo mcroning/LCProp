@@ -86,7 +86,17 @@ class ImagePane(QWidget):
 
         if self.field_selector.count() > 0:
             default_index = 0
-            if run_data.workflow in {"static", "timedependent"}:
+            preferred_found = False
+            for index in range(self.field_selector.count()):
+                key = self.field_selector.itemData(index)
+                if bool(getattr(run_data.fields[key], "initially_selected", False)):
+                    default_index = index
+                    preferred_found = True
+                    break
+            if (
+                not preferred_found
+                and run_data.workflow in {"static", "timedependent"}
+            ):
                 final_index = self.field_selector.findData("final_intensity")
                 if final_index >= 0:
                     default_index = final_index
@@ -111,6 +121,9 @@ class ImagePane(QWidget):
         self.image_view.set_field(
             field,
             extent=extent,
+            default_display_extent=getattr(
+                field, "default_display_extent", None
+            ),
             vmin=vmin,
             vmax=vmax,
         )

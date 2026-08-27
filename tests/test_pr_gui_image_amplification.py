@@ -15,9 +15,11 @@ from PySide6.QtWidgets import QApplication
 from launchplane.model import BeamDefinition, BeamStackDefinition
 
 from lcprop.core.backend import BackendSpec
+from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
+from lcprop.gui.views.image_pane import ImagePane
 from lcprop.optics.launch_configuration import LaunchConfiguration
 from lcprop.optics.screens import (
     ChannelLaunchElements,
@@ -56,7 +58,10 @@ from lcprop.pr.operations import (
     PR_STATIC_OPERATION,
     PR_TIMEDEPENDENT_OPERATION,
 )
-from lcprop.pr.products import pr_image_amplification_result_to_run_data
+from lcprop.pr.products import (
+    _image_amplification_default_display_extent,
+    pr_image_amplification_result_to_run_data,
+)
 from lcprop.pr.specs import (
     PRMaterialSpec,
     PRRunRequest,
@@ -416,8 +421,191 @@ def test_rectangular_result_products_have_independent_axes():
     assert values["power_entering_pr_medium_mW"] < 3.5
     assert values["signal_throughput_fraction"] < 1.0
     assert values["transparency_policy"] == "passive_intensity_transmission_v1"
+    metrics = run_data.diagnostics["image_amplification_metrics"].values
+    assert metrics["measured_signal_gain"] == result.measured_absolute_signal_gain
+    assert metrics["analytic_signal_gain"] == result.analytic_absolute_signal_gain
+    assert metrics["image_correlation"] == result.image_intensity_correlation
+    assert metrics["normalized_image_rmse"] == result.normalized_image_rmse
+    assert metrics["incident_signal_power_mW"] == result.incident_channel_powers_mW[1]
+    assert metrics["post_screen_signal_power_mW"] == (
+        result.post_element_channel_powers_mW[1]
+    )
+    assert metrics["signal_screen_throughput"] == result.signal_throughput_fraction
+    assert metrics["output_isolated_signal_power_mW"] == (
+        result.output_isolated_signal_power_mW
+    )
+    assert metrics["total_power_entering_pr_medium_mW"] == (
+        result.post_element_total_power_mW
+    )
+    assert metrics["normalized_optical_power_drift"] == (
+        result.normalized_power_relative_drift
+    )
+    assert metrics["measured_gain_vs_z_available"] is False
+    assert "no per-z complex optical-field history" in (
+        metrics["measured_gain_vs_z_reason"]
+    )
     assert run_data.geometry.x.shape == (32,)
     assert run_data.geometry.y.shape == (8,)
+
+
+def test_image_products_default_to_offset_rectangular_signal_screen_frame(app):
+    experiment = _presentation_image_experiment()
+    composite = run_image_amplification_experiment(
+        LocalRunner(operations=(PR_TIMEDEPENDENT_OPERATION,)),
+        experiment,
+    )
+    analysis = composite.result.analysis_result
+    assert analysis is not None
+    run_data = composite.run_data
+    base_run_data = composite.result.base_runner_result.run_data
+    expected = (6.55, 36.45, -17.8, -2.2)
+    full_extent = tuple(run_data.geometry.extent_xy())
+    assert np.array_equal(run_data.geometry.x, base_run_data.geometry.x)
+    assert np.array_equal(run_data.geometry.y, base_run_data.geometry.y)
+
+    for key, source_values in (
+        ("image_transmission", analysis.image_transmission),
+        ("input_signal_intensity", np.abs(analysis.input_signal_field) ** 2),
+        ("output_signal_intensity", np.abs(analysis.output_signal_field) ** 2),
+        ("amplified_image", np.abs(analysis.backpropagated_signal_field) ** 2),
+        (
+            "zero_response_image",
+            np.abs(analysis.zero_response_backpropagated_signal_field) ** 2,
+        ),
+    ):
+        field = run_data.fields[key]
+        assert field.default_display_extent == pytest.approx(expected)
+        assert np.array_equal(field.data, source_values)
+        assert field.default_display_extent[0] >= full_extent[0]
+        assert field.default_display_extent[1] <= full_extent[1]
+        assert field.default_display_extent[2] >= full_extent[2]
+        assert field.default_display_extent[3] <= full_extent[3]
+        assert field.axes == ("x", "y")
+
+    pane = ImagePane()
+    pane.set_run_data(run_data)
+    assert pane.field_selector.currentData() == "amplified_image"
+    assert tuple(pane.image_view.image.get_extent()) == pytest.approx(full_extent)
+    assert pane.image_view.ax.get_xlim() == pytest.approx(expected[:2])
+    assert pane.image_view.ax.get_ylim() == pytest.approx(expected[2:])
+    pane.close()
+
+
+def test_image_default_frame_supports_screen_centered_on_signal():
+    experiment = _presentation_image_experiment(
+        screen_center_x_um=20.0,
+        screen_center_y_um=-10.0,
+    )
+    composite = run_image_amplification_experiment(
+        LocalRunner(operations=(PR_TIMEDEPENDENT_OPERATION,)),
+        experiment,
+    )
+
+    assert composite.run_data.fields[
+        "amplified_image"
+    ].default_display_extent == pytest.approx((7.0, 33.0, -17.8, -2.2))
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected_x"),
+    (
+        (
+            {"screen_center_x_um": 23.0, "screen_width_um": 40.0},
+            (-3.0, 49.0),
+        ),
+        (
+            {"signal_waist_x_um": 12.0, "screen_width_um": 8.0},
+            (-11.2, 51.2),
+        ),
+    ),
+)
+def test_image_default_frame_uses_larger_of_screen_and_beam(kwargs, expected_x):
+    experiment = _presentation_image_experiment(**kwargs)
+    composite = run_image_amplification_experiment(
+        LocalRunner(operations=(PR_TIMEDEPENDENT_OPERATION,)),
+        experiment,
+    )
+    extent = composite.run_data.fields["amplified_image"].default_display_extent
+
+    assert extent is not None
+    assert extent[:2] == pytest.approx(expected_x)
+
+
+def test_image_default_frame_clamps_to_aperture_and_has_safe_fallback():
+    experiment = _presentation_image_experiment(
+        screen_center_x_um=55.0,
+        screen_width_um=8.0,
+    )
+    signal = replace(
+        experiment.launch_configuration.beams.channels[1],
+        x0_um=55.0,
+    )
+    beams = replace(
+        experiment.launch_configuration.beams,
+        channels=(
+            experiment.launch_configuration.beams.channels[0],
+            signal,
+        ),
+    )
+    launch = replace(experiment.launch_configuration, beams=beams)
+    experiment = replace(
+        experiment,
+        base_request=replace(experiment.base_request, beams=beams),
+        launch_configuration=launch,
+    )
+    composite = run_image_amplification_experiment(
+        LocalRunner(operations=(PR_TIMEDEPENDENT_OPERATION,)),
+        experiment,
+    )
+    analysis = composite.result.analysis_result
+    assert analysis is not None
+    extent = composite.run_data.fields["amplified_image"].default_display_extent
+    full_extent = tuple(composite.run_data.geometry.extent_xy())
+
+    assert extent is not None
+    assert extent[1] == full_extent[1]
+    assert _image_amplification_default_display_extent(
+        replace(analysis, image_request=object()),
+        composite.result.base_runner_result.run_data,
+    ) is None
+
+
+def test_measured_gain_power_diagnostics_use_existing_carrier_isolation():
+    experiment = _presentation_image_experiment()
+    composite = run_image_amplification_experiment(
+        LocalRunner(operations=(PR_TIMEDEPENDENT_OPERATION,)),
+        experiment,
+    )
+    analysis = composite.result.analysis_result
+    assert analysis is not None
+    metrics = composite.run_data.diagnostics[
+        "image_amplification_metrics"
+    ].values
+
+    assert analysis.measured_absolute_signal_gain == pytest.approx(
+        analysis.output_isolated_signal_power_normalized
+        / analysis.measured_gain_reference_signal_power_normalized,
+        rel=0.0,
+        abs=1.0e-15,
+    )
+    assert analysis.measured_absolute_signal_gain == pytest.approx(
+        analysis.output_isolated_signal_power_mW
+        / analysis.measured_gain_reference_signal_power_mW,
+        rel=0.0,
+        abs=1.0e-15,
+    )
+    assert metrics["measured_gain_reference_signal_power_mW"] == (
+        analysis.measured_gain_reference_signal_power_mW
+    )
+    assert metrics["output_isolated_signal_power_mW"] == (
+        analysis.output_isolated_signal_power_mW
+    )
+    assert metrics["measured_gain_reference"] == (
+        "carrier-isolated post-screen field at z=0"
+    )
+    assert tuple(composite.run_data.curves) == tuple(
+        composite.result.base_runner_result.run_data.curves
+    )
 
 
 def test_gui_user_mode_builds_and_dispatches_registered_operation(app, tmp_path):
@@ -602,6 +790,78 @@ def _valid_beampanel_image_amplification_request():
             prepared.beams,
             (ChannelLaunchElements(1, (screen,)),),
         ),
+        pump_channel_index=0,
+        signal_channel_index=1,
+    )
+
+
+def _presentation_image_experiment(
+    *,
+    signal_waist_x_um=5.0,
+    signal_waist_y_um=3.0,
+    screen_center_x_um=23.0,
+    screen_center_y_um=-8.0,
+    screen_width_um=20.0,
+    screen_height_um=8.0,
+):
+    grid = GridSpec(
+        Nx=64,
+        Ny=48,
+        x_aperture_um=120.0,
+        y_aperture_um=80.0,
+        z_length_um=10.0,
+        dz_um=5.0,
+    )
+    beams = BeamStack(
+        channels=(
+            BeamChannel(
+                name="pump",
+                power_mW=1.0,
+                waist_x_um=5.0,
+                waist_y_um=3.0,
+                x0_um=-20.0,
+                y0_um=10.0,
+                tilt_x_rad_per_um=0.15,
+                coherence_group="image-presentation",
+            ),
+            BeamChannel(
+                name="signal",
+                power_mW=0.2,
+                waist_x_um=signal_waist_x_um,
+                waist_y_um=signal_waist_y_um,
+                x0_um=20.0,
+                y0_um=-10.0,
+                tilt_x_rad_per_um=-0.15,
+                coherence_group="image-presentation",
+            ),
+        ),
+        coherence="coherent",
+    )
+    screen = IntensityRasterScreen(
+        PRImageSource.from_array(np.eye(8)),
+        ScreenPlacement(
+            center_x_um=screen_center_x_um,
+            center_y_um=screen_center_y_um,
+            width_um=screen_width_um,
+            height_um=screen_height_um,
+            boundary_policy="reject",
+        ),
+    )
+    launch = LaunchConfiguration(
+        beams,
+        (ChannelLaunchElements(1, (screen,)),),
+    )
+    base = PRRunRequest(
+        grid=grid,
+        beams=beams,
+        material=PRMaterialSpec(gain_length_product=0.0),
+        solver=PRSolverOptions(Nt=0, dt_normalized=0.01),
+        backend=BackendSpec(backend="numpy", precision="float64", verbose=False),
+    )
+    return PRImageAmplificationExperimentRequest(
+        base_workflow_id=PR_TIMEDEPENDENT_WORKFLOW,
+        base_request=base,
+        launch_configuration=launch,
         pump_channel_index=0,
         signal_channel_index=1,
     )
@@ -1072,7 +1332,14 @@ def test_transverse_static_image_experiment_is_functional_and_coherent(app):
     )
     assert static_analysis.backpropagated_signal_field.shape == (24, 24)
     assert "image_amplification" in static.run_data.diagnostics
+    assert "image_amplification_metrics" in static.run_data.diagnostics
     assert "transverse_pr" in static.run_data.diagnostics
+    assert static.run_data.diagnostics["image_amplification_metrics"].values[
+        "measured_signal_gain"
+    ] == static_analysis.measured_absolute_signal_gain
+    assert tuple(static.run_data.curves) == tuple(
+        static.result.base_runner_result.run_data.curves
+    )
     assert any(
         item.workflow == PR_TRANSVERSE_STATIC_WORKFLOW for item in progress
     )
@@ -1304,6 +1571,12 @@ def test_gui_completion_accepts_d1_composite_and_installs_all_products(app):
     assert selector.findData("amplified_image") >= 0
     assert selector.findData("zero_response_image") >= 0
     assert "[image_amplification] Image Amplification" in diagnostics
+    assert (
+        "[image_amplification_metrics] Image Amplification Metrics"
+        in diagnostics
+    )
+    assert "measured_signal_gain" in diagnostics
+    assert "output_isolated_signal_power_mW" in diagnostics
     assert "Image-amplification run complete" in console
     assert (
         "Normalized optical power: "
@@ -1415,6 +1688,10 @@ def test_image_experiment_reduced_td_matches_direct_completed_result_bit_for_bit
     for name in (
         "measured_absolute_signal_gain",
         "analytic_absolute_signal_gain",
+        "measured_gain_reference_signal_power_normalized",
+        "output_isolated_signal_power_normalized",
+        "measured_gain_reference_signal_power_mW",
+        "output_isolated_signal_power_mW",
         "image_intensity_correlation",
         "zero_response_image_intensity_correlation",
         "normalized_image_rmse",

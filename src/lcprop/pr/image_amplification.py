@@ -390,6 +390,10 @@ class PRImageAmplificationResult:
     analytic_gamma_p_L: float
     analytic_absolute_signal_gain: float
     measured_absolute_signal_gain: float
+    measured_gain_reference_signal_power_normalized: float
+    output_isolated_signal_power_normalized: float
+    measured_gain_reference_signal_power_mW: float
+    output_isolated_signal_power_mW: float
     image_intensity_correlation: float
     zero_response_image_intensity_correlation: float
     normalized_image_rmse: float
@@ -1311,6 +1315,14 @@ def _analyze_prepared_image_amplification(
         analytic_gamma_p_L=analytic_gamma,
         analytic_absolute_signal_gain=analytic_gain,
         measured_absolute_signal_gain=measured_gain,
+        measured_gain_reference_signal_power_normalized=input_signal_power,
+        output_isolated_signal_power_normalized=output_signal_power,
+        measured_gain_reference_signal_power_mW=(
+            input_signal_power * incident_total
+        ),
+        output_isolated_signal_power_mW=(
+            output_signal_power * incident_total
+        ),
         image_intensity_correlation=correlation,
         zero_response_image_intensity_correlation=zero_correlation,
         normalized_image_rmse=normalized_rmse,

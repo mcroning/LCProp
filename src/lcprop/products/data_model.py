@@ -93,6 +93,8 @@ class FieldData:
     colormap: str = "viridis"
     source_volume_key: str | None = None
     coordinates: dict[str, Any] = field(default_factory=dict)
+    default_display_extent: tuple[float, float, float, float] | None = None
+    initially_selected: bool = False
 
 
 @dataclass(frozen=True)
@@ -131,6 +133,8 @@ def make_field(
     colormap: str = "viridis",
     source_volume_key: str | None = None,
     coordinates: dict[str, Any] | None = None,
+    default_display_extent: tuple[float, float, float, float] | None = None,
+    initially_selected: bool = False,
 ) -> FieldData:
     return FieldData(
         key=key,
@@ -145,6 +149,8 @@ def make_field(
         colormap=colormap,
         source_volume_key=source_volume_key,
         coordinates={} if coordinates is None else coordinates,
+        default_display_extent=default_display_extent,
+        initially_selected=bool(initially_selected),
     )
 
 

@@ -60,7 +60,15 @@ class ImageView(FigureCanvasQTAgg):
         self._crosshair_index = None
         self._button_press_cid = self.mpl_connect("button_press_event", self._on_mouse_press)
 
-    def set_field(self, field, *, extent=None, vmin=None, vmax=None) -> None:
+    def set_field(
+        self,
+        field,
+        *,
+        extent=None,
+        default_display_extent=None,
+        vmin=None,
+        vmax=None,
+    ) -> None:
         raw = np.asarray(field.data)
 
         if raw.ndim != 2:
@@ -82,13 +90,20 @@ class ImageView(FigureCanvasQTAgg):
             else tuple(float(value) for value in extent)
         )
         display_extent = _nondegenerate_extent(resolved_extent)
+        initial_limits = (
+            display_extent
+            if default_display_extent is None
+            else _nondegenerate_extent(
+                tuple(float(value) for value in default_display_extent)
+            )
+        )
         self.image.set_data(data)
         self.image.set_extent(display_extent)
         self.image.set_cmap(getattr(field, "colormap", "viridis"))
         self.image.set_clim(vmin=vmin, vmax=vmax)
         self.ax.set_aspect(_image_aspect(field))
-        self.ax.set_xlim(display_extent[0], display_extent[1])
-        self.ax.set_ylim(display_extent[2], display_extent[3])
+        self.ax.set_xlim(initial_limits[0], initial_limits[1])
+        self.ax.set_ylim(initial_limits[2], initial_limits[3])
 
         self.ax.set_title(field.display_name, fontsize=10, pad=4)
 

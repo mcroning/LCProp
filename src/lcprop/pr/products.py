@@ -21,6 +21,7 @@ from lcprop.pr.image_amplification import (
     PRBeamPanelImageAmplificationRunRequest,
     PRImageAmplificationExperimentRequest,
     PRImageAmplificationResult,
+    PRImageAmplificationRunRequest,
 )
 from lcprop.pr.specs import PRRunResult, PR_TIMEDEPENDENT_WORKFLOW
 from lcprop.pr.static_workflow import (
@@ -88,6 +89,89 @@ def _geometry_from_grid_summary(
 
 def _geometry_from_pr_result(result: PRRunResult) -> Geometry:
     return _geometry_from_grid_summary(result.grid_summary)
+
+
+def _image_amplification_default_display_extent(
+    result: PRImageAmplificationResult,
+    base: RunData,
+) -> tuple[float, float, float, float] | None:
+    """Return a clamped signal/screen view without cropping stored fields."""
+
+    image_request = result.image_request
+    try:
+        if isinstance(
+            image_request,
+            (
+                PRBeamPanelImageAmplificationRunRequest,
+                PRImageAmplificationExperimentRequest,
+            ),
+        ):
+            signal_index = int(image_request.signal_channel_index)
+            screen = next(
+                assignment.elements[0]
+                for assignment in image_request.launch_configuration.channel_elements
+                if assignment.channel_index == signal_index
+            )
+            screen_center_x = float(screen.placement.center_x_um)
+            screen_center_y = float(screen.placement.center_y_um)
+            screen_width = float(screen.placement.width_um)
+            screen_height = float(screen.placement.height_um)
+        elif isinstance(image_request, PRImageAmplificationRunRequest):
+            signal_index = 1
+            screen_size = float(image_request.launch.image_physical_size_um)
+            screen_width = screen_size
+            screen_height = screen_size
+            screen_center_x = float(result.request.beams.channels[1].x0_um)
+            screen_center_y = float(result.request.beams.channels[1].y0_um)
+        else:
+            return None
+        signal = result.request.beams.channels[signal_index]
+        center_x = float(signal.x0_um)
+        center_y = float(signal.y0_um)
+        waist_x = float(signal.waist_x_um)
+        waist_y = float(signal.waist_y_um)
+        x = np.asarray(base.geometry.x, dtype=float)
+        y = np.asarray(base.geometry.y, dtype=float)
+    except (AttributeError, IndexError, StopIteration, TypeError, ValueError):
+        return None
+    values = np.asarray([
+        center_x,
+        center_y,
+        waist_x,
+        waist_y,
+        screen_center_x,
+        screen_center_y,
+        screen_width,
+        screen_height,
+    ])
+    if (
+        x.size < 2
+        or y.size < 2
+        or not np.all(np.isfinite(values))
+        or waist_x <= 0.0
+        or waist_y <= 0.0
+        or screen_width <= 0.0
+        or screen_height <= 0.0
+    ):
+        return None
+
+    # BeamChannel waists are 1/e^2 intensity radii.  The established PR
+    # aperture check uses a two-waist envelope, so presentation reuses it.
+    x_min = min(center_x - 2.0 * waist_x, screen_center_x - 0.5 * screen_width)
+    x_max = max(center_x + 2.0 * waist_x, screen_center_x + 0.5 * screen_width)
+    y_min = min(center_y - 2.0 * waist_y, screen_center_y - 0.5 * screen_height)
+    y_max = max(center_y + 2.0 * waist_y, screen_center_y + 0.5 * screen_height)
+    x_margin = 0.15 * (x_max - x_min)
+    y_margin = 0.15 * (y_max - y_min)
+    extent = (
+        max(float(x[0]), x_min - x_margin),
+        min(float(x[-1]), x_max + x_margin),
+        max(float(y[0]), y_min - y_margin),
+        min(float(y[-1]), y_max + y_margin),
+    )
+    if extent[0] >= extent[1] or extent[2] >= extent[3]:
+        return None
+    return extent
 
 
 def _validated_result_arrays(
@@ -351,6 +435,10 @@ def augment_pr_image_amplification_run_data(
         "source_x": np.arange(source_xy.shape[0], dtype=float),
         "source_y": np.arange(source_xy.shape[1], dtype=float),
     }
+    default_display_extent = _image_amplification_default_display_extent(
+        result,
+        base,
+    )
     for key, display_name, values, axes, kind, units, coordinates in (
         (
             "image_source",
@@ -420,6 +508,10 @@ def augment_pr_image_amplification_run_data(
                 value_unit="1",
                 coordinates=coordinates,
                 colormap="gray" if kind in ("image_source", "mask") else "viridis",
+                default_display_extent=(
+                    default_display_extent if axes == ("x", "y") else None
+                ),
+                initially_selected=key == "amplified_image",
             ),
         )
 
@@ -517,6 +609,44 @@ def augment_pr_image_amplification_run_data(
         )
 
     diagnostics = DiagnosticCollection(list(base.diagnostics.items()))
+    diagnostics.add(
+        "image_amplification_metrics",
+        DiagnosticData(
+            "image_amplification_metrics",
+            "Image Amplification Metrics",
+            {
+                "measured_signal_gain": result.measured_absolute_signal_gain,
+                "analytic_signal_gain": result.analytic_absolute_signal_gain,
+                "image_correlation": result.image_intensity_correlation,
+                "normalized_image_rmse": result.normalized_image_rmse,
+                "incident_signal_power_mW": result.incident_channel_powers_mW[1],
+                "post_screen_signal_power_mW": (
+                    result.post_element_channel_powers_mW[1]
+                ),
+                "signal_screen_throughput": result.signal_throughput_fraction,
+                "measured_gain_reference_signal_power_mW": (
+                    result.measured_gain_reference_signal_power_mW
+                ),
+                "output_isolated_signal_power_mW": (
+                    result.output_isolated_signal_power_mW
+                ),
+                "total_power_entering_pr_medium_mW": (
+                    result.post_element_total_power_mW
+                ),
+                "normalized_optical_power_drift": (
+                    result.normalized_power_relative_drift
+                ),
+                "measured_gain_reference": (
+                    "carrier-isolated post-screen field at z=0"
+                ),
+                "measured_gain_vs_z_available": False,
+                "measured_gain_vs_z_reason": (
+                    "base result stores input/output complex optical fields "
+                    "but no per-z complex optical-field history"
+                ),
+            },
+        ),
+    )
     diagnostics.add(
         "image_amplification",
         DiagnosticData(
