@@ -239,6 +239,11 @@ class LCPropMainWindow(QWidget):
         self.beam_panel = BeamPanel(
             x_aperture_um=self.grid_panel.x_aperture_um.value(),
             y_aperture_um=self.grid_panel.y_aperture_um.value(),
+            input_screens_enabled=False,
+            input_screens_disabled_reason=(
+                "Input screens are disabled because LC requests do not yet "
+                "carry shared launch-element plans."
+            ),
         )
         self.solver_panel = SolverPanel()
         self.sweep_panel = SweepPanel(

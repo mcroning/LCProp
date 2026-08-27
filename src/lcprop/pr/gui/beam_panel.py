@@ -36,6 +36,11 @@ def make_pr_beam_panel(
     panel = BeamPanel(
         x_aperture_um=x_aperture_um,
         y_aperture_um=y_aperture_um,
+        input_screens_enabled=False,
+        input_screens_disabled_reason=(
+            "Input screens are disabled here until PR Stage B3 carries the "
+            "shared launch-element plan into Image Amplification execution."
+        ),
     )
     panel.set_beam_stack_definition(pr_default_beam_stack_definition())
     return panel

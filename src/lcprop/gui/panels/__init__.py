@@ -4,6 +4,7 @@ from importlib import import_module
 
 from lcprop.gui.panels.beam_panel import BeamPanel
 from lcprop.gui.panels.grid_panel import GridPanel
+from lcprop.gui.panels.input_screen_editor import InputScreenEditor
 from lcprop.gui.panels.results_panel import ResultsPanel
 
 
@@ -30,6 +31,7 @@ __all__ = [
     "PhysicsPanel",
     "BeamPanel",
     "GridPanel",
+    "InputScreenEditor",
     "SolverPanel",
     "SweepPanel",
     "ResultsPanel",

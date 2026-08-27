@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QAbstractSpinBox, QVBoxLayout, QWidget
+import numpy as np
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QAbstractSpinBox, QSplitter, QVBoxLayout, QWidget
 
 from lcprop.adapters.launchplane import beam_stack_definition_to_lcprop
 from lcprop.core.beams import BeamStack
+from lcprop.core.context import GridSpec
+from lcprop.core.grid import make_grid
+from lcprop.gui.panels.input_screen_editor import InputScreenEditor
+from lcprop.optics.screens import ChannelLaunchElements
 
 try:
     from launchplane.launchpane import LaunchPlaneWidget
@@ -29,9 +34,18 @@ class BeamPanel(QWidget):
         *,
         x_aperture_um: float = 75.0,
         y_aperture_um: float = 100.0,
+        preview_Nx: int = 128,
+        preview_Ny: int = 128,
+        input_screens_enabled: bool = False,
+        input_screens_disabled_reason: str = (
+            "Input screens are unavailable because this host does not yet "
+            "consume shared launch-element plans."
+        ),
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self._preview_Nx = int(preview_Nx)
+        self._preview_Ny = int(preview_Ny)
 
         launch_plane = LaunchPlaneDefinition(
             x_aperture_um=x_aperture_um,
@@ -62,9 +76,27 @@ class BeamPanel(QWidget):
         )
         self.launch_plane_widget.set_beam_stack(default_stack, selected_index=0)
 
+        self.input_screen_editor = InputScreenEditor(
+            beam_definitions=lambda: self.beam_stack_definition,
+            beams=self.beams,
+            runtime_grid=self._screen_preview_grid,
+            enabled=input_screens_enabled,
+            disabled_reason=input_screens_disabled_reason,
+            parent=self,
+        )
+        self.input_screen_editor.setMinimumWidth(360)
+        self.launch_plane_widget.beamStackChanged.connect(
+            self.input_screen_editor.sync_beams
+        )
+
+        self.splitter = QSplitter(Qt.Horizontal, self)
+        self.splitter.addWidget(self.launch_plane_widget)
+        self.splitter.addWidget(self.input_screen_editor)
+        self.splitter.setStretchFactor(0, 3)
+        self.splitter.setStretchFactor(1, 1)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.launch_plane_widget)
+        layout.addWidget(self.splitter)
         self.setMinimumSize(1000, 650)
         self._initial_aperture_fit_queued = False
         self._initial_aperture_fit_done = False
@@ -113,6 +145,7 @@ class BeamPanel(QWidget):
         )
         selected_index = 0 if stack.beams else None
         self.launch_plane_widget.set_beam_stack(stack, selected_index=selected_index)
+        self.input_screen_editor.sync_beams()
 
     def set_aperture(
         self,
@@ -150,6 +183,30 @@ class BeamPanel(QWidget):
             selected_index=selected_index,
         )
         self.launch_plane_widget.view.fit_aperture()
+        self.input_screen_editor.refresh_preview()
+
+    def set_preview_grid(self, Nx: int, Ny: int) -> None:
+        """Set preview sampling without changing source images or beam geometry."""
+
+        if int(Nx) < 2 or int(Ny) < 2:
+            raise ValueError("preview Nx and Ny must be at least two")
+        self._preview_Nx = int(Nx)
+        self._preview_Ny = int(Ny)
+        self.input_screen_editor.refresh_preview()
+
+    def _screen_preview_grid(self):
+        definition = self.launch_plane_definition
+        return make_grid(
+            GridSpec(
+                Nx=self._preview_Nx,
+                Ny=self._preview_Ny,
+                x_aperture_um=float(definition.x_aperture_um),
+                y_aperture_um=float(definition.y_aperture_um),
+                z_length_um=1.0,
+                dz_um=1.0,
+            ),
+            real_dtype=np.float64,
+        )
 
     def beams(self) -> BeamStack:
         """Return enabled LaunchPane beams adapted to LCProp channels."""
@@ -179,3 +236,16 @@ class BeamPanel(QWidget):
         return beam_stack_definition_to_lcprop(
             self.launch_plane_widget.beam_stack
         )
+
+    def launch_elements(self) -> tuple[ChannelLaunchElements, ...]:
+        """Return the declarative screen plan for canonical enabled channels."""
+
+        return self.input_screen_editor.launch_elements()
+
+    def launch_configuration(
+        self,
+    ) -> tuple[BeamStack, tuple[ChannelLaunchElements, ...]]:
+        """Return canonical beams together with their ordered launch elements."""
+
+        beams = self.beams()
+        return beams, self.input_screen_editor.launch_elements()
