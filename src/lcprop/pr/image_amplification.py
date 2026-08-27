@@ -14,6 +14,7 @@ from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch import build_launch, channel_power_integrals
+from lcprop.optics.launch_configuration import LaunchConfiguration
 from lcprop.optics.screens import (
     ChannelLaunchElements,
     EVEN_SQUARE_NEAREST_TRANSPARENT_V1,
@@ -171,6 +172,113 @@ class PRImageAmplificationRunRequest:
 
 
 @dataclass(frozen=True)
+class PRBeamPanelImageAmplificationRunRequest:
+    """Physical image experiment composed from the shared BeamPanel launch.
+
+    Channel indices refer to the canonical enabled-channel ordering in the
+    immutable :class:`LaunchConfiguration`; roles are deliberately not stored
+    on the generic beam model.
+    """
+
+    grid: GridSpec
+    material: PRMaterialSpec
+    solver: PRSolverOptions
+    backend: BackendSpec
+    launch_configuration: LaunchConfiguration
+    pump_channel_index: int
+    signal_channel_index: int
+
+    def validate(self) -> None:
+        self.grid.validate()
+        self.material.validate()
+        self.solver.validate()
+        self.backend.validate()
+        if not isinstance(self.launch_configuration, LaunchConfiguration):
+            raise TypeError("launch_configuration must be a LaunchConfiguration")
+        beams = self.launch_configuration.beams
+        if len(beams.channels) != 2:
+            raise ValueError(
+                "Image Amplification requires exactly two enabled beam channels"
+            )
+        for name in ("pump_channel_index", "signal_channel_index"):
+            value = getattr(self, name)
+            if type(value) is not int or not 0 <= value < len(beams.channels):
+                raise ValueError(
+                    f"{name} must identify a canonical enabled beam channel"
+                )
+        if self.pump_channel_index == self.signal_channel_index:
+            raise ValueError("pump and signal channels must be distinct")
+        pump = beams.channels[self.pump_channel_index]
+        signal = beams.channels[self.signal_channel_index]
+        if float(pump.power_mW) <= 0.0 or float(signal.power_mW) <= 0.0:
+            raise ValueError("pump and signal incident powers must be positive")
+        groups = beams.coherence_groups
+        if groups[self.pump_channel_index] != groups[self.signal_channel_index]:
+            raise ValueError(
+                "pump and signal channels must share one coherence group"
+            )
+        if not math.isclose(
+            float(pump.wavelength_um),
+            float(signal.wavelength_um),
+            rel_tol=0.0,
+            abs_tol=1e-15,
+        ):
+            raise ValueError("pump and signal wavelengths must match")
+        if not math.isclose(
+            float(pump.tilt_y_rad_per_um),
+            0.0,
+            rel_tol=0.0,
+            abs_tol=1e-15,
+        ) or not math.isclose(
+            float(signal.tilt_y_rad_per_um),
+            0.0,
+            rel_tol=0.0,
+            abs_tol=1e-15,
+        ):
+            raise ValueError(
+                "Image Amplification C1 requires both carriers in the x-z plane"
+            )
+        if not math.isclose(
+            float(pump.tilt_x_rad_per_um),
+            -float(signal.tilt_x_rad_per_um),
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        ):
+            raise ValueError(
+                "Image Amplification C1 requires symmetric pump/signal x carriers"
+            )
+        assignments = {
+            assignment.channel_index: assignment.elements
+            for assignment in self.launch_configuration.channel_elements
+        }
+        if assignments.get(self.pump_channel_index, ()):
+            raise ValueError("the selected pump channel must not carry an image screen")
+        signal_elements = assignments.get(self.signal_channel_index, ())
+        if len(signal_elements) != 1 or not isinstance(
+            signal_elements[0], IntensityRasterScreen
+        ):
+            raise ValueError(
+                "the selected signal channel must carry exactly one "
+                "IntensityRasterScreen"
+            )
+
+    @property
+    def source(self):
+        assignments = {
+            assignment.channel_index: assignment.elements
+            for assignment in self.launch_configuration.channel_elements
+        }
+        return assignments[self.signal_channel_index][0].source
+
+    @property
+    def incident_signal_to_pump_power_ratio(self) -> float:
+        channels = self.launch_configuration.beams.channels
+        return float(channels[self.signal_channel_index].power_mW) / float(
+            channels[self.pump_channel_index].power_mW
+        )
+
+
+@dataclass(frozen=True)
 class PRImageAmplificationResult:
     """Optical, gain, and image-fidelity evidence from one benchmark."""
 
@@ -202,7 +310,11 @@ class PRImageAmplificationResult:
     reconstruction_optical_runtime_s: float
     reconstruction_runtime_s: float
     runtime_s: float
-    image_request: PRImageAmplificationRunRequest | None = None
+    image_request: (
+        PRImageAmplificationRunRequest
+        | PRBeamPanelImageAmplificationRunRequest
+        | None
+    ) = None
 
     @property
     def status(self) -> str:
@@ -422,7 +534,9 @@ def _gain_geometry(
 
 
 def prepare_image_amplification_workflow_request(
-    request: PRImageAmplificationRunRequest,
+    request: (
+        PRImageAmplificationRunRequest | PRBeamPanelImageAmplificationRunRequest
+    ),
 ) -> tuple[PRRunRequest, np.ndarray, float]:
     """Apply the passive image element to an incident-power-normalized launch.
 
@@ -430,8 +544,45 @@ def prepare_image_amplification_workflow_request(
     image may reduce that integral; no post-element renormalization occurs.
     """
 
+    if isinstance(request, PRBeamPanelImageAmplificationRunRequest):
+        request.validate()
+        grid = make_grid(request.grid, real_dtype=np.float64)
+        launch = request.launch_configuration
+        prepared = build_launch(
+            launch.beams,
+            grid,
+            complex_dtype=np.complex128,
+            launch_elements=launch.channel_elements,
+        )
+        assignments = {
+            assignment.channel_index: assignment.elements
+            for assignment in launch.channel_elements
+        }
+        screen = assignments[request.signal_channel_index][0]
+        transmission = prepare_intensity_raster_transmission(
+            screen.source.grayscale,
+            grid,
+            placement=screen.placement,
+            invert=screen.invert,
+            preprocessing_policy=screen.preprocessing_policy,
+        )
+        pump = launch.beams.channels[request.pump_channel_index]
+        signal = launch.beams.channels[request.signal_channel_index]
+        normalized_grating = (
+            float(signal.tilt_x_rad_per_um)
+            - float(pump.tilt_x_rad_per_um)
+        ) / float(request.material.characteristic_wavenumber_per_um)
+        workflow_request = PRRunRequest(
+            grid=request.grid,
+            beams=launch.beams,
+            material=request.material,
+            solver=request.solver,
+            backend=request.backend,
+            initial_A=np.asarray(prepared.A0).copy(),
+        )
+        return workflow_request, transmission, normalized_grating
     if not isinstance(request, PRImageAmplificationRunRequest):
-        raise TypeError("request must be a PRImageAmplificationRunRequest")
+        raise TypeError("unsupported image-amplification request type")
     request.validate()
     launch_spec = request.launch
     grid = make_grid(request.grid, real_dtype=np.float64)
@@ -704,17 +855,27 @@ def _run_prepared_image_amplification(
     *,
     analytic_input_ratio: float,
     wavelength_um: float,
-    image_request: PRImageAmplificationRunRequest | None,
+    image_request: (
+        PRImageAmplificationRunRequest
+        | PRBeamPanelImageAmplificationRunRequest
+        | None
+    ),
     transparency_policy: str,
     incident_channel_powers_mW: tuple[float, float],
+    pump_channel_index: int = 0,
+    signal_channel_index: int = 1,
     cancellation_token: CancellationToken | None = None,
     progress_callback=None,
 ) -> PRImageAmplificationResult:
     """Measure one already-prepared image-bearing PR request."""
 
     grid = make_grid(request.grid, real_dtype=np.float64)
-    pump_kx = float(request.beams.channels[0].tilt_x_rad_per_um)
-    signal_kx = float(request.beams.channels[1].tilt_x_rad_per_um)
+    pump_kx = float(
+        request.beams.channels[pump_channel_index].tilt_x_rad_per_um
+    )
+    signal_kx = float(
+        request.beams.channels[signal_channel_index].tilt_x_rad_per_um
+    )
     mask = signal_carrier_mask(
         grid,
         pump_kx_rad_per_um=pump_kx,
@@ -761,7 +922,9 @@ def _run_prepared_image_amplification(
         request=request,
     )
     reconstruction_optical_runtime += perf_counter() - optical_started_at
-    signal_channel_intensity = np.abs(np.asarray(request.initial_A)[1]) ** 2
+    signal_channel_intensity = (
+        np.abs(np.asarray(request.initial_A)[signal_channel_index]) ** 2
+    )
     roi = signal_channel_intensity > 1e-4 * float(np.max(signal_channel_intensity))
     correlation, normalized_rmse = _intensity_metrics(
         input_signal,
@@ -798,9 +961,10 @@ def _run_prepared_image_amplification(
     reconstruction_runtime = perf_counter() - reconstruction_started_at
     incident_powers = tuple(float(value) for value in incident_channel_powers_mW)
     incident_total = float(sum(incident_powers))
-    post_element_powers = tuple(
-        float(value) * incident_total
-        for value in channel_power_integrals(request.initial_A, grid)
+    prepared_channel_powers = channel_power_integrals(request.initial_A, grid)
+    post_element_powers = (
+        float(prepared_channel_powers[pump_channel_index]) * incident_total,
+        float(prepared_channel_powers[signal_channel_index]) * incident_total,
     )
     signal_throughput = (
         post_element_powers[1] / incident_powers[1]
@@ -842,7 +1006,9 @@ def _run_prepared_image_amplification(
 
 
 def run_image_amplification_request(
-    image_request: PRImageAmplificationRunRequest,
+    image_request: (
+        PRImageAmplificationRunRequest | PRBeamPanelImageAmplificationRunRequest
+    ),
     *,
     cancellation_token: CancellationToken | None = None,
     progress_callback=None,
@@ -852,19 +1018,36 @@ def run_image_amplification_request(
     request, transmission, normalized_grating = (
         prepare_image_amplification_workflow_request(image_request)
     )
-    launch = image_request.launch
+    if isinstance(image_request, PRBeamPanelImageAmplificationRunRequest):
+        launch_configuration = image_request.launch_configuration
+        pump_index = image_request.pump_channel_index
+        signal_index = image_request.signal_channel_index
+        pump = launch_configuration.beams.channels[pump_index]
+        signal = launch_configuration.beams.channels[signal_index]
+        analytic_ratio = image_request.incident_signal_to_pump_power_ratio
+        wavelength_um = float(signal.wavelength_um)
+        incident_powers = (float(pump.power_mW), float(signal.power_mW))
+    else:
+        launch = image_request.launch
+        pump_index = 0
+        signal_index = 1
+        analytic_ratio = launch.incident_signal_to_pump_power_ratio
+        wavelength_um = launch.wavelength_um
+        incident_powers = (
+            launch.pump_incident_power_mW,
+            launch.signal_incident_power_mW,
+        )
     return _run_prepared_image_amplification(
         request,
         transmission,
         normalized_grating,
-        analytic_input_ratio=launch.incident_signal_to_pump_power_ratio,
-        wavelength_um=launch.wavelength_um,
+        analytic_input_ratio=analytic_ratio,
+        wavelength_um=wavelength_um,
         image_request=image_request,
         transparency_policy="passive_intensity_transmission_v1",
-        incident_channel_powers_mW=(
-            launch.pump_incident_power_mW,
-            launch.signal_incident_power_mW,
-        ),
+        incident_channel_powers_mW=incident_powers,
+        pump_channel_index=pump_index,
+        signal_channel_index=signal_index,
         cancellation_token=cancellation_token,
         progress_callback=progress_callback,
     )
@@ -998,6 +1181,7 @@ def run_streaming_image_amplification(
 
 __all__ = [
     "PR_IMAGE_AMPLIFICATION_WORKFLOW",
+    "PRBeamPanelImageAmplificationRunRequest",
     "PRImageAmplificationRunRequest",
     "PRImageAmplificationResult",
     "PRImageAmplificationSpec",

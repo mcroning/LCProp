@@ -319,7 +319,8 @@ def test_pr_gui_build_and_registered_dispatch_carry_screen_plan(app):
     assert np.array_equal(window.last_result.A_initial, _independent(request).A0)
 
     window.input_panel.input_mode.setCurrentIndex(1)
-    assert not window.tabs.isTabEnabled(window.tabs.indexOf(window.beam_panel))
+    assert window.tabs.isTabEnabled(window.tabs.indexOf(window.beam_panel))
+    assert window.beam_panel.launch_elements() == request.launch_elements
     window.close()
 
 

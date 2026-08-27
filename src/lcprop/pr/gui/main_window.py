@@ -76,6 +76,7 @@ from lcprop.pr.specs import (
 )
 from lcprop.pr.image_amplification import (
     PR_IMAGE_AMPLIFICATION_WORKFLOW,
+    PRBeamPanelImageAmplificationRunRequest,
     PRImageAmplificationRunRequest,
     prepare_image_amplification_workflow_request,
 )
@@ -230,6 +231,7 @@ class PRMainWindow(QWidget):
             x_aperture_um=self.grid_panel.x_aperture_um.value(),
             y_aperture_um=self.grid_panel.y_aperture_um.value(),
         )
+        self.input_panel.set_beam_panel(self.beam_panel)
         self.evolution_panel = PREvolutionPanel()
         self.results_panel = ResultsPanel()
         self.tabs.addTab(self.material_panel, "PR Material")
@@ -256,7 +258,7 @@ class PRMainWindow(QWidget):
     def _input_mode_changed(self, mode_id: str) -> None:
         image_mode = mode_id == PR_IMAGE_AMPLIFICATION_INPUT_MODE
         beam_index = self.tabs.indexOf(self.beam_panel)
-        self.tabs.setTabEnabled(beam_index, not image_mode)
+        self.tabs.setTabEnabled(beam_index, True)
         if image_mode:
             self.evolution_panel.set_workflow_id(PR_TIMEDEPENDENT_WORKFLOW)
         self.evolution_panel.workflow.setEnabled(not image_mode)
@@ -352,6 +354,7 @@ class PRMainWindow(QWidget):
                 material=self.material_panel.material(),
                 solver=self.evolution_panel.solver(),
                 backend=self.evolution_panel.backend_spec(),
+                launch_configuration=self.beam_panel.launch_configuration(),
             )
         return build_pr_request(
             material_panel=self.material_panel,
@@ -393,9 +396,15 @@ class PRMainWindow(QWidget):
         if self._background_running:
             raise RuntimeError("cannot save an experiment while a run is active")
         request = self.build_request()
-        if isinstance(request, PRImageAmplificationRunRequest):
+        if isinstance(
+            request,
+            (
+                PRImageAmplificationRunRequest,
+                PRBeamPanelImageAmplificationRunRequest,
+            ),
+        ):
             raise ValueError(
-                "Image Amplification experiment persistence is deferred to Stage B"
+                "Image Amplification experiment persistence is unsupported in C1"
             )
         validate_pr_gui_request_representable(request)
         return save_experiment(
@@ -482,13 +491,53 @@ class PRMainWindow(QWidget):
     def describe_request(self, request) -> str:
         """Return a durable, unit-explicit summary of one PR request."""
 
-        if isinstance(request, PRImageAmplificationRunRequest):
+        if isinstance(
+            request,
+            (
+                PRImageAmplificationRunRequest,
+                PRBeamPanelImageAmplificationRunRequest,
+            ),
+        ):
             prepared, _transmission, _grating = (
                 prepare_image_amplification_workflow_request(request)
             )
             preflight = validate_pr_gui_workflow_request(prepared)
-            launch = request.launch
             source = request.source
+            if isinstance(request, PRBeamPanelImageAmplificationRunRequest):
+                launch_configuration = request.launch_configuration
+                pump = launch_configuration.beams.channels[
+                    request.pump_channel_index
+                ]
+                signal = launch_configuration.beams.channels[
+                    request.signal_channel_index
+                ]
+                signal_elements = next(
+                    assignment.elements
+                    for assignment in launch_configuration.channel_elements
+                    if assignment.channel_index == request.signal_channel_index
+                )
+                screen = signal_elements[0]
+                image_size = (
+                    screen.placement.width_um,
+                    screen.placement.height_um,
+                )
+                invert_image = screen.invert
+                preprocessing_policy = screen.preprocessing_policy
+                incident_powers = (pump.power_mW, signal.power_mW)
+                incident_ratio = request.incident_signal_to_pump_power_ratio
+            else:
+                launch = request.launch
+                image_size = (
+                    launch.image_physical_size_um,
+                    launch.image_physical_size_um,
+                )
+                invert_image = launch.invert_image
+                preprocessing_policy = source.preprocessing_policy
+                incident_powers = (
+                    launch.pump_incident_power_mW,
+                    launch.signal_incident_power_mW,
+                )
+                incident_ratio = launch.incident_signal_to_pump_power_ratio
             lines = [
                 "Material: photorefractive",
                 f"Workflow: {PR_IMAGE_AMPLIFICATION_WORKFLOW}",
@@ -508,21 +557,21 @@ class PRMainWindow(QWidget):
                     f"pixels={source.width} × {source.height}; "
                     f"format={source.encoded_format}; SHA-256={source.sha256}"
                 ),
-                f"Preprocessing: {source.preprocessing_policy}",
+                f"Preprocessing: {preprocessing_policy}",
                 "Alpha policy: discarded; alpha is not an optical mask",
                 (
-                    f"Image footprint: {launch.image_physical_size_um:g} µm "
-                    "square; nearest-neighbor resampling"
+                    f"Image footprint: {image_size[0]:g} × {image_size[1]:g} µm; "
+                    "nearest-neighbor resampling"
                 ),
-                f"Invert image: {launch.invert_image}",
+                f"Invert image: {invert_image}",
                 (
                     "Incident channel powers: "
-                    f"pump={launch.pump_incident_power_mW:g} mW; "
-                    f"signal={launch.signal_incident_power_mW:g} mW"
+                    f"pump={incident_powers[0]:g} mW; "
+                    f"signal={incident_powers[1]:g} mW"
                 ),
                 (
                     "Derived incident signal/pump power ratio: "
-                    f"{launch.incident_signal_to_pump_power_ratio:g}"
+                    f"{incident_ratio:g}"
                 ),
                 (
                     "Prepared incident channel powers: "
@@ -640,7 +689,13 @@ class PRMainWindow(QWidget):
 
     @staticmethod
     def _workflow_id_for_request(request) -> str:
-        if isinstance(request, PRImageAmplificationRunRequest):
+        if isinstance(
+            request,
+            (
+                PRImageAmplificationRunRequest,
+                PRBeamPanelImageAmplificationRunRequest,
+            ),
+        ):
             return PR_IMAGE_AMPLIFICATION_WORKFLOW
         if isinstance(request, PRTransverseStaticRunRequest):
             return PR_TRANSVERSE_STATIC_WORKFLOW
@@ -908,7 +963,13 @@ class PRMainWindow(QWidget):
             f"with {self.runner.name}..."
         )
         preflight_request = request
-        if isinstance(request, PRImageAmplificationRunRequest):
+        if isinstance(
+            request,
+            (
+                PRImageAmplificationRunRequest,
+                PRBeamPanelImageAmplificationRunRequest,
+            ),
+        ):
             preflight_request, _transmission, _grating = (
                 prepare_image_amplification_workflow_request(request)
             )

@@ -66,6 +66,7 @@ from lcprop.pr.readiness import (
 )
 from lcprop.pr.image_amplification import (
     PR_IMAGE_AMPLIFICATION_WORKFLOW,
+    PRBeamPanelImageAmplificationRunRequest,
     PRImageAmplificationRunRequest,
     PRImageAmplificationResult,
     PRImageAmplificationSpec,
@@ -105,6 +106,7 @@ from lcprop.pr.workflow import (
 __all__ = [
     "PR_IMAGE_AMPLIFICATION_WORKFLOW",
     "PR_IMAGE_PREPROCESSING_POLICY_V1",
+    "PRBeamPanelImageAmplificationRunRequest",
     "PRImageAmplificationRunRequest",
     "PRMaterialSpec",
     "PR_EULER_INTEGRATOR",

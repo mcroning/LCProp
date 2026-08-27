@@ -18,6 +18,7 @@ from lcprop.optics.farfield import direction_cosine_spectrum
 from lcprop.optics.splitstep import total_intensity
 from lcprop.pr.image_amplification import (
     PR_IMAGE_AMPLIFICATION_WORKFLOW,
+    PRBeamPanelImageAmplificationRunRequest,
     PRImageAmplificationResult,
 )
 from lcprop.pr.specs import PRRunResult, PR_TIMEDEPENDENT_WORKFLOW
@@ -419,15 +420,40 @@ def pr_image_amplification_result_to_run_data(
             ),
         )
 
-    launch = image_request.launch
+    if isinstance(image_request, PRBeamPanelImageAmplificationRunRequest):
+        launch_configuration = image_request.launch_configuration
+        signal = launch_configuration.beams.channels[
+            image_request.signal_channel_index
+        ]
+        wavelength_um = float(signal.wavelength_um)
+        coherence_group = launch_configuration.beams.coherence_groups[
+            image_request.signal_channel_index
+        ]
+        incident_ratio = image_request.incident_signal_to_pump_power_ratio
+        screen = next(
+            assignment.elements[0]
+            for assignment in launch_configuration.channel_elements
+            if assignment.channel_index == image_request.signal_channel_index
+        )
+        preprocessing_policy = screen.preprocessing_policy
+        pump_channel_index = image_request.pump_channel_index
+        signal_channel_index = image_request.signal_channel_index
+    else:
+        launch = image_request.launch
+        wavelength_um = float(launch.wavelength_um)
+        coherence_group = launch.coherence_group
+        incident_ratio = launch.incident_signal_to_pump_power_ratio
+        preprocessing_policy = image_request.source.preprocessing_policy
+        pump_channel_index = 0
+        signal_channel_index = 1
     coherent_output = np.sum(np.asarray(result.run_result.A_final), axis=0)
     spectrum = direction_cosine_spectrum(
         coherent_output[None, ...],
         dx_um=float(result.run_result.grid_summary["dx_um"]),
         dy_um=float(result.run_result.grid_summary["dy_um"]),
-        wavelength_um=float(launch.wavelength_um),
+        wavelength_um=wavelength_um,
         refractive_index=float(image_request.material.refractive_index),
-        coherence_groups=(launch.coherence_group,),
+        coherence_groups=(coherence_group,),
         xp=np,
     )
     far_field = np.asarray(spectrum.intensity)
@@ -498,7 +524,9 @@ def pr_image_amplification_result_to_run_data(
                 ],
                 "source_decoded_mode": image_request.source.decoded_mode,
                 "source_encoded_format": image_request.source.encoded_format,
-                "preprocessing_policy": image_request.source.preprocessing_policy,
+                "preprocessing_policy": preprocessing_policy,
+                "pump_channel_index": pump_channel_index,
+                "signal_channel_index": signal_channel_index,
                 "alpha_policy": "discarded_not_an_optical_mask",
                 "simulation_grid": [image_request.grid.Nx, image_request.grid.Ny],
                 "incident_pump_power_mW": result.incident_channel_powers_mW[0],
@@ -514,7 +542,7 @@ def pr_image_amplification_result_to_run_data(
                 "signal_throughput_fraction": result.signal_throughput_fraction,
                 "transparency_policy": result.transparency_policy,
                 "derived_incident_signal_to_pump_power_ratio": (
-                    launch.incident_signal_to_pump_power_ratio
+                    incident_ratio
                 ),
                 "measured_absolute_signal_gain": result.measured_absolute_signal_gain,
                 "analytic_absolute_signal_gain": result.analytic_absolute_signal_gain,

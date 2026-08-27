@@ -11,10 +11,17 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
+from launchplane.model import BeamDefinition, BeamStackDefinition
 
 from lcprop.core.backend import BackendSpec
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
+from lcprop.optics.launch_configuration import LaunchConfiguration
+from lcprop.optics.screens import (
+    ChannelLaunchElements,
+    IntensityRasterScreen,
+    ScreenPlacement,
+)
 from lcprop.pr.gui.image_input_panel import (
     PR_IMAGE_AMPLIFICATION_INPUT_MODE,
     PRImageInputPanel,
@@ -23,6 +30,7 @@ from lcprop.pr.gui.image_input_panel import (
 from lcprop.pr.gui.main_window import PRMainWindow
 from lcprop.pr.image_amplification import (
     PR_IMAGE_AMPLIFICATION_WORKFLOW,
+    PRBeamPanelImageAmplificationRunRequest,
     PRImageAmplificationRunRequest,
     PRImageAmplificationSpec,
     PRImageLaunchSpec,
@@ -387,7 +395,6 @@ def test_gui_user_mode_builds_and_dispatches_registered_operation(app, tmp_path)
         PR_IMAGE_AMPLIFICATION_INPUT_MODE
     )
     window.input_panel.input_mode.setCurrentIndex(mode_index)
-    window.input_panel.load_user_image(path)
     window.grid_panel.Nx.setValue(32)
     window.grid_panel.Ny.setValue(8)
     window.grid_panel.x_aperture_um.setValue(64.0)
@@ -395,10 +402,34 @@ def test_gui_user_mode_builds_and_dispatches_registered_operation(app, tmp_path)
     window.grid_panel.z_length_um.setValue(20.0)
     window.grid_panel.dz_um.setValue(10.0)
     window.evolution_panel.Nt.setValue(0)
-    window.input_panel.image_size_um.setValue(8.0)
-    window.input_panel.positive_mode_index.setValue(2)
-    window.input_panel.pump_incident_power_mW.setValue(2.0)
-    window.input_panel.signal_incident_power_mW.setValue(0.25)
+    kx = 2.0 * np.pi * 2 / 64.0
+    window.beam_panel.set_beam_stack_definition(
+        BeamStackDefinition(
+            beams=(
+                BeamDefinition(
+                    name="pump",
+                    power_mW=2.0,
+                    waist_x_um=10.0,
+                    waist_y_um=6.0,
+                    tilt_x_rad_per_um=kx,
+                    coherence_group="image-laser",
+                ),
+                BeamDefinition(
+                    name="signal",
+                    power_mW=0.25,
+                    waist_x_um=10.0,
+                    waist_y_um=6.0,
+                    tilt_x_rad_per_um=-kx,
+                    coherence_group="image-laser",
+                ),
+            )
+        )
+    )
+    editor = window.beam_panel.input_screen_editor
+    editor.channel.setCurrentIndex(1)
+    editor.load_user_image(path)
+    editor.width_um.setValue(8.0)
+    editor.height_um.setValue(8.0)
 
     request = window.build_request()
     before = window.grid_panel.grid()
@@ -417,47 +448,476 @@ def test_gui_user_mode_builds_and_dispatches_registered_operation(app, tmp_path)
         time.sleep(0.002)
     app.processEvents()
 
-    assert isinstance(request, PRImageAmplificationRunRequest)
+    assert isinstance(request, PRBeamPanelImageAmplificationRunRequest)
     assert request.source.grayscale.shape == (4, 8)
-    assert request.launch.pump_incident_power_mW == 2.0
-    assert request.launch.signal_incident_power_mW == 0.25
-    assert request.launch.incident_signal_to_pump_power_ratio == pytest.approx(0.125)
+    assert request.incident_signal_to_pump_power_ratio == pytest.approx(0.125)
     assert window.grid_panel.grid() == before == request.grid
-    assert not window.tabs.isTabEnabled(window.tabs.indexOf(window.beam_panel))
+    assert window.tabs.isTabEnabled(window.tabs.indexOf(window.beam_panel))
     assert not window.evolution_panel.workflow.isEnabled()
-    assert not window.input_panel.preview.pixmap().isNull()
+    assert not hasattr(window.input_panel, "preview")
     assert not window._background_running
     assert calls and calls[0][:2] == ("pr", PR_IMAGE_AMPLIFICATION_WORKFLOW)
     assert calls[0][2] == request
     assert window.last_runner_result.kind == PR_IMAGE_AMPLIFICATION_WORKFLOW
     assert "amplified_image" in window.last_runner_result.run_data.fields
     assert "image_amplification" in window.last_runner_result.run_data.diagnostics
-    with pytest.raises(ValueError, match="deferred to Stage B"):
+    with pytest.raises(ValueError, match="unsupported in C1"):
         window.save_experiment_to(tmp_path / "image.lcprop.json")
     window.close()
 
 
-def test_standard_selector_is_disabled_with_actionable_message(app):
-    panel = PRImageInputPanel()
-    panel.input_mode.setCurrentIndex(
-        panel.input_mode.findData(PR_IMAGE_AMPLIFICATION_INPUT_MODE)
+def test_beampanel_request_matches_stage_a_prepared_launch_bit_for_bit():
+    source = PRImageSource.from_array(np.eye(8))
+    legacy = _composite(source, pump_power_mW=3.0, signal_power_mW=0.5)
+    old_prepared, old_transmission, old_grating = (
+        prepare_image_amplification_workflow_request(legacy)
     )
-    panel.source_type.setCurrentIndex(panel.source_type.findData("standard"))
+    signal = old_prepared.beams.channels[1]
+    screen = IntensityRasterScreen(
+        source=source,
+        placement=ScreenPlacement(
+            center_x_um=signal.x0_um,
+            center_y_um=signal.y0_um,
+            width_um=legacy.launch.image_physical_size_um,
+            height_um=legacy.launch.image_physical_size_um,
+            boundary_policy="reject",
+        ),
+    )
+    request = PRBeamPanelImageAmplificationRunRequest(
+        grid=legacy.grid,
+        material=legacy.material,
+        solver=legacy.solver,
+        backend=legacy.backend,
+        launch_configuration=LaunchConfiguration(
+            beams=old_prepared.beams,
+            channel_elements=(ChannelLaunchElements(1, (screen,)),),
+        ),
+        pump_channel_index=0,
+        signal_channel_index=1,
+    )
+    new_prepared, new_transmission, new_grating = (
+        prepare_image_amplification_workflow_request(request)
+    )
 
-    assert not panel.standard_image.isEnabled()
-    assert "provenance approval is pending" in panel.standard_status.text()
-    with pytest.raises(ValueError, match="no redistributable standard image"):
-        panel.build_request(
-            grid=GridSpec(
-                Nx=16,
-                Ny=8,
-                dz_um=1.0,
-                x_aperture_um=16.0,
-                y_aperture_um=8.0,
-                z_length_um=10.0,
+    assert new_prepared.beams == old_prepared.beams
+    assert np.array_equal(new_transmission, old_transmission)
+    assert new_grating == old_grating
+    assert np.array_equal(new_prepared.initial_A, old_prepared.initial_A)
+
+
+def test_role_validation_rejects_ambiguous_or_incompatible_launches():
+    source = PRImageSource.from_array(np.eye(4))
+    legacy = _composite(source)
+    prepared, _transmission, _grating = prepare_image_amplification_workflow_request(
+        legacy
+    )
+    screen = IntensityRasterScreen(
+        source=source,
+        placement=ScreenPlacement(width_um=4.0, height_um=4.0),
+    )
+    launch = LaunchConfiguration(
+        beams=prepared.beams,
+        channel_elements=(ChannelLaunchElements(1, (screen,)),),
+    )
+    common = dict(
+        grid=legacy.grid,
+        material=legacy.material,
+        solver=legacy.solver,
+        backend=legacy.backend,
+        launch_configuration=launch,
+    )
+    with pytest.raises(ValueError, match="must be distinct"):
+        PRBeamPanelImageAmplificationRunRequest(
+            **common, pump_channel_index=1, signal_channel_index=1
+        ).validate()
+    with pytest.raises(ValueError, match="exactly one IntensityRasterScreen"):
+        PRBeamPanelImageAmplificationRunRequest(
+            **{**common, "launch_configuration": LaunchConfiguration(prepared.beams)},
+            pump_channel_index=0,
+            signal_channel_index=1,
+        ).validate()
+
+
+def _valid_beampanel_image_amplification_request():
+    source = PRImageSource.from_array(np.eye(4))
+    legacy = _composite(source)
+    prepared, _transmission, _grating = prepare_image_amplification_workflow_request(
+        legacy
+    )
+    signal = prepared.beams.channels[1]
+    screen = IntensityRasterScreen(
+        source=source,
+        placement=ScreenPlacement(
+            center_x_um=signal.x0_um,
+            center_y_um=signal.y0_um,
+            width_um=4.0,
+            height_um=4.0,
+        ),
+    )
+    return PRBeamPanelImageAmplificationRunRequest(
+        grid=legacy.grid,
+        material=legacy.material,
+        solver=legacy.solver,
+        backend=legacy.backend,
+        launch_configuration=LaunchConfiguration(
+            prepared.beams,
+            (ChannelLaunchElements(1, (screen,)),),
+        ),
+        pump_channel_index=0,
+        signal_channel_index=1,
+    )
+
+
+@pytest.mark.parametrize("channel_count", [1, 3])
+def test_beampanel_request_rejects_non_two_channel_launches(channel_count):
+    request = _valid_beampanel_image_amplification_request()
+    channels = request.launch_configuration.beams.channels
+    if channel_count == 1:
+        selected = channels[:1]
+        elements = ()
+    else:
+        selected = channels + (replace(channels[1], name="extra"),)
+        elements = request.launch_configuration.channel_elements
+    launch = LaunchConfiguration(
+        replace(request.launch_configuration.beams, channels=selected),
+        elements,
+    )
+
+    with pytest.raises(ValueError, match="exactly two enabled beam channels"):
+        replace(request, launch_configuration=launch).validate()
+
+
+def test_beampanel_request_rejects_different_coherence_groups():
+    request = _valid_beampanel_image_amplification_request()
+    pump, signal = request.launch_configuration.beams.channels
+    beams = replace(
+        request.launch_configuration.beams,
+        channels=(pump, replace(signal, coherence_group="other-laser")),
+    )
+
+    with pytest.raises(ValueError, match="share one coherence group"):
+        replace(
+            request,
+            launch_configuration=replace(
+                request.launch_configuration,
+                beams=beams,
             ),
-            material=PRMaterialSpec(),
-            solver=PRSolverOptions(),
-            backend=BackendSpec(),
+        ).validate()
+
+
+def test_beampanel_request_rejects_different_wavelengths():
+    request = _valid_beampanel_image_amplification_request()
+    pump, signal = request.launch_configuration.beams.channels
+    beams = replace(
+        request.launch_configuration.beams,
+        channels=(pump, replace(signal, wavelength_um=0.532)),
+    )
+
+    with pytest.raises(ValueError, match="wavelengths must match"):
+        replace(
+            request,
+            launch_configuration=replace(
+                request.launch_configuration,
+                beams=beams,
+            ),
+        ).validate()
+
+
+def test_beampanel_request_rejects_nonzero_y_carrier():
+    request = _valid_beampanel_image_amplification_request()
+    pump, signal = request.launch_configuration.beams.channels
+    beams = replace(
+        request.launch_configuration.beams,
+        channels=(pump, replace(signal, tilt_y_rad_per_um=0.01)),
+    )
+
+    with pytest.raises(ValueError, match="carriers in the x-z plane"):
+        replace(
+            request,
+            launch_configuration=replace(
+                request.launch_configuration,
+                beams=beams,
+            ),
+        ).validate()
+
+
+def test_beampanel_request_requires_symmetric_x_carriers():
+    request = _valid_beampanel_image_amplification_request()
+    request.validate()
+    pump, signal = request.launch_configuration.beams.channels
+    beams = replace(
+        request.launch_configuration.beams,
+        channels=(pump, replace(signal, tilt_x_rad_per_um=-0.5)),
+    )
+
+    with pytest.raises(ValueError, match="symmetric pump/signal x carriers"):
+        replace(
+            request,
+            launch_configuration=replace(
+                request.launch_configuration,
+                beams=beams,
+            ),
+        ).validate()
+
+
+def test_beampanel_request_rejects_pump_screen():
+    request = _valid_beampanel_image_amplification_request()
+    signal_assignment = request.launch_configuration.channel_elements[0]
+    screen = signal_assignment.elements[0]
+    launch = replace(
+        request.launch_configuration,
+        channel_elements=(
+            ChannelLaunchElements(0, (screen,)),
+            signal_assignment,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="pump channel must not carry"):
+        replace(request, launch_configuration=launch).validate()
+
+
+def test_beampanel_request_rejects_multiple_signal_screens():
+    request = _valid_beampanel_image_amplification_request()
+    assignment = request.launch_configuration.channel_elements[0]
+    launch = replace(
+        request.launch_configuration,
+        channel_elements=(
+            replace(assignment, elements=assignment.elements * 2),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="exactly one IntensityRasterScreen"):
+        replace(request, launch_configuration=launch).validate()
+
+
+def test_beampanel_image_amplification_is_explicitly_rejected_by_slurm(app):
+    class ObservedSlurmRunner:
+        name = "Slurm"
+        supports_parallel_sweeps = False
+        registered_operations = ()
+
+        def __init__(self):
+            self.calls = []
+
+        def run_registered(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            raise AssertionError("unsupported request reached Slurm dispatch")
+
+    request = _valid_beampanel_image_amplification_request()
+    assert request.launch_configuration.channel_elements
+    assert request.pump_channel_index == 0
+    assert request.signal_channel_index == 1
+    runner = ObservedSlurmRunner()
+    window = PRMainWindow(slurm_runner=runner)
+    window.runner = runner
+    window.runner_label.setText("Runner: Slurm")
+    window.remote_execution_controls.validate_backend = lambda _backend: None
+    window.build_request = lambda: request
+
+    window.run_clicked()
+
+    assert runner.calls == []
+    assert window._active_request is None
+    assert not window._background_running
+    assert window.status_label.text() == "Invalid request"
+    assert "supports only pr_transverse_static" in (
+        window.results_panel.workspace.console.toPlainText()
+    )
+    window.close()
+
+
+def test_beampanel_stage_a_full_result_equivalence():
+    source = PRImageSource.from_array(np.eye(8))
+    legacy = replace(
+        _composite(source, pump_power_mW=3.0, signal_power_mW=0.5),
+        solver=PRSolverOptions(Nt=1, dt_normalized=0.01),
+    )
+    old_prepared, _old_transmission, _old_grating = (
+        prepare_image_amplification_workflow_request(legacy)
+    )
+    signal = old_prepared.beams.channels[1]
+    screen = IntensityRasterScreen(
+        source=source,
+        placement=ScreenPlacement(
+            center_x_um=signal.x0_um,
+            center_y_um=signal.y0_um,
+            width_um=legacy.launch.image_physical_size_um,
+            height_um=legacy.launch.image_physical_size_um,
+            boundary_policy="reject",
+        ),
+    )
+    rewired = PRBeamPanelImageAmplificationRunRequest(
+        grid=legacy.grid,
+        material=legacy.material,
+        solver=legacy.solver,
+        backend=legacy.backend,
+        launch_configuration=LaunchConfiguration(
+            old_prepared.beams,
+            (ChannelLaunchElements(1, (screen,)),),
+        ),
+        pump_channel_index=0,
+        signal_channel_index=1,
+    )
+
+    old_result = run_image_amplification_request(legacy)
+    new_result = run_image_amplification_request(rewired)
+    for name in (
+        "image_transmission",
+        "signal_carrier_mask",
+        "input_signal_field",
+        "output_signal_field",
+        "backpropagated_signal_field",
+        "zero_response_backpropagated_signal_field",
+    ):
+        assert np.array_equal(getattr(new_result, name), getattr(old_result, name))
+    for name in (
+        "A_initial",
+        "A_final",
+        "E_initial",
+        "E_final",
+        "source_intensity_stack",
+    ):
+        assert np.array_equal(
+            getattr(new_result.run_result, name),
+            getattr(old_result.run_result, name),
         )
-    panel.close()
+    for name in (
+        "incident_channel_powers_mW",
+        "post_element_channel_powers_mW",
+        "incident_total_power_mW",
+        "post_element_total_power_mW",
+        "signal_throughput_fraction",
+        "measured_absolute_signal_gain",
+        "analytic_absolute_signal_gain",
+        "analytic_gamma_p_L",
+        "image_intensity_correlation",
+        "zero_response_image_intensity_correlation",
+        "normalized_image_rmse",
+        "normalized_power_relative_drift",
+    ):
+        assert getattr(new_result, name) == getattr(old_result, name)
+    assert new_result.run_result.status == old_result.run_result.status
+    assert (
+        new_result.run_result.completed_steps
+        == old_result.run_result.completed_steps
+    )
+    assert new_result.run_result.diagnostics == old_result.run_result.diagnostics
+
+
+def test_mode_switch_preserves_shared_beams_screens_and_role_names(app):
+    window = PRMainWindow()
+    kx = 0.1
+    stack = BeamStackDefinition(
+        beams=(
+            BeamDefinition(
+                name="pump",
+                tilt_x_rad_per_um=kx,
+                coherence_group="shared",
+            ),
+            BeamDefinition(
+                name="signal",
+                tilt_x_rad_per_um=-kx,
+                coherence_group="shared",
+            ),
+        )
+    )
+    window.beam_panel.set_beam_stack_definition(stack)
+    editor = window.beam_panel.input_screen_editor
+    editor.channel.setCurrentIndex(1)
+    editor.set_source(PRImageSource.from_array(np.eye(4)))
+    original_elements = window.beam_panel.launch_elements()
+
+    image_index = window.input_panel.input_mode.findData(
+        PR_IMAGE_AMPLIFICATION_INPUT_MODE
+    )
+    gaussian_index = window.input_panel.input_mode.findData(
+        "gaussian_beams"
+    )
+    window.input_panel.input_mode.setCurrentIndex(image_index)
+    window.input_panel.sync_channels()
+    assert window.input_panel.pump_channel.currentText() == "0 — pump"
+    assert window.input_panel.signal_channel.currentText() == "1 — signal"
+    assert window.tabs.isTabEnabled(window.tabs.indexOf(window.beam_panel))
+    window.input_panel.input_mode.setCurrentIndex(gaussian_index)
+
+    assert window.beam_panel.beam_stack_definition == stack
+    assert window.beam_panel.launch_elements() == original_elements
+    window.close()
+
+
+def test_signal_role_may_be_first_canonical_channel():
+    source = PRImageSource.from_array(np.eye(4))
+    legacy = _composite(source)
+    prepared, _transmission, expected_grating = (
+        prepare_image_amplification_workflow_request(legacy)
+    )
+    reversed_beams = replace(
+        prepared.beams,
+        channels=tuple(reversed(prepared.beams.channels)),
+    )
+    signal = reversed_beams.channels[0]
+    screen = IntensityRasterScreen(
+        source,
+        ScreenPlacement(
+            center_x_um=signal.x0_um,
+            center_y_um=signal.y0_um,
+            width_um=legacy.launch.image_physical_size_um,
+            height_um=legacy.launch.image_physical_size_um,
+            boundary_policy="reject",
+        ),
+    )
+    request = PRBeamPanelImageAmplificationRunRequest(
+        grid=legacy.grid,
+        material=legacy.material,
+        solver=legacy.solver,
+        backend=legacy.backend,
+        launch_configuration=LaunchConfiguration(
+            reversed_beams,
+            (ChannelLaunchElements(0, (screen,)),),
+        ),
+        pump_channel_index=1,
+        signal_channel_index=0,
+    )
+
+    workflow, _transmission, grating = prepare_image_amplification_workflow_request(
+        request
+    )
+    result = run_image_amplification_request(request)
+    run_data = PR_IMAGE_AMPLIFICATION_OPERATION.to_run_data(result)
+
+    assert grating == expected_grating
+    assert np.any(np.asarray(workflow.initial_A[0]) != 0.0)
+    assert run_data.diagnostics["image_amplification"].values[
+        "incident_signal_power_mW"
+    ] == pytest.approx(signal.power_mW)
+
+
+def test_role_selectors_follow_unique_names_on_reorder_and_clear_disabled(app):
+    window = PRMainWindow()
+    pump = BeamDefinition(name="pump", coherence_group="shared")
+    signal = BeamDefinition(name="signal", coherence_group="shared")
+    window.beam_panel.set_beam_stack_definition(
+        BeamStackDefinition(beams=(pump, signal))
+    )
+    window.input_panel.sync_channels()
+    assert window.input_panel.pump_channel.currentData() == 0
+    assert window.input_panel.signal_channel.currentData() == 1
+
+    window.beam_panel.set_beam_stack_definition(
+        BeamStackDefinition(beams=(signal, pump))
+    )
+    window.input_panel.sync_channels()
+    assert window.input_panel.pump_channel.currentData() == 1
+    assert window.input_panel.signal_channel.currentData() == 0
+
+    window.beam_panel.set_beam_stack_definition(
+        BeamStackDefinition(beams=(replace(signal, enabled=False), pump))
+    )
+    window.input_panel.sync_channels()
+    assert window.input_panel.signal_channel.currentData() is None
+    window.input_panel.input_mode.setCurrentIndex(
+        window.input_panel.input_mode.findData(PR_IMAGE_AMPLIFICATION_INPUT_MODE)
+    )
+    with pytest.raises(ValueError, match="valid enabled signal channel"):
+        window.build_request()
+    window.close()
