@@ -4,12 +4,14 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QLabel,
     QVBoxLayout,
     QWidget,
 )
 
 from lcprop.core.backend import BackendSpec
 from lcprop.gui.panels.helpers import spin_box
+from lcprop.pr.image_amplification import image_amplification_base_capabilities
 from lcprop.pr.specs import (
     PRSolverOptions,
     PR_EULER_INTEGRATOR,
@@ -20,6 +22,7 @@ from lcprop.pr.static_workflow import (
     PRStaticWorkflowOptions,
     PR_STATIC_WORKFLOW,
 )
+from lcprop.pr.transverse.specs import PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
 from lcprop.pr.transverse.static_workflow import (
     PRTransverseStaticWorkflowOptions,
     PR_TRANSVERSE_STATIC_WORKFLOW,
@@ -50,6 +53,20 @@ class PREvolutionPanel(QWidget):
             "Static (legacy x-only)",
             PR_STATIC_WORKFLOW,
         )
+        self.workflow.addItem(
+            "Time dependent (2D transverse) — GUI unavailable",
+            PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+        )
+        transverse_td_item = self.workflow.model().item(
+            self.workflow.findData(PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW)
+        )
+        transverse_td_item.setEnabled(False)
+        transverse_td_item.setToolTip(
+            "The prepared-field adapter exists, but the GUI cannot yet "
+            "construct the canonical transverse-TD request."
+        )
+        self.algorithm_status = QLabel()
+        self.algorithm_status.setWordWrap(True)
         self.Nt = spin_box(0, 1_000_000_000, defaults.Nt)
         self.dt_normalized = QDoubleSpinBox()
         self.dt_normalized.setRange(1e-12, 1e6)
@@ -69,6 +86,7 @@ class PREvolutionPanel(QWidget):
         self.max_coupled_passes = spin_box(1, 1_000_000, 20)
 
         form.addRow("Workflow", self.workflow)
+        form.addRow("Validation status", self.algorithm_status)
         form.addRow("Material steps in segment", self.Nt)
         form.addRow("Normalized timestep", self.dt_normalized)
         form.addRow("Material integrator", self.integrator)
@@ -77,6 +95,7 @@ class PREvolutionPanel(QWidget):
         form.addRow("Backend", self.backend)
         form.addRow("Precision", self.precision)
         self._form = form
+        self._image_amplification_mode = False
         self.workflow.currentIndexChanged.connect(
             self._refresh_workflow_controls
         )
@@ -92,6 +111,62 @@ class PREvolutionPanel(QWidget):
         if index < 0:
             raise ValueError(f"unsupported PR GUI workflow: {workflow_id!r}")
         self.workflow.setCurrentIndex(index)
+
+    def set_image_amplification_mode(self, enabled: bool) -> None:
+        """Present the canonical workflow selector as the base algorithm."""
+
+        self._image_amplification_mode = bool(enabled)
+        labels = {
+            PR_TIMEDEPENDENT_WORKFLOW: "Reduced TD",
+            PR_STATIC_WORKFLOW: "Static",
+            PR_TRANSVERSE_STATIC_WORKFLOW: "Transverse Static",
+            PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW: "Transverse TD",
+        }
+        statuses = {
+            capability.workflow_id: capability.validation_status
+            for capability in image_amplification_base_capabilities()
+        }
+        ordinary_labels = {
+            PR_TIMEDEPENDENT_WORKFLOW: "Time dependent",
+            PR_TRANSVERSE_STATIC_WORKFLOW: (
+                "Static (2D transverse zero-flux)"
+            ),
+            PR_STATIC_WORKFLOW: "Static (legacy x-only)",
+            PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW: (
+                "Time dependent (2D transverse) — GUI unavailable"
+            ),
+        }
+        for index in range(self.workflow.count()):
+            workflow_id = str(self.workflow.itemData(index))
+            if enabled:
+                status = statuses[workflow_id]
+                badge = (
+                    "Validated"
+                    if status == "compatible_and_validated"
+                    else "Experimental"
+                )
+                unavailable = (
+                    " — unavailable"
+                    if workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
+                    else ""
+                )
+                text = f"{labels[workflow_id]} [{badge}{unavailable}]"
+            else:
+                text = ordinary_labels[workflow_id]
+            self.workflow.setItemText(index, text)
+        label = self._form.labelForField(self.workflow)
+        if label is not None:
+            label.setText("Algorithm" if enabled else "Workflow")
+        self._refresh_workflow_controls()
+
+    def image_amplification_validation_status(self) -> str | None:
+        if not self._image_amplification_mode:
+            return None
+        return next(
+            capability.validation_status
+            for capability in image_amplification_base_capabilities()
+            if capability.workflow_id == self.workflow_id()
+        )
 
     def _set_row_visible(self, widget: QWidget, visible: bool) -> None:
         label = self._form.labelForField(widget)
@@ -119,6 +194,25 @@ class PREvolutionPanel(QWidget):
                 if is_transverse_static
                 else "Maximum coupled passes per slice"
             )
+        self._set_row_visible(
+            self.algorithm_status,
+            self._image_amplification_mode,
+        )
+        if self._image_amplification_mode:
+            status = self.image_amplification_validation_status()
+            if status == "compatible_and_validated":
+                text = "Validated for the Image Amplification experiment."
+            else:
+                text = (
+                    "Experimental: compatible architecture; specialized "
+                    "Image Amplification validation is pending."
+                )
+            if self.workflow_id() == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
+                text += (
+                    " Selection is disabled because the GUI cannot construct "
+                    "its canonical prepared-field request."
+                )
+            self.algorithm_status.setText(text)
 
     def solver(self) -> PRSolverOptions:
         return PRSolverOptions(

@@ -21,6 +21,7 @@ from lcprop.gui.image_sources import (
 )
 from lcprop.pr.image_amplification import (
     PRBeamPanelImageAmplificationRunRequest,
+    PRImageAmplificationExperimentRequest,
 )
 from lcprop.pr.image_sources import PRImageSource
 
@@ -221,6 +222,32 @@ class PRImageInputPanel(QWidget):
             material=material,
             solver=solver,
             backend=backend,
+            launch_configuration=launch_configuration,
+            pump_channel_index=int(self.pump_channel.currentData()),
+            signal_channel_index=int(self.signal_channel.currentData()),
+        )
+        request.validate()
+        return request
+
+    def build_experiment_request(
+        self,
+        *,
+        base_workflow_id: str,
+        base_request,
+        launch_configuration,
+    ) -> PRImageAmplificationExperimentRequest:
+        """Compose image roles over one canonical ordinary PR request."""
+
+        if not self.is_image_amplification():
+            raise ValueError("image-amplification input mode is not selected")
+        self.sync_channels()
+        if self.pump_channel.currentData() is None:
+            raise ValueError("select a valid enabled pump channel")
+        if self.signal_channel.currentData() is None:
+            raise ValueError("select a valid enabled signal channel")
+        request = PRImageAmplificationExperimentRequest(
+            base_workflow_id=base_workflow_id,
+            base_request=base_request,
             launch_configuration=launch_configuration,
             pump_channel_index=int(self.pump_channel.currentData()),
             signal_channel_index=int(self.signal_channel.currentData()),

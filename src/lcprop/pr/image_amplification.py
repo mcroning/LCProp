@@ -137,13 +137,11 @@ class PRImageAmplificationCompositeResult:
 
     @property
     def status(self) -> str:
-        if self.base_status != "completed":
+        if self.base_status not in ("completed", "converged"):
             return self.base_status
-        return (
-            "completed"
-            if self.analysis_status == "completed"
-            else self.analysis_status
-        )
+        if self.analysis_status != "completed":
+            return self.analysis_status
+        return self.base_status
 
 
 @dataclass(frozen=True)
@@ -484,7 +482,7 @@ def image_amplification_base_capabilities() -> tuple[
             PRTransverseStaticRunRequest,
             PRTransverseStaticRunResult,
             "declarative_elements",
-            "compatible_validation_pending",
+            "compatible_and_validated",
         ),
         PRImageAmplificationBaseCapability(
             PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,

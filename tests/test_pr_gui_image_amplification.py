@@ -34,6 +34,7 @@ from lcprop.pr.image_amplification import (
     PR_IMAGE_AMPLIFICATION_WORKFLOW,
     PRBeamPanelImageAmplificationRunRequest,
     PRImageAmplificationCompositeResult,
+    PRImageAmplificationExperimentRequest,
     PRImageAmplificationRunRequest,
     PRImageAmplificationSpec,
     PRImageLaunchSpec,
@@ -52,6 +53,7 @@ from lcprop.pr.image_amplification import (
 from lcprop.pr.image_sources import PRImageSource, standard_image_catalog
 from lcprop.pr.operations import (
     PR_IMAGE_AMPLIFICATION_OPERATION,
+    PR_STATIC_OPERATION,
     PR_TIMEDEPENDENT_OPERATION,
 )
 from lcprop.pr.products import pr_image_amplification_result_to_run_data
@@ -61,7 +63,11 @@ from lcprop.pr.specs import (
     PRSolverOptions,
     PR_TIMEDEPENDENT_WORKFLOW,
 )
-from lcprop.pr.static_workflow import PRStaticRunRequest, PR_STATIC_WORKFLOW
+from lcprop.pr.static_workflow import (
+    PRStaticRunRequest,
+    PRStaticRunResult,
+    PR_STATIC_WORKFLOW,
+)
 from lcprop.pr.transverse.specs import (
     PRTransverseRunRequest,
     PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
@@ -70,6 +76,7 @@ from lcprop.pr.transverse.static_workflow import (
     PRTransverseStaticRunRequest,
     PR_TRANSVERSE_STATIC_WORKFLOW,
 )
+from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
 from lcprop.runners.local import LocalRunner
 
 
@@ -474,18 +481,22 @@ def test_gui_user_mode_builds_and_dispatches_registered_operation(app, tmp_path)
         time.sleep(0.002)
     app.processEvents()
 
-    assert isinstance(request, PRBeamPanelImageAmplificationRunRequest)
+    assert isinstance(request, PRImageAmplificationExperimentRequest)
+    assert isinstance(request.base_request, PRRunRequest)
     assert request.source.grayscale.shape == (4, 8)
     assert request.incident_signal_to_pump_power_ratio == pytest.approx(0.125)
     assert window.grid_panel.grid() == before == request.grid
     assert window.tabs.isTabEnabled(window.tabs.indexOf(window.beam_panel))
-    assert not window.evolution_panel.workflow.isEnabled()
+    assert window.evolution_panel.workflow.isEnabled()
     assert not hasattr(window.input_panel, "preview")
     assert not window._background_running
     assert calls and calls[0][:2] == ("pr", PR_TIMEDEPENDENT_WORKFLOW)
     assert isinstance(calls[0][2], PRRunRequest)
     assert calls[0][2].initial_A is None
-    assert calls[0][2].launch_elements == request.launch_configuration.channel_elements
+    assert (
+        calls[0][2].launch_elements
+        == request.launch_configuration.channel_elements
+    )
     assert window.last_runner_result.kind == PR_IMAGE_AMPLIFICATION_WORKFLOW
     assert "amplified_image" in window.last_runner_result.run_data.fields
     assert "image_amplification" in window.last_runner_result.run_data.diagnostics
@@ -594,6 +605,61 @@ def _valid_beampanel_image_amplification_request():
         pump_channel_index=0,
         signal_channel_index=1,
     )
+
+
+def _configured_multi_algorithm_image_window(app):
+    window = PRMainWindow()
+    window.input_panel.input_mode.setCurrentIndex(
+        window.input_panel.input_mode.findData(
+            PR_IMAGE_AMPLIFICATION_INPUT_MODE
+        )
+    )
+    window.grid_panel.Nx.setValue(24)
+    window.grid_panel.Ny.setValue(24)
+    window.grid_panel.x_aperture_um.setValue(40.0)
+    window.grid_panel.y_aperture_um.setValue(40.0)
+    window.grid_panel.z_length_um.setValue(10.0)
+    window.grid_panel.dz_um.setValue(5.0)
+    window.material_panel.dark_intensity.setValue(0.4)
+    window.material_panel.uniform_background_intensity.setValue(0.1)
+    window.material_panel.applied_field.setValue(0.0)
+    window.material_panel.gain_length_product.setValue(1.0e-3)
+    window.material_panel.use_characteristic_wavenumber_override.setChecked(True)
+    window.material_panel.characteristic_wavenumber_per_um_override.setValue(0.1)
+    window.evolution_panel.Nt.setValue(2)
+    window.evolution_panel.dt_normalized.setValue(0.01)
+    window.evolution_panel.max_coupled_passes.setValue(8)
+    window.evolution_panel.backend.setCurrentText("numpy")
+    window.evolution_panel.precision.setCurrentText("float64")
+    window.beam_panel.set_beam_stack_definition(
+        BeamStackDefinition(
+            beams=(
+                BeamDefinition(
+                    name="pump",
+                    power_mW=1.0,
+                    waist_x_um=10.0,
+                    waist_y_um=10.0,
+                    tilt_x_rad_per_um=0.15,
+                    coherence_group="image-validation",
+                ),
+                BeamDefinition(
+                    name="signal",
+                    power_mW=0.2,
+                    waist_x_um=10.0,
+                    waist_y_um=10.0,
+                    tilt_x_rad_per_um=-0.15,
+                    coherence_group="image-validation",
+                ),
+            )
+        )
+    )
+    editor = window.beam_panel.input_screen_editor
+    editor.channel.setCurrentIndex(1)
+    editor.set_source(PRImageSource.from_array(np.eye(8)))
+    editor.width_um.setValue(8.0)
+    editor.height_um.setValue(8.0)
+    window.input_panel.sync_channels()
+    return window
 
 
 @pytest.mark.parametrize("channel_count", [1, 3])
@@ -846,17 +912,265 @@ def test_image_experiment_capability_table_covers_current_pr_algorithms():
     assert capabilities["pr_timedependent"].validation_status == (
         "compatible_and_validated"
     )
+    assert capabilities["pr_transverse_static"].validation_status == (
+        "compatible_and_validated"
+    )
     assert all(
         capabilities[name].validation_status == "compatible_validation_pending"
         for name in (
             "pr_static",
-            "pr_transverse_static",
             "pr_transverse_timedependent",
         )
     )
     assert capabilities["pr_transverse_timedependent"].launch_adapter == (
         "prepared_field"
     )
+
+
+def test_gui_image_mode_reuses_workflow_selector_with_capability_status(app):
+    window = PRMainWindow()
+    window.input_panel.input_mode.setCurrentIndex(
+        window.input_panel.input_mode.findData(
+            PR_IMAGE_AMPLIFICATION_INPUT_MODE
+        )
+    )
+    selector = window.evolution_panel.workflow
+    expected = {
+        PR_TIMEDEPENDENT_WORKFLOW: ("Reduced TD", "Validated", True),
+        PR_STATIC_WORKFLOW: ("Static", "Experimental", True),
+        PR_TRANSVERSE_STATIC_WORKFLOW: (
+            "Transverse Static", "Validated", True
+        ),
+        PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW: (
+            "Transverse TD", "Experimental", False
+        ),
+    }
+    assert window.evolution_panel._form.labelForField(selector).text() == (
+        "Algorithm"
+    )
+    for workflow_id, (name, status, enabled) in expected.items():
+        index = selector.findData(workflow_id)
+        assert index >= 0
+        assert name in selector.itemText(index)
+        assert status in selector.itemText(index)
+        assert selector.model().item(index).isEnabled() is enabled
+    selector.setCurrentIndex(selector.findData(PR_STATIC_WORKFLOW))
+    assert "Experimental" in window.evolution_panel.algorithm_status.text()
+    window.close()
+
+
+def test_gui_image_algorithm_switch_preserves_experiment_inputs(app):
+    window = _configured_multi_algorithm_image_window(app)
+    material = window.material_panel.material()
+    launch = window.beam_panel.launch_configuration()
+    pump_index = window.input_panel.pump_channel.currentData()
+    signal_index = window.input_panel.signal_channel.currentData()
+
+    for workflow_id in (
+        PR_TIMEDEPENDENT_WORKFLOW,
+        PR_STATIC_WORKFLOW,
+        PR_TRANSVERSE_STATIC_WORKFLOW,
+    ):
+        window.evolution_panel.set_workflow_id(workflow_id)
+        request = window.build_request()
+        assert request.base_workflow_id == workflow_id
+        assert request.material == material
+        assert request.launch_configuration == launch
+        assert request.pump_channel_index == pump_index
+        assert request.signal_channel_index == signal_index
+    window.close()
+
+
+@pytest.mark.parametrize(
+    ("workflow_id", "base_type"),
+    (
+        (PR_TIMEDEPENDENT_WORKFLOW, PRRunRequest),
+        (PR_STATIC_WORKFLOW, PRStaticRunRequest),
+        (PR_TRANSVERSE_STATIC_WORKFLOW, PRTransverseStaticRunRequest),
+    ),
+)
+def test_gui_image_algorithm_selection_builds_canonical_base_request(
+    app,
+    workflow_id,
+    base_type,
+):
+    window = _configured_multi_algorithm_image_window(app)
+    window.evolution_panel.set_workflow_id(workflow_id)
+    request = window.build_request()
+    prepared, transmission, _grating = prepare_image_amplification_base_request(
+        request
+    )
+
+    assert isinstance(request, PRImageAmplificationExperimentRequest)
+    assert request.base_workflow_id == workflow_id
+    assert isinstance(request.base_request, base_type)
+    assert isinstance(prepared, base_type)
+    assert prepared.initial_A is None
+    assert prepared.beams == request.launch_configuration.beams
+    assert prepared.launch_elements == (
+        request.launch_configuration.channel_elements
+    )
+    assert transmission.shape == (24, 24)
+    window.close()
+
+
+def test_transverse_static_image_experiment_is_functional_and_coherent(app):
+    window = _configured_multi_algorithm_image_window(app)
+    window.evolution_panel.set_workflow_id(PR_TIMEDEPENDENT_WORKFLOW)
+    td_request = window.build_request()
+    window.evolution_panel.set_workflow_id(PR_TRANSVERSE_STATIC_WORKFLOW)
+    static_request = window.build_request()
+    window.close()
+
+    prepared_td, transmission_td, grating_td = (
+        prepare_image_amplification_base_request(td_request)
+    )
+    prepared_static, transmission_static, grating_static = (
+        prepare_image_amplification_base_request(static_request)
+    )
+    assert prepared_td.beams == prepared_static.beams
+    assert prepared_td.launch_elements == prepared_static.launch_elements
+    assert np.array_equal(transmission_td, transmission_static)
+    assert grating_td == grating_static
+
+    runner = LocalRunner(
+        operations=(
+            PR_TIMEDEPENDENT_OPERATION,
+            PR_TRANSVERSE_STATIC_OPERATION,
+        )
+    )
+    td = run_image_amplification_experiment(runner, td_request)
+    progress = []
+    static = run_image_amplification_experiment(
+        runner,
+        static_request,
+        progress_callback=progress.append,
+    )
+    td_analysis = td.result.analysis_result
+    static_analysis = static.result.analysis_result
+    assert td_analysis is not None
+    assert static_analysis is not None
+    assert static.result.base_status == "converged"
+    assert static.result.status == "converged"
+    assert static.result.analysis_status == "completed"
+    assert static.result.run_result.converged
+    assert static.result.run_result.replay_diagnostics["field_match"] is True
+    for value in (
+        static_analysis.measured_absolute_signal_gain,
+        static_analysis.analytic_absolute_signal_gain,
+        static_analysis.image_intensity_correlation,
+        static_analysis.normalized_image_rmse,
+        static_analysis.normalized_power_relative_drift,
+    ):
+        assert np.isfinite(value)
+    assert -1.0 <= static_analysis.image_intensity_correlation <= 1.0
+    assert static_analysis.normalized_image_rmse >= 0.0
+    assert abs(static_analysis.normalized_power_relative_drift) < 1.0e-10
+    assert np.array_equal(
+        td_analysis.signal_carrier_mask,
+        static_analysis.signal_carrier_mask,
+    )
+    assert static_analysis.backpropagated_signal_field.shape == (24, 24)
+    assert "image_amplification" in static.run_data.diagnostics
+    assert "transverse_pr" in static.run_data.diagnostics
+    assert any(
+        item.workflow == PR_TRANSVERSE_STATIC_WORKFLOW for item in progress
+    )
+    assert [
+        item.diagnostics["stage"]
+        for item in progress
+        if item.workflow == PR_IMAGE_AMPLIFICATION_WORKFLOW
+    ] == list(image_amplification_module.PR_IMAGE_ANALYSIS_STAGES)
+
+    gui = PRMainWindow()
+    gui._thread_done = True
+    gui._on_finished(static)
+    assert gui.run_status == "completed"
+    assert gui.status_label.text() == "Converged"
+    assert "image_amplification" in gui.last_runner_result.run_data.diagnostics
+    assert "transverse_pr" in gui.last_runner_result.run_data.diagnostics
+    assert "Authoritative zero-flux residual" in (
+        gui.results_panel.workspace.console.toPlainText()
+    )
+    gui.close()
+
+
+def test_gui_runs_transverse_static_image_progress_and_completion(app):
+    window = _configured_multi_algorithm_image_window(app)
+    window.evolution_panel.set_workflow_id(PR_TRANSVERSE_STATIC_WORKFLOW)
+    calls = []
+    original_run = window.local_runner.run_registered
+
+    def observed(material_id, workflow_id, request, **kwargs):
+        calls.append((material_id, workflow_id, request))
+        return original_run(material_id, workflow_id, request, **kwargs)
+
+    window.local_runner.run_registered = observed
+    window.run_button.click()
+    deadline = time.monotonic() + 10.0
+    while window._background_running and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.002)
+    app.processEvents()
+
+    console = window.results_panel.workspace.console.toPlainText()
+    assert not window._background_running
+    assert calls and calls[0][:2] == ("pr", PR_TRANSVERSE_STATIC_WORKFLOW)
+    assert isinstance(calls[0][2], PRTransverseStaticRunRequest)
+    assert window.run_status == "completed"
+    assert window.status_label.text() == "Converged"
+    assert "PR transverse static progress" in console
+    assert "Post-processing image amplification" in console
+    assert "Image-amplification run complete" in console
+    assert "image_amplification" in window.last_runner_result.run_data.diagnostics
+    window.close()
+
+
+def test_transverse_static_image_experiment_forwards_base_cancellation(app):
+    window = _configured_multi_algorithm_image_window(app)
+    window.evolution_panel.set_workflow_id(PR_TRANSVERSE_STATIC_WORKFLOW)
+    request = window.build_request()
+    window.close()
+    token = CancellationToken()
+    progress = []
+
+    def cancel_after_first_accepted_iteration(item):
+        progress.append(item)
+        if item.workflow == PR_TRANSVERSE_STATIC_WORKFLOW:
+            token.cancel()
+
+    result = run_image_amplification_experiment(
+        LocalRunner(operations=(PR_TRANSVERSE_STATIC_OPERATION,)),
+        request,
+        cancellation_token=token,
+        progress_callback=cancel_after_first_accepted_iteration,
+    ).result
+
+    assert any(item.workflow == PR_TRANSVERSE_STATIC_WORKFLOW for item in progress)
+    assert result.base_status == "cancelled"
+    assert result.status == "cancelled"
+    assert result.analysis_status == "not_run"
+    assert result.analysis_result is None
+    assert all(
+        item.workflow != PR_IMAGE_AMPLIFICATION_WORKFLOW for item in progress
+    )
+
+
+def test_legacy_static_image_experiment_dispatches_registered_operation(app):
+    window = _configured_multi_algorithm_image_window(app)
+    window.evolution_panel.set_workflow_id(PR_STATIC_WORKFLOW)
+    request = window.build_request()
+    window.close()
+
+    result = run_image_amplification_experiment(
+        LocalRunner(operations=(PR_STATIC_OPERATION,)),
+        request,
+    )
+
+    assert result.result.base_runner_result.kind == PR_STATIC_WORKFLOW
+    assert isinstance(result.result.run_result, PRStaticRunResult)
+    assert result.result.analysis_result is not None
+    assert result.result.analysis_status == "completed"
 
 
 def test_image_experiment_reduced_td_transformation_is_declarative():

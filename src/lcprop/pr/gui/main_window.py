@@ -71,6 +71,7 @@ from lcprop.pr.operations import (
 )
 from lcprop.pr.specs import (
     PRRunRequest,
+    PRRunResult,
     PR_MATERIAL_ID,
     PR_TIMEDEPENDENT_WORKFLOW,
 )
@@ -78,7 +79,9 @@ from lcprop.pr.image_amplification import (
     PR_IMAGE_AMPLIFICATION_WORKFLOW,
     PRBeamPanelImageAmplificationRunRequest,
     PRImageAmplificationCompositeResult,
+    PRImageAmplificationExperimentRequest,
     PRImageAmplificationRunRequest,
+    image_amplification_base_capabilities,
     image_amplification_experiment_request,
     prepare_image_amplification_base_request,
     prepare_image_amplification_workflow_request,
@@ -86,6 +89,7 @@ from lcprop.pr.image_amplification import (
 )
 from lcprop.pr.static_workflow import (
     PRStaticRunRequest,
+    PRStaticRunResult,
     PR_STATIC_WORKFLOW,
 )
 from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
@@ -263,9 +267,7 @@ class PRMainWindow(QWidget):
         image_mode = mode_id == PR_IMAGE_AMPLIFICATION_INPUT_MODE
         beam_index = self.tabs.indexOf(self.beam_panel)
         self.tabs.setTabEnabled(beam_index, True)
-        if image_mode:
-            self.evolution_panel.set_workflow_id(PR_TIMEDEPENDENT_WORKFLOW)
-        self.evolution_panel.workflow.setEnabled(not image_mode)
+        self.evolution_panel.set_image_amplification_mode(image_mode)
         if hasattr(self, "checkpoint_compatibility_reason"):
             self._refresh_checkpoint_controls()
 
@@ -349,15 +351,15 @@ class PRMainWindow(QWidget):
         """Construct the immutable request represented by the controls."""
 
         if self.input_panel.is_image_amplification():
-            if self.evolution_panel.workflow_id() != PR_TIMEDEPENDENT_WORKFLOW:
-                raise ValueError(
-                    "Image Amplification Stage A uses only Time dependent PR"
-                )
-            return self.input_panel.build_request(
-                grid=self.grid_panel.grid(),
-                material=self.material_panel.material(),
-                solver=self.evolution_panel.solver(),
-                backend=self.evolution_panel.backend_spec(),
+            base_request = build_pr_request(
+                material_panel=self.material_panel,
+                beam_panel=self.beam_panel,
+                grid_panel=self.grid_panel,
+                evolution_panel=self.evolution_panel,
+            )
+            return self.input_panel.build_experiment_request(
+                base_workflow_id=self.evolution_panel.workflow_id(),
+                base_request=base_request,
                 launch_configuration=self.beam_panel.launch_configuration(),
             )
         return build_pr_request(
@@ -405,6 +407,7 @@ class PRMainWindow(QWidget):
             (
                 PRImageAmplificationRunRequest,
                 PRBeamPanelImageAmplificationRunRequest,
+                PRImageAmplificationExperimentRequest,
             ),
         ):
             raise ValueError(
@@ -494,6 +497,57 @@ class PRMainWindow(QWidget):
 
     def describe_request(self, request) -> str:
         """Return a durable, unit-explicit summary of one PR request."""
+
+        if isinstance(request, PRImageAmplificationExperimentRequest):
+            prepared, _transmission, _grating = (
+                prepare_image_amplification_base_request(request)
+            )
+            capability = next(
+                capability
+                for capability in image_amplification_base_capabilities()
+                if capability.workflow_id == request.base_workflow_id
+            )
+            assignments = {
+                assignment.channel_index: assignment.elements
+                for assignment in request.launch_configuration.channel_elements
+            }
+            screen = assignments[request.signal_channel_index][0]
+            channels = request.launch_configuration.beams.channels
+            pump = channels[request.pump_channel_index]
+            signal = channels[request.signal_channel_index]
+            status = (
+                "Validated"
+                if capability.validation_status == "compatible_and_validated"
+                else "Experimental — validation pending"
+            )
+            lines = [
+                "Material: photorefractive",
+                f"Workflow: {PR_IMAGE_AMPLIFICATION_WORKFLOW}",
+                "Input mode: Image Amplification",
+                f"Base PR algorithm: {request.base_workflow_id}",
+                f"Algorithm validation: {status}",
+                f"Source: {request.source.display_name}",
+                (
+                    "Image footprint: "
+                    f"{screen.placement.width_um:g} × "
+                    f"{screen.placement.height_um:g} µm"
+                ),
+                f"Invert image: {screen.invert}",
+                (
+                    "Incident channel powers: "
+                    f"pump={pump.power_mW:g} mW; "
+                    f"signal={signal.power_mW:g} mW"
+                ),
+                (
+                    "Derived incident signal/pump power ratio: "
+                    f"{request.incident_signal_to_pump_power_ratio:g}"
+                ),
+                "Base request:",
+            ]
+            lines.extend(
+                f"  {line}" for line in self.describe_request(prepared).splitlines()
+            )
+            return "\n".join(lines)
 
         if isinstance(
             request,
@@ -698,6 +752,7 @@ class PRMainWindow(QWidget):
             (
                 PRImageAmplificationRunRequest,
                 PRBeamPanelImageAmplificationRunRequest,
+                PRImageAmplificationExperimentRequest,
             ),
         ):
             return PR_IMAGE_AMPLIFICATION_WORKFLOW
@@ -735,8 +790,18 @@ class PRMainWindow(QWidget):
         self.runner_label.setText(f"Runner: {self.runner.name}")
 
     def _run_registered(self, request, **kwargs):
-        if isinstance(request, PRBeamPanelImageAmplificationRunRequest):
-            composite = image_amplification_experiment_request(request)
+        if isinstance(
+            request,
+            (
+                PRBeamPanelImageAmplificationRunRequest,
+                PRImageAmplificationExperimentRequest,
+            ),
+        ):
+            composite = (
+                request
+                if isinstance(request, PRImageAmplificationExperimentRequest)
+                else image_amplification_experiment_request(request)
+            )
             return run_image_amplification_experiment(
                 self.runner,
                 composite,
@@ -975,12 +1040,33 @@ class PRMainWindow(QWidget):
             f"with {self.runner.name}..."
         )
         preflight_request = request
-        if isinstance(request, PRBeamPanelImageAmplificationRunRequest):
+        if isinstance(
+            request,
+            (
+                PRBeamPanelImageAmplificationRunRequest,
+                PRImageAmplificationExperimentRequest,
+            ),
+        ):
+            composite = (
+                request
+                if isinstance(request, PRImageAmplificationExperimentRequest)
+                else image_amplification_experiment_request(request)
+            )
             preflight_request, _transmission, _grating = (
                 prepare_image_amplification_base_request(
-                    image_amplification_experiment_request(request)
+                    composite
                 )
             )
+            capability = next(
+                capability
+                for capability in image_amplification_base_capabilities()
+                if capability.workflow_id == composite.base_workflow_id
+            )
+            if capability.validation_status != "compatible_and_validated":
+                self.results_panel.append_console(
+                    "WARNING: selected Image Amplification base algorithm is "
+                    "experimental; specialized validation is pending."
+                )
         elif isinstance(request, PRImageAmplificationRunRequest):
             preflight_request, _transmission, _grating = (
                 prepare_image_amplification_workflow_request(request)
@@ -1216,7 +1302,7 @@ class PRMainWindow(QWidget):
                     self.status_label.setText("Not converged")
                     prefix = "Final PR image time"
                     message = "Base PR solve did not converge"
-                elif result.status != "completed":
+                elif result.status not in ("completed", "converged"):
                     self.run_status = "failed"
                     self.status_label.setText("Analysis failed")
                     prefix = "Final PR image time"
@@ -1227,14 +1313,45 @@ class PRMainWindow(QWidget):
                     )
                 else:
                     self.run_status = "completed"
-                    self.status_label.setText("Completed")
+                    self.status_label.setText(
+                        "Converged" if result.status == "converged" else "Completed"
+                    )
                     prefix = "Final PR image time"
                     message = "Image-amplification run complete"
-                self.results_panel.set_td_time_indicator(
-                    f"{prefix}: {float(td_result.time_normalized):.6g} "
-                    f"normalized; steps: {td_result.completed_steps}/"
-                    f"{td_result.requested_steps}"
-                )
+                if isinstance(td_result, PRRunResult):
+                    self.results_panel.set_td_time_indicator(
+                        f"{prefix}: {float(td_result.time_normalized):.6g} "
+                        f"normalized; steps: {td_result.completed_steps}/"
+                        f"{td_result.requested_steps}"
+                    )
+                elif isinstance(td_result, PRTransverseStaticRunResult):
+                    requested = int(
+                        td_result.resolved_profile["solver"][
+                            "max_coupled_iterations"
+                        ]
+                    )
+                    self.results_panel.set_td_time_indicator(
+                        "PR image transverse static: "
+                        f"{td_result.completed_coupled_iterations}/"
+                        f"{requested} coupled iterations"
+                    )
+                    diagnostics = td_result.diagnostics
+                    self.results_panel.append_console(
+                        "Authoritative zero-flux residual: "
+                        f"RMS={diagnostics['equilibrium_residual_rms']:.8g}; "
+                        f"max={diagnostics['equilibrium_residual_max']:.8g}"
+                    )
+                elif isinstance(td_result, PRStaticRunResult):
+                    total_slices = int(td_result.grid_summary["Nz"])
+                    self.results_panel.set_td_time_indicator(
+                        "PR image static: "
+                        f"{td_result.completed_slices}/{total_slices} slices"
+                    )
+                else:
+                    raise TypeError(
+                        "unsupported Image Amplification base result type: "
+                        f"{type(td_result).__name__}"
+                    )
                 if analysis is not None:
                     self.results_panel.append_console(
                         "Image amplification: "
