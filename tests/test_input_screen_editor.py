@@ -55,7 +55,7 @@ def _enabled_panel(*, Nx=24, Ny=12, x_aperture=24.0, y_aperture=12.0):
     )
 
 
-def test_current_lc_and_pr_hosts_disable_screens_with_actionable_reasons(app):
+def test_lc_remains_disabled_while_ordinary_pr_host_is_enabled(app):
     lc_window = LCPropMainWindow()
     pr_window = PRMainWindow()
 
@@ -63,12 +63,10 @@ def test_current_lc_and_pr_hosts_disable_screens_with_actionable_reasons(app):
     assert "LC requests do not yet carry" in (
         lc_window.beam_panel.input_screen_editor.availability.text()
     )
-    assert not pr_window.beam_panel.input_screen_editor.editor_enabled
-    assert "Stage B3" in pr_window.beam_panel.input_screen_editor.availability.text()
+    assert pr_window.beam_panel.input_screen_editor.editor_enabled
     with pytest.raises(ValueError, match="LC requests do not yet carry"):
         lc_window.beam_panel.launch_elements()
-    with pytest.raises(ValueError, match="Stage B3"):
-        pr_window.beam_panel.launch_elements()
+    assert pr_window.beam_panel.launch_elements() == ()
 
     lc_window.close()
     pr_window.close()

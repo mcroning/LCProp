@@ -101,6 +101,11 @@ def validate_pr_continuation(
         (request.grid, original.grid, "grid"),
         (request.material, original.material, "material"),
         (request.beams, original.beams, "beams"),
+        (
+            request.launch_elements,
+            original.launch_elements,
+            "launch_elements",
+        ),
         (request.backend, original.backend, "backend"),
         (request.scattering, original.scattering, "scattering"),
         (

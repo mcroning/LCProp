@@ -160,9 +160,11 @@ def build_pr_request(
     """Take one immutable, validated request snapshot from PR controls."""
 
     workflow_id = evolution_panel.workflow_id()
+    launch = beam_panel.launch_configuration()
     common = {
         "grid": grid_panel.grid(),
-        "beams": beam_panel.beams(),
+        "beams": launch.beams,
+        "launch_elements": launch.channel_elements,
         "material": material_panel.material(),
         "backend": evolution_panel.backend_spec(),
         "initial_A": None,
@@ -262,6 +264,7 @@ def apply_pr_request(
         if beam_stack_definition is None
         else beam_stack_definition
     )
+    beam_panel.clear_launch_elements()
 
 
 __all__ = [

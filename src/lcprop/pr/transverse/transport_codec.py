@@ -90,6 +90,11 @@ def _validate_request(request: PRTransverseStaticRunRequest) -> None:
 def encode_pr_transverse_static_transport_request(request: PRTransverseStaticRunRequest) -> EncodedRequest:
     if not isinstance(request, PRTransverseStaticRunRequest):
         raise TypeError("request must be a PRTransverseStaticRunRequest")
+    if request.launch_elements:
+        raise TransportCodecError(
+            "PR transverse-static remote transport does not yet encode "
+            "launch_elements"
+        )
     _validate_request(request)
     arrays: dict[str, np.ndarray] = {}
     metadata = {

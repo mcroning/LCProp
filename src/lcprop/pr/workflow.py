@@ -42,6 +42,10 @@ from lcprop.pr.specs import (
     PR_SEMI_IMPLICIT_INTEGRATOR,
     PR_TIMEDEPENDENT_WORKFLOW,
 )
+from lcprop.optics.launch_configuration import (
+    LaunchConfiguration,
+    reject_prepared_launch_conflict,
+)
 
 
 ProgressCallback = Callable[[RunProgress], None]
@@ -354,6 +358,12 @@ def run_pr_timedependent(
     request.material.validate()
     request.solver.validate()
     request.backend.validate()
+    LaunchConfiguration(request.beams, request.launch_elements)
+    if _checkpoint_request is None:
+        reject_prepared_launch_conflict(
+            request.initial_A,
+            request.launch_elements,
+        )
     if request.scattering is not None:
         request.scattering.validate()
 
@@ -378,6 +388,7 @@ def run_pr_timedependent(
         request.beams,
         grid,
         complex_dtype=backend.complex_dtype,
+        launch_elements=request.launch_elements,
     )
     A0, E = _initial_fields(
         request,

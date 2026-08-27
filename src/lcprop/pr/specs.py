@@ -9,6 +9,7 @@ from typing import Any
 from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
+from lcprop.optics.screens import ChannelLaunchElements
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 
 
@@ -126,6 +127,8 @@ class PRRunRequest:
     ``initial_A``, when supplied, has shape ``(Nch, Nx, Ny)``. ``initial_E``
     is the normalized physical space-charge state with shape
     ``(Nz, Nx, Ny)``; omitting it selects the paper/reference zero state.
+    ``launch_elements`` are applied to the normalized incident beams before
+    propagation and cannot be combined with an explicit ``initial_A``.
     ``scattering`` is an optional canonical physical-z phase realization;
     ``None`` preserves the historical no-scattering workflow exactly.
     """
@@ -139,6 +142,7 @@ class PRRunRequest:
         precision="float64",
         verbose=False,
     )
+    launch_elements: tuple[ChannelLaunchElements, ...] = ()
     initial_A: Any | None = None
     initial_E: Any | None = None
     scattering: PRCanonicalScatteringSpec | None = None

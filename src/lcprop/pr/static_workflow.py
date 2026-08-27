@@ -15,6 +15,11 @@ from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch import build_launch, normalized_power
+from lcprop.optics.launch_configuration import (
+    LaunchConfiguration,
+    reject_prepared_launch_conflict,
+)
+from lcprop.optics.screens import ChannelLaunchElements
 from lcprop.optics.splitstep import linear_kernel
 from lcprop.pr.evolution import hopping_rhs
 from lcprop.pr.source import channel_peak_intensity_reference
@@ -82,7 +87,11 @@ class PRStaticWorkflowOptions:
 
 @dataclass(frozen=True)
 class PRStaticRunRequest:
-    """Request for a headless self-consistent static PR calculation."""
+    """Request for a headless self-consistent static PR calculation.
+
+    Declarative ``launch_elements`` transform normalized incident beams before
+    propagation and cannot be combined with an explicit ``initial_A``.
+    """
 
     grid: GridSpec
     beams: BeamStack
@@ -95,6 +104,7 @@ class PRStaticRunRequest:
         precision="float64",
         verbose=False,
     )
+    launch_elements: tuple[ChannelLaunchElements, ...] = ()
     initial_A: Any | None = None
     initial_E: Any | None = None
 
@@ -325,6 +335,8 @@ def run_pr_static(
     request.material.validate()
     request.solver.validate()
     request.backend.validate()
+    LaunchConfiguration(request.beams, request.launch_elements)
+    reject_prepared_launch_conflict(request.initial_A, request.launch_elements)
     wavelengths = tuple(
         float(channel.wavelength_um) for channel in request.beams.channels
     )
@@ -342,6 +354,7 @@ def run_pr_static(
         request.beams,
         grid,
         complex_dtype=backend.complex_dtype,
+        launch_elements=request.launch_elements,
     )
     if request.initial_A is None:
         A0 = launch.A0.copy()

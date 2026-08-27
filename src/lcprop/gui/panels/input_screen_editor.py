@@ -500,6 +500,15 @@ class InputScreenEditor(QGroupBox):
             )
         self._screen_controls_changed()
 
+    def clear_launch_elements(self) -> None:
+        """Remove every transient channel assignment from the editor."""
+
+        if not self._editor_enabled:
+            raise ValueError(self._disabled_reason)
+        self._bindings.clear()
+        self._load_selected_binding()
+        self.configurationChanged.emit()
+
     def launch_elements(self) -> tuple[ChannelLaunchElements, ...]:
         """Return ordered screen assignments for canonical enabled channels."""
 

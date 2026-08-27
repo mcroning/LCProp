@@ -76,6 +76,10 @@ def _validate_common(request: PRRunRequest | PRStaticRunRequest) -> None:
 
 def _encode_common(request: PRRunRequest | PRStaticRunRequest) -> dict:
     _reject_runtime_state(request)
+    if request.launch_elements:
+        raise ExperimentPayloadError(
+            "PR experiment persistence does not yet encode launch_elements"
+        )
     _validate_common(request)
     return {
         "schema_version": PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
@@ -130,6 +134,11 @@ def encode_pr_transverse_static_request(
             "PR transverse-static experiment requests cannot persist runtime "
             f"state ({', '.join(populated)}); use result transport or an "
             "explicit continuation mechanism for runtime state"
+        )
+    if request.launch_elements:
+        raise ExperimentPayloadError(
+            "PR transverse-static experiment persistence does not yet encode "
+            "launch_elements"
         )
     _validate_transverse_static(request)
     return {

@@ -9,6 +9,7 @@ from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
 from lcprop.gui.panels.input_screen_editor import InputScreenEditor
+from lcprop.optics.launch_configuration import LaunchConfiguration
 from lcprop.optics.screens import ChannelLaunchElements
 
 try:
@@ -242,10 +243,18 @@ class BeamPanel(QWidget):
 
         return self.input_screen_editor.launch_elements()
 
+    def clear_launch_elements(self) -> None:
+        """Clear all transient declarative input-screen assignments."""
+
+        self.input_screen_editor.clear_launch_elements()
+
     def launch_configuration(
         self,
-    ) -> tuple[BeamStack, tuple[ChannelLaunchElements, ...]]:
+    ) -> LaunchConfiguration:
         """Return canonical beams together with their ordered launch elements."""
 
         beams = self.beams()
-        return beams, self.input_screen_editor.launch_elements()
+        return LaunchConfiguration(
+            beams=beams,
+            channel_elements=self.input_screen_editor.launch_elements(),
+        )

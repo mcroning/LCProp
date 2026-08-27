@@ -21,6 +21,11 @@ from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch import build_launch, normalized_power
+from lcprop.optics.launch_configuration import (
+    LaunchConfiguration,
+    reject_prepared_launch_conflict,
+)
+from lcprop.optics.screens import ChannelLaunchElements
 from lcprop.optics.splitstep import linear_kernel
 from lcprop.pr.scattering import (
     PRCanonicalScatteringSpec,
@@ -119,7 +124,11 @@ class PRTransverseStaticWorkflowOptions:
 
 @dataclass(frozen=True)
 class PRTransverseStaticRunRequest:
-    """Headless request for the separate full-transverse static workflow."""
+    """Headless request for the separate full-transverse static workflow.
+
+    Declarative ``launch_elements`` transform normalized incident beams before
+    propagation and cannot be combined with an explicit ``initial_A``.
+    """
 
     grid: GridSpec
     beams: BeamStack
@@ -134,6 +143,7 @@ class PRTransverseStaticRunRequest:
     backend: BackendSpec = BackendSpec(
         backend="numpy", precision="float64", verbose=False
     )
+    launch_elements: tuple[ChannelLaunchElements, ...] = ()
     initial_A: Any | None = None
     initial_psi: Any | None = None
     scattering: PRCanonicalScatteringSpec | None = None
@@ -224,6 +234,8 @@ def _validate_request(request: PRTransverseStaticRunRequest) -> None:
     request.projection.validate()
     request.solver.validate()
     request.backend.validate()
+    LaunchConfiguration(request.beams, request.launch_elements)
+    reject_prepared_launch_conflict(request.initial_A, request.launch_elements)
     if request.scattering is not None:
         request.scattering.validate()
     if request.backend.backend not in ("numpy", "cupy"):
@@ -394,7 +406,12 @@ def _run_pr_transverse_static_at_visibility(
     _validate_canonical_scattering_for_grid(
         request.scattering, grid=grid, z_length_um=request.grid.z_length_um
     )
-    launch = build_launch(request.beams, grid, complex_dtype=backend.complex_dtype)
+    launch = build_launch(
+        request.beams,
+        grid,
+        complex_dtype=backend.complex_dtype,
+        launch_elements=request.launch_elements,
+    )
     A0, psi = _initial_fields(
         request,
         launch=launch,

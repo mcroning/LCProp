@@ -117,6 +117,10 @@ def save_pr_checkpoint(
     """Encode a validated PR checkpoint in a portable JSON/NPZ directory."""
 
     validate_pr_checkpoint(checkpoint)
+    if checkpoint.request.launch_elements:
+        raise ValueError(
+            "PR checkpoint persistence does not yet encode launch_elements"
+        )
     directory = Path(run_dir)
     directory.mkdir(parents=True, exist_ok=True)
 
