@@ -963,6 +963,81 @@ def test_image_experiment_uses_one_base_runner_call_and_forwards_controls():
     assert "image_amplification" in result.run_data.diagnostics
 
 
+def test_gui_completion_accepts_d1_composite_and_installs_all_products(app):
+    image_request = replace(
+        _valid_beampanel_image_amplification_request(),
+        solver=PRSolverOptions(Nt=0, dt_normalized=0.01),
+    )
+    runner_result = run_image_amplification_experiment(
+        LocalRunner(operations=(PR_TIMEDEPENDENT_OPERATION,)),
+        image_amplification_experiment_request(image_request),
+    )
+    composite = runner_result.result
+    assert isinstance(composite, PRImageAmplificationCompositeResult)
+    assert composite.status == "completed"
+
+    window = PRMainWindow()
+    window._thread_done = True
+    window._on_finished(runner_result)
+
+    selector = window.results_panel.workspace.image_pane.field_selector
+    console = window.results_panel.workspace.console.toPlainText()
+    diagnostics = window.results_panel.workspace.diagnostics_view.toPlainText()
+    assert window.run_status == "completed"
+    assert window.status_label.text() == "Completed"
+    assert window.last_result is composite
+    assert selector.findData("output_intensity") >= 0
+    assert selector.findData("amplified_image") >= 0
+    assert selector.findData("zero_response_image") >= 0
+    assert "[image_amplification] Image Amplification" in diagnostics
+    assert "Image-amplification run complete" in console
+    assert (
+        "Normalized optical power: "
+        f"{composite.run_result.power_initial:.8g} -> "
+        f"{composite.run_result.power_final:.8g}"
+    ) in console
+    assert "ERROR" not in console
+    assert composite.analysis_result is not None
+    assert np.array_equal(
+        runner_result.run_data.fields["amplified_image"].data,
+        np.abs(composite.analysis_result.backpropagated_signal_field) ** 2,
+    )
+    window.close()
+
+
+def test_gui_completion_preserves_nonconverged_composite_base_status(app):
+    image_request = replace(
+        _valid_beampanel_image_amplification_request(),
+        solver=PRSolverOptions(Nt=0, dt_normalized=0.01),
+    )
+    runner_result = run_image_amplification_experiment(
+        LocalRunner(operations=(PR_TIMEDEPENDENT_OPERATION,)),
+        image_amplification_experiment_request(image_request),
+    )
+    base = runner_result.result.base_runner_result
+    nonconverged_base = replace(
+        base,
+        result=replace(base.result, status="not_converged"),
+    )
+    composite = replace(
+        runner_result.result,
+        base_runner_result=nonconverged_base,
+    )
+
+    window = PRMainWindow()
+    window._thread_done = True
+    window._on_finished(replace(runner_result, result=composite))
+
+    assert composite.analysis_status == "completed"
+    assert composite.status == "not_converged"
+    assert window.run_status == "not_converged"
+    assert window.status_label.text() == "Not converged"
+    assert "Base PR solve did not converge" in (
+        window.results_panel.workspace.console.toPlainText()
+    )
+    window.close()
+
+
 def test_image_experiment_honors_selected_registered_operation_name():
     image_request = _valid_beampanel_image_amplification_request()
     base = PRStaticRunRequest(

@@ -1182,6 +1182,11 @@ class PRMainWindow(QWidget):
             if runner_result.run_data is None:
                 raise ValueError("PR runner result has no prepared RunData")
             result = runner_result.result
+            ordinary_result = (
+                result.run_result
+                if runner_result.kind == PR_IMAGE_AMPLIFICATION_WORKFLOW
+                else result
+            )
             self.last_runner_result = runner_result
             self.last_result = result
             if runner_result.kind in (
@@ -1194,7 +1199,7 @@ class PRMainWindow(QWidget):
                 self.results_panel.append_console("Rendering results...")
             self.results_panel.set_run_data(runner_result.run_data)
             if runner_result.kind == PR_IMAGE_AMPLIFICATION_WORKFLOW:
-                td_result = result.run_result
+                td_result = ordinary_result
                 analysis = (
                     result.analysis_result
                     if isinstance(result, PRImageAmplificationCompositeResult)
@@ -1206,6 +1211,11 @@ class PRMainWindow(QWidget):
                     self.status_label.setText("Stopped")
                     prefix = "PR image time at stop"
                     message = "Image-amplification run cancelled"
+                elif result.status == "not_converged":
+                    self.run_status = "not_converged"
+                    self.status_label.setText("Not converged")
+                    prefix = "Final PR image time"
+                    message = "Base PR solve did not converge"
                 elif result.status != "completed":
                     self.run_status = "failed"
                     self.status_label.setText("Analysis failed")
@@ -1320,7 +1330,8 @@ class PRMainWindow(QWidget):
             self.results_panel.append_console(message)
             self.results_panel.append_console(
                 "Normalized optical power: "
-                f"{result.power_initial:.8g} -> {result.power_final:.8g}"
+                f"{ordinary_result.power_initial:.8g} -> "
+                f"{ordinary_result.power_final:.8g}"
             )
         except Exception:
             self.run_status = "failed"
