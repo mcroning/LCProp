@@ -7,7 +7,6 @@ import math
 from time import perf_counter
 
 import numpy as np
-from scipy.ndimage import zoom
 
 from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamStack
@@ -15,6 +14,15 @@ from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch import build_launch, channel_power_integrals
+from lcprop.optics.screens import (
+    ChannelLaunchElements,
+    EVEN_SQUARE_NEAREST_TRANSPARENT_V1,
+    IntensityRasterScreen,
+    ScreenPlacement,
+    apply_passive_field_transmittance,
+    intensity_transmission_to_field_transmittance,
+    prepare_intensity_raster_transmission,
+)
 from lcprop.optics.splitstep import linear_kernel
 from lcprop.pr.coupling import analytic_plane_wave_gain_length
 from lcprop.pr.geometry import crossing_beam_channels
@@ -329,60 +337,6 @@ def paper_figure6_spec() -> PRImageAmplificationSpec:
     )
 
 
-def _validate_image(image_intensity) -> np.ndarray:
-    supplied = np.asarray(image_intensity)
-    if supplied.ndim != 2:
-        raise ValueError("image_intensity must be a two-dimensional array")
-    if supplied.dtype.kind not in "fiu":
-        raise TypeError("image_intensity must have a real numeric dtype")
-    image = supplied.astype(np.float64, copy=True)
-    if not np.all(np.isfinite(image)):
-        raise ValueError("image_intensity must contain only finite values")
-    if np.any(image < 0.0):
-        raise ValueError("image_intensity must be nonnegative")
-    maximum = float(np.max(image))
-    if maximum <= 0.0:
-        raise ValueError("image_intensity must contain a positive value")
-    return image / maximum
-
-
-def intensity_transmission_to_field_transmittance(
-    intensity_transmission,
-) -> np.ndarray:
-    """Map passive intensity transmission ``T`` to field multiplier ``sqrt(T)``."""
-
-    transmission = np.asarray(intensity_transmission)
-    if transmission.ndim != 2 or transmission.dtype.kind not in "fiu":
-        raise TypeError("intensity transmission must be a real two-dimensional array")
-    values = transmission.astype(np.float64, copy=False)
-    if not np.all(np.isfinite(values)):
-        raise ValueError("intensity transmission must be finite")
-    tolerance = 32.0 * np.finfo(values.dtype).eps
-    if np.any(values < -tolerance) or np.any(values > 1.0 + tolerance):
-        raise ValueError("passive intensity transmission must lie between zero and one")
-    return np.sqrt(np.clip(values, 0.0, 1.0))
-
-
-def apply_passive_field_transmittance(field, field_transmittance) -> np.ndarray:
-    """Apply a bounded passive complex field transmittance without renormalizing."""
-
-    supplied_field = np.asarray(field)
-    transmittance = np.asarray(field_transmittance)
-    if supplied_field.ndim != 2 or transmittance.shape != supplied_field.shape:
-        raise ValueError("field and field transmittance must have the same 2-D shape")
-    if not np.all(np.isfinite(transmittance)):
-        raise ValueError("field transmittance must be finite")
-    precision_dtype = (
-        transmittance.real.dtype
-        if transmittance.dtype.kind in "fc"
-        else np.dtype(np.float64)
-    )
-    tolerance = 64.0 * np.finfo(precision_dtype).eps
-    if np.any(np.abs(transmittance) > 1.0 + tolerance):
-        raise ValueError("passive field transmittance magnitude must not exceed one")
-    return supplied_field * transmittance
-
-
 def prepare_image_transmission(
     image_intensity,
     grid,
@@ -403,68 +357,24 @@ def prepare_image_transmission(
     returned intensity transmission.
     """
 
-    image = _validate_image(image_intensity)
-    if bool(invert):
-        image = 1.0 - image
     size_um = float(physical_size_um)
     if not math.isfinite(size_um) or size_um <= 0.0:
         raise ValueError("physical_size_um must be finite and positive")
-
-    side = max(image.shape)
-    if side % 2:
-        side += 1
-    square = np.ones((side, side), dtype=np.float64)
-    y_offset = (side - image.shape[0]) // 2
-    x_offset = (side - image.shape[1]) // 2
-    square[
-        y_offset : y_offset + image.shape[0],
-        x_offset : x_offset + image.shape[1],
-    ] = image
-    image_xy = np.rot90(square)
-
-    target_nx = max(2, int(round(size_um / float(grid.dx_um))))
-    target_ny = max(2, int(round(size_um / float(grid.dy_um))))
-    resized = zoom(
-        image_xy,
-        (target_nx / image_xy.shape[0], target_ny / image_xy.shape[1]),
-        order=0,
-        mode="nearest",
-        prefilter=False,
+    return prepare_intensity_raster_transmission(
+        image_intensity,
+        grid,
+        placement=ScreenPlacement(
+            center_x_um=float(center_x_um),
+            center_y_um=float(center_y_um),
+            width_um=size_um,
+            height_um=size_um,
+            resampling="nearest",
+            outside_intensity_transmission=1.0,
+            boundary_policy="reject" if require_full_footprint else "clip",
+        ),
+        invert=invert,
+        preprocessing_policy=EVEN_SQUARE_NEAREST_TRANSPARENT_V1,
     )
-    resized = resized[:target_nx, :target_ny]
-
-    center_x = int(np.argmin(np.abs(np.asarray(grid.x_um) - center_x_um)))
-    center_y = int(np.argmin(np.abs(np.asarray(grid.y_um) - center_y_um)))
-    destination = np.ones((grid.Nx, grid.Ny), dtype=np.float64)
-    x_start = center_x - resized.shape[0] // 2
-    y_start = center_y - resized.shape[1] // 2
-    x_stop = x_start + resized.shape[0]
-    y_stop = y_start + resized.shape[1]
-    if bool(require_full_footprint) and (
-        x_start < 0
-        or y_start < 0
-        or x_stop > grid.Nx
-        or y_stop > grid.Ny
-    ):
-        raise ValueError(
-            "image footprint extends outside the simulation aperture; "
-            "increase the aperture, reduce image size, or adjust the launch"
-        )
-    destination_x0 = max(0, x_start)
-    destination_y0 = max(0, y_start)
-    destination_x1 = min(grid.Nx, x_stop)
-    destination_y1 = min(grid.Ny, y_stop)
-    if destination_x0 >= destination_x1 or destination_y0 >= destination_y1:
-        raise ValueError("image transparency lies outside the transverse grid")
-    source_x0 = destination_x0 - x_start
-    source_y0 = destination_y0 - y_start
-    source_x1 = source_x0 + destination_x1 - destination_x0
-    source_y1 = source_y0 + destination_y1 - destination_y0
-    destination[
-        destination_x0:destination_x1,
-        destination_y0:destination_y1,
-    ] = resized[source_x0:source_x1, source_y0:source_y1]
-    return destination
 
 
 def _resolved_characteristic_wavenumber(spec: PRImageAmplificationSpec) -> float:
@@ -553,12 +463,6 @@ def prepare_image_amplification_workflow_request(
         names=("pump", "image signal"),
     )
     preliminary_beams = BeamStack(channels=channels, coherence="coherent")
-    preliminary = build_launch(
-        preliminary_beams,
-        grid,
-        complex_dtype=np.complex128,
-    )
-    A0 = np.asarray(preliminary.A0).copy()
     half_size = 0.5 * float(launch_spec.image_physical_size_um)
     if bool(launch_spec.require_full_footprint) and (
         abs(float(channels[1].x0_um)) + half_size
@@ -570,22 +474,38 @@ def prepare_image_amplification_workflow_request(
             "image footprint extends outside the simulation aperture; "
             "increase the aperture, reduce image size, or adjust the launch"
         )
-    transmission = prepare_image_transmission(
-        request.source.grayscale,
-        grid,
-        center_x_um=channels[1].x0_um,
-        center_y_um=channels[1].y0_um,
-        physical_size_um=float(launch_spec.image_physical_size_um),
+    screen = IntensityRasterScreen(
+        source=request.source,
+        placement=ScreenPlacement(
+            center_x_um=float(channels[1].x0_um),
+            center_y_um=float(channels[1].y0_um),
+            width_um=float(launch_spec.image_physical_size_um),
+            height_um=float(launch_spec.image_physical_size_um),
+            resampling="nearest",
+            outside_intensity_transmission=1.0,
+            boundary_policy=(
+                "reject" if launch_spec.require_full_footprint else "clip"
+            ),
+        ),
         invert=bool(launch_spec.invert_image),
-        require_full_footprint=bool(launch_spec.require_full_footprint),
+        preprocessing_policy=EVEN_SQUARE_NEAREST_TRANSPARENT_V1,
     )
-    field_transmittance = intensity_transmission_to_field_transmittance(
-        transmission
+    transmission = prepare_intensity_raster_transmission(
+        screen.source.grayscale,
+        grid,
+        placement=screen.placement,
+        invert=screen.invert,
+        preprocessing_policy=screen.preprocessing_policy,
     )
-    A0[1] = apply_passive_field_transmittance(
-        A0[1],
-        field_transmittance,
+    preliminary = build_launch(
+        preliminary_beams,
+        grid,
+        complex_dtype=np.complex128,
+        launch_elements=(
+            ChannelLaunchElements(channel_index=1, elements=(screen,)),
+        ),
     )
+    A0 = np.asarray(preliminary.A0).copy()
     beams = BeamStack(channels=channels, coherence="coherent")
     workflow_request = PRRunRequest(
         grid=request.grid,

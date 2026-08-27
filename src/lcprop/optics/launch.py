@@ -21,6 +21,10 @@ import numpy as np
 
 from lcprop.core.beams import BeamStack
 from lcprop.core.grid import RuntimeGrid
+from lcprop.optics.screens import (
+    ChannelLaunchElements,
+    apply_channel_launch_elements,
+)
 
 Array = Any
 
@@ -36,14 +40,39 @@ class LaunchResult:
     wavelengths_um: Array
     coherence: str
     coherence_groups: tuple[str, ...]
+    post_element_physical_powers_mW: Array | None = None
+    post_element_total_power_mW: float | None = None
+    channel_throughput_fractions: Array | None = None
 
     def summary(self) -> dict:
+        post_element_powers = (
+            self.physical_powers_mW
+            if self.post_element_physical_powers_mW is None
+            else self.post_element_physical_powers_mW
+        )
+        post_element_total = (
+            self.physical_total_power_mW
+            if self.post_element_total_power_mW is None
+            else self.post_element_total_power_mW
+        )
+        throughput = (
+            np.ones_like(np.asarray(_to_numpy(self.physical_powers_mW)))
+            if self.channel_throughput_fractions is None
+            else np.asarray(_to_numpy(self.channel_throughput_fractions))
+        )
         return {
             "Nch": int(self.A0.shape[0]),
             "coherence": self.coherence,
             "coherence_groups": list(self.coherence_groups),
             "physical_channel_powers_mW": [float(x) for x in np.asarray(_to_numpy(self.physical_powers_mW)).ravel()],
             "physical_total_power_mW": float(self.physical_total_power_mW),
+            "post_element_channel_powers_mW": [
+                float(x) for x in np.asarray(_to_numpy(post_element_powers)).ravel()
+            ],
+            "post_element_total_power_mW": float(post_element_total),
+            "channel_throughput_fractions": [
+                float(x) for x in throughput.ravel()
+            ],
             "power_fractions": [float(x) for x in np.asarray(_to_numpy(self.power_fractions)).ravel()],
             "field_normalization": "sum_channel_integrals_equals_one",
             "wavelengths_um": [float(x) for x in np.asarray(_to_numpy(self.wavelengths_um)).ravel()],
@@ -117,8 +146,14 @@ def build_launch(
     grid: RuntimeGrid,
     *,
     complex_dtype: Any = np.complex64,
+    launch_elements: tuple[ChannelLaunchElements, ...] = (),
 ) -> LaunchResult:
-    """Build ``A0`` channel stack from a ``BeamStack``."""
+    """Build and optionally transform ``A0`` from an incident ``BeamStack``.
+
+    Beam powers describe the incident fields. Ordered passive launch elements
+    are applied only after those fields have been normalized, and the resulting
+    stack is never renormalized.
+    """
 
     beams.validate()
     xp = grid.xp
@@ -143,6 +178,29 @@ def build_launch(
     ]
 
     A0 = xp.stack(fields, axis=0).astype(complex_dtype, copy=False)
+    A0 = apply_channel_launch_elements(A0, grid, launch_elements)
+
+    post_element_powers_numpy = (
+        channel_power_integrals(A0, grid) * physical_total_power_mW
+    )
+    incident_powers_numpy = np.asarray(
+        [float(ch.power_mW) for ch in beams.channels],
+        dtype=float,
+    )
+    throughput_numpy = np.divide(
+        post_element_powers_numpy,
+        incident_powers_numpy,
+        out=np.zeros_like(post_element_powers_numpy),
+        where=incident_powers_numpy > 0.0,
+    )
+    post_element_physical_powers_mW = xp.asarray(
+        post_element_powers_numpy,
+        dtype=grid.real_dtype,
+    )
+    channel_throughput_fractions = xp.asarray(
+        throughput_numpy,
+        dtype=grid.real_dtype,
+    )
 
     wavelengths_um = xp.asarray(
         [float(ch.wavelength_um) for ch in beams.channels],
@@ -157,6 +215,9 @@ def build_launch(
         wavelengths_um=wavelengths_um,
         coherence=beams.coherence,
         coherence_groups=beams.coherence_groups,
+        post_element_physical_powers_mW=post_element_physical_powers_mW,
+        post_element_total_power_mW=float(np.sum(post_element_powers_numpy)),
+        channel_throughput_fractions=channel_throughput_fractions,
     )
 
 
