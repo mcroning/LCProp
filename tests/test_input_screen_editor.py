@@ -194,6 +194,7 @@ def test_user_image_decode_preview_and_large_source_do_not_select_grid(
     editor = panel.input_screen_editor
     loaded = editor.load_user_image(path)
     assert loaded == decoded.source
+    assert editor.selected_source.text() == path.name
     assert panel._screen_preview_grid().Nx == 20
     assert panel._screen_preview_grid().Ny == 8
 
@@ -262,4 +263,79 @@ def test_preview_uses_optical_launch_only_and_never_material_propagation(
 
     assert calls
     assert all(isinstance(assignments, tuple) for assignments in calls)
+    panel.close()
+
+
+def test_new_screen_centers_on_selected_beam_and_remains_independent(app):
+    first = BeamDefinition(name="first", x_um=4.0, y_um=-2.0)
+    second = BeamDefinition(name="second", x_um=-5.0, y_um=3.0)
+    panel = _enabled_panel(x_aperture=30.0, y_aperture=20.0)
+    panel.set_beam_stack_definition(
+        BeamStackDefinition(beams=(first, second))
+    )
+    editor = panel.input_screen_editor
+
+    editor.channel.setCurrentIndex(0)
+    first_source = _source(np.eye(4), name="first.png")
+    editor.set_source(first_source)
+    assert editor.center_x_um.value() == pytest.approx(4.0)
+    assert editor.center_y_um.value() == pytest.approx(-2.0)
+
+    editor.center_x_um.setValue(1.25)
+    editor.center_y_um.setValue(-0.75)
+    moved_first = replace(first, x_um=7.0, y_um=1.5)
+    panel.set_beam_stack_definition(
+        BeamStackDefinition(beams=(moved_first, second))
+    )
+    assert editor.center_x_um.value() == pytest.approx(1.25)
+    assert editor.center_y_um.value() == pytest.approx(-0.75)
+
+    width_before = editor.width_um.value()
+    height_before = editor.height_um.value()
+    editor.center_on_beam.click()
+    assert editor.center_x_um.value() == pytest.approx(7.0)
+    assert editor.center_y_um.value() == pytest.approx(1.5)
+    assert editor.width_um.value() == width_before
+    assert editor.height_um.value() == height_before
+    assert panel.launch_elements()[0].elements[0].source == first_source
+
+    editor.channel.setCurrentIndex(1)
+    editor.set_source(_source(np.fliplr(np.eye(4)), name="second.png"))
+    assert editor.center_x_um.value() == pytest.approx(-5.0)
+    assert editor.center_y_um.value() == pytest.approx(3.0)
+    assignments = panel.launch_elements()
+    assert tuple(item.channel_index for item in assignments) == (0, 1)
+    panel.close()
+
+
+def test_compact_preview_selector_and_none_state_preserve_screen_evidence(app):
+    panel = _enabled_panel()
+    editor = panel.input_screen_editor
+
+    assert editor.screen_type.currentData() == NO_SCREEN
+    assert editor.preview_stack.isHidden()
+    assert editor.selected_source.isHidden()
+
+    source = _source(np.eye(4), name="visible-source.png")
+    editor.set_source(source)
+    assert editor.preview_mode.count() == 2
+    assert editor.preview_mode.itemData(0) == "transmission"
+    assert editor.preview_mode.itemData(1) == "post_screen"
+    assert not editor.preview_stack.isHidden()
+    assert not editor.selected_source.isHidden()
+    assert editor.selected_source.text() == "<array>"
+    assert not editor.transmission_preview.pixmap().isNull()
+    assert not editor.transformed_preview.pixmap().isNull()
+    assert editor.incident_power.text() != "—"
+    assert editor.transmitted_power.text() != "—"
+    assert editor.throughput.text() != "—"
+
+    editor.preview_mode.setCurrentIndex(1)
+    assert editor.preview_stack.currentWidget() is editor.transformed_preview
+    editor.preview_mode.setCurrentIndex(0)
+    assert editor.preview_stack.currentWidget() is editor.transmission_preview
+
+    editor.screen_type.setCurrentIndex(editor.screen_type.findData(NO_SCREEN))
+    assert editor.preview_stack.isHidden()
+    assert editor.selected_source.isHidden()
     panel.close()

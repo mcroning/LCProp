@@ -899,25 +899,72 @@ def test_role_selectors_follow_unique_names_on_reorder_and_clear_disabled(app):
     window.beam_panel.set_beam_stack_definition(
         BeamStackDefinition(beams=(pump, signal))
     )
-    window.input_panel.sync_channels()
     assert window.input_panel.pump_channel.currentData() == 0
     assert window.input_panel.signal_channel.currentData() == 1
 
     window.beam_panel.set_beam_stack_definition(
         BeamStackDefinition(beams=(signal, pump))
     )
-    window.input_panel.sync_channels()
     assert window.input_panel.pump_channel.currentData() == 1
     assert window.input_panel.signal_channel.currentData() == 0
 
     window.beam_panel.set_beam_stack_definition(
         BeamStackDefinition(beams=(replace(signal, enabled=False), pump))
     )
-    window.input_panel.sync_channels()
     assert window.input_panel.signal_channel.currentData() is None
     window.input_panel.input_mode.setCurrentIndex(
         window.input_panel.input_mode.findData(PR_IMAGE_AMPLIFICATION_INPUT_MODE)
     )
     with pytest.raises(ValueError, match="valid enabled signal channel"):
         window.build_request()
+    window.close()
+
+
+def test_role_selectors_follow_live_add_duplicate_rename_disable_and_delete(app):
+    window = PRMainWindow()
+    launch = window.beam_panel.launch_plane_widget
+    assert window.input_panel.pump_channel.count() == 1
+    assert window.input_panel.signal_channel.count() == 1
+
+    launch._place_beam(4.0, -3.0)
+    assert window.input_panel.pump_channel.count() == 2
+    assert window.input_panel.signal_channel.count() == 2
+    launch.delete_selected()
+    assert window.input_panel.pump_channel.count() == 1
+    assert window.input_panel.signal_channel.count() == 1
+
+    launch.object_list.setCurrentRow(0)
+    launch.duplicate_selected()
+    assert window.input_panel.pump_channel.count() == 2
+    assert window.input_panel.signal_channel.count() == 2
+    assert window.input_panel.pump_channel.currentData() == 0
+    assert window.input_panel.signal_channel.currentData() == 1
+
+    launch.name_edit.setText("signal")
+    launch.name_edit.editingFinished.emit()
+    assert window.input_panel.signal_channel.currentData() == 1
+    assert window.input_panel.signal_channel.currentText() == "1 — signal"
+
+    editor = window.beam_panel.input_screen_editor
+    editor.channel.setCurrentIndex(1)
+    editor.set_source(PRImageSource.from_array(np.eye(4)))
+    window.input_panel.input_mode.setCurrentIndex(
+        window.input_panel.input_mode.findData(PR_IMAGE_AMPLIFICATION_INPUT_MODE)
+    )
+    request = window.build_request()
+    assert request.pump_channel_index == 0
+    assert request.signal_channel_index == 1
+
+    launch.enabled_checkbox.setChecked(False)
+    assert window.input_panel.pump_channel.count() == 1
+    assert window.input_panel.signal_channel.count() == 1
+    assert window.input_panel.signal_channel.currentData() is None
+    launch.enabled_checkbox.setChecked(True)
+    assert window.input_panel.pump_channel.count() == 2
+    assert window.input_panel.signal_channel.count() == 2
+    assert window.input_panel.signal_channel.currentData() == 1
+
+    launch.delete_selected()
+    assert window.input_panel.pump_channel.count() == 1
+    assert window.input_panel.signal_channel.count() == 1
     window.close()

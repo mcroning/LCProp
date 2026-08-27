@@ -16,8 +16,10 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QPushButton,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -128,6 +130,7 @@ class InputScreenEditor(QGroupBox):
             self.standard_source.addItem(source.display_name, index)
         self.standard_status = QLabel()
         self.standard_status.setWordWrap(True)
+        self.standard_status.setMaximumHeight(42)
         if not self._standard_sources:
             self.standard_status.setText(
                 "No approved packaged images are available; use User image."
@@ -147,6 +150,7 @@ class InputScreenEditor(QGroupBox):
         )
         self.center_x_um = self._position_control(0.0)
         self.center_y_um = self._position_control(0.0)
+        self.center_on_beam = QPushButton("Center on beam")
 
         form.addRow("Channel", self.channel)
         form.addRow("Screen", self.screen_type)
@@ -159,9 +163,13 @@ class InputScreenEditor(QGroupBox):
         form.addRow("Height (µm)", self.height_um)
         form.addRow("Center x (µm)", self.center_x_um)
         form.addRow("Center y (µm)", self.center_y_um)
+        form.addRow("", self.center_on_beam)
         form.addRow("", self.invert)
         layout.addLayout(form)
 
+        self.preview_mode = QComboBox()
+        self.preview_mode.addItem("Transmission", "transmission")
+        self.preview_mode.addItem("Post-screen beam", "post_screen")
         self.transmission_preview = QLabel("Screen transmission")
         self.transmission_preview.setAlignment(Qt.AlignCenter)
         self.transmission_preview.setMinimumSize(RASTER_PREVIEW_SIZE)
@@ -174,10 +182,14 @@ class InputScreenEditor(QGroupBox):
             _TRANSFORMED_PREVIEW_SIZE.height()
         )
         self.transformed_preview.setStyleSheet("border: 1px solid #888;")
-        layout.addWidget(QLabel("Screen transmission"))
-        layout.addWidget(self.transmission_preview)
-        layout.addWidget(QLabel("Incident beam → screen → post-screen beam"))
-        layout.addWidget(self.transformed_preview)
+        self.preview_stack = QStackedWidget()
+        self.preview_stack.addWidget(self.transmission_preview)
+        self.preview_stack.addWidget(self.transformed_preview)
+        preview_row = QHBoxLayout()
+        preview_row.addWidget(QLabel("Preview"))
+        preview_row.addWidget(self.preview_mode)
+        layout.addLayout(preview_row)
+        layout.addWidget(self.preview_stack)
 
         power_form = QFormLayout()
         self.incident_power = QLabel("—")
@@ -202,15 +214,18 @@ class InputScreenEditor(QGroupBox):
             self.height_um,
             self.center_x_um,
             self.center_y_um,
+            self.center_on_beam,
             self.invert,
         )
         self.channel.currentIndexChanged.connect(self._selected_channel_changed)
-        self.screen_type.currentIndexChanged.connect(self._screen_controls_changed)
+        self.screen_type.currentIndexChanged.connect(self._screen_type_changed)
         self.source_type.currentIndexChanged.connect(self._source_type_changed)
         self.standard_source.currentIndexChanged.connect(
             self._standard_source_changed
         )
         self.choose_file.clicked.connect(self._choose_user_image)
+        self.center_on_beam.clicked.connect(self._center_on_selected_beam)
+        self.preview_mode.currentIndexChanged.connect(self._preview_mode_changed)
         for control in (
             self.width_um,
             self.height_um,
@@ -219,6 +234,40 @@ class InputScreenEditor(QGroupBox):
         ):
             control.valueChanged.connect(self._screen_controls_changed)
         self.invert.toggled.connect(self._screen_controls_changed)
+        self._screen_detail_widgets = (
+            self.source_type,
+            self.standard_source,
+            self.standard_status,
+            self.choose_file,
+            self.selected_source,
+            self.width_um,
+            self.height_um,
+            self.center_x_um,
+            self.center_y_um,
+            self.center_on_beam,
+            self.invert,
+            self.preview_mode,
+            self.preview_stack,
+            self.incident_power,
+            self.transmitted_power,
+            self.throughput,
+        )
+        self._screen_detail_labels = tuple(
+            label
+            for widget in self._screen_detail_widgets
+            if (label := form.labelForField(widget)) is not None
+        ) + tuple(
+            label
+            for widget in (
+                self.incident_power,
+                self.transmitted_power,
+                self.throughput,
+            )
+            if (label := power_form.labelForField(widget)) is not None
+        )
+        self._standard_source_label = form.labelForField(self.standard_source)
+        self._standard_status_label = form.labelForField(self.standard_status)
+        self._choose_file_label = form.labelForField(self.choose_file)
         self.sync_beams()
         self._update_enabled_state()
         if self._editor_enabled:
@@ -433,6 +482,38 @@ class InputScreenEditor(QGroupBox):
         self.refresh_preview()
         self.configurationChanged.emit()
 
+    def _screen_type_changed(self, *_args) -> None:
+        if (
+            not self._loading_controls
+            and self.screen_type.currentData() == INTENSITY_IMAGE_SCREEN
+            and self._binding_for_selected() is None
+        ):
+            self._set_center_from_selected_beam()
+        self._screen_controls_changed()
+
+    def _set_center_from_selected_beam(self) -> None:
+        definition = self._selected_definition()
+        if definition is None:
+            raise ValueError("no enabled channel is selected")
+        self.center_x_um.blockSignals(True)
+        self.center_y_um.blockSignals(True)
+        try:
+            self.center_x_um.setValue(float(definition.x_um))
+            self.center_y_um.setValue(float(definition.y_um))
+        finally:
+            self.center_x_um.blockSignals(False)
+            self.center_y_um.blockSignals(False)
+
+    def _center_on_selected_beam(self) -> None:
+        try:
+            self._set_center_from_selected_beam()
+            self._screen_controls_changed()
+        except ValueError as exc:
+            self.status.setText(str(exc))
+
+    def _preview_mode_changed(self, index: int) -> None:
+        self.preview_stack.setCurrentIndex(max(0, int(index)))
+
     def _source_type_changed(self, *_args) -> None:
         self._update_enabled_state()
         if self.source_type.currentData() == "standard":
@@ -446,6 +527,12 @@ class InputScreenEditor(QGroupBox):
             self.set_source(self._standard_sources[index])
 
     def _update_enabled_state(self) -> None:
+        image_mode = (
+            self._editor_enabled
+            and self.screen_type.currentData() == INTENSITY_IMAGE_SCREEN
+        )
+        for widget in (*self._screen_detail_widgets, *self._screen_detail_labels):
+            widget.setVisible(image_mode)
         if not self._editor_enabled:
             self.availability.setText(self._disabled_reason)
             for control in self._editable_controls:
@@ -457,8 +544,18 @@ class InputScreenEditor(QGroupBox):
         )
         self.channel.setEnabled(bool(self._enabled_definitions))
         self.screen_type.setEnabled(bool(self._enabled_definitions))
-        image_mode = self.screen_type.currentData() == INTENSITY_IMAGE_SCREEN
         standard = self.source_type.currentData() == "standard"
+        for widget in (self.standard_source, self.standard_status):
+            widget.setVisible(image_mode and standard)
+        for label in (
+            self._standard_source_label,
+            self._standard_status_label,
+        ):
+            if label is not None:
+                label.setVisible(image_mode and standard)
+        self.choose_file.setVisible(image_mode and not standard)
+        if self._choose_file_label is not None:
+            self._choose_file_label.setVisible(image_mode and not standard)
         self.source_type.setEnabled(image_mode)
         self.standard_source.setEnabled(
             image_mode and standard and bool(self._standard_sources)
@@ -472,6 +569,10 @@ class InputScreenEditor(QGroupBox):
             self.invert,
         ):
             control.setEnabled(image_mode)
+        self.center_on_beam.setEnabled(
+            image_mode and self._selected_definition() is not None
+        )
+        self.preview_mode.setEnabled(image_mode)
 
     def _choose_user_image(self) -> None:
         formats = " ".join(f"*.{value}" for value in supported_user_image_formats())

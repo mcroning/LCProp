@@ -55,7 +55,6 @@ class PRImageInputPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._beam_panel = None
-        self._roles_initialized = False
         self._role_names: list[str | None] = [None, None]
         self._enabled_channel_names: list[str] = []
 
@@ -102,13 +101,11 @@ class PRImageInputPanel(QWidget):
 
         if self._beam_panel is not None:
             try:
-                self._beam_panel.launch_plane_widget.beamStackChanged.disconnect(
-                    self.sync_channels
-                )
+                self._beam_panel.beamStackChanged.disconnect(self.sync_channels)
             except RuntimeError:
                 pass
         self._beam_panel = beam_panel
-        beam_panel.launch_plane_widget.beamStackChanged.connect(self.sync_channels)
+        beam_panel.beamStackChanged.connect(self.sync_channels)
         self.sync_channels()
 
     def mode_id(self) -> str:
@@ -129,37 +126,75 @@ class PRImageInputPanel(QWidget):
 
         if self._beam_panel is None:
             return
-        previous_names = tuple(self._role_names)
+        previous_role_names = tuple(self._role_names)
+        previous_enabled_names = tuple(self._enabled_channel_names)
         enabled = [
             beam for beam in self._beam_panel.beam_stack_definition.beams
             if beam.enabled
         ]
         names = [str(beam.name) for beam in enabled]
         self._enabled_channel_names = names
-        resolved_matches = [
-            [index for index, name in enumerate(names) if name == previous]
-            for previous in previous_names
+
+        mapping: dict[int, int] = {}
+        unmatched_current = set(range(len(names)))
+        for previous_index, previous_name in enumerate(previous_enabled_names):
+            matches = [
+                index
+                for index in unmatched_current
+                if names[index] == previous_name
+            ]
+            if len(matches) == 1:
+                mapping[previous_index] = matches[0]
+                unmatched_current.remove(matches[0])
+        unmatched_previous = [
+            index
+            for index in range(len(previous_enabled_names))
+            if index not in mapping
         ]
-        default_pair = len(names) == 2 and not self._roles_initialized
+        if (
+            len(previous_enabled_names) == len(names)
+            and len(unmatched_previous) == 1
+            and len(unmatched_current) == 1
+        ):
+            mapping[unmatched_previous[0]] = next(iter(unmatched_current))
+
+        resolved_indices = []
+        for previous_name in previous_role_names:
+            old_matches = [
+                index
+                for index, name in enumerate(previous_enabled_names)
+                if name == previous_name
+            ]
+            resolved_indices.append(
+                mapping.get(old_matches[0]) if len(old_matches) == 1 else None
+            )
+        if (
+            resolved_indices[0] is not None
+            and resolved_indices[0] == resolved_indices[1]
+        ):
+            resolved_indices[1] = None
+        if len(names) == 2:
+            used = {index for index in resolved_indices if index is not None}
+            for role, resolved in enumerate(resolved_indices):
+                if resolved is not None:
+                    continue
+                available = [index for index in range(2) if index not in used]
+                if available:
+                    resolved_indices[role] = available[0]
+                    used.add(available[0])
         for role, selector in enumerate((self.pump_channel, self.signal_channel)):
             selector.blockSignals(True)
             selector.clear()
             for index, name in enumerate(names):
                 selector.addItem(f"{index} — {name}", index)
-            previous = previous_names[role]
-            matches = resolved_matches[role]
-            if previous is not None and len(matches) == 1:
-                selector.setCurrentIndex(matches[0])
-                self._role_names[role] = previous
-            elif default_pair:
-                selector.setCurrentIndex(role)
-                self._role_names[role] = names[role]
+            resolved = resolved_indices[role]
+            if resolved is not None:
+                selector.setCurrentIndex(resolved)
+                self._role_names[role] = names[resolved]
             else:
                 selector.setCurrentIndex(-1)
                 self._role_names[role] = None
             selector.blockSignals(False)
-        if default_pair:
-            self._roles_initialized = True
         self.configurationChanged.emit()
 
     def _role_changed(self, role: int) -> None:

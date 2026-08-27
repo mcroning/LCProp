@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import QAbstractSpinBox, QSplitter, QVBoxLayout, QWidget
 
 from lcprop.adapters.launchplane import beam_stack_definition_to_lcprop
@@ -29,6 +29,8 @@ except ImportError as exc:
 
 class BeamPanel(QWidget):
     """LCProp Beam tab backed by the independent LaunchPane widget."""
+
+    beamStackChanged = Signal(object)
 
     def __init__(
         self,
@@ -87,7 +89,7 @@ class BeamPanel(QWidget):
         )
         self.input_screen_editor.setMinimumWidth(360)
         self.launch_plane_widget.beamStackChanged.connect(
-            self.input_screen_editor.sync_beams
+            self._beam_stack_changed
         )
 
         self.splitter = QSplitter(Qt.Horizontal, self)
@@ -146,7 +148,13 @@ class BeamPanel(QWidget):
         )
         selected_index = 0 if stack.beams else None
         self.launch_plane_widget.set_beam_stack(stack, selected_index=selected_index)
+        self._beam_stack_changed(stack)
+
+    def _beam_stack_changed(self, stack: BeamStackDefinition) -> None:
+        """Relay every canonical interactive or programmatic stack change."""
+
         self.input_screen_editor.sync_beams()
+        self.beamStackChanged.emit(stack)
 
     def set_aperture(
         self,
