@@ -77,8 +77,12 @@ from lcprop.pr.specs import (
 from lcprop.pr.image_amplification import (
     PR_IMAGE_AMPLIFICATION_WORKFLOW,
     PRBeamPanelImageAmplificationRunRequest,
+    PRImageAmplificationCompositeResult,
     PRImageAmplificationRunRequest,
+    image_amplification_experiment_request,
+    prepare_image_amplification_base_request,
     prepare_image_amplification_workflow_request,
+    run_image_amplification_experiment,
 )
 from lcprop.pr.static_workflow import (
     PRStaticRunRequest,
@@ -731,6 +735,14 @@ class PRMainWindow(QWidget):
         self.runner_label.setText(f"Runner: {self.runner.name}")
 
     def _run_registered(self, request, **kwargs):
+        if isinstance(request, PRBeamPanelImageAmplificationRunRequest):
+            composite = image_amplification_experiment_request(request)
+            return run_image_amplification_experiment(
+                self.runner,
+                composite,
+                cancellation_token=kwargs.get("cancellation_token"),
+                progress_callback=kwargs.get("progress_callback"),
+            )
         if isinstance(
             request,
             (PRStaticRunRequest, PRTransverseStaticRunRequest),
@@ -963,13 +975,13 @@ class PRMainWindow(QWidget):
             f"with {self.runner.name}..."
         )
         preflight_request = request
-        if isinstance(
-            request,
-            (
-                PRImageAmplificationRunRequest,
-                PRBeamPanelImageAmplificationRunRequest,
-            ),
-        ):
+        if isinstance(request, PRBeamPanelImageAmplificationRunRequest):
+            preflight_request, _transmission, _grating = (
+                prepare_image_amplification_base_request(
+                    image_amplification_experiment_request(request)
+                )
+            )
+        elif isinstance(request, PRImageAmplificationRunRequest):
             preflight_request, _transmission, _grating = (
                 prepare_image_amplification_workflow_request(request)
             )
@@ -1103,6 +1115,11 @@ class PRMainWindow(QWidget):
                 f"elapsed={progress.elapsed_wall_time:.3f} s"
             )
             return
+        if progress.workflow == PR_IMAGE_AMPLIFICATION_WORKFLOW:
+            self.status_label.setText(progress.message)
+            self.results_panel.set_td_time_indicator(progress.message)
+            self.results_panel.append_console(progress.message)
+            return
         if progress.workflow == PR_STATIC_WORKFLOW:
             diagnostics = progress.diagnostics or {}
             phase = diagnostics.get("phase", "solve")
@@ -1178,12 +1195,26 @@ class PRMainWindow(QWidget):
             self.results_panel.set_run_data(runner_result.run_data)
             if runner_result.kind == PR_IMAGE_AMPLIFICATION_WORKFLOW:
                 td_result = result.run_result
+                analysis = (
+                    result.analysis_result
+                    if isinstance(result, PRImageAmplificationCompositeResult)
+                    else result
+                )
                 self.last_checkpoint = None
-                if td_result.status == "cancelled":
+                if result.status == "cancelled":
                     self.run_status = "stopped"
                     self.status_label.setText("Stopped")
                     prefix = "PR image time at stop"
                     message = "Image-amplification run cancelled"
+                elif result.status != "completed":
+                    self.run_status = "failed"
+                    self.status_label.setText("Analysis failed")
+                    prefix = "Final PR image time"
+                    message = getattr(
+                        result,
+                        "analysis_message",
+                        "Image-amplification analysis failed",
+                    )
                 else:
                     self.run_status = "completed"
                     self.status_label.setText("Completed")
@@ -1194,13 +1225,14 @@ class PRMainWindow(QWidget):
                     f"normalized; steps: {td_result.completed_steps}/"
                     f"{td_result.requested_steps}"
                 )
-                self.results_panel.append_console(
-                    "Image amplification: "
-                    f"measured gain={result.measured_absolute_signal_gain:.8g}; "
-                    f"analytic gain={result.analytic_absolute_signal_gain:.8g}; "
-                    f"correlation={result.image_intensity_correlation:.8g}; "
-                    f"NRMSE={result.normalized_image_rmse:.8g}"
-                )
+                if analysis is not None:
+                    self.results_panel.append_console(
+                        "Image amplification: "
+                        f"measured gain={analysis.measured_absolute_signal_gain:.8g}; "
+                        f"analytic gain={analysis.analytic_absolute_signal_gain:.8g}; "
+                        f"correlation={analysis.image_intensity_correlation:.8g}; "
+                        f"NRMSE={analysis.normalized_image_rmse:.8g}"
+                    )
             elif runner_result.kind == PR_TIMEDEPENDENT_WORKFLOW:
                 self.last_checkpoint = result.checkpoint
                 if result.status == "cancelled":

@@ -19,6 +19,7 @@ from lcprop.optics.splitstep import total_intensity
 from lcprop.pr.image_amplification import (
     PR_IMAGE_AMPLIFICATION_WORKFLOW,
     PRBeamPanelImageAmplificationRunRequest,
+    PRImageAmplificationExperimentRequest,
     PRImageAmplificationResult,
 )
 from lcprop.pr.specs import PRRunResult, PR_TIMEDEPENDENT_WORKFLOW
@@ -325,16 +326,18 @@ def pr_result_to_run_data(result: PRRunResult) -> RunData:
     )
 
 
-def pr_image_amplification_result_to_run_data(
+def augment_pr_image_amplification_run_data(
     result: PRImageAmplificationResult,
+    base: RunData,
 ) -> RunData:
-    """Expose the established image-amplification products in shared RunData."""
+    """Augment already-created ordinary PR products with image diagnostics."""
 
     if not isinstance(result, PRImageAmplificationResult):
         raise TypeError("result must be a PRImageAmplificationResult")
     if result.image_request is None:
         raise ValueError("image-amplification result lacks source provenance")
-    base = pr_result_to_run_data(result.run_result)
+    if not isinstance(base, RunData):
+        raise TypeError("base must be the selected operation's RunData")
     fields = FieldCollection(list(base.fields.items()))
     image_request = result.image_request
     source = np.asarray(
@@ -420,7 +423,13 @@ def pr_image_amplification_result_to_run_data(
             ),
         )
 
-    if isinstance(image_request, PRBeamPanelImageAmplificationRunRequest):
+    if isinstance(
+        image_request,
+        (
+            PRBeamPanelImageAmplificationRunRequest,
+            PRImageAmplificationExperimentRequest,
+        ),
+    ):
         launch_configuration = image_request.launch_configuration
         signal = launch_configuration.beams.channels[
             image_request.signal_channel_index
@@ -452,7 +461,7 @@ def pr_image_amplification_result_to_run_data(
         dx_um=float(result.run_result.grid_summary["dx_um"]),
         dy_um=float(result.run_result.grid_summary["dy_um"]),
         wavelength_um=wavelength_um,
-        refractive_index=float(image_request.material.refractive_index),
+        refractive_index=float(result.request.material.refractive_index),
         coherence_groups=(coherence_group,),
         xp=np,
     )
@@ -528,7 +537,7 @@ def pr_image_amplification_result_to_run_data(
                 "pump_channel_index": pump_channel_index,
                 "signal_channel_index": signal_channel_index,
                 "alpha_policy": "discarded_not_an_optical_mask",
-                "simulation_grid": [image_request.grid.Nx, image_request.grid.Ny],
+                "simulation_grid": [result.request.grid.Nx, result.request.grid.Ny],
                 "incident_pump_power_mW": result.incident_channel_powers_mW[0],
                 "incident_signal_power_mW": result.incident_channel_powers_mW[1],
                 "incident_total_power_mW": result.incident_total_power_mW,
@@ -563,6 +572,17 @@ def pr_image_amplification_result_to_run_data(
         diagnostics=diagnostics,
         longitudinal_enabled=base.longitudinal_enabled,
         longitudinal_message=base.longitudinal_message,
+    )
+
+
+def pr_image_amplification_result_to_run_data(
+    result: PRImageAmplificationResult,
+) -> RunData:
+    """Expose the historical reduced-TD image products in shared RunData."""
+
+    return augment_pr_image_amplification_run_data(
+        result,
+        pr_result_to_run_data(result.run_result),
     )
 
 

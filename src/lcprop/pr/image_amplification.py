@@ -5,13 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import math
 from time import perf_counter
+from typing import Any, Literal
 
 import numpy as np
 
 from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
-from lcprop.core.execution import CancellationToken
+from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch import build_launch, channel_power_integrals
 from lcprop.optics.launch_configuration import LaunchConfiguration
@@ -33,10 +34,12 @@ from lcprop.pr.image_sources import (
 )
 from lcprop.pr.specs import (
     PRMaterialSpec,
+    PR_MATERIAL_ID,
     PRRunRequest,
     PRRunResult,
     PRSolverOptions,
     PR_SEMI_IMPLICIT_INTEGRATOR,
+    PR_TIMEDEPENDENT_WORKFLOW,
 )
 from lcprop.pr.workflow import run_pr_timedependent
 from lcprop.pr.static_streaming import (
@@ -48,6 +51,99 @@ from lcprop.pr.static_streaming import (
 
 
 PR_IMAGE_AMPLIFICATION_WORKFLOW = "pr_image_amplification"
+
+PR_IMAGE_ANALYSIS_STAGES = (
+    "carrier_isolation",
+    "output_back_propagation",
+    "zero_response_propagation",
+    "reference_back_propagation",
+    "metric_construction",
+    "product_augmentation",
+)
+
+
+@dataclass(frozen=True)
+class PRImageAmplificationBaseCapability:
+    """Small, explicit adapter contract for an ordinary PR operation."""
+
+    workflow_id: str
+    request_type: type
+    result_type: type
+    launch_adapter: Literal["declarative_elements", "prepared_field"]
+    validation_status: Literal[
+        "compatible_and_validated", "compatible_validation_pending"
+    ]
+
+
+@dataclass(frozen=True)
+class PRImageAmplificationExperimentRequest:
+    """Image analysis composed over one selected ordinary PR request.
+
+    ``base_request`` remains authoritative for material, solver, grid, and
+    backend settings.  The experiment owns only launch composition and channel
+    roles, avoiding a second copy of algorithm-specific solver controls.
+    """
+
+    base_workflow_id: str
+    base_request: Any
+    launch_configuration: LaunchConfiguration
+    pump_channel_index: int
+    signal_channel_index: int
+
+    @property
+    def source(self):
+        return _image_screen_and_channels(self)[0].source
+
+    @property
+    def grid(self):
+        return self.base_request.grid
+
+    @property
+    def material(self):
+        return self.base_request.material
+
+    @property
+    def backend(self):
+        return self.base_request.backend
+
+    @property
+    def incident_signal_to_pump_power_ratio(self) -> float:
+        channels = self.launch_configuration.beams.channels
+        return float(channels[self.signal_channel_index].power_mW) / float(
+            channels[self.pump_channel_index].power_mW
+        )
+
+    def validate(self) -> None:
+        prepare_image_amplification_base_request(self)
+
+
+@dataclass(frozen=True)
+class PRImageAmplificationCompositeResult:
+    """Ordinary base result plus independently classified image analysis."""
+
+    request: PRImageAmplificationExperimentRequest
+    base_runner_result: Any
+    analysis_result: PRImageAmplificationResult | None
+    analysis_status: Literal["completed", "cancelled", "not_run", "failed"]
+    analysis_message: str
+
+    @property
+    def run_result(self):
+        return self.base_runner_result.result
+
+    @property
+    def base_status(self) -> str:
+        return str(getattr(self.base_runner_result.result, "status", "failed"))
+
+    @property
+    def status(self) -> str:
+        if self.base_status != "completed":
+            return self.base_status
+        return (
+            "completed"
+            if self.analysis_status == "completed"
+            else self.analysis_status
+        )
 
 
 @dataclass(frozen=True)
@@ -282,8 +378,8 @@ class PRBeamPanelImageAmplificationRunRequest:
 class PRImageAmplificationResult:
     """Optical, gain, and image-fidelity evidence from one benchmark."""
 
-    request: PRRunRequest
-    run_result: PRRunResult
+    request: Any
+    run_result: Any
     image_transmission: np.ndarray
     signal_carrier_mask: np.ndarray
     input_signal_field: np.ndarray
@@ -313,6 +409,7 @@ class PRImageAmplificationResult:
     image_request: (
         PRImageAmplificationRunRequest
         | PRBeamPanelImageAmplificationRunRequest
+        | PRImageAmplificationExperimentRequest
         | None
     ) = None
 
@@ -339,6 +436,230 @@ class PRStreamingImageAmplificationResult:
     image_intensity_correlation: float
     normalized_image_rmse: float
     normalized_power_relative_drift: float
+
+
+def image_amplification_base_capabilities() -> tuple[
+    PRImageAmplificationBaseCapability, ...
+]:
+    """Return the bounded capability adapters for current PR operations.
+
+    Compatibility means the operation can supply the complex launch/output
+    fields and physical metadata required by the common postprocessor.  It is
+    deliberately distinct from scientific validation for this experiment.
+    """
+
+    from lcprop.pr.static_workflow import (
+        PRStaticRunRequest,
+        PRStaticRunResult,
+        PR_STATIC_WORKFLOW,
+    )
+    from lcprop.pr.transverse.specs import (
+        PRTransverseRunRequest,
+        PRTransverseRunResult,
+        PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+    )
+    from lcprop.pr.transverse.static_workflow import (
+        PRTransverseStaticRunRequest,
+        PRTransverseStaticRunResult,
+        PR_TRANSVERSE_STATIC_WORKFLOW,
+    )
+
+    return (
+        PRImageAmplificationBaseCapability(
+            PR_TIMEDEPENDENT_WORKFLOW,
+            PRRunRequest,
+            PRRunResult,
+            "declarative_elements",
+            "compatible_and_validated",
+        ),
+        PRImageAmplificationBaseCapability(
+            PR_STATIC_WORKFLOW,
+            PRStaticRunRequest,
+            PRStaticRunResult,
+            "declarative_elements",
+            "compatible_validation_pending",
+        ),
+        PRImageAmplificationBaseCapability(
+            PR_TRANSVERSE_STATIC_WORKFLOW,
+            PRTransverseStaticRunRequest,
+            PRTransverseStaticRunResult,
+            "declarative_elements",
+            "compatible_validation_pending",
+        ),
+        PRImageAmplificationBaseCapability(
+            PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+            PRTransverseRunRequest,
+            PRTransverseRunResult,
+            "prepared_field",
+            "compatible_validation_pending",
+        ),
+    )
+
+
+def _base_capability(workflow_id: str) -> PRImageAmplificationBaseCapability:
+    for capability in image_amplification_base_capabilities():
+        if capability.workflow_id == workflow_id:
+            return capability
+    raise ValueError(
+        f"PR workflow {workflow_id!r} does not expose the image-amplification "
+        "optical-result capability"
+    )
+
+
+def _image_screen_and_channels(request):
+    launch = request.launch_configuration
+    pump_index = int(request.pump_channel_index)
+    signal_index = int(request.signal_channel_index)
+    assignments = {
+        assignment.channel_index: assignment.elements
+        for assignment in launch.channel_elements
+    }
+    signal_elements = assignments.get(signal_index, ())
+    if len(signal_elements) != 1 or not isinstance(
+        signal_elements[0], IntensityRasterScreen
+    ):
+        raise ValueError(
+            "the selected signal channel must carry exactly one "
+            "IntensityRasterScreen"
+        )
+    return (
+        signal_elements[0],
+        launch.beams.channels[pump_index],
+        launch.beams.channels[signal_index],
+    )
+
+
+def _validate_composite_launch(request) -> None:
+    launch = request.launch_configuration
+    if not isinstance(launch, LaunchConfiguration):
+        raise TypeError("launch_configuration must be a LaunchConfiguration")
+    beams = launch.beams
+    if len(beams.channels) != 2:
+        raise ValueError(
+            "Image Amplification requires exactly two enabled beam channels"
+        )
+    for name in ("pump_channel_index", "signal_channel_index"):
+        value = getattr(request, name)
+        if type(value) is not int or not 0 <= value < len(beams.channels):
+            raise ValueError(f"{name} must identify a canonical enabled beam channel")
+    if request.pump_channel_index == request.signal_channel_index:
+        raise ValueError("pump and signal channels must be distinct")
+    screen, pump, signal = _image_screen_and_channels(request)
+    if any(float(channel.power_mW) <= 0.0 for channel in (pump, signal)):
+        raise ValueError("pump and signal incident powers must be positive")
+    groups = beams.coherence_groups
+    if groups[request.pump_channel_index] != groups[request.signal_channel_index]:
+        raise ValueError("pump and signal channels must share one coherence group")
+    if not math.isclose(
+        float(pump.wavelength_um),
+        float(signal.wavelength_um),
+        abs_tol=1e-15,
+    ):
+        raise ValueError("pump and signal wavelengths must match")
+    if not math.isclose(
+        float(pump.tilt_y_rad_per_um), 0.0, abs_tol=1e-15
+    ) or not math.isclose(
+        float(signal.tilt_y_rad_per_um), 0.0, abs_tol=1e-15
+    ):
+        raise ValueError("Image Amplification requires both carriers in the x-z plane")
+    if not math.isclose(
+        float(pump.tilt_x_rad_per_um),
+        -float(signal.tilt_x_rad_per_um),
+        rel_tol=1e-12,
+        abs_tol=1e-12,
+    ):
+        raise ValueError(
+            "Image Amplification requires symmetric pump/signal x carriers"
+        )
+    assignments = {
+        assignment.channel_index: assignment.elements
+        for assignment in launch.channel_elements
+    }
+    if assignments.get(request.pump_channel_index, ()):
+        raise ValueError("the selected pump channel must not carry an image screen")
+    if screen.preprocessing_policy != EVEN_SQUARE_NEAREST_TRANSPARENT_V1:
+        raise ValueError("unsupported image-screen preprocessing policy")
+
+
+def image_amplification_experiment_request(
+    request: PRBeamPanelImageAmplificationRunRequest,
+    *,
+    base_workflow_id: str = PR_TIMEDEPENDENT_WORKFLOW,
+    base_request: Any | None = None,
+) -> PRImageAmplificationExperimentRequest:
+    """Compose the C1 BeamPanel request over one ordinary PR operation."""
+
+    request.validate()
+    if base_request is None:
+        if base_workflow_id != PR_TIMEDEPENDENT_WORKFLOW:
+            raise ValueError("a base_request is required for non-default PR algorithms")
+        base_request = PRRunRequest(
+            grid=request.grid,
+            beams=request.launch_configuration.beams,
+            material=request.material,
+            solver=request.solver,
+            backend=request.backend,
+        )
+    composite = PRImageAmplificationExperimentRequest(
+        base_workflow_id=base_workflow_id,
+        base_request=base_request,
+        launch_configuration=request.launch_configuration,
+        pump_channel_index=request.pump_channel_index,
+        signal_channel_index=request.signal_channel_index,
+    )
+    capability = _base_capability(base_workflow_id)
+    if not isinstance(base_request, capability.request_type):
+        raise TypeError(
+            f"{base_workflow_id} requires {capability.request_type.__name__}"
+        )
+    _validate_composite_launch(composite)
+    return composite
+
+
+def prepare_image_amplification_base_request(
+    request: PRImageAmplificationExperimentRequest,
+) -> tuple[Any, np.ndarray, float]:
+    """Deterministically transform an experiment into an ordinary PR request."""
+
+    if not isinstance(request, PRImageAmplificationExperimentRequest):
+        raise TypeError("request must be a PRImageAmplificationExperimentRequest")
+    capability = _base_capability(request.base_workflow_id)
+    if not isinstance(request.base_request, capability.request_type):
+        raise TypeError(
+            f"{request.base_workflow_id} requires {capability.request_type.__name__}"
+        )
+    _validate_composite_launch(request)
+    base = request.base_request
+    for attribute in ("grid", "material", "backend"):
+        if not hasattr(base, attribute):
+            raise TypeError(f"base request lacks required {attribute} capability")
+    grid = make_grid(base.grid, real_dtype=np.float64)
+    screen, pump, signal = _image_screen_and_channels(request)
+    transmission = prepare_intensity_raster_transmission(
+        screen.source.grayscale,
+        grid,
+        placement=screen.placement,
+        invert=screen.invert,
+        preprocessing_policy=screen.preprocessing_policy,
+    )
+    normalized_grating = (
+        float(signal.tilt_x_rad_per_um) - float(pump.tilt_x_rad_per_um)
+    ) / float(base.material.characteristic_wavenumber_per_um)
+    replacement = {
+        "beams": request.launch_configuration.beams,
+        "initial_A": None,
+    }
+    if capability.launch_adapter == "declarative_elements":
+        replacement["launch_elements"] = request.launch_configuration.channel_elements
+    else:
+        prepared = build_launch(
+            request.launch_configuration.beams,
+            grid,
+            complex_dtype=np.complex128,
+            launch_elements=request.launch_configuration.channel_elements,
+        )
+        replacement["initial_A"] = np.asarray(prepared.A0).copy()
+    return replace(base, **replacement), transmission, normalized_grating
 
 
 def paper_absolute_signal_gain(
@@ -848,8 +1169,9 @@ def _intensity_metrics(
     return correlation, normalized_rmse
 
 
-def _run_prepared_image_amplification(
-    request: PRRunRequest,
+def _analyze_prepared_image_amplification(
+    request,
+    run_result,
     transmission: np.ndarray,
     normalized_grating: float,
     *,
@@ -858,16 +1180,18 @@ def _run_prepared_image_amplification(
     image_request: (
         PRImageAmplificationRunRequest
         | PRBeamPanelImageAmplificationRunRequest
+        | PRImageAmplificationExperimentRequest
         | None
     ),
     transparency_policy: str,
     incident_channel_powers_mW: tuple[float, float],
     pump_channel_index: int = 0,
     signal_channel_index: int = 1,
-    cancellation_token: CancellationToken | None = None,
-    progress_callback=None,
+    pr_workflow_runtime_s: float,
+    benchmark_started_at: float,
+    stage_callback=None,
 ) -> PRImageAmplificationResult:
-    """Measure one already-prepared image-bearing PR request."""
+    """Apply the common image analysis to one capable ordinary PR result."""
 
     grid = make_grid(request.grid, real_dtype=np.float64)
     pump_kx = float(
@@ -881,17 +1205,11 @@ def _run_prepared_image_amplification(
         pump_kx_rad_per_um=pump_kx,
         signal_kx_rad_per_um=signal_kx,
     )
-    coherent_input = np.sum(np.asarray(request.initial_A), axis=0)
+    prepared_A = np.asarray(run_result.A_initial)
+    coherent_input = np.sum(prepared_A, axis=0)
     input_signal = isolate_signal_carrier(coherent_input, mask)
-
-    benchmark_started_at = perf_counter()
-    workflow_started_at = perf_counter()
-    run_result = run_pr_timedependent(
-        request,
-        cancellation_token=cancellation_token,
-        progress_callback=progress_callback,
-    )
-    pr_workflow_runtime = perf_counter() - workflow_started_at
+    if stage_callback is not None:
+        stage_callback("carrier_isolation")
     reconstruction_started_at = perf_counter()
     coherent_output = np.sum(np.asarray(run_result.A_final), axis=0)
     output_signal = isolate_signal_carrier(coherent_output, mask)
@@ -904,6 +1222,8 @@ def _run_prepared_image_amplification(
         request=request,
     )
     reconstruction_optical_runtime += perf_counter() - optical_started_at
+    if stage_callback is not None:
+        stage_callback("output_back_propagation")
 
     optical_started_at = perf_counter()
     zero_output = _linear_propagate(
@@ -913,6 +1233,8 @@ def _run_prepared_image_amplification(
         request=request,
     )
     reconstruction_optical_runtime += perf_counter() - optical_started_at
+    if stage_callback is not None:
+        stage_callback("zero_response_propagation")
     zero_signal = isolate_signal_carrier(zero_output, mask)
     optical_started_at = perf_counter()
     zero_backpropagated = _linear_propagate(
@@ -922,8 +1244,10 @@ def _run_prepared_image_amplification(
         request=request,
     )
     reconstruction_optical_runtime += perf_counter() - optical_started_at
+    if stage_callback is not None:
+        stage_callback("reference_back_propagation")
     signal_channel_intensity = (
-        np.abs(np.asarray(request.initial_A)[signal_channel_index]) ** 2
+        np.abs(prepared_A[signal_channel_index]) ** 2
     )
     roi = signal_channel_intensity > 1e-4 * float(np.max(signal_channel_intensity))
     correlation, normalized_rmse = _intensity_metrics(
@@ -936,6 +1260,8 @@ def _run_prepared_image_amplification(
         zero_backpropagated,
         roi,
     )
+    if stage_callback is not None:
+        stage_callback("metric_construction")
 
     dxdy = float(grid.dx_um) * float(grid.dy_um)
     input_signal_power = float(np.sum(np.abs(input_signal) ** 2) * dxdy)
@@ -961,7 +1287,7 @@ def _run_prepared_image_amplification(
     reconstruction_runtime = perf_counter() - reconstruction_started_at
     incident_powers = tuple(float(value) for value in incident_channel_powers_mW)
     incident_total = float(sum(incident_powers))
-    prepared_channel_powers = channel_power_integrals(request.initial_A, grid)
+    prepared_channel_powers = channel_power_integrals(prepared_A, grid)
     post_element_powers = (
         float(prepared_channel_powers[pump_channel_index]) * incident_total,
         float(prepared_channel_powers[signal_channel_index]) * incident_total,
@@ -997,11 +1323,56 @@ def _run_prepared_image_amplification(
         post_element_total_power_mW=float(sum(post_element_powers)),
         signal_throughput_fraction=signal_throughput,
         transparency_policy=transparency_policy,
-        pr_workflow_runtime_s=pr_workflow_runtime,
+        pr_workflow_runtime_s=pr_workflow_runtime_s,
         reconstruction_optical_runtime_s=reconstruction_optical_runtime,
         reconstruction_runtime_s=reconstruction_runtime,
         runtime_s=perf_counter() - benchmark_started_at,
         image_request=image_request,
+    )
+
+
+def _run_prepared_image_amplification(
+    request: PRRunRequest,
+    transmission: np.ndarray,
+    normalized_grating: float,
+    *,
+    analytic_input_ratio: float,
+    wavelength_um: float,
+    image_request: (
+        PRImageAmplificationRunRequest
+        | PRBeamPanelImageAmplificationRunRequest
+        | None
+    ),
+    transparency_policy: str,
+    incident_channel_powers_mW: tuple[float, float],
+    pump_channel_index: int = 0,
+    signal_channel_index: int = 1,
+    cancellation_token: CancellationToken | None = None,
+    progress_callback=None,
+) -> PRImageAmplificationResult:
+    """Preserve the historical direct reduced-TD execution entry point."""
+
+    benchmark_started_at = perf_counter()
+    workflow_started_at = perf_counter()
+    run_result = run_pr_timedependent(
+        request,
+        cancellation_token=cancellation_token,
+        progress_callback=progress_callback,
+    )
+    return _analyze_prepared_image_amplification(
+        request,
+        run_result,
+        transmission,
+        normalized_grating,
+        analytic_input_ratio=analytic_input_ratio,
+        wavelength_um=wavelength_um,
+        image_request=image_request,
+        transparency_policy=transparency_policy,
+        incident_channel_powers_mW=incident_channel_powers_mW,
+        pump_channel_index=pump_channel_index,
+        signal_channel_index=signal_channel_index,
+        pr_workflow_runtime_s=perf_counter() - workflow_started_at,
+        benchmark_started_at=benchmark_started_at,
     )
 
 
@@ -1050,6 +1421,190 @@ def run_image_amplification_request(
         signal_channel_index=signal_index,
         cancellation_token=cancellation_token,
         progress_callback=progress_callback,
+    )
+
+
+class _ImageAnalysisCancelled(RuntimeError):
+    pass
+
+
+def run_image_amplification_experiment(
+    runner,
+    request: PRImageAmplificationExperimentRequest,
+    *,
+    cancellation_token: CancellationToken | None = None,
+    progress_callback=None,
+    runner_kwargs: dict[str, Any] | None = None,
+):
+    """Run one image experiment through exactly one ordinary PR operation.
+
+    Base-operation progress and the cancellation token are forwarded without
+    translation.  Only the bounded post-processing stages emit image-specific
+    progress.
+    """
+
+    from lcprop.pr.products import augment_pr_image_amplification_run_data
+    from lcprop.runners.base import RunnerResult
+
+    base_request, transmission, normalized_grating = (
+        prepare_image_amplification_base_request(request)
+    )
+    capability = _base_capability(request.base_workflow_id)
+    benchmark_started_at = perf_counter()
+    base_started_at = perf_counter()
+    kwargs = dict(runner_kwargs or {})
+    kwargs["cancellation_token"] = cancellation_token
+    kwargs["progress_callback"] = progress_callback
+    base_runner_result = runner.run_registered(
+        PR_MATERIAL_ID,
+        request.base_workflow_id,
+        base_request,
+        **kwargs,
+    )
+    base_runtime = perf_counter() - base_started_at
+    base_result = base_runner_result.result
+    if not isinstance(base_result, capability.result_type):
+        raise TypeError(
+            f"{request.base_workflow_id} returned {type(base_result).__name__}; "
+            f"expected {capability.result_type.__name__}"
+        )
+    for attribute in (
+        "A_initial",
+        "A_final",
+        "grid_summary",
+        "power_initial",
+        "power_final",
+        "status",
+    ):
+        if not hasattr(base_result, attribute):
+            raise TypeError(
+                f"base result lacks required image-amplification {attribute} capability"
+            )
+
+    base_status = str(base_result.status)
+    analysis_result = None
+    analysis_status: Literal["completed", "cancelled", "not_run", "failed"]
+    analysis_message: str
+    if base_status in ("cancelled", "failed"):
+        analysis_status = "not_run"
+        analysis_message = f"analysis not run because base status is {base_status}"
+    elif cancellation_token is not None and cancellation_token.is_cancelled():
+        analysis_status = "cancelled"
+        analysis_message = "image analysis cancelled before carrier isolation"
+    else:
+        stage_started_at = perf_counter()
+
+        def stage_completed(stage: str) -> None:
+            if progress_callback is not None:
+                index = PR_IMAGE_ANALYSIS_STAGES.index(stage) + 1
+                progress_callback(
+                    RunProgress(
+                        workflow=PR_IMAGE_AMPLIFICATION_WORKFLOW,
+                        status="running",
+                        completed_units=index,
+                        total_units=len(PR_IMAGE_ANALYSIS_STAGES),
+                        current_coordinate=float(index),
+                        coordinate_name="analysis_stage",
+                        coordinate_unit="1",
+                        elapsed_wall_time=perf_counter() - stage_started_at,
+                        message=(
+                            "Post-processing image amplification: "
+                            f"{stage.replace('_', ' ')}"
+                        ),
+                        diagnostics={"phase": "image_postprocessing", "stage": stage},
+                    )
+                )
+            if cancellation_token is not None and cancellation_token.is_cancelled():
+                raise _ImageAnalysisCancelled(stage)
+
+        screen, pump, signal = _image_screen_and_channels(request)
+        channels = request.launch_configuration.beams.channels
+        incident_powers = (
+            float(channels[request.pump_channel_index].power_mW),
+            float(channels[request.signal_channel_index].power_mW),
+        )
+        try:
+            analysis_result = _analyze_prepared_image_amplification(
+                base_request,
+                base_result,
+                transmission,
+                normalized_grating,
+                analytic_input_ratio=incident_powers[1] / incident_powers[0],
+                wavelength_um=float(signal.wavelength_um),
+                image_request=request,
+                transparency_policy="passive_intensity_transmission_v1",
+                incident_channel_powers_mW=incident_powers,
+                pump_channel_index=request.pump_channel_index,
+                signal_channel_index=request.signal_channel_index,
+                pr_workflow_runtime_s=base_runtime,
+                benchmark_started_at=benchmark_started_at,
+                stage_callback=stage_completed,
+            )
+            analysis_status = "completed"
+            analysis_message = "image analysis completed"
+        except _ImageAnalysisCancelled as exc:
+            analysis_status = "cancelled"
+            analysis_message = f"image analysis cancelled after {exc}"
+        except Exception as exc:  # preserve the successful base result for diagnosis
+            analysis_status = "failed"
+            analysis_message = f"image analysis failed: {type(exc).__name__}: {exc}"
+
+    if analysis_result is not None:
+        try:
+            if cancellation_token is not None and cancellation_token.is_cancelled():
+                raise _ImageAnalysisCancelled("metric_construction")
+            run_data = augment_pr_image_amplification_run_data(
+                analysis_result,
+                base_runner_result.run_data,
+            )
+            if progress_callback is not None:
+                progress_callback(
+                    RunProgress(
+                        workflow=PR_IMAGE_AMPLIFICATION_WORKFLOW,
+                        status="running",
+                        completed_units=len(PR_IMAGE_ANALYSIS_STAGES),
+                        total_units=len(PR_IMAGE_ANALYSIS_STAGES),
+                        current_coordinate=float(len(PR_IMAGE_ANALYSIS_STAGES)),
+                        coordinate_name="analysis_stage",
+                        coordinate_unit="1",
+                        elapsed_wall_time=perf_counter() - benchmark_started_at,
+                        message=(
+                            "Post-processing image amplification: "
+                            "product augmentation"
+                        ),
+                        diagnostics={
+                            "phase": "image_postprocessing",
+                            "stage": "product_augmentation",
+                        },
+                    )
+                )
+        except _ImageAnalysisCancelled as exc:
+            analysis_result = None
+            analysis_status = "cancelled"
+            analysis_message = f"image analysis cancelled after {exc}"
+            run_data = base_runner_result.run_data
+        except Exception as exc:
+            analysis_status = "failed"
+            analysis_message = (
+                "image product augmentation failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            run_data = base_runner_result.run_data
+    else:
+        run_data = base_runner_result.run_data
+    composite = PRImageAmplificationCompositeResult(
+        request=request,
+        base_runner_result=base_runner_result,
+        analysis_result=analysis_result,
+        analysis_status=analysis_status,
+        analysis_message=analysis_message,
+    )
+    return RunnerResult(
+        kind=PR_IMAGE_AMPLIFICATION_WORKFLOW,
+        result=composite,
+        message=analysis_message,
+        run_data=run_data,
+        material_id=PR_MATERIAL_ID,
     )
 
 

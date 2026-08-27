@@ -6,6 +6,7 @@ import time
 
 import numpy as np
 import pytest
+import lcprop.pr.image_amplification as image_amplification_module
 
 pytest.importorskip("PySide6")
 
@@ -15,6 +16,7 @@ from launchplane.model import BeamDefinition, BeamStackDefinition
 
 from lcprop.core.backend import BackendSpec
 from lcprop.core.context import GridSpec
+from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch_configuration import LaunchConfiguration
 from lcprop.optics.screens import (
@@ -31,20 +33,44 @@ from lcprop.pr.gui.main_window import PRMainWindow
 from lcprop.pr.image_amplification import (
     PR_IMAGE_AMPLIFICATION_WORKFLOW,
     PRBeamPanelImageAmplificationRunRequest,
+    PRImageAmplificationCompositeResult,
     PRImageAmplificationRunRequest,
     PRImageAmplificationSpec,
     PRImageLaunchSpec,
     apply_passive_field_transmittance,
     image_amplification_run_request,
+    image_amplification_base_capabilities,
+    image_amplification_experiment_request,
     intensity_transmission_to_field_transmittance,
     prepare_image_amplification_workflow_request,
+    prepare_image_amplification_base_request,
     prepare_image_transmission,
     run_image_amplification,
     run_image_amplification_request,
+    run_image_amplification_experiment,
 )
 from lcprop.pr.image_sources import PRImageSource, standard_image_catalog
-from lcprop.pr.operations import PR_IMAGE_AMPLIFICATION_OPERATION
-from lcprop.pr.specs import PRMaterialSpec, PRSolverOptions
+from lcprop.pr.operations import (
+    PR_IMAGE_AMPLIFICATION_OPERATION,
+    PR_TIMEDEPENDENT_OPERATION,
+)
+from lcprop.pr.products import pr_image_amplification_result_to_run_data
+from lcprop.pr.specs import (
+    PRMaterialSpec,
+    PRRunRequest,
+    PRSolverOptions,
+    PR_TIMEDEPENDENT_WORKFLOW,
+)
+from lcprop.pr.static_workflow import PRStaticRunRequest, PR_STATIC_WORKFLOW
+from lcprop.pr.transverse.specs import (
+    PRTransverseRunRequest,
+    PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+)
+from lcprop.pr.transverse.static_workflow import (
+    PRTransverseStaticRunRequest,
+    PR_TRANSVERSE_STATIC_WORKFLOW,
+)
+from lcprop.runners.local import LocalRunner
 
 
 @pytest.fixture(scope="module")
@@ -456,8 +482,10 @@ def test_gui_user_mode_builds_and_dispatches_registered_operation(app, tmp_path)
     assert not window.evolution_panel.workflow.isEnabled()
     assert not hasattr(window.input_panel, "preview")
     assert not window._background_running
-    assert calls and calls[0][:2] == ("pr", PR_IMAGE_AMPLIFICATION_WORKFLOW)
-    assert calls[0][2] == request
+    assert calls and calls[0][:2] == ("pr", PR_TIMEDEPENDENT_WORKFLOW)
+    assert isinstance(calls[0][2], PRRunRequest)
+    assert calls[0][2].initial_A is None
+    assert calls[0][2].launch_elements == request.launch_configuration.channel_elements
     assert window.last_runner_result.kind == PR_IMAGE_AMPLIFICATION_WORKFLOW
     assert "amplified_image" in window.last_runner_result.run_data.fields
     assert "image_amplification" in window.last_runner_result.run_data.diagnostics
@@ -802,6 +830,324 @@ def test_beampanel_stage_a_full_result_equivalence():
         == old_result.run_result.completed_steps
     )
     assert new_result.run_result.diagnostics == old_result.run_result.diagnostics
+
+
+def test_image_experiment_capability_table_covers_current_pr_algorithms():
+    capabilities = {
+        capability.workflow_id: capability
+        for capability in image_amplification_base_capabilities()
+    }
+    assert set(capabilities) == {
+        "pr_timedependent",
+        "pr_static",
+        "pr_transverse_static",
+        "pr_transverse_timedependent",
+    }
+    assert capabilities["pr_timedependent"].validation_status == (
+        "compatible_and_validated"
+    )
+    assert all(
+        capabilities[name].validation_status == "compatible_validation_pending"
+        for name in (
+            "pr_static",
+            "pr_transverse_static",
+            "pr_transverse_timedependent",
+        )
+    )
+    assert capabilities["pr_transverse_timedependent"].launch_adapter == (
+        "prepared_field"
+    )
+
+
+def test_image_experiment_reduced_td_transformation_is_declarative():
+    image_request = _valid_beampanel_image_amplification_request()
+    experiment = image_amplification_experiment_request(image_request)
+    prepared, transmission, _grating = prepare_image_amplification_base_request(
+        experiment
+    )
+
+    assert experiment.base_workflow_id == PR_TIMEDEPENDENT_WORKFLOW
+    assert prepared.initial_A is None
+    assert (
+        prepared.launch_elements
+        == image_request.launch_configuration.channel_elements
+    )
+    assert prepared.beams == image_request.launch_configuration.beams
+    assert transmission.shape == (image_request.grid.Nx, image_request.grid.Ny)
+
+
+@pytest.mark.parametrize(
+    ("workflow_id", "base_request_type", "expects_declarative"),
+    (
+        (PR_STATIC_WORKFLOW, PRStaticRunRequest, True),
+        (PR_TRANSVERSE_STATIC_WORKFLOW, PRTransverseStaticRunRequest, True),
+        (PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW, PRTransverseRunRequest, False),
+    ),
+)
+def test_image_experiment_current_algorithm_launch_adapters(
+    workflow_id,
+    base_request_type,
+    expects_declarative,
+):
+    image_request = _valid_beampanel_image_amplification_request()
+    base = base_request_type(
+        grid=image_request.grid,
+        beams=image_request.launch_configuration.beams,
+        material=image_request.material,
+        backend=image_request.backend,
+    )
+    experiment = image_amplification_experiment_request(
+        image_request,
+        base_workflow_id=workflow_id,
+        base_request=base,
+    )
+    prepared, _transmission, _grating = prepare_image_amplification_base_request(
+        experiment
+    )
+
+    if expects_declarative:
+        assert prepared.initial_A is None
+        assert (
+            prepared.launch_elements
+            == image_request.launch_configuration.channel_elements
+        )
+    else:
+        assert prepared.initial_A is not None
+        assert not hasattr(prepared, "launch_elements")
+
+
+def test_image_experiment_uses_one_base_runner_call_and_forwards_controls():
+    image_request = _valid_beampanel_image_amplification_request()
+    experiment = image_amplification_experiment_request(image_request)
+    runner = LocalRunner(operations=(PR_TIMEDEPENDENT_OPERATION,))
+    calls = []
+    base_progress = RunProgress(
+        workflow=PR_TIMEDEPENDENT_WORKFLOW,
+        status="running",
+        completed_units=0,
+        total_units=0,
+        current_coordinate=0.0,
+        coordinate_name="time",
+        coordinate_unit="1",
+        elapsed_wall_time=0.0,
+    )
+    observed_progress = []
+    token = CancellationToken()
+    ordinary_run = runner.run_registered
+
+    def recorded(material_id, workflow_id, request, **kwargs):
+        calls.append((material_id, workflow_id, request, kwargs))
+        kwargs["progress_callback"](base_progress)
+        return ordinary_run(material_id, workflow_id, request, **kwargs)
+
+    runner.run_registered = recorded
+    result = run_image_amplification_experiment(
+        runner,
+        experiment,
+        cancellation_token=token,
+        progress_callback=observed_progress.append,
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0:2] == ("pr", PR_TIMEDEPENDENT_WORKFLOW)
+    assert calls[0][3]["cancellation_token"] is token
+    assert observed_progress[0] is base_progress
+    assert [
+        progress.diagnostics["stage"]
+        for progress in observed_progress[1:]
+    ] == list(image_amplification_module.PR_IMAGE_ANALYSIS_STAGES)
+    assert isinstance(result.result, PRImageAmplificationCompositeResult)
+    assert result.result.analysis_status == "completed"
+    assert result.result.base_runner_result.kind == PR_TIMEDEPENDENT_WORKFLOW
+    assert result.kind == PR_IMAGE_AMPLIFICATION_WORKFLOW
+    assert "image_amplification" in result.run_data.diagnostics
+
+
+def test_image_experiment_honors_selected_registered_operation_name():
+    image_request = _valid_beampanel_image_amplification_request()
+    base = PRStaticRunRequest(
+        grid=image_request.grid,
+        beams=image_request.launch_configuration.beams,
+        material=image_request.material,
+        backend=image_request.backend,
+    )
+    experiment = image_amplification_experiment_request(
+        image_request,
+        base_workflow_id=PR_STATIC_WORKFLOW,
+        base_request=base,
+    )
+    calls = []
+
+    class RecordingRunner:
+        def run_registered(self, material_id, workflow_id, request, **kwargs):
+            calls.append((material_id, workflow_id, request, kwargs))
+            raise RuntimeError("stop after dispatch evidence")
+
+    with pytest.raises(RuntimeError, match="dispatch evidence"):
+        run_image_amplification_experiment(RecordingRunner(), experiment)
+    assert len(calls) == 1
+    assert calls[0][0:2] == ("pr", PR_STATIC_WORKFLOW)
+    assert isinstance(calls[0][2], PRStaticRunRequest)
+
+
+def test_image_experiment_reduced_td_matches_direct_completed_result_bit_for_bit():
+    image_request = replace(
+        _valid_beampanel_image_amplification_request(),
+        solver=PRSolverOptions(Nt=1, dt_normalized=0.01),
+    )
+    direct = run_image_amplification_request(image_request)
+    runner = LocalRunner(operations=(PR_TIMEDEPENDENT_OPERATION,))
+    composite = run_image_amplification_experiment(
+        runner,
+        image_amplification_experiment_request(image_request),
+    )
+    analyzed = composite.result.analysis_result
+    assert analyzed is not None
+    for name in (
+        "A_initial",
+        "A_final",
+        "E_initial",
+        "E_final",
+        "source_intensity_stack",
+    ):
+        assert np.array_equal(
+            getattr(analyzed.run_result, name),
+            getattr(direct.run_result, name),
+        )
+    for name in (
+        "image_transmission",
+        "signal_carrier_mask",
+        "input_signal_field",
+        "output_signal_field",
+        "backpropagated_signal_field",
+        "zero_response_backpropagated_signal_field",
+    ):
+        assert np.array_equal(getattr(analyzed, name), getattr(direct, name))
+    for name in (
+        "measured_absolute_signal_gain",
+        "analytic_absolute_signal_gain",
+        "image_intensity_correlation",
+        "zero_response_image_intensity_correlation",
+        "normalized_image_rmse",
+        "normalized_power_relative_drift",
+    ):
+        assert getattr(analyzed, name) == getattr(direct, name)
+    direct_run_data = pr_image_amplification_result_to_run_data(direct)
+    assert tuple(composite.run_data.fields) == tuple(direct_run_data.fields)
+    assert tuple(composite.run_data.diagnostics) == tuple(direct_run_data.diagnostics)
+    for key in direct_run_data.fields:
+        assert np.array_equal(
+            composite.run_data.fields[key].data,
+            direct_run_data.fields[key].data,
+        )
+    for key in direct_run_data.diagnostics:
+        composite_values = composite.run_data.diagnostics[key].values
+        direct_values = direct_run_data.diagnostics[key].values
+        if key != "summary":
+            assert composite_values == direct_values
+            continue
+        assert {
+            name: value
+            for name, value in composite_values.items()
+            if name != "launch"
+        } == {
+            name: value
+            for name, value in direct_values.items()
+            if name != "launch"
+        }
+        composite_launch = composite_values["launch"]
+        direct_launch = direct_values["launch"]
+        for name in (
+            "Nch",
+            "coherence",
+            "coherence_groups",
+            "physical_channel_powers_mW",
+            "physical_total_power_mW",
+            "power_fractions",
+            "field_normalization",
+            "wavelengths_um",
+        ):
+            assert composite_launch[name] == direct_launch[name]
+        assert composite_launch["post_element_channel_powers_mW"] == list(
+            analyzed.post_element_channel_powers_mW
+        )
+        assert direct_launch["channel_throughput_fractions"][1] == 1.0
+        assert composite_launch["channel_throughput_fractions"][1] < 1.0
+
+
+def test_image_experiment_cancellation_between_analysis_stages_preserves_base():
+    image_request = _valid_beampanel_image_amplification_request()
+    runner = LocalRunner(operations=(PR_TIMEDEPENDENT_OPERATION,))
+    token = CancellationToken()
+
+    def observe(progress):
+        if (
+            progress.workflow == PR_IMAGE_AMPLIFICATION_WORKFLOW
+            and progress.diagnostics["stage"] == "carrier_isolation"
+        ):
+            token.cancel()
+
+    composite = run_image_amplification_experiment(
+        runner,
+        image_amplification_experiment_request(image_request),
+        cancellation_token=token,
+        progress_callback=observe,
+    ).result
+
+    assert composite.base_status == "completed"
+    assert composite.analysis_status == "cancelled"
+    assert composite.status == "cancelled"
+    assert composite.analysis_result is None
+    assert composite.base_runner_result.run_data is not None
+
+
+def test_image_experiment_preserves_nonconverged_base_status():
+    image_request = _valid_beampanel_image_amplification_request()
+    ordinary = LocalRunner(operations=(PR_TIMEDEPENDENT_OPERATION,))
+
+    class NonconvergedRunner:
+        def run_registered(self, *args, **kwargs):
+            result = ordinary.run_registered(*args, **kwargs)
+            return replace(
+                result,
+                result=replace(result.result, status="not_converged"),
+            )
+
+    composite = run_image_amplification_experiment(
+        NonconvergedRunner(),
+        image_amplification_experiment_request(image_request),
+    ).result
+
+    assert composite.base_status == "not_converged"
+    assert composite.analysis_status == "completed"
+    assert composite.status == "not_converged"
+    assert composite.analysis_result is not None
+
+
+def test_image_experiment_analysis_failure_retains_completed_base(monkeypatch):
+    image_request = _valid_beampanel_image_amplification_request()
+    runner = LocalRunner(operations=(PR_TIMEDEPENDENT_OPERATION,))
+
+    def fail_metrics(*_args, **_kwargs):
+        raise ValueError("diagnostic failure")
+
+    monkeypatch.setattr(
+        image_amplification_module,
+        "_intensity_metrics",
+        fail_metrics,
+    )
+    result = run_image_amplification_experiment(
+        runner,
+        image_amplification_experiment_request(image_request),
+    )
+    composite = result.result
+
+    assert composite.base_status == "completed"
+    assert composite.analysis_status == "failed"
+    assert composite.status == "failed"
+    assert composite.analysis_result is None
+    assert "diagnostic failure" in composite.analysis_message
+    assert result.run_data is composite.base_runner_result.run_data
 
 
 def test_mode_switch_preserves_shared_beams_screens_and_role_names(app):
