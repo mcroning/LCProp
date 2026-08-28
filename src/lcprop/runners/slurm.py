@@ -239,6 +239,16 @@ def _read_execution_provenance(path: Path) -> dict:
     return value
 
 
+def _verified_result_provenance(decoded) -> tuple[str, dict]:
+    """Return material-neutral backend provenance from a verified result."""
+
+    envelope = decoded.envelope
+    return (
+        envelope.scientific_backend_resolved,
+        dict(envelope.device_summary or {}),
+    )
+
+
 class SlurmRunner:
     """Execute registered operations remotely through the transport contract."""
 
@@ -608,11 +618,7 @@ class SlurmRunner:
             run_data=run_data,
             material_id=operation.material_id,
         )
-        backend_summary = getattr(decoded.result, "backend_summary", {})
-        decoded_backend = getattr(backend_summary, "get", lambda *_: "numpy")(
-            "backend", "numpy"
-        )
-        device_summary = dict(backend_summary) if backend_summary else {}
+        decoded_backend, device_summary = _verified_result_provenance(decoded)
         device_summary.update(execution_provenance)
         cleanup_requested = self.config.cleanup_remote_on_success
         cleanup_succeeded = None

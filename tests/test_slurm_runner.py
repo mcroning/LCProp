@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 import shlex
+from types import SimpleNamespace
 
 import pytest
 import lcprop.runners.slurm as slurm_module
@@ -24,7 +25,8 @@ from lcprop.runners.source_deployment import (
     ResolvedSourceDeployment,
     SourceDeploymentError,
 )
-from lcprop.pr.specs import PRMaterialSpec
+from lcprop.pr.operations import PR_TIMEDEPENDENT_OPERATION
+from lcprop.pr.specs import PRMaterialSpec, PRRunRequest, PRSolverOptions
 from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
 from lcprop.pr.transverse.static_workflow import (
     PRTransverseStaticRunRequest, PRTransverseStaticWorkflowOptions,
@@ -87,6 +89,39 @@ def _pr_request():
         ),
         solver=PRTransverseStaticWorkflowOptions(max_coupled_iterations=2),
         backend=BackendSpec(backend="numpy", precision="float64", verbose=False),
+    )
+
+
+def _pr_td_request():
+    return PRRunRequest(
+        grid=GridSpec(
+            Nx=8,
+            Ny=8,
+            x_aperture_um=20.0,
+            y_aperture_um=20.0,
+            dz_um=2.0,
+            z_length_um=2.0,
+        ),
+        beams=BeamStack(
+            channels=(
+                BeamChannel(
+                    wavelength_um=0.633,
+                    waist_x_um=4.0,
+                    waist_y_um=4.0,
+                    coherence_group="remote-pr-td",
+                ),
+            )
+        ),
+        material=PRMaterialSpec(
+            dark_intensity=0.4,
+            uniform_background_intensity=0.1,
+            gain_length_product=1e-3,
+            characteristic_wavenumber_per_um_override=0.1,
+        ),
+        solver=PRSolverOptions(Nt=0, dt_normalized=0.001),
+        backend=BackendSpec(
+            backend="auto", precision="float32", verbose=False
+        ),
     )
 
 
@@ -279,6 +314,66 @@ def test_shared_runner_has_no_material_specific_resource_branching(tmp_path):
     )
     with pytest.raises(ValueError, match="resource_profile is required"):
         runner.run_registered("lc", "static", _request())
+
+
+@pytest.mark.parametrize("backend", ("numpy", "cupy"))
+def test_verified_result_backend_provenance_is_result_type_independent(backend):
+    decoded = SimpleNamespace(
+        envelope=SimpleNamespace(
+            scientific_backend_resolved=backend,
+            device_summary={"backend": backend, "device": "test-device"},
+        ),
+        result=object(),
+    )
+
+    resolved, device = slurm_module._verified_result_provenance(decoded)
+
+    assert resolved == backend
+    assert device == {"backend": backend, "device": "test-device"}
+
+
+def test_final_remote_status_uses_verified_cupy_envelope_for_td_result(
+    tmp_path, monkeypatch
+):
+    original_read = slurm_module.read_result_package
+
+    def read_with_verified_cupy_provenance(*args, **kwargs):
+        decoded = original_read(*args, **kwargs)
+        return replace(
+            decoded,
+            envelope=replace(
+                decoded.envelope,
+                scientific_backend_resolved="cupy",
+                device_summary={"backend": "cupy", "is_gpu": True},
+            ),
+        )
+
+    monkeypatch.setattr(
+        slurm_module, "read_result_package", read_with_verified_cupy_provenance
+    )
+    transport = FakeTransport()
+    states = []
+    runner = SlurmRunner(
+        _config(tmp_path),
+        (PR_TIMEDEPENDENT_OPERATION,),
+        transport=transport,
+        registry=default_transport_registry(),
+        sleep=lambda _seconds: None,
+    )
+
+    completed = runner.run_registered(
+        "pr",
+        "pr_timedependent",
+        _pr_td_request(),
+        resource_profile="H200 small",
+        progress_callback=states.append,
+    )
+
+    assert not hasattr(completed.result, "backend_summary")
+    assert states[-1].state == RemoteRunState.COMPLETED
+    assert states[-1].scientific_backend_resolved == "cupy"
+    assert states[-1].device_summary["backend"] == "cupy"
+    assert states[-1].device_summary["device"] == "NVIDIA H200"
 
 
 def test_commissioning_script_defaults_to_accepted_stage_d_snapshot():

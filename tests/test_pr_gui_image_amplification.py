@@ -1143,10 +1143,11 @@ def test_image_amplification_rejects_unregistered_slurm_base_operation(app):
 
 
 def test_gui_slurm_eligibility_uses_registered_ordinary_operation(app):
-    class StaticSlurmRunner:
+    class RegisteredSlurmRunner:
         name = "Slurm"
         supports_parallel_sweeps = False
         registered_operations = (
+            PR_TIMEDEPENDENT_OPERATION,
             PR_STATIC_OPERATION,
             PR_TRANSVERSE_STATIC_OPERATION,
         )
@@ -1158,7 +1159,7 @@ def test_gui_slurm_eligibility_uses_registered_ordinary_operation(app):
         material=image_request.material,
         backend=image_request.backend,
     )
-    runner = StaticSlurmRunner()
+    runner = RegisteredSlurmRunner()
     window = PRMainWindow(slurm_runner=runner)
     window.runner = runner
     window.remote_execution_controls.validate_backend = lambda _backend: None
@@ -1183,10 +1184,10 @@ def test_gui_slurm_eligibility_uses_registered_ordinary_operation(app):
 
     window.run_clicked()
 
-    assert starts == []
-    assert window.status_label.text() == "Invalid request"
-    assert "operation 'pr_timedependent'" in (
-        window.results_panel.workspace.console.toPlainText()
+    assert starts and starts[0][0] is td_request
+    assert window._slurm_supports_workflow(PR_TIMEDEPENDENT_WORKFLOW)
+    assert not window._slurm_supports_workflow(
+        PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
     )
     window.close()
 
@@ -1554,11 +1555,12 @@ def test_legacy_static_image_experiment_dispatches_registered_operation(app):
 @pytest.mark.parametrize(
     ("workflow_id", "operation"),
     (
+        (PR_TIMEDEPENDENT_WORKFLOW, PR_TIMEDEPENDENT_OPERATION),
         (PR_STATIC_WORKFLOW, PR_STATIC_OPERATION),
         (PR_TRANSVERSE_STATIC_WORKFLOW, PR_TRANSVERSE_STATIC_OPERATION),
     ),
 )
-def test_static_image_experiment_matches_in_process_transport_roundtrip(
+def test_image_experiment_matches_in_process_transport_roundtrip(
     app, workflow_id, operation
 ):
     window = _configured_multi_algorithm_image_window(app)
