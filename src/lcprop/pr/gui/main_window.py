@@ -92,7 +92,15 @@ from lcprop.pr.static_workflow import (
     PRStaticRunResult,
     PR_STATIC_WORKFLOW,
 )
-from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
+from lcprop.pr.transverse.operations import (
+    PR_TRANSVERSE_STATIC_OPERATION,
+    PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
+)
+from lcprop.pr.transverse.specs import (
+    PRTransverseRunRequest,
+    PRTransverseRunResult,
+    PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+)
 from lcprop.pr.transverse.static_workflow import (
     PRTransverseStaticRunRequest,
     PRTransverseStaticRunResult,
@@ -142,6 +150,7 @@ class PRMainWindow(QWidget):
             operations=(
                 PR_TIMEDEPENDENT_OPERATION,
                 PR_IMAGE_AMPLIFICATION_OPERATION,
+                PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
                 PR_TRANSVERSE_STATIC_OPERATION,
                 PR_STATIC_OPERATION,
             )
@@ -370,13 +379,21 @@ class PRMainWindow(QWidget):
         )
 
     def _capture_experiment_gui_state(self):
+        workflow_id = self.evolution_panel.workflow_id()
+        if workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
+            solver = self.evolution_panel.transverse_solver()
+        elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
+            solver = self.evolution_panel.transverse_static_solver()
+        elif workflow_id == PR_STATIC_WORKFLOW:
+            solver = self.evolution_panel.static_solver()
+        else:
+            solver = self.evolution_panel.solver()
         return {
             "input_mode": self.input_panel.mode_id(),
-            "workflow_id": self.evolution_panel.workflow_id(),
+            "workflow_id": workflow_id,
             "grid": self.grid_panel.grid(),
             "material": self.material_panel.material(),
-            "td_solver": self.evolution_panel.solver(),
-            "static_solver": self.evolution_panel.static_solver(),
+            "solver": solver,
             "backend": self.evolution_panel.backend_spec(),
             "beam_stack": self.beam_panel.beam_stack_definition,
             "launch_elements": self.beam_panel.launch_elements(),
@@ -389,8 +406,16 @@ class PRMainWindow(QWidget):
         self.input_panel.input_mode.setCurrentIndex(mode_index)
         self.grid_panel.set_grid(state["grid"])
         self.material_panel.set_material(state["material"])
-        self.evolution_panel.set_solver(state["td_solver"])
-        self.evolution_panel.set_static_solver(state["static_solver"])
+        workflow_id = state["workflow_id"]
+        self.evolution_panel.set_workflow_id(workflow_id)
+        if workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
+            self.evolution_panel.set_transverse_solver(state["solver"])
+        elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
+            self.evolution_panel.set_transverse_static_solver(state["solver"])
+        elif workflow_id == PR_STATIC_WORKFLOW:
+            self.evolution_panel.set_static_solver(state["solver"])
+        else:
+            self.evolution_panel.set_solver(state["solver"])
         self.evolution_panel.set_backend_spec(state["backend"])
         self.beam_panel.set_aperture(
             state["grid"].x_aperture_um,
@@ -408,7 +433,6 @@ class PRMainWindow(QWidget):
                 state["pump_channel_index"],
                 state["signal_channel_index"],
             )
-        self.evolution_panel.set_workflow_id(state["workflow_id"])
 
     @staticmethod
     def _validate_experiment_request_representable(request) -> None:
@@ -754,6 +778,16 @@ class PRMainWindow(QWidget):
                     f"{preflight.conservative_dt_limit:.8g}"
                 ),
             ])
+        elif workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
+            lines.extend([
+                "Time-dependent material model: full 2D transverse zero-flux",
+                "Authoritative material state: periodic zero-mean psi",
+                "Solved material fields: E_x and E_y",
+                "Scalar optical projection: E_active = E_x",
+                f"Material steps: {request.solver.Nt}",
+                f"Material integrator: {request.solver.integrator}",
+                f"Normalized timestep: {request.solver.dt_normalized:g}",
+            ])
         elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
             lines.extend([
                 "Static material model: nonlinear 2D transverse zero-flux",
@@ -800,6 +834,8 @@ class PRMainWindow(QWidget):
             return PR_IMAGE_AMPLIFICATION_WORKFLOW
         if isinstance(request, PRTransverseStaticRunRequest):
             return PR_TRANSVERSE_STATIC_WORKFLOW
+        if isinstance(request, PRTransverseRunRequest):
+            return PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
         if isinstance(request, PRStaticRunRequest):
             return PR_STATIC_WORKFLOW
         if isinstance(request, PRRunRequest):
@@ -1330,6 +1366,7 @@ class PRMainWindow(QWidget):
                 PR_IMAGE_AMPLIFICATION_WORKFLOW,
                 PR_STATIC_WORKFLOW,
                 PR_TRANSVERSE_STATIC_WORKFLOW,
+                PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
             ):
                 raise ValueError("PR window received an unexpected workflow")
             if runner_result.run_data is None:
@@ -1385,7 +1422,7 @@ class PRMainWindow(QWidget):
                     )
                     prefix = "Final PR image time"
                     message = "Image-amplification run complete"
-                if isinstance(td_result, PRRunResult):
+                if isinstance(td_result, (PRRunResult, PRTransverseRunResult)):
                     self.results_panel.set_td_time_indicator(
                         f"{prefix}: {float(td_result.time_normalized):.6g} "
                         f"normalized; steps: {td_result.completed_steps}/"
@@ -1439,6 +1476,22 @@ class PRMainWindow(QWidget):
                     self.status_label.setText("Completed")
                     prefix = "Final PR time"
                     message = "Run complete"
+                self.results_panel.set_td_time_indicator(
+                    f"{prefix}: {float(result.time_normalized):.6g} normalized; "
+                    f"steps: {result.completed_steps}/{result.requested_steps}"
+                )
+            elif runner_result.kind == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
+                self.last_checkpoint = None
+                if result.status == "cancelled":
+                    self.run_status = "stopped"
+                    self.status_label.setText("Stopped")
+                    prefix = "PR transverse time at stop"
+                    message = "2D zero-flux time-dependent run cancelled"
+                else:
+                    self.run_status = "completed"
+                    self.status_label.setText("Completed")
+                    prefix = "Final PR transverse time"
+                    message = "2D zero-flux time-dependent run complete"
                 self.results_panel.set_td_time_indicator(
                     f"{prefix}: {float(result.time_normalized):.6g} normalized; "
                     f"steps: {result.completed_steps}/{result.requested_steps}"

@@ -9,7 +9,15 @@ from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken
+from lcprop.core.grid import make_grid
+from lcprop.optics.launch import build_launch
+from lcprop.optics.screens import (
+    ChannelLaunchElements,
+    IntensityRasterScreen,
+    ScreenPlacement,
+)
 from lcprop.pr.evolution import hopping_rhs
+from lcprop.pr.image_sources import PRImageSource
 from lcprop.pr.specs import PRMaterialSpec
 from lcprop.pr.scattering import (
     PR_CANONICAL_SCATTERING_V2,
@@ -341,6 +349,80 @@ def test_cancellation_after_progress_preserves_one_complete_accepted_step():
     assert result.completed_steps == 1
     assert len(accepted) == 1
     np.testing.assert_array_equal(result.psi_final, accepted[0])
+
+
+def test_declarative_launch_screen_is_applied_once_to_selected_channel():
+    request = _request(steps=0)
+    second = BeamChannel(
+        name="screened signal",
+        wavelength_um=0.633,
+        power_mW=0.4,
+        waist_x_um=9.0,
+        waist_y_um=7.0,
+        coherence_group="transverse-pr",
+    )
+    beams = BeamStack(
+        channels=(request.beams.channels[0], second),
+        coherence="coherent",
+    )
+    screen = IntensityRasterScreen(
+        source=PRImageSource.from_array(np.eye(5)),
+        placement=ScreenPlacement(
+            width_um=20.0,
+            height_um=12.0,
+            boundary_policy="reject",
+        ),
+    )
+    elements = (ChannelLaunchElements(1, (screen,)),)
+    screened = PRTransverseRunRequest(
+        **{
+            **request.__dict__,
+            "beams": beams,
+            "launch_elements": elements,
+        }
+    )
+    result = run_pr_transverse_timedependent(screened)
+    grid = make_grid(request.grid, real_dtype=np.float64)
+    expected = build_launch(
+        beams,
+        grid,
+        complex_dtype=np.complex128,
+        launch_elements=elements,
+    ).A0
+    unscreened = build_launch(
+        beams,
+        grid,
+        complex_dtype=np.complex128,
+    ).A0
+
+    np.testing.assert_array_equal(result.A_initial, expected)
+    np.testing.assert_array_equal(result.A_initial[0], unscreened[0])
+    assert not np.array_equal(result.A_initial[1], unscreened[1])
+    transmission = np.divide(
+        expected[1],
+        unscreened[1],
+        out=np.zeros_like(expected[1]),
+        where=unscreened[1] != 0,
+    )
+    assert not np.array_equal(result.A_initial[1], expected[1] * transmission)
+
+
+def test_prepared_field_and_declarative_launch_screen_are_rejected_together():
+    request = _request(steps=0)
+    screen = IntensityRasterScreen(
+        source=PRImageSource.from_array(np.eye(3)),
+        placement=ScreenPlacement(width_um=12.0, height_um=12.0),
+    )
+    shape = (1, request.grid.Nx, request.grid.Ny)
+    conflicting = PRTransverseRunRequest(
+        **{
+            **request.__dict__,
+            "initial_A": np.ones(shape, dtype=np.complex128),
+            "launch_elements": (ChannelLaunchElements(0, (screen,)),),
+        }
+    )
+    with pytest.raises(ValueError, match="already-prepared runtime launch"):
+        run_pr_transverse_timedependent(conflicting)
 
 
 def test_products_reconstruct_derived_fields_and_operation_is_composable():

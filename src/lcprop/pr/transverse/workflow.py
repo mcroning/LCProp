@@ -12,6 +12,8 @@ from lcprop.core.backend import asnumpy, get_backend, scalar_float
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch import build_launch, normalized_power
+from lcprop.optics.launch_configuration import reject_prepared_launch_conflict
+from lcprop.optics.screens import validate_channel_launch_elements
 from lcprop.optics.splitstep import linear_kernel
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.scattering import canonical_scattering_provenance
@@ -64,6 +66,11 @@ def _validate_request(request: PRTransverseRunRequest) -> None:
     request.backend.validate()
     if request.scattering is not None:
         request.scattering.validate()
+    validate_channel_launch_elements(
+        request.launch_elements,
+        n_channels=len(request.beams.channels),
+    )
+    reject_prepared_launch_conflict(request.initial_A, request.launch_elements)
     if request.backend.backend not in ("numpy", "cupy"):
         raise ValueError(
             "Profile v1 requires explicit backend='numpy' or backend='cupy'"
@@ -183,7 +190,12 @@ def run_pr_transverse_timedependent(
         grid=grid,
         z_length_um=request.grid.z_length_um,
     )
-    launch = build_launch(request.beams, grid, complex_dtype=complex_dtype)
+    launch = build_launch(
+        request.beams,
+        grid,
+        complex_dtype=complex_dtype,
+        launch_elements=request.launch_elements,
+    )
     A0, psi = _initial_fields(
         request,
         launch=launch,

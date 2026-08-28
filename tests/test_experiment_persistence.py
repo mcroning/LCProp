@@ -67,6 +67,11 @@ from lcprop.pr.transverse.static_workflow import (
     PRTransverseStaticWorkflowOptions,
     PR_TRANSVERSE_STATIC_WORKFLOW,
 )
+from lcprop.pr.transverse.specs import (
+    PRTransverseRunRequest,
+    PRTransverseSolverOptions,
+    PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+)
 
 
 def _angle_q() -> tuple[float, float]:
@@ -378,6 +383,31 @@ def _pr_transverse_static_request() -> PRTransverseStaticRunRequest:
     )
 
 
+def _pr_transverse_timedependent_request() -> PRTransverseRunRequest:
+    static = _pr_transverse_static_request()
+    return PRTransverseRunRequest(
+        grid=static.grid,
+        beams=static.beams,
+        material=static.material,
+        transport=static.transport,
+        dielectric=static.dielectric,
+        boundary=static.boundary,
+        projection=static.projection,
+        solver=PRTransverseSolverOptions(
+            Nt=31,
+            dt_normalized=0.004,
+            optical_substeps=6,
+        ),
+        backend=BackendSpec(
+            backend="cupy",
+            precision="float32",
+            verbose=False,
+        ),
+        scattering=static.scattering,
+        launch_elements=static.launch_elements,
+    )
+
+
 @pytest.mark.parametrize(
     ("material_id", "workflow_id", "request_factory"),
     (
@@ -389,6 +419,11 @@ def _pr_transverse_static_request() -> PRTransverseStaticRunRequest:
             PR_MATERIAL_ID,
             PR_TRANSVERSE_STATIC_WORKFLOW,
             _pr_transverse_static_request,
+        ),
+        (
+            PR_MATERIAL_ID,
+            PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+            _pr_transverse_timedependent_request,
         ),
     ),
 )
@@ -593,6 +628,15 @@ def test_launchplane_presentation_cannot_override_canonical_q(tmp_path):
             ),
             PR_MATERIAL_ID,
             PR_TRANSVERSE_STATIC_WORKFLOW,
+            "initial_psi",
+        ),
+        (
+            replace(
+                _pr_transverse_timedependent_request(),
+                initial_psi=np.zeros((1, 2, 2)),
+            ),
+            PR_MATERIAL_ID,
+            PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
             "initial_psi",
         ),
     ),

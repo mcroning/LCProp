@@ -47,7 +47,10 @@ from lcprop.pr.transverse.specs import (
     PRTransverseBoundaryProfile,
     PRTransverseDielectricProfile,
     PRTransverseProjectionProfile,
+    PRTransverseRunRequest,
+    PRTransverseSolverOptions,
     PRTransverseTransportProfile,
+    PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
 )
 from lcprop.pr.transverse.static import (
     PRTransverseDiscreteStaticCorrectorOptions,
@@ -132,7 +135,9 @@ def encode_pr_static_request(request: PRStaticRunRequest) -> dict:
     return _encode_common(request)
 
 
-def _validate_transverse_static(request: PRTransverseStaticRunRequest) -> None:
+def _validate_transverse_request(
+    request: PRTransverseRunRequest | PRTransverseStaticRunRequest,
+) -> None:
     request.grid.validate()
     request.beams.validate()
     request.material.validate()
@@ -164,7 +169,44 @@ def encode_pr_transverse_static_request(
             f"state ({', '.join(populated)}); use result transport or an "
             "explicit continuation mechanism for runtime state"
         )
-    _validate_transverse_static(request)
+    _validate_transverse_request(request)
+    return {
+        "schema_version": PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+        "grid": asdict(request.grid),
+        "material": asdict(request.material),
+        "beams": encode_beam_stack(request.beams),
+        "transport": asdict(request.transport),
+        "dielectric": asdict(request.dielectric),
+        "boundary": asdict(request.boundary),
+        "projection": asdict(request.projection),
+        "solver": asdict(request.solver),
+        "backend": asdict(request.backend),
+        "scattering": (
+            None if request.scattering is None else asdict(request.scattering)
+        ),
+        "launch_elements": _encode_launch_elements(request.launch_elements),
+    }
+
+
+def encode_pr_transverse_timedependent_request(
+    request: PRTransverseRunRequest,
+) -> dict:
+    """Encode canonical transverse-TD inputs without runtime state."""
+
+    if not isinstance(request, PRTransverseRunRequest):
+        raise TypeError("request must be a PRTransverseRunRequest")
+    populated = tuple(
+        name
+        for name in ("initial_A", "initial_psi")
+        if getattr(request, name) is not None
+    )
+    if populated:
+        raise ExperimentRuntimeStateError(
+            "PR transverse-TD experiment requests cannot persist runtime "
+            f"state ({', '.join(populated)}); use result transport for "
+            "runtime state"
+        )
+    _validate_transverse_request(request)
     return {
         "schema_version": PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         "grid": asdict(request.grid),
@@ -451,12 +493,134 @@ def decode_pr_transverse_static_request(
                 n_channels=len(beams.channels),
             ),
         )
-        _validate_transverse_static(request)
+        _validate_transverse_request(request)
     except ExperimentPayloadError:
         raise
     except (TypeError, ValueError) as exc:
         raise ExperimentPayloadError(
             f"invalid PR transverse-static request: {exc}"
+        ) from exc
+    return request
+
+
+def decode_pr_transverse_timedependent_request(
+    value: Any,
+) -> PRTransverseRunRequest:
+    """Decode one canonical transverse-TD experiment request."""
+
+    payload = require_mapping(value, name="PR transverse-TD request_payload")
+    version = payload.get("schema_version")
+    if (
+        type(version) is not int
+        or version != PR_EXPERIMENT_REQUEST_SCHEMA_VERSION
+    ):
+        raise ExperimentSchemaError(
+            "unsupported PR transverse-TD experiment request schema version: "
+            f"{version!r}"
+        )
+    require_exact_keys(
+        payload,
+        required={
+            "schema_version",
+            "grid",
+            "material",
+            "beams",
+            "transport",
+            "dielectric",
+            "boundary",
+            "projection",
+            "solver",
+            "backend",
+            "scattering",
+            "launch_elements",
+        },
+        name="PR transverse-TD request_payload",
+    )
+    scattering_values = payload["scattering"]
+    try:
+        beams = decode_beam_stack(payload["beams"])
+        request = PRTransverseRunRequest(
+            grid=GridSpec(
+                **dataclass_values(
+                    GridSpec,
+                    payload["grid"],
+                    name="PR transverse-TD request_payload.grid",
+                )
+            ),
+            beams=beams,
+            material=PRMaterialSpec(
+                **dataclass_values(
+                    PRMaterialSpec,
+                    payload["material"],
+                    name="PR transverse-TD request_payload.material",
+                )
+            ),
+            transport=PRTransverseTransportProfile(
+                **dataclass_values(
+                    PRTransverseTransportProfile,
+                    payload["transport"],
+                    name="PR transverse-TD request_payload.transport",
+                )
+            ),
+            dielectric=PRTransverseDielectricProfile(
+                **dataclass_values(
+                    PRTransverseDielectricProfile,
+                    payload["dielectric"],
+                    name="PR transverse-TD request_payload.dielectric",
+                )
+            ),
+            boundary=PRTransverseBoundaryProfile(
+                **dataclass_values(
+                    PRTransverseBoundaryProfile,
+                    payload["boundary"],
+                    name="PR transverse-TD request_payload.boundary",
+                )
+            ),
+            projection=PRTransverseProjectionProfile(
+                **dataclass_values(
+                    PRTransverseProjectionProfile,
+                    payload["projection"],
+                    name="PR transverse-TD request_payload.projection",
+                )
+            ),
+            solver=PRTransverseSolverOptions(
+                **dataclass_values(
+                    PRTransverseSolverOptions,
+                    payload["solver"],
+                    name="PR transverse-TD request_payload.solver",
+                )
+            ),
+            backend=BackendSpec(
+                **dataclass_values(
+                    BackendSpec,
+                    payload["backend"],
+                    name="PR transverse-TD request_payload.backend",
+                )
+            ),
+            initial_A=None,
+            initial_psi=None,
+            scattering=(
+                None
+                if scattering_values is None
+                else PRCanonicalScatteringSpec(
+                    **dataclass_values(
+                        PRCanonicalScatteringSpec,
+                        scattering_values,
+                        name="PR transverse-TD request_payload.scattering",
+                    )
+                )
+            ),
+            launch_elements=_decode_launch_elements(
+                payload["launch_elements"],
+                n_channels=len(beams.channels),
+            ),
+        )
+        _validate_transverse_request(request)
+    except ExperimentPayloadError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise ExperimentPayloadError(
+            f"invalid PR transverse-TD request: {exc}"
         ) from exc
     return request
 
@@ -468,6 +632,8 @@ def _encode_image_base_request(workflow_id: str, request: Any) -> dict[str, Any]
         return encode_pr_static_request(request)
     if workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
         return encode_pr_transverse_static_request(request)
+    if workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
+        return encode_pr_transverse_timedependent_request(request)
     raise ExperimentPayloadError(
         "Image Amplification base operation is not persistable: "
         f"{workflow_id!r}"
@@ -481,6 +647,8 @@ def _decode_image_base_request(workflow_id: str, value: Any) -> Any:
         return decode_pr_static_request(value)
     if workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
         return decode_pr_transverse_static_request(value)
+    if workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
+        return decode_pr_transverse_timedependent_request(value)
     raise ExperimentPayloadError(
         "Image Amplification base operation is not registered or persistable: "
         f"{workflow_id!r}"
@@ -608,6 +776,14 @@ PR_TRANSVERSE_STATIC_EXPERIMENT_CODEC = ExperimentRequestCodec(
     decode_request=decode_pr_transverse_static_request,
 )
 
+PR_TRANSVERSE_TIMEDEPENDENT_EXPERIMENT_CODEC = ExperimentRequestCodec(
+    material_id=PR_MATERIAL_ID,
+    workflow_id=PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+    request_type=PRTransverseRunRequest,
+    encode_request=encode_pr_transverse_timedependent_request,
+    decode_request=decode_pr_transverse_timedependent_request,
+)
+
 PR_IMAGE_AMPLIFICATION_EXPERIMENT_CODEC = ExperimentRequestCodec(
     material_id=PR_MATERIAL_ID,
     workflow_id=PR_IMAGE_AMPLIFICATION_WORKFLOW,
@@ -623,12 +799,15 @@ __all__ = [
     "PR_STATIC_EXPERIMENT_CODEC",
     "PR_TIMEDEPENDENT_EXPERIMENT_CODEC",
     "PR_TRANSVERSE_STATIC_EXPERIMENT_CODEC",
+    "PR_TRANSVERSE_TIMEDEPENDENT_EXPERIMENT_CODEC",
     "decode_pr_static_request",
     "decode_pr_image_amplification_request",
     "decode_pr_timedependent_request",
     "decode_pr_transverse_static_request",
+    "decode_pr_transverse_timedependent_request",
     "encode_pr_static_request",
     "encode_pr_image_amplification_request",
     "encode_pr_timedependent_request",
     "encode_pr_transverse_static_request",
+    "encode_pr_transverse_timedependent_request",
 ]

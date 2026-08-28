@@ -9,6 +9,7 @@ from typing import Any
 from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
+from lcprop.optics.screens import ChannelLaunchElements
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.pr.specs import PRMaterialSpec
 
@@ -136,6 +137,7 @@ class PRTransverseRunRequest:
     initial_A: Any | None = None
     initial_psi: Any | None = None
     scattering: PRCanonicalScatteringSpec | None = None
+    launch_elements: tuple[ChannelLaunchElements, ...] = ()
 
 
 @dataclass(frozen=True)

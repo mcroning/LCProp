@@ -22,7 +22,12 @@ from lcprop.pr.static_workflow import (
     PRStaticWorkflowOptions,
     PR_STATIC_WORKFLOW,
 )
-from lcprop.pr.transverse.specs import PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
+from lcprop.pr.transverse.specs import (
+    PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE,
+    PR_TRANSVERSE_IMEX_EULER,
+    PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+    PRTransverseSolverOptions,
+)
 from lcprop.pr.transverse.static_workflow import (
     PRTransverseStaticWorkflowOptions,
     PR_TRANSVERSE_STATIC_WORKFLOW,
@@ -54,16 +59,8 @@ class PREvolutionPanel(QWidget):
             PR_STATIC_WORKFLOW,
         )
         self.workflow.addItem(
-            "Time dependent (2D transverse) — GUI unavailable",
+            "Time dependent (2D transverse zero-flux)",
             PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
-        )
-        transverse_td_item = self.workflow.model().item(
-            self.workflow.findData(PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW)
-        )
-        transverse_td_item.setEnabled(False)
-        transverse_td_item.setToolTip(
-            "The prepared-field adapter exists, but the GUI cannot yet "
-            "construct the canonical transverse-TD request."
         )
         self.algorithm_status = QLabel()
         self.algorithm_status.setWordWrap(True)
@@ -133,7 +130,7 @@ class PREvolutionPanel(QWidget):
             ),
             PR_STATIC_WORKFLOW: "Static (legacy x-only)",
             PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW: (
-                "Time dependent (2D transverse) — GUI unavailable"
+                "Time dependent (2D transverse zero-flux)"
             ),
         }
         for index in range(self.workflow.count()):
@@ -145,12 +142,7 @@ class PREvolutionPanel(QWidget):
                     if status == "compatible_and_validated"
                     else "Experimental"
                 )
-                unavailable = (
-                    " — unavailable"
-                    if workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
-                    else ""
-                )
-                text = f"{labels[workflow_id]} [{badge}{unavailable}]"
+                text = f"{labels[workflow_id]} [{badge}]"
             else:
                 text = ordinary_labels[workflow_id]
             self.workflow.setItemText(index, text)
@@ -175,10 +167,15 @@ class PREvolutionPanel(QWidget):
         widget.setVisible(visible)
 
     def _refresh_workflow_controls(self, *_args) -> None:
-        is_time_dependent = self.workflow_id() == PR_TIMEDEPENDENT_WORKFLOW
-        is_transverse_static = (
-            self.workflow_id() == PR_TRANSVERSE_STATIC_WORKFLOW
+        workflow_id = self.workflow_id()
+        is_time_dependent = workflow_id in (
+            PR_TIMEDEPENDENT_WORKFLOW,
+            PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
         )
+        is_transverse_static = (
+            workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW
+        )
+        self._refresh_integrator_choices()
         for widget in (self.Nt, self.dt_normalized, self.integrator):
             self._set_row_visible(widget, is_time_dependent)
         self._set_row_visible(
@@ -207,15 +204,48 @@ class PREvolutionPanel(QWidget):
                     "Experimental: compatible architecture; specialized "
                     "Image Amplification validation is pending."
                 )
-            if self.workflow_id() == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
-                text += (
-                    " Selection is disabled because the GUI cannot construct "
-                    "its canonical prepared-field request."
-                )
             self.algorithm_status.setText(text)
+
+    def _refresh_integrator_choices(self) -> None:
+        transverse = self.workflow_id() == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
+        if transverse:
+            choices = (
+                ("Spectral IMEX Euler", PR_TRANSVERSE_IMEX_EULER),
+                (
+                    "Explicit Euler (reference)",
+                    PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE,
+                ),
+            )
+        else:
+            choices = (
+                ("Semi-implicit trapezoidal", PR_SEMI_IMPLICIT_INTEGRATOR),
+                ("Explicit Euler (reference)", PR_EULER_INTEGRATOR),
+            )
+        current = self.integrator.currentData()
+        expected = tuple(value for _label, value in choices)
+        current_items = tuple(
+            self.integrator.itemData(i) for i in range(self.integrator.count())
+        )
+        if current_items == expected:
+            return
+        self.integrator.clear()
+        for label, value in choices:
+            self.integrator.addItem(label, value)
+        index = self.integrator.findData(current)
+        self.integrator.setCurrentIndex(index if index >= 0 else 0)
 
     def solver(self) -> PRSolverOptions:
         return PRSolverOptions(
+            Nt=self.Nt.value(),
+            dt_normalized=self.dt_normalized.value(),
+            optical_substeps=self.optical_substeps.value(),
+            integrator=self.integrator.currentData(),
+        )
+
+    def transverse_solver(self) -> PRTransverseSolverOptions:
+        """Return the canonical full-transverse material-time policy."""
+
+        return PRTransverseSolverOptions(
             Nt=self.Nt.value(),
             dt_normalized=self.dt_normalized.value(),
             optical_substeps=self.optical_substeps.value(),
@@ -258,6 +288,16 @@ class PREvolutionPanel(QWidget):
         integrator_index = self.integrator.findData(solver.integrator)
         if integrator_index < 0:
             raise ValueError("unsupported PR GUI integrator")
+        self.integrator.setCurrentIndex(integrator_index)
+
+    def set_transverse_solver(self, solver: PRTransverseSolverOptions) -> None:
+        solver.validate()
+        self.Nt.setValue(solver.Nt)
+        self.dt_normalized.setValue(solver.dt_normalized)
+        self.optical_substeps.setValue(solver.optical_substeps)
+        integrator_index = self.integrator.findData(solver.integrator)
+        if integrator_index < 0:
+            raise ValueError("unsupported transverse PR GUI integrator")
         self.integrator.setCurrentIndex(integrator_index)
 
     def set_static_solver(self, solver: PRStaticWorkflowOptions) -> None:

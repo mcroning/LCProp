@@ -75,13 +75,17 @@ from lcprop.pr.static_workflow import (
 )
 from lcprop.pr.transverse.specs import (
     PRTransverseRunRequest,
+    PRTransverseSolverOptions,
     PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
 )
 from lcprop.pr.transverse.static_workflow import (
     PRTransverseStaticRunRequest,
     PR_TRANSVERSE_STATIC_WORKFLOW,
 )
-from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
+from lcprop.pr.transverse.operations import (
+    PR_TRANSVERSE_STATIC_OPERATION,
+    PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
+)
 from lcprop.runners.base import RunnerResult
 from lcprop.runners.local import LocalRunner
 from lcprop.transport.defaults import default_transport_registry
@@ -1189,6 +1193,22 @@ def test_gui_slurm_eligibility_uses_registered_ordinary_operation(app):
     assert not window._slurm_supports_workflow(
         PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
     )
+    starts.clear()
+    transverse_request = PRTransverseRunRequest(
+        grid=image_request.grid,
+        beams=image_request.launch_configuration.beams,
+        material=image_request.material,
+        backend=image_request.backend,
+    )
+    window.build_request = lambda: transverse_request
+
+    window.run_clicked()
+
+    assert not starts
+    assert window.status_label.text() == "Invalid request"
+    assert "pr_transverse_timedependent" in (
+        window.results_panel.workspace.console.toPlainText()
+    )
     window.close()
 
 
@@ -1287,15 +1307,14 @@ def test_image_experiment_capability_table_covers_current_pr_algorithms():
     assert capabilities["pr_transverse_static"].validation_status == (
         "compatible_and_validated"
     )
-    assert all(
-        capabilities[name].validation_status == "compatible_validation_pending"
-        for name in (
-            "pr_static",
-            "pr_transverse_timedependent",
-        )
+    assert capabilities["pr_static"].validation_status == (
+        "compatible_validation_pending"
+    )
+    assert capabilities["pr_transverse_timedependent"].validation_status == (
+        "compatible_and_validated"
     )
     assert capabilities["pr_transverse_timedependent"].launch_adapter == (
-        "prepared_field"
+        "declarative_elements"
     )
 
 
@@ -1314,7 +1333,7 @@ def test_gui_image_mode_reuses_workflow_selector_with_capability_status(app):
             "Transverse Static", "Validated", True
         ),
         PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW: (
-            "Transverse TD", "Experimental", False
+            "Transverse TD", "Validated", True
         ),
     }
     assert window.evolution_panel._form.labelForField(selector).text() == (
@@ -1505,6 +1524,47 @@ def test_gui_runs_transverse_static_image_progress_and_completion(app):
     window.close()
 
 
+def test_gui_runs_transverse_td_image_progress_and_completion(app):
+    window = _configured_multi_algorithm_image_window(app)
+    window.evolution_panel.set_workflow_id(
+        PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
+    )
+    window.evolution_panel.Nt.setValue(1)
+    window.evolution_panel.dt_normalized.setValue(1.0e-4)
+    calls = []
+    original_run = window.local_runner.run_registered
+
+    def observed(material_id, workflow_id, request, **kwargs):
+        calls.append((material_id, workflow_id, request))
+        return original_run(material_id, workflow_id, request, **kwargs)
+
+    window.local_runner.run_registered = observed
+    window.run_button.click()
+    deadline = time.monotonic() + 10.0
+    while window._background_running and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.002)
+    app.processEvents()
+
+    console = window.results_panel.workspace.console.toPlainText()
+    assert not window._background_running
+    assert calls and calls[0][:2] == (
+        "pr",
+        PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+    )
+    assert isinstance(calls[0][2], PRTransverseRunRequest)
+    assert calls[0][2].initial_A is None
+    assert calls[0][2].launch_elements
+    assert window.run_status == "completed"
+    assert window.status_label.text() == "Completed"
+    assert "PR progress" in console
+    assert "Post-processing image amplification" in console
+    assert "Image-amplification run complete" in console
+    assert "image_amplification" in window.last_runner_result.run_data.diagnostics
+    assert "transverse_pr" in window.last_runner_result.run_data.diagnostics
+    window.close()
+
+
 def test_transverse_static_image_experiment_forwards_base_cancellation(app):
     window = _configured_multi_algorithm_image_window(app)
     window.evolution_panel.set_workflow_id(PR_TRANSVERSE_STATIC_WORKFLOW)
@@ -1651,7 +1711,7 @@ def test_image_experiment_reduced_td_transformation_is_declarative():
     (
         (PR_STATIC_WORKFLOW, PRStaticRunRequest, True),
         (PR_TRANSVERSE_STATIC_WORKFLOW, PRTransverseStaticRunRequest, True),
-        (PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW, PRTransverseRunRequest, False),
+        (PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW, PRTransverseRunRequest, True),
     ),
 )
 def test_image_experiment_current_algorithm_launch_adapters(
@@ -1684,6 +1744,72 @@ def test_image_experiment_current_algorithm_launch_adapters(
     else:
         assert prepared.initial_A is not None
         assert not hasattr(prepared, "launch_elements")
+
+
+def test_transverse_td_image_amplification_local_scientific_validation():
+    image_request = _valid_beampanel_image_amplification_request()
+    base = PRTransverseRunRequest(
+        grid=image_request.grid,
+        beams=image_request.launch_configuration.beams,
+        material=replace(image_request.material, applied_field=0.0),
+        solver=PRTransverseSolverOptions(
+            Nt=2,
+            dt_normalized=1.0e-4,
+            optical_substeps=1,
+        ),
+        backend=BackendSpec("numpy", "float64", False),
+    )
+    experiment = image_amplification_experiment_request(
+        image_request,
+        base_workflow_id=PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+        base_request=base,
+    )
+    prepared, transmission, _grating = prepare_image_amplification_base_request(
+        experiment
+    )
+    runner = LocalRunner(operations=(PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,))
+    composite = run_image_amplification_experiment(runner, experiment).result
+    reduced = image_amplification_experiment_request(
+        image_request,
+        base_workflow_id=PR_TIMEDEPENDENT_WORKFLOW,
+        base_request=PRRunRequest(
+            grid=image_request.grid,
+            beams=image_request.launch_configuration.beams,
+            material=image_request.material,
+            solver=PRSolverOptions(Nt=2, dt_normalized=1.0e-4),
+            backend=BackendSpec("numpy", "float64", False),
+        ),
+    )
+    reduced_result = run_image_amplification_experiment(
+        LocalRunner(operations=(PR_TIMEDEPENDENT_OPERATION,)),
+        reduced,
+    ).result
+
+    assert prepared.initial_A is None
+    assert prepared.launch_elements == (
+        image_request.launch_configuration.channel_elements
+    )
+    assert composite.status == "completed"
+    assert composite.analysis_status == "completed"
+    assert composite.run_result.status == "completed"
+    assert composite.analysis_result is not None
+    analysis = composite.analysis_result
+    assert np.array_equal(analysis.image_transmission, transmission)
+    np.testing.assert_array_equal(
+        composite.run_result.A_initial,
+        reduced_result.run_result.A_initial,
+    )
+    assert np.all(np.isfinite(composite.run_result.A_final))
+    assert np.all(np.isfinite(analysis.backpropagated_signal_field))
+    assert np.isfinite(analysis.measured_absolute_signal_gain)
+    assert np.isfinite(analysis.image_intensity_correlation)
+    assert np.isfinite(analysis.normalized_image_rmse)
+    assert np.isfinite(
+        reduced_result.analysis_result.image_intensity_correlation
+    )
+    assert analysis.image_intensity_correlation > 0.0
+    assert abs(analysis.normalized_power_relative_drift) < 2.0e-13
+    assert composite.run_result.diagnostics["complete_final_optical_replay"]
 
 
 def test_image_experiment_uses_one_base_runner_call_and_forwards_controls():

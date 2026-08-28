@@ -18,7 +18,10 @@ from lcprop.pr.operations import (
     PR_STATIC_OPERATION,
     PR_TIMEDEPENDENT_OPERATION,
 )
-from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
+from lcprop.pr.transverse.operations import (
+    PR_TRANSVERSE_STATIC_OPERATION,
+    PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
+)
 from lcprop.pr.specs import (
     PR_EULER_INTEGRATOR,
     PR_MATERIAL_ID,
@@ -61,6 +64,7 @@ def test_pr_window_is_standalone_and_registers_both_pr_operations(app):
     assert window.runner.registered_operations == (
         PR_TIMEDEPENDENT_OPERATION,
         PR_IMAGE_AMPLIFICATION_OPERATION,
+        PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
         PR_TRANSVERSE_STATIC_OPERATION,
         PR_STATIC_OPERATION,
     )

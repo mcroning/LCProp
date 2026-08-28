@@ -22,7 +22,10 @@ from lcprop.pr.operations import (
     PR_TIMEDEPENDENT_OPERATION,
 )
 from lcprop.pr.specs import PR_MATERIAL_ID
-from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
+from lcprop.pr.transverse.operations import (
+    PR_TRANSVERSE_STATIC_OPERATION,
+    PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
+)
 from lcprop.pr.transverse.static_workflow import (
     PRTransverseStaticRunRequest,
     PR_TRANSVERSE_STATIC_WORKFLOW,
@@ -84,6 +87,7 @@ def test_gui_static_choice_identifies_canonical_2d_and_legacy_paths(app):
     assert window.runner.registered_operations == (
         PR_TIMEDEPENDENT_OPERATION,
         PR_IMAGE_AMPLIFICATION_OPERATION,
+        PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
         PR_TRANSVERSE_STATIC_OPERATION,
         PR_STATIC_OPERATION,
     )

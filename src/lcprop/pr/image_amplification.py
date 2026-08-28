@@ -496,8 +496,8 @@ def image_amplification_base_capabilities() -> tuple[
             PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
             PRTransverseRunRequest,
             PRTransverseRunResult,
-            "prepared_field",
-            "compatible_validation_pending",
+            "declarative_elements",
+            "compatible_and_validated",
         ),
     )
 

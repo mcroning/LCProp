@@ -38,6 +38,7 @@ from lcprop.pr.specs import PR_MATERIAL_ID
 from lcprop.pr.static import PRStaticSolverOptions
 from lcprop.pr.static_workflow import PR_STATIC_WORKFLOW
 from lcprop.pr.transverse.static_workflow import PR_TRANSVERSE_STATIC_WORKFLOW
+from lcprop.pr.transverse.specs import PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
 
 
 @pytest.fixture(scope="module")
@@ -169,7 +170,12 @@ def _configure_image_amplification_window(window, image_path, workflow_id):
 
 @pytest.mark.parametrize(
     "workflow_id",
-    ("pr_timedependent", PR_STATIC_WORKFLOW, PR_TRANSVERSE_STATIC_WORKFLOW),
+    (
+        "pr_timedependent",
+        PR_STATIC_WORKFLOW,
+        PR_TRANSVERSE_STATIC_WORKFLOW,
+        PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+    ),
 )
 def test_pr_image_experiment_survives_original_file_deletion(
     app,
