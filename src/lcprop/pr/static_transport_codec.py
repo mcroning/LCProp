@@ -1,0 +1,292 @@
+"""PR-owned portable transport codec for the reduced static workflow."""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+from typing import Any, Mapping
+
+import numpy as np
+
+from lcprop.core.backend import BackendSpec
+from lcprop.core.context import GridSpec
+from lcprop.core.grid import round_nz
+from lcprop.optics.launch_configuration import reject_prepared_launch_conflict
+from lcprop.persistence.experiments import decode_beam_stack, encode_beam_stack
+from lcprop.optics.screens import validate_channel_launch_elements
+from lcprop.pr.portable_launch import (
+    PortableLaunchPayloadError,
+    decode_launch_elements,
+    encode_launch_elements,
+)
+from lcprop.pr.specs import PRMaterialSpec, PR_MATERIAL_ID
+from lcprop.pr.static import PRStaticSolverOptions
+from lcprop.pr.static_workflow import (
+    PRCoupledStaticIterationRecord,
+    PRCoupledStaticSliceSummary,
+    PRStaticRunRequest,
+    PRStaticRunResult,
+    PRStaticWorkflowOptions,
+    PR_STATIC_WORKFLOW,
+)
+from lcprop.pr.transport_common import pack_portable, unpack_portable
+from lcprop.transport.codecs import (
+    EncodedRequest,
+    EncodedResult,
+    PortablePayload,
+    TransportCodec,
+)
+from lcprop.transport.envelopes import TransportCodecError
+
+
+PR_STATIC_REQUEST_CODEC_ID = "pr.static.request"
+PR_STATIC_RESULT_CODEC_ID = "pr.static.result"
+PR_STATIC_TRANSPORT_CODEC_VERSION = 1
+
+
+def _validate_request(request: PRStaticRunRequest) -> None:
+    request.grid.validate()
+    request.beams.validate()
+    request.material.validate()
+    request.solver.validate()
+    request.backend.validate()
+    validate_channel_launch_elements(
+        request.launch_elements, n_channels=len(request.beams.channels)
+    )
+    reject_prepared_launch_conflict(request.initial_A, request.launch_elements)
+    expected_A = (len(request.beams.channels), request.grid.Nx, request.grid.Ny)
+    expected_E = (
+        round_nz(request.grid.z_length_um, request.grid.dz_um),
+        request.grid.Nx,
+        request.grid.Ny,
+    )
+    if request.initial_A is not None and request.initial_A.shape != expected_A:
+        raise ValueError(f"initial_A shape must be {expected_A}")
+    if request.initial_E is not None and request.initial_E.shape != expected_E:
+        raise ValueError(f"initial_E shape must be {expected_E}")
+
+
+def encode_pr_static_transport_request(
+    request: PRStaticRunRequest,
+) -> EncodedRequest:
+    """Encode one canonical reduced-static request."""
+
+    if not isinstance(request, PRStaticRunRequest):
+        raise TypeError("request must be a PRStaticRunRequest")
+    _validate_request(request)
+    arrays: dict[str, np.ndarray] = {}
+    metadata = {
+        "grid": asdict(request.grid),
+        "beams": encode_beam_stack(request.beams),
+        "material": asdict(request.material),
+        "solver": pack_portable(request.solver, arrays, "solver"),
+        "backend": asdict(request.backend),
+        "launch_elements": encode_launch_elements(request.launch_elements),
+        "initial_A": pack_portable(request.initial_A, arrays, "initial_A"),
+        "initial_E": pack_portable(request.initial_E, arrays, "initial_E"),
+    }
+    return EncodedRequest(
+        PortablePayload(metadata, arrays), request.backend.backend
+    )
+
+
+def decode_pr_static_transport_request(
+    metadata: Mapping[str, Any], arrays: Mapping[str, np.ndarray]
+) -> PRStaticRunRequest:
+    """Decode and validate one canonical reduced-static request."""
+
+    try:
+        values = unpack_portable(dict(metadata), arrays)
+        solver_values = dict(values["solver"])
+        material_values = solver_values.pop("material_solver")
+        material_solver = (
+            None
+            if material_values is None
+            else PRStaticSolverOptions(**material_values)
+        )
+        beams = decode_beam_stack(values["beams"])
+        request = PRStaticRunRequest(
+            grid=GridSpec(**values["grid"]),
+            beams=beams,
+            material=PRMaterialSpec(**values["material"]),
+            solver=PRStaticWorkflowOptions(
+                material_solver=material_solver,
+                **solver_values,
+            ),
+            backend=BackendSpec(**values["backend"]),
+            launch_elements=decode_launch_elements(
+                values.get("launch_elements", []),
+                n_channels=len(beams.channels),
+            ),
+            initial_A=values["initial_A"],
+            initial_E=values["initial_E"],
+        )
+        _validate_request(request)
+        return request
+    except TransportCodecError:
+        raise
+    except (PortableLaunchPayloadError, KeyError, TypeError, ValueError) as exc:
+        raise TransportCodecError(
+            f"invalid PR static request payload: {exc}"
+        ) from exc
+
+
+def encode_pr_static_transport_result(result: PRStaticRunResult) -> EncodedResult:
+    """Encode the complete canonical reduced-static result."""
+
+    if not isinstance(result, PRStaticRunResult):
+        raise TypeError("result must be a PRStaticRunResult")
+    arrays: dict[str, np.ndarray] = {}
+    metadata = pack_portable(asdict(result), arrays, "result")
+    backend = str(result.backend_summary.get("backend", "unknown"))
+    termination = (
+        "cancelled_at_accepted_boundary"
+        if result.status == "cancelled"
+        else (
+            result.slice_summaries[-1].termination_reason
+            if result.slice_summaries
+            else result.status
+        )
+    )
+    return EncodedResult(
+        PortablePayload(metadata, arrays),
+        scientific_status=result.status,
+        converged=bool(result.converged),
+        cancelled=result.status == "cancelled",
+        termination_reason=str(termination),
+        scientific_backend_resolved=backend,
+        device_summary=pack_portable(
+            result.backend_summary, arrays, "device_summary"
+        ),
+    )
+
+
+def _positive_dimension(summary: Mapping[str, Any], name: str) -> int:
+    value = summary.get(name)
+    if type(value) is not int or value < 1:
+        raise TransportCodecError(
+            f"PR static result {name} must be a positive integer"
+        )
+    return value
+
+
+def _validate_result(values: Mapping[str, Any]) -> None:
+    grid = values.get("grid_summary")
+    launch = values.get("launch_summary")
+    if not isinstance(grid, Mapping) or not isinstance(launch, Mapping):
+        raise TransportCodecError(
+            "PR static result lacks grid or launch summary"
+        )
+    nx = _positive_dimension(grid, "Nx")
+    ny = _positive_dimension(grid, "Ny")
+    nz = _positive_dimension(grid, "Nz")
+    nch = _positive_dimension(launch, "Nch")
+    completed = values.get("completed_slices")
+    if type(completed) is not int or not 0 <= completed <= nz:
+        raise TransportCodecError(
+            "PR static completed_slices is outside the declared grid"
+        )
+    expected = {
+        "A_initial": (nch, nx, ny),
+        "A_final": (nch, nx, ny),
+        "E_initial": (completed, nx, ny),
+        "E_final": (completed, nx, ny),
+        "source_intensity_stack": (completed, nx, ny),
+        "residual_stack": (completed, nx, ny),
+    }
+    for name, shape in expected.items():
+        array = values.get(name)
+        if not isinstance(array, np.ndarray):
+            raise TransportCodecError(
+                f"PR static result {name} must be a numeric array"
+            )
+        if array.dtype.hasobject:
+            raise TransportCodecError(
+                f"PR static result {name} has forbidden object dtype"
+            )
+        if array.shape != shape:
+            raise TransportCodecError(
+                f"PR static result {name} shape {array.shape} does not match {shape}"
+            )
+    summaries = values.get("slice_summaries")
+    if not isinstance(summaries, list) or len(summaries) != completed:
+        raise TransportCodecError(
+            "PR static slice summaries must match completed_slices"
+        )
+    status = values.get("status")
+    converged = values.get("converged")
+    if type(converged) is not bool:
+        raise TransportCodecError("PR static converged must be boolean")
+    if status not in {"converged", "not_converged", "cancelled"}:
+        raise TransportCodecError("PR static result status is invalid")
+    if converged != (status == "converged"):
+        raise TransportCodecError(
+            "PR static convergence flag disagrees with result status"
+        )
+
+
+def decode_pr_static_transport_result(
+    metadata: Mapping[str, Any], arrays: Mapping[str, np.ndarray]
+) -> PRStaticRunResult:
+    """Decode and validate the complete canonical reduced-static result."""
+
+    try:
+        values = unpack_portable(dict(metadata), arrays)
+        _validate_result(values)
+        result = PRStaticRunResult(
+            A_initial=values["A_initial"],
+            A_final=values["A_final"],
+            E_initial=values["E_initial"],
+            E_final=values["E_final"],
+            source_intensity_stack=values["source_intensity_stack"],
+            residual_stack=values["residual_stack"],
+            power_initial=float(values["power_initial"]),
+            power_final=float(values["power_final"]),
+            converged=values["converged"],
+            completed_slices=values["completed_slices"],
+            iteration_records=tuple(
+                PRCoupledStaticIterationRecord(**item)
+                for item in values["iteration_records"]
+            ),
+            slice_summaries=tuple(
+                PRCoupledStaticSliceSummary(**item)
+                for item in values["slice_summaries"]
+            ),
+            grid_summary=dict(values["grid_summary"]),
+            launch_summary=dict(values["launch_summary"]),
+            backend_summary=dict(values["backend_summary"]),
+            tolerance_provenance=dict(values["tolerance_provenance"]),
+            replay_diagnostics=dict(values["replay_diagnostics"]),
+            status=values["status"],
+        )
+        return result
+    except TransportCodecError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TransportCodecError(
+            f"invalid PR static result payload: {exc}"
+        ) from exc
+
+
+PR_STATIC_TRANSPORT_CODEC = TransportCodec(
+    material_id=PR_MATERIAL_ID,
+    workflow_id=PR_STATIC_WORKFLOW,
+    request_codec_id=PR_STATIC_REQUEST_CODEC_ID,
+    request_codec_version=PR_STATIC_TRANSPORT_CODEC_VERSION,
+    request_type=PRStaticRunRequest,
+    encode_request=encode_pr_static_transport_request,
+    decode_request=decode_pr_static_transport_request,
+    result_codec_id=PR_STATIC_RESULT_CODEC_ID,
+    result_codec_version=PR_STATIC_TRANSPORT_CODEC_VERSION,
+    result_type=PRStaticRunResult,
+    encode_result=encode_pr_static_transport_result,
+    decode_result=decode_pr_static_transport_result,
+)
+
+
+__all__ = [
+    "PR_STATIC_TRANSPORT_CODEC",
+    "decode_pr_static_transport_request",
+    "decode_pr_static_transport_result",
+    "encode_pr_static_transport_request",
+    "encode_pr_static_transport_result",
+]

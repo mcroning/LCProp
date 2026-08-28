@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict
 import math
 from typing import Any, Mapping
 
 import numpy as np
 
-from lcprop.core.backend import BackendSpec, asnumpy
+from lcprop.core.backend import BackendSpec
 from lcprop.core.context import GridSpec
+from lcprop.core.grid import round_nz
+from lcprop.optics.launch_configuration import reject_prepared_launch_conflict
 from lcprop.persistence.experiments import decode_beam_stack, encode_beam_stack
+from lcprop.optics.screens import validate_channel_launch_elements
+from lcprop.pr.portable_launch import (
+    PortableLaunchPayloadError,
+    decode_launch_elements,
+    encode_launch_elements,
+)
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.pr.specs import PRMaterialSpec, PR_MATERIAL_ID
+from lcprop.pr.transport_common import pack_portable, unpack_portable
 from lcprop.pr.transverse.specs import (
     PRTransverseBoundaryProfile,
     PRTransverseDielectricProfile,
@@ -40,37 +49,7 @@ from lcprop.transport.envelopes import TransportCodecError
 
 PR_TRANSVERSE_STATIC_REQUEST_CODEC_ID = "pr.transverse_static.request"
 PR_TRANSVERSE_STATIC_RESULT_CODEC_ID = "pr.transverse_static.result"
-PR_TRANSVERSE_STATIC_TRANSPORT_CODEC_VERSION = 1
-_ARRAY_MARKER = "__lcprop_array__"
-
-
-def _pack(value: Any, arrays: dict[str, np.ndarray], path: str) -> Any:
-    if is_dataclass(value):
-        value = asdict(value)
-    if isinstance(value, np.generic):
-        return value.item()
-    if hasattr(value, "shape") and hasattr(value, "dtype"):
-        key = path.replace(".", "__")
-        arrays[key] = np.asarray(asnumpy(value)).copy()
-        return {_ARRAY_MARKER: key}
-    if isinstance(value, Mapping):
-        return {str(k): _pack(v, arrays, f"{path}.{k}") for k, v in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_pack(v, arrays, f"{path}.{i}") for i, v in enumerate(value)]
-    return value
-
-
-def _unpack(value: Any, arrays: Mapping[str, np.ndarray]) -> Any:
-    if isinstance(value, Mapping):
-        if set(value) == {_ARRAY_MARKER}:
-            key = value[_ARRAY_MARKER]
-            if key not in arrays:
-                raise TransportCodecError(f"missing transported PR array {key!r}")
-            return np.asarray(arrays[key]).copy()
-        return {str(k): _unpack(v, arrays) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_unpack(v, arrays) for v in value]
-    return value
+PR_TRANSVERSE_STATIC_TRANSPORT_CODEC_VERSION = 2
 
 
 def _validate_request(request: PRTransverseStaticRunRequest) -> None:
@@ -83,6 +62,20 @@ def _validate_request(request: PRTransverseStaticRunRequest) -> None:
     request.projection.validate()
     request.solver.validate()
     request.backend.validate()
+    validate_channel_launch_elements(
+        request.launch_elements, n_channels=len(request.beams.channels)
+    )
+    reject_prepared_launch_conflict(request.initial_A, request.launch_elements)
+    expected_A = (len(request.beams.channels), request.grid.Nx, request.grid.Ny)
+    expected_psi = (
+        round_nz(request.grid.z_length_um, request.grid.dz_um),
+        request.grid.Nx,
+        request.grid.Ny,
+    )
+    if request.initial_A is not None and request.initial_A.shape != expected_A:
+        raise ValueError(f"initial_A shape must be {expected_A}")
+    if request.initial_psi is not None and request.initial_psi.shape != expected_psi:
+        raise ValueError(f"initial_psi shape must be {expected_psi}")
     if request.scattering is not None:
         request.scattering.validate()
 
@@ -90,11 +83,6 @@ def _validate_request(request: PRTransverseStaticRunRequest) -> None:
 def encode_pr_transverse_static_transport_request(request: PRTransverseStaticRunRequest) -> EncodedRequest:
     if not isinstance(request, PRTransverseStaticRunRequest):
         raise TypeError("request must be a PRTransverseStaticRunRequest")
-    if request.launch_elements:
-        raise TransportCodecError(
-            "PR transverse-static remote transport does not yet encode "
-            "launch_elements"
-        )
     _validate_request(request)
     arrays: dict[str, np.ndarray] = {}
     metadata = {
@@ -105,10 +93,11 @@ def encode_pr_transverse_static_transport_request(request: PRTransverseStaticRun
         "dielectric": asdict(request.dielectric),
         "boundary": asdict(request.boundary),
         "projection": asdict(request.projection),
-        "solver": _pack(request.solver, arrays, "solver"),
+        "solver": pack_portable(request.solver, arrays, "solver"),
         "backend": asdict(request.backend),
-        "initial_A": _pack(request.initial_A, arrays, "initial_A"),
-        "initial_psi": _pack(request.initial_psi, arrays, "initial_psi"),
+        "launch_elements": encode_launch_elements(request.launch_elements),
+        "initial_A": pack_portable(request.initial_A, arrays, "initial_A"),
+        "initial_psi": pack_portable(request.initial_psi, arrays, "initial_psi"),
         "scattering": None if request.scattering is None else asdict(request.scattering),
     }
     return EncodedRequest(PortablePayload(metadata, arrays), request.backend.backend)
@@ -116,14 +105,15 @@ def encode_pr_transverse_static_transport_request(request: PRTransverseStaticRun
 
 def decode_pr_transverse_static_transport_request(metadata: Mapping[str, Any], arrays: Mapping[str, np.ndarray]) -> PRTransverseStaticRunRequest:
     try:
-        values = _unpack(dict(metadata), arrays)
+        values = unpack_portable(dict(metadata), arrays)
         solver_values = dict(values["solver"])
         material_solver = PRTransverseStaticMaterialSolverOptions(**solver_values.pop("material_solver"))
         discrete_corrector = PRTransverseDiscreteStaticCorrectorOptions(**solver_values.pop("discrete_corrector"))
         scattering = values["scattering"]
+        beams = decode_beam_stack(values["beams"])
         request = PRTransverseStaticRunRequest(
             grid=GridSpec(**values["grid"]),
-            beams=decode_beam_stack(values["beams"]),
+            beams=beams,
             material=PRMaterialSpec(**values["material"]),
             transport=PRTransverseTransportProfile(**values["transport"]),
             dielectric=PRTransverseDielectricProfile(**values["dielectric"]),
@@ -135,6 +125,10 @@ def decode_pr_transverse_static_transport_request(metadata: Mapping[str, Any], a
                 **solver_values,
             ),
             backend=BackendSpec(**values["backend"]),
+            launch_elements=decode_launch_elements(
+                values.get("launch_elements", []),
+                n_channels=len(beams.channels),
+            ),
             initial_A=values["initial_A"],
             initial_psi=values["initial_psi"],
             scattering=None if scattering is None else PRCanonicalScatteringSpec(**scattering),
@@ -143,6 +137,10 @@ def decode_pr_transverse_static_transport_request(metadata: Mapping[str, Any], a
         return request
     except TransportCodecError:
         raise
+    except PortableLaunchPayloadError as exc:
+        raise TransportCodecError(
+            f"invalid PR transverse-static request payload: {exc}"
+        ) from exc
     except Exception as exc:
         raise TransportCodecError(f"invalid PR transverse-static request payload: {exc}") from exc
 
@@ -151,9 +149,11 @@ def encode_pr_transverse_static_transport_result(result: PRTransverseStaticRunRe
     if not isinstance(result, PRTransverseStaticRunResult):
         raise TypeError("result must be a PRTransverseStaticRunResult")
     arrays: dict[str, np.ndarray] = {}
-    metadata = _pack(asdict(result), arrays, "result")
+    metadata = pack_portable(asdict(result), arrays, "result")
     backend = str(result.backend_summary.get("backend", "unknown"))
-    device_summary = _pack(result.backend_summary, arrays, "device_summary")
+    device_summary = pack_portable(
+        result.backend_summary, arrays, "device_summary"
+    )
     termination = result.diagnostics.get("termination_reason", result.status)
     return EncodedResult(
         PortablePayload(metadata, arrays),
@@ -318,7 +318,7 @@ def _validate_continuation(values: Mapping[str, Any]) -> None:
 
 def decode_pr_transverse_static_transport_result(metadata: Mapping[str, Any], arrays: Mapping[str, np.ndarray]) -> PRTransverseStaticRunResult:
     try:
-        values = _unpack(dict(metadata), arrays)
+        values = unpack_portable(dict(metadata), arrays)
         _validate_result_shapes(values)
         _validate_continuation(values)
         material_records = []

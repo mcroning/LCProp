@@ -844,11 +844,17 @@ class PRMainWindow(QWidget):
                 if isinstance(request, PRImageAmplificationExperimentRequest)
                 else image_amplification_experiment_request(request)
             )
+            runner_kwargs = (
+                self.remote_execution_controls.runner_kwargs()
+                if self.runner is self.slurm_runner
+                else None
+            )
             return run_image_amplification_experiment(
                 self.runner,
                 composite,
                 cancellation_token=kwargs.get("cancellation_token"),
                 progress_callback=kwargs.get("progress_callback"),
+                runner_kwargs=runner_kwargs,
             )
         if isinstance(
             request,
@@ -906,6 +912,16 @@ class PRMainWindow(QWidget):
             self._workflow_id_for_request(request),
             request,
             **kwargs,
+        )
+
+    def _slurm_supports_workflow(self, workflow_id: str) -> bool:
+        """Return whether the active Slurm composition registers one PR operation."""
+
+        if self.slurm_runner is None:
+            return False
+        return any(
+            operation.key == (PR_MATERIAL_ID, workflow_id)
+            for operation in self.slurm_runner.registered_operations
         )
 
     def save_checkpoint_to(self, run_dir):
@@ -1037,12 +1053,21 @@ class PRMainWindow(QWidget):
                 self.remote_execution_controls.validate_backend(
                     request.backend.backend
                 )
-            if self.runner is self.slurm_runner and not isinstance(
-                request, PRTransverseStaticRunRequest
-            ):
-                raise ValueError(
-                    "Slurm execution currently supports only pr_transverse_static"
-                )
+                workflow_id = self._workflow_id_for_request(request)
+                if isinstance(request, PRImageAmplificationExperimentRequest):
+                    workflow_id = request.base_workflow_id
+                if not self._slurm_supports_workflow(workflow_id):
+                    kind = (
+                        "base operation"
+                        if isinstance(
+                            request, PRImageAmplificationExperimentRequest
+                        )
+                        else "operation"
+                    )
+                    raise ValueError(
+                        "Slurm execution does not support the selected PR "
+                        f"{kind} {workflow_id!r}"
+                    )
         except Exception:
             self.status_label.setText("Invalid request")
             self.results_panel.append_console("ERROR")

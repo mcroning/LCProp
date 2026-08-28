@@ -22,6 +22,15 @@ from lcprop.lc.workflows import (
     continue_static, run_timedependent, timedependent_state_from_static_result,
 )
 from lcprop.pr.specs import PRMaterialSpec
+from lcprop.pr.operations import PR_STATIC_OPERATION
+from lcprop.pr.static_workflow import (
+    PRStaticRunRequest,
+    PRStaticWorkflowOptions,
+)
+from lcprop.pr.static_transport_codec import (
+    decode_pr_static_transport_result,
+    encode_pr_static_transport_result,
+)
 from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
 from lcprop.pr.transverse.static_workflow import (
     PRTransverseStaticRunRequest,
@@ -86,6 +95,26 @@ def _pr_request():
     )
 
 
+def _pr_static_request():
+    return PRStaticRunRequest(
+        grid=GridSpec(
+            Nx=12, Ny=10, x_aperture_um=30.0, y_aperture_um=25.0,
+            dz_um=5.0, z_length_um=5.0,
+        ),
+        beams=_beam_stack("pr-static-remote"),
+        material=PRMaterialSpec(
+            dark_intensity=0.4,
+            uniform_background_intensity=0.1,
+            gain_length_product=1e-3,
+            characteristic_wavenumber_per_um_override=0.1,
+        ),
+        solver=PRStaticWorkflowOptions(max_coupled_passes=3),
+        backend=BackendSpec(
+            backend="numpy", precision="float64", verbose=False
+        ),
+    )
+
+
 def _assert_arrays_equal(left, right, names):
     for name in names:
         np.testing.assert_array_equal(getattr(left, name), getattr(right, name))
@@ -130,6 +159,19 @@ def test_slurm_cancellation_variants_are_terminal(scheduler_state):
     assert (
         scheduler_state_to_remote_state(scheduler_state)
         == RemoteRunState.CANCELLED
+    )
+
+
+def test_default_transport_composition_registers_both_pr_static_operations():
+    expected = {
+        ("pr", "pr_static"),
+        ("pr", "pr_transverse_static"),
+    }
+    assert expected.issubset(
+        {codec.key for codec in default_transport_registry().codecs}
+    )
+    assert expected.issubset(
+        {operation.key for operation in default_transport_operations()}
     )
 
 
@@ -217,6 +259,180 @@ def test_request_result_roundtrip_and_product_regeneration(tmp_path, kind):
         transported_diagnostic = regenerated.run_data.diagnostics[key]
         assert transported_diagnostic.display_name == original_diagnostic.display_name
         _assert_nested_equal(transported_diagnostic.values, original_diagnostic.values)
+
+
+def test_pr_static_request_result_roundtrip_and_product_regeneration(tmp_path):
+    registry = default_transport_registry()
+    request = _pr_static_request()
+    run_dir = tmp_path / "pr-static"
+    write_request_package(
+        run_dir,
+        registry=registry,
+        material_id=PR_STATIC_OPERATION.material_id,
+        workflow_id=PR_STATIC_OPERATION.workflow_id,
+        request=request,
+        run_id="pr-static-run",
+        execution_target="local",
+        provenance={"git_sha": "test"},
+    )
+    decoded_request = read_request_package(run_dir, registry=registry).request
+    assert decoded_request == request
+    completed = PR_STATIC_OPERATION.run(decoded_request)
+    codec = registry.codec(
+        PR_STATIC_OPERATION.material_id, PR_STATIC_OPERATION.workflow_id
+    )
+    encoded = encode_pr_static_transport_result(completed)
+    decoded_direct = decode_pr_static_transport_result(
+        encoded.payload.metadata, encoded.payload.arrays
+    )
+    for name in (
+        "A_initial", "A_final", "E_initial", "E_final",
+        "source_intensity_stack", "residual_stack",
+    ):
+        np.testing.assert_array_equal(
+            getattr(decoded_direct, name), getattr(completed, name)
+        )
+    write_result_package(
+        run_dir,
+        codec=codec,
+        result=completed,
+        request_envelope=read_request_package(
+            run_dir, registry=registry
+        ).envelope,
+    )
+    regenerated = runner_result_from_package(
+        run_dir,
+        registry=registry,
+        operations=default_transport_operations(),
+    )
+    assert isinstance(regenerated.result, type(completed))
+    assert regenerated.result.status == completed.status
+    assert regenerated.result.replay_diagnostics == completed.replay_diagnostics
+    original = PR_STATIC_OPERATION.to_run_data(completed)
+    assert tuple(regenerated.run_data.fields) == tuple(original.fields)
+    assert tuple(regenerated.run_data.diagnostics) == tuple(original.diagnostics)
+    for key in original.fields:
+        np.testing.assert_allclose(
+            regenerated.run_data.fields[key].data,
+            original.fields[key].data,
+        )
+
+
+def test_pr_static_transport_rejects_malformed_result_shape():
+    completed = PR_STATIC_OPERATION.run(_pr_static_request())
+    encoded = encode_pr_static_transport_result(completed)
+    arrays = dict(encoded.payload.arrays)
+    arrays["result__E_final"] = arrays["result__E_final"][:, :-1, :]
+    with pytest.raises(TransportCodecError, match="E_final shape"):
+        decode_pr_static_transport_result(encoded.payload.metadata, arrays)
+
+
+def test_pr_static_cancelled_result_transport_preserves_accepted_boundary():
+    token = CancellationToken()
+    token.cancel()
+    cancelled = PR_STATIC_OPERATION.run(
+        _pr_static_request(), cancellation_token=token
+    )
+    assert cancelled.status == "cancelled"
+    assert cancelled.completed_slices == 0
+    encoded = encode_pr_static_transport_result(cancelled)
+    decoded = decode_pr_static_transport_result(
+        encoded.payload.metadata, encoded.payload.arrays
+    )
+    assert decoded.status == "cancelled"
+    assert not decoded.converged
+    assert decoded.completed_slices == 0
+    assert decoded.E_final.shape == (0, 12, 10)
+
+
+def test_pr_static_transport_cancellation_after_accepted_slice_is_explicit(
+    tmp_path,
+):
+    request = replace(
+        _pr_static_request(),
+        grid=replace(_pr_static_request().grid, z_length_um=10.0),
+    )
+    token = CancellationToken()
+
+    def cancel_after_first_slice(progress):
+        if progress.completed_units == 1:
+            token.cancel()
+
+    cancelled = PR_STATIC_OPERATION.run(
+        request,
+        cancellation_token=token,
+        progress_callback=cancel_after_first_slice,
+    )
+    assert cancelled.status == "cancelled"
+    assert cancelled.completed_slices == 1
+    accepted_arrays = {
+        name: np.asarray(getattr(cancelled, name)).copy()
+        for name in (
+            "A_initial", "A_final", "E_initial", "E_final",
+            "source_intensity_stack", "residual_stack",
+        )
+    }
+    encoded = encode_pr_static_transport_result(cancelled)
+    assert encoded.cancelled is True
+    assert encoded.termination_reason == "cancelled_at_accepted_boundary"
+    assert encoded.termination_reason != "residual_tolerance"
+
+    registry = default_transport_registry()
+    run_dir = tmp_path / "pr-static-cancelled"
+    write_request_package(
+        run_dir,
+        registry=registry,
+        material_id=PR_STATIC_OPERATION.material_id,
+        workflow_id=PR_STATIC_OPERATION.workflow_id,
+        request=request,
+        run_id="pr-static-cancelled-run",
+    )
+    request_envelope = read_request_package(
+        run_dir, registry=registry
+    ).envelope
+    write_result_package(
+        run_dir,
+        codec=registry.codec(*PR_STATIC_OPERATION.key),
+        result=cancelled,
+        request_envelope=request_envelope,
+    )
+    transported = read_result_package(run_dir, registry=registry)
+    assert transported.envelope.cancelled is True
+    assert (
+        transported.envelope.termination_reason
+        == "cancelled_at_accepted_boundary"
+    )
+    assert transported.result.status == "cancelled"
+    assert (
+        encode_pr_static_transport_result(
+            transported.result
+        ).termination_reason
+        == "cancelled_at_accepted_boundary"
+    )
+    for name, expected in accepted_arrays.items():
+        np.testing.assert_array_equal(
+            getattr(transported.result, name), expected
+        )
+
+
+def test_pr_static_transport_preserves_float32_dtypes_and_backend_provenance():
+    request = replace(
+        _pr_static_request(),
+        backend=BackendSpec(
+            backend="numpy", precision="float32", verbose=False
+        ),
+    )
+    completed = PR_STATIC_OPERATION.run(request)
+    encoded = encode_pr_static_transport_result(completed)
+    decoded = decode_pr_static_transport_result(
+        encoded.payload.metadata, encoded.payload.arrays
+    )
+    assert encoded.scientific_backend_resolved == "numpy"
+    assert decoded.backend_summary["real_dtype"] == "float32"
+    assert decoded.A_final.dtype == np.complex64
+    assert decoded.E_final.dtype == np.float32
+    np.testing.assert_array_equal(decoded.A_final, completed.A_final)
+    np.testing.assert_array_equal(decoded.E_final, completed.E_final)
 
 
 def test_lc_stopped_checkpoint_typed_records_and_metadata_roundtrip(tmp_path):

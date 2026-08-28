@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import os
 import time
 
@@ -38,16 +39,20 @@ from lcprop.pr.static_workflow import (
     PR_STATIC_WORKFLOW,
     run_pr_static,
 )
+from lcprop.pr.static_transport_codec import (
+    decode_pr_static_transport_request,
+    encode_pr_static_transport_request,
+)
 from lcprop.pr.transverse.static_workflow import (
     PRTransverseStaticRunRequest,
     PRTransverseStaticWorkflowOptions,
     run_pr_transverse_static,
 )
 from lcprop.pr.transverse.transport_codec import (
+    decode_pr_transverse_static_transport_request,
     encode_pr_transverse_static_transport_request,
 )
 from lcprop.pr.workflow import continue_pr_timedependent, run_pr_timedependent
-from lcprop.transport.envelopes import TransportCodecError
 
 
 @pytest.fixture(scope="module")
@@ -259,7 +264,7 @@ def test_explicit_initial_A_with_launch_elements_is_rejected(kind):
         runner(request)
 
 
-def test_experiment_persistence_supports_plan_while_remote_paths_reject_it(tmp_path):
+def test_experiment_and_static_transports_share_screen_plan_encoding(tmp_path):
     static = PRStaticRunRequest(
         grid=_grid(), beams=_beams(), launch_elements=_assignments(1)
     )
@@ -271,12 +276,22 @@ def test_experiment_persistence_supports_plan_while_remote_paths_reject_it(tmp_p
         workflow_id=PR_STATIC_WORKFLOW,
     )
     assert load_experiment(path).request == static
+    encoded_static = encode_pr_static_transport_request(static)
+    decoded_static = decode_pr_static_transport_request(
+        encoded_static.payload.metadata,
+        encoded_static.payload.arrays,
+    )
+    assert decoded_static == static
 
     transverse = PRTransverseStaticRunRequest(
         grid=_grid(), beams=_beams(), launch_elements=_assignments(1)
     )
-    with pytest.raises(TransportCodecError, match="launch_elements"):
-        encode_pr_transverse_static_transport_request(transverse)
+    encoded_transverse = encode_pr_transverse_static_transport_request(transverse)
+    decoded_transverse = decode_pr_transverse_static_transport_request(
+        encoded_transverse.payload.metadata,
+        encoded_transverse.payload.arrays,
+    )
+    assert decoded_transverse == transverse
 
     td = PRRunRequest(
         grid=_grid(),
@@ -287,6 +302,52 @@ def test_experiment_persistence_supports_plan_while_remote_paths_reject_it(tmp_p
     checkpoint = run_pr_timedependent(td).checkpoint
     with pytest.raises(ValueError, match="launch_elements"):
         save_pr_checkpoint(checkpoint, tmp_path)
+
+
+def test_static_transport_preserves_embedded_user_image_and_screen_geometry():
+    encoded_bytes = b"portable-user-image"
+    pixels = np.asarray([[0.1, 0.8, 0.3], [1.0, 0.2, 0.6]], dtype=np.float32)
+    source = RasterSource(
+        source_kind="user",
+        display_name="user chart",
+        basename="chart.png",
+        sha256=hashlib.sha256(encoded_bytes).hexdigest(),
+        width=3,
+        height=2,
+        encoded_format="png",
+        decoded_mode="L",
+        grayscale=pixels,
+        encoded_bytes=encoded_bytes,
+    )
+    screen = IntensityRasterScreen(
+        source=source,
+        placement=ScreenPlacement(
+            center_x_um=2.5,
+            center_y_um=-1.5,
+            width_um=9.0,
+            height_um=5.0,
+            outside_intensity_transmission=0.25,
+            boundary_policy="clip",
+        ),
+        invert=True,
+    )
+    request = PRStaticRunRequest(
+        grid=_grid(),
+        beams=_beams(3),
+        launch_elements=(
+            ChannelLaunchElements(0, (screen,)),
+            ChannelLaunchElements(2, (_screen([[1.0, 0.2], [0.4, 0.8]]),)),
+        ),
+    )
+    encoded = encode_pr_static_transport_request(request)
+    decoded = decode_pr_static_transport_request(
+        encoded.payload.metadata, encoded.payload.arrays
+    )
+    assert decoded == request
+    restored = decoded.launch_elements[0].elements[0]
+    assert restored.source.encoded_bytes == encoded_bytes
+    assert restored.placement == screen.placement
+    assert restored.invert
 
 
 def _wait_for(app, predicate, *, timeout: float = 8.0) -> None:

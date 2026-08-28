@@ -82,7 +82,9 @@ from lcprop.pr.transverse.static_workflow import (
     PR_TRANSVERSE_STATIC_WORKFLOW,
 )
 from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
+from lcprop.runners.base import RunnerResult
 from lcprop.runners.local import LocalRunner
+from lcprop.transport.defaults import default_transport_registry
 
 
 @pytest.fixture(scope="module")
@@ -1053,37 +1055,137 @@ def test_beampanel_request_rejects_multiple_signal_screens():
         replace(request, launch_configuration=launch).validate()
 
 
-def test_beampanel_image_amplification_is_explicitly_rejected_by_slurm(app):
+def test_static_image_amplification_is_allowed_by_capable_slurm_and_forwards_profile(app):
     class ObservedSlurmRunner:
         name = "Slurm"
         supports_parallel_sweeps = False
-        registered_operations = ()
+        registered_operations = (PR_STATIC_OPERATION,)
 
         def __init__(self):
             self.calls = []
 
-        def run_registered(self, *args, **kwargs):
-            self.calls.append((args, kwargs))
-            raise AssertionError("unsupported request reached Slurm dispatch")
+        def run_registered(self, material_id, workflow_id, request, **kwargs):
+            self.calls.append((material_id, workflow_id, request, kwargs))
+            local_kwargs = dict(kwargs)
+            local_kwargs.pop("resource_profile", None)
+            return LocalRunner((PR_STATIC_OPERATION,)).run_registered(
+                material_id, workflow_id, request, **local_kwargs
+            )
 
-    request = _valid_beampanel_image_amplification_request()
-    assert request.launch_configuration.channel_elements
-    assert request.pump_channel_index == 0
-    assert request.signal_channel_index == 1
+    image_request = _valid_beampanel_image_amplification_request()
+    base = PRStaticRunRequest(
+        grid=image_request.grid,
+        beams=image_request.launch_configuration.beams,
+        material=image_request.material,
+        backend=image_request.backend,
+    )
+    request = image_amplification_experiment_request(
+        image_request,
+        base_workflow_id=PR_STATIC_WORKFLOW,
+        base_request=base,
+    )
     runner = ObservedSlurmRunner()
     window = PRMainWindow(slurm_runner=runner)
     window.runner = runner
     window.runner_label.setText("Runner: Slurm")
     window.remote_execution_controls.validate_backend = lambda _backend: None
+    window.remote_execution_controls.runner_kwargs = lambda: {
+        "resource_profile": "gpu-test"
+    }
+    window.build_request = lambda: request
+    starts = []
+    window._start_background = lambda supplied, **kwargs: starts.append(
+        (supplied, kwargs)
+    )
+
+    window.run_clicked()
+
+    assert starts and starts[0][0] is request
+    result = window._run_registered(request)
+    assert result.result.analysis_status == "completed"
+    assert len(runner.calls) == 1
+    assert runner.calls[0][0:2] == ("pr", PR_STATIC_WORKFLOW)
+    assert runner.calls[0][3]["resource_profile"] == "gpu-test"
+    window.close()
+
+
+def test_image_amplification_rejects_unregistered_slurm_base_operation(app):
+    class TransverseOnlySlurmRunner:
+        name = "Slurm"
+        supports_parallel_sweeps = False
+        registered_operations = (PR_TRANSVERSE_STATIC_OPERATION,)
+
+    image_request = _valid_beampanel_image_amplification_request()
+    base = PRStaticRunRequest(
+        grid=image_request.grid,
+        beams=image_request.launch_configuration.beams,
+        material=image_request.material,
+        backend=image_request.backend,
+    )
+    request = image_amplification_experiment_request(
+        image_request,
+        base_workflow_id=PR_STATIC_WORKFLOW,
+        base_request=base,
+    )
+    runner = TransverseOnlySlurmRunner()
+    window = PRMainWindow(slurm_runner=runner)
+    window.runner = runner
+    window.remote_execution_controls.validate_backend = lambda _backend: None
     window.build_request = lambda: request
 
     window.run_clicked()
 
-    assert runner.calls == []
-    assert window._active_request is None
-    assert not window._background_running
     assert window.status_label.text() == "Invalid request"
-    assert "supports only pr_transverse_static" in (
+    assert "base operation 'pr_static'" in (
+        window.results_panel.workspace.console.toPlainText()
+    )
+    window.close()
+
+
+def test_gui_slurm_eligibility_uses_registered_ordinary_operation(app):
+    class StaticSlurmRunner:
+        name = "Slurm"
+        supports_parallel_sweeps = False
+        registered_operations = (
+            PR_STATIC_OPERATION,
+            PR_TRANSVERSE_STATIC_OPERATION,
+        )
+
+    image_request = _valid_beampanel_image_amplification_request()
+    static_request = PRStaticRunRequest(
+        grid=image_request.grid,
+        beams=image_request.launch_configuration.beams,
+        material=image_request.material,
+        backend=image_request.backend,
+    )
+    runner = StaticSlurmRunner()
+    window = PRMainWindow(slurm_runner=runner)
+    window.runner = runner
+    window.remote_execution_controls.validate_backend = lambda _backend: None
+    starts = []
+    window._start_background = lambda supplied, **kwargs: starts.append(
+        (supplied, kwargs)
+    )
+    window.build_request = lambda: static_request
+
+    window.run_clicked()
+
+    assert starts and starts[0][0] is static_request
+    starts.clear()
+    td_request = PRRunRequest(
+        grid=image_request.grid,
+        beams=image_request.launch_configuration.beams,
+        material=image_request.material,
+        solver=PRSolverOptions(Nt=0),
+        backend=image_request.backend,
+    )
+    window.build_request = lambda: td_request
+
+    window.run_clicked()
+
+    assert starts == []
+    assert window.status_label.text() == "Invalid request"
+    assert "operation 'pr_timedependent'" in (
         window.results_panel.workspace.console.toPlainText()
     )
     window.close()
@@ -1447,6 +1549,82 @@ def test_legacy_static_image_experiment_dispatches_registered_operation(app):
     assert isinstance(result.result.run_result, PRStaticRunResult)
     assert result.result.analysis_result is not None
     assert result.result.analysis_status == "completed"
+
+
+@pytest.mark.parametrize(
+    ("workflow_id", "operation"),
+    (
+        (PR_STATIC_WORKFLOW, PR_STATIC_OPERATION),
+        (PR_TRANSVERSE_STATIC_WORKFLOW, PR_TRANSVERSE_STATIC_OPERATION),
+    ),
+)
+def test_static_image_experiment_matches_in_process_transport_roundtrip(
+    app, workflow_id, operation
+):
+    window = _configured_multi_algorithm_image_window(app)
+    window.evolution_panel.set_workflow_id(workflow_id)
+    request = window.build_request()
+    window.close()
+    registry = default_transport_registry()
+
+    class InProcessTransportRunner:
+        registered_operations = (operation,)
+
+        def run_registered(
+            self, material_id, selected_workflow_id, supplied, **kwargs
+        ):
+            codec = registry.codec(material_id, selected_workflow_id)
+            encoded_request = codec.encode_request(supplied)
+            decoded_request = codec.decode_request(
+                encoded_request.payload.metadata,
+                encoded_request.payload.arrays,
+            )
+            completed = operation.run(decoded_request, **kwargs)
+            encoded_result = codec.encode_result(completed)
+            decoded_result = codec.decode_result(
+                encoded_result.payload.metadata,
+                encoded_result.payload.arrays,
+            )
+            return RunnerResult(
+                kind=selected_workflow_id,
+                result=decoded_result,
+                run_data=operation.to_run_data(decoded_result),
+                material_id=material_id,
+            )
+
+    local = run_image_amplification_experiment(
+        LocalRunner((operation,)), request
+    ).result
+    transported = run_image_amplification_experiment(
+        InProcessTransportRunner(), request
+    ).result
+
+    assert transported.status == local.status
+    assert transported.analysis_status == local.analysis_status
+    for name in ("A_initial", "A_final"):
+        np.testing.assert_array_equal(
+            getattr(transported.run_result, name),
+            getattr(local.run_result, name),
+        )
+    assert transported.analysis_result is not None
+    assert local.analysis_result is not None
+    for name in (
+        "image_transmission", "signal_carrier_mask", "input_signal_field",
+        "output_signal_field", "backpropagated_signal_field",
+        "zero_response_backpropagated_signal_field",
+    ):
+        np.testing.assert_array_equal(
+            getattr(transported.analysis_result, name),
+            getattr(local.analysis_result, name),
+        )
+    for name in (
+        "measured_absolute_signal_gain", "analytic_absolute_signal_gain",
+        "image_intensity_correlation", "normalized_image_rmse",
+        "normalized_power_relative_drift",
+    ):
+        assert getattr(transported.analysis_result, name) == pytest.approx(
+            getattr(local.analysis_result, name), abs=0.0, rel=0.0
+        )
 
 
 def test_image_experiment_reduced_td_transformation_is_declarative():
