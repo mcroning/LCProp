@@ -16,6 +16,7 @@ from lcprop.pr.transverse.static import (
     production_steady_residual,
     solve_pr_transverse_discrete_static_intensity,
     solve_pr_transverse_static_intensity,
+    _solve_pr_transverse_static_intensity_host_volume,
     static_equilibrium_residual,
 )
 from lcprop.pr.transverse.static import (
@@ -82,6 +83,42 @@ def test_uniform_intensity_has_exact_uniform_static_equilibrium():
     assert np.array_equal(result.equilibrium_residual, np.zeros_like(intensity))
     assert np.array_equal(result.td_rhs_residual, np.zeros_like(intensity))
     assert all(summary.carrier_mean == 1.0 for summary in result.plane_summaries)
+
+
+def test_host_volume_adapter_matches_canonical_batched_material_solve():
+    spacing, expected, plane = _constructed_equilibrium(16)
+    intensity = np.stack((plane, 1.07 * plane), axis=0)
+    initial = np.zeros_like(intensity)
+    options = PRTransverseStaticMaterialSolverOptions(
+        equilibrium_rms_tolerance=1.0e-10,
+        equilibrium_max_tolerance=1.0e-9,
+    )
+
+    batched = solve_pr_transverse_static_intensity(
+        intensity,
+        dx_normalized=spacing,
+        dy_normalized=spacing,
+        initial_psi=initial,
+        options=options,
+    )
+    streamed = _solve_pr_transverse_static_intensity_host_volume(
+        intensity,
+        dx_normalized=spacing,
+        dy_normalized=spacing,
+        initial_psi=initial,
+        options=options,
+        xp=np,
+    )
+
+    assert streamed.status == batched.status
+    assert streamed.converged == batched.converged
+    assert streamed.plane_summaries == batched.plane_summaries
+    assert streamed.iteration_records == batched.iteration_records
+    np.testing.assert_array_equal(streamed.psi, batched.psi)
+    np.testing.assert_array_equal(
+        streamed.equilibrium_residual, batched.equilibrium_residual
+    )
+    np.testing.assert_array_equal(streamed.td_rhs_residual, batched.td_rhs_residual)
 
 
 def test_constructed_nonuniform_zero_flux_state_is_recovered_and_physical():

@@ -34,6 +34,7 @@ from lcprop.pr.scattering import (
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.specs import PRMaterialSpec
 from lcprop.pr.transverse.diagnostics import state_diagnostics
+from lcprop.pr.transverse.projection import project_active_field
 from lcprop.pr.transverse.specs import (
     PR_FULL_TRANSVERSE_PROFILE_V1,
     PRTransverseBoundaryProfile,
@@ -46,20 +47,17 @@ from lcprop.pr.transverse.static import (
     PRTransverseDiscreteStaticNewtonRecord,
     PRTransverseStaticMaterialSolverOptions,
     PRTransverseStaticNewtonRecord,
-    _physical_state_validity,
+    _solve_pr_transverse_static_intensity_host_volume,
     derivative_null_residual,
     project_production_resolved_modes,
-    solve_pr_transverse_static_intensity,
     static_equilibrium_residual,
 )
 from lcprop.pr.transverse.transport import potential_rhs, state_from_potential
-from lcprop.pr.transverse.workflow import (
-    _initial_fields,
-    _optical_pass,
-)
 from lcprop.pr.workflow import (
-    _canonical_scattering_phase_stack,
+    _apply_canonical_scattering_after_slice,
+    _canonical_scattering_phase_for_slice,
     _validate_canonical_scattering_for_grid,
+    advance_pr_slice_with_midpoint_source,
 )
 
 
@@ -252,7 +250,18 @@ def _validate_request(request: PRTransverseStaticRunRequest) -> None:
 
 
 def _metrics(value, *, xp) -> tuple[float, float]:
-    accumulator_dtype = xp.float64 if value.dtype == np.dtype(np.float64) else xp.float32
+    if isinstance(value, np.ndarray):
+        accumulator_dtype = (
+            np.float64 if value.dtype == np.dtype(np.float64) else np.float32
+        )
+        work = value.astype(accumulator_dtype, copy=False)
+        return (
+            float(np.sqrt(np.mean(work * work, dtype=accumulator_dtype))),
+            float(np.max(np.abs(work))),
+        )
+    accumulator_dtype = (
+        xp.float64 if value.dtype == np.dtype(np.float64) else xp.float32
+    )
     work = value.astype(accumulator_dtype, copy=False)
     return (
         scalar_float(xp.sqrt(xp.mean(work * work))),
@@ -262,10 +271,223 @@ def _metrics(value, *, xp) -> tuple[float, float]:
 
 def _difference_rms(left, right, *, xp) -> float:
     difference = left - right
-    accumulator_dtype = xp.float64 if difference.real.dtype == np.dtype(np.float64) else xp.float32
+    if isinstance(difference, np.ndarray):
+        accumulator_dtype = (
+            np.float64
+            if difference.real.dtype == np.dtype(np.float64)
+            else np.float32
+        )
+        return float(
+            np.sqrt(
+                np.mean(np.abs(difference) ** 2, dtype=accumulator_dtype)
+            )
+        )
+    accumulator_dtype = (
+        xp.float64
+        if difference.real.dtype == np.dtype(np.float64)
+        else xp.float32
+    )
     return scalar_float(
         xp.sqrt(xp.mean(xp.abs(difference) ** 2, dtype=accumulator_dtype))
     )
+
+
+def _host_initial_potential(request, *, grid, real_dtype, xp) -> np.ndarray:
+    """Return a projected host potential with one backend slice live at a time."""
+
+    expected = (grid.Nz, grid.Nx, grid.Ny)
+    dtype = np.dtype(real_dtype)
+    if request.initial_psi is None:
+        return np.zeros(expected, dtype=dtype)
+    supplied = np.asarray(asnumpy(request.initial_psi))
+    if supplied.shape != expected:
+        raise ValueError(
+            f"initial_psi shape {supplied.shape} does not match {expected}"
+        )
+    if any(not np.all(np.isfinite(plane)) for plane in supplied):
+        raise ValueError("initial_psi must contain only finite values")
+    return supplied.astype(dtype, copy=True)
+
+
+def _project_host_volume(
+    volume,
+    *,
+    dx_normalized: float,
+    dy_normalized: float,
+    h_y: float,
+    xp,
+) -> np.ndarray:
+    """Project a host longitudinal volume without a backend batch FFT."""
+
+    source = np.asarray(volume)
+    projected = np.empty_like(source)
+    for plane_index in range(source.shape[0]):
+        plane = project_production_resolved_modes(
+            xp.asarray(source[plane_index]),
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=h_y,
+            xp=xp,
+        )
+        projected[plane_index] = np.asarray(asnumpy(plane))
+    return projected
+
+
+def _host_volume_state_validity(
+    volume,
+    *,
+    dx_normalized: float,
+    dy_normalized: float,
+    h_y: float,
+    xp,
+) -> tuple[bool, float, float, float]:
+    """Validate every retained plane while keeping state scratch slice-local."""
+
+    finite = True
+    carrier_minimum = math.inf
+    volume_array = np.asarray(volume)
+    accumulator_dtype = (
+        np.float64
+        if volume_array.dtype == np.dtype(np.float64)
+        else np.float32
+    )
+    carrier_sums = np.empty(volume_array.shape[0], dtype=accumulator_dtype)
+    potential_max_abs = 0.0
+    count = 0
+    for plane_index, plane in enumerate(volume_array):
+        state = state_from_potential(
+            xp.asarray(plane),
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=h_y,
+            xp=xp,
+        )
+        finite = finite and bool(asnumpy(xp.all(xp.isfinite(state.psi))))
+        finite = finite and bool(
+            asnumpy(xp.all(xp.isfinite(state.carrier_density)))
+        )
+        carrier_minimum = min(
+            carrier_minimum, scalar_float(xp.min(state.carrier_density))
+        )
+        carrier_sums[plane_index] = np.asarray(
+            asnumpy(xp.sum(state.carrier_density, dtype=state.psi.dtype))
+        )
+        potential_max_abs = max(
+            potential_max_abs, scalar_float(xp.max(xp.abs(state.psi)))
+        )
+        count += int(state.psi.size)
+    carrier_mean = float(
+        np.sum(carrier_sums, dtype=accumulator_dtype)
+        / np.asarray(count, dtype=accumulator_dtype)
+    )
+    potential_mean = float(np.mean(volume_array, dtype=accumulator_dtype))
+    dtype_epsilon = float(np.finfo(volume_array.dtype).eps)
+    valid = (
+        finite
+        and carrier_minimum > 0.0
+        and abs(carrier_mean - 1.0) <= 64.0 * dtype_epsilon
+        and abs(potential_mean)
+        <= 64.0 * dtype_epsilon * max(1.0, potential_max_abs)
+    )
+    return valid, carrier_mean, carrier_minimum, potential_mean
+
+
+def _host_volume_diagnostics(
+    volume,
+    *,
+    dx_normalized: float,
+    dy_normalized: float,
+    h_y: float,
+    xp,
+) -> dict[str, Any]:
+    """Aggregate established state diagnostics from independent z planes."""
+
+    carrier_integrals = []
+    sums = {
+        "curl": 0.0,
+        "gauss": 0.0,
+        "E_x": 0.0,
+        "E_y": 0.0,
+        "P_minus_one": 0.0,
+    }
+    maxima = {name: 0.0 for name in sums}
+    potential_mean_max_abs = 0.0
+    finite = True
+    count = 0
+    for plane in np.asarray(volume):
+        state = state_from_potential(
+            xp.asarray(plane),
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=h_y,
+            xp=xp,
+        )
+        plane_diagnostics = state_diagnostics(
+            state,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=h_y,
+            xp=xp,
+        )
+        carrier_integrals.append(
+            float(np.asarray(plane_diagnostics["carrier_integrals_per_z"]).item())
+        )
+        plane_count = int(plane.size)
+        count += plane_count
+        for name in sums:
+            rms_key = f"{name}_rms"
+            max_key = "P_minus_one_max_abs" if name == "P_minus_one" else (
+                f"{name}_max_abs" if name in ("E_x", "E_y") else f"{name}_max"
+            )
+            sums[name] += float(plane_diagnostics[rms_key]) ** 2 * plane_count
+            maxima[name] = max(maxima[name], float(plane_diagnostics[max_key]))
+        potential_mean_max_abs = max(
+            potential_mean_max_abs,
+            float(plane_diagnostics["potential_mean_max_abs"]),
+        )
+        finite = finite and bool(plane_diagnostics["finite_material_state"])
+    return {
+        "carrier_integrals_per_z": np.asarray(carrier_integrals),
+        "curl_rms": math.sqrt(sums["curl"] / count),
+        "curl_max": maxima["curl"],
+        "gauss_rms": math.sqrt(sums["gauss"] / count),
+        "gauss_max": maxima["gauss"],
+        "E_x_rms": math.sqrt(sums["E_x"] / count),
+        "E_x_max_abs": maxima["E_x"],
+        "E_y_rms": math.sqrt(sums["E_y"] / count),
+        "E_y_max_abs": maxima["E_y"],
+        "P_minus_one_rms": math.sqrt(sums["P_minus_one"] / count),
+        "P_minus_one_max_abs": maxima["P_minus_one"],
+        "potential_mean_max_abs": potential_mean_max_abs,
+        "finite_material_state": finite,
+    }
+
+
+def _host_derivative_null_metrics(
+    residual,
+    *,
+    dx_normalized: float,
+    dy_normalized: float,
+    h_y: float,
+    xp,
+) -> tuple[float, float]:
+    """Measure the null component without constructing a backend volume."""
+
+    volume = np.asarray(residual)
+    sum_squares = 0.0
+    maximum = 0.0
+    for plane in volume:
+        null = derivative_null_residual(
+            xp.asarray(plane),
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=h_y,
+            xp=xp,
+        )
+        host = np.asarray(asnumpy(null), dtype=np.float64)
+        sum_squares += float(np.sum(host * host))
+        maximum = max(maximum, float(np.max(np.abs(host))))
+    return math.sqrt(sum_squares / volume.size), maximum
 
 
 def _residuals(
@@ -277,33 +499,81 @@ def _residuals(
     h_y: float,
     xp,
 ):
-    equilibrium = static_equilibrium_residual(
-        psi,
-        source,
-        dx_normalized=dx_normalized,
-        dy_normalized=dy_normalized,
-        h_y=h_y,
-        xp=xp,
+    potential_volume = np.asarray(psi)
+    source_volume = np.asarray(source)
+    if potential_volume.shape != source_volume.shape or potential_volume.ndim != 3:
+        raise ValueError("psi and source must share shape (Nz, Nx, Ny)")
+    equilibrium = np.empty_like(potential_volume)
+    td = np.empty_like(potential_volume)
+    accumulator_dtype = (
+        np.float64
+        if potential_volume.dtype == np.dtype(np.float64)
+        else np.float32
     )
-    td = potential_rhs(
-        psi,
-        source,
-        dx_normalized=dx_normalized,
-        dy_normalized=dy_normalized,
-        h_y=h_y,
-        applied_field_x=0.0,
-        xp=xp,
-    )
-    resolved_equilibrium = project_production_resolved_modes(
-        equilibrium,
-        dx_normalized=dx_normalized,
-        dy_normalized=dy_normalized,
-        h_y=h_y,
-        xp=xp,
-    )
+    equilibrium_sum_squares = np.asarray(0.0, dtype=accumulator_dtype)
+    equilibrium_max = 0.0
+    td_sum_squares = np.asarray(0.0, dtype=accumulator_dtype)
+    td_max = 0.0
+    count = int(potential_volume.size)
+    for plane_index in range(potential_volume.shape[0]):
+        potential_plane = xp.asarray(potential_volume[plane_index])
+        source_plane = xp.asarray(source_volume[plane_index])
+        equilibrium_plane = static_equilibrium_residual(
+            potential_plane,
+            source_plane,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=h_y,
+            xp=xp,
+        )
+        td_plane = potential_rhs(
+            potential_plane,
+            source_plane,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=h_y,
+            applied_field_x=0.0,
+            xp=xp,
+        )
+        resolved_plane = project_production_resolved_modes(
+            equilibrium_plane,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=h_y,
+            xp=xp,
+        )
+        equilibrium[plane_index] = np.asarray(asnumpy(equilibrium_plane))
+        td[plane_index] = np.asarray(asnumpy(td_plane))
+        resolved_host = np.asarray(asnumpy(resolved_plane), dtype=accumulator_dtype)
+        td_host = np.asarray(asnumpy(td_plane), dtype=accumulator_dtype)
+        equilibrium_sum_squares = np.add(
+            equilibrium_sum_squares,
+            np.sum(resolved_host * resolved_host, dtype=accumulator_dtype),
+            dtype=accumulator_dtype,
+        )
+        equilibrium_max = max(
+            equilibrium_max, float(np.max(np.abs(resolved_host)))
+        )
+        td_sum_squares = np.add(
+            td_sum_squares,
+            np.sum(td_host * td_host, dtype=accumulator_dtype),
+            dtype=accumulator_dtype,
+        )
+        td_max = max(td_max, float(np.max(np.abs(td_host))))
     return equilibrium, td, (
-        *_metrics(resolved_equilibrium, xp=xp),
-        *_metrics(td, xp=xp),
+        float(
+            np.sqrt(
+                equilibrium_sum_squares
+                / np.asarray(count, dtype=accumulator_dtype)
+            )
+        ),
+        equilibrium_max,
+        float(
+            np.sqrt(
+                td_sum_squares / np.asarray(count, dtype=accumulator_dtype)
+            )
+        ),
+        td_max,
     )
 
 
@@ -332,6 +602,98 @@ def _fully_incoherent_request(
         for index, channel in enumerate(request.beams.channels)
     )
     return replace(request, beams=replace(request.beams, channels=channels))
+
+
+def _optical_pass_host_volume(
+    A0,
+    psi,
+    *,
+    request: PRTransverseStaticRunRequest,
+    grid,
+    kernel,
+    peak_reference: float,
+    wavelength_um: float,
+    dx_normalized: float,
+    dy_normalized: float,
+    scattering_phase_stack=None,
+):
+    """Propagate through host-retained material with slice-local GPU state."""
+
+    xp = grid.xp
+    potential_volume = np.asarray(psi)
+    expected = (grid.Nz, grid.Nx, grid.Ny)
+    if potential_volume.shape != expected:
+        raise ValueError(f"psi shape {potential_volume.shape} does not match {expected}")
+    source = np.empty(expected, dtype=np.dtype(grid.real_dtype))
+    A = A0.copy()
+    intensity_before = None
+    for z_index in range(grid.Nz):
+        state = state_from_potential(
+            xp.asarray(potential_volume[z_index]),
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=request.dielectric.h_y,
+            applied_field_x=request.boundary.applied_field_x,
+            xp=xp,
+        )
+        active = project_active_field(
+            state.E_x, state.E_y, profile=request.projection, xp=xp
+        )
+        A, source_plane, intensity_before = advance_pr_slice_with_midpoint_source(
+            A,
+            active,
+            kernel=kernel,
+            optical_substeps=request.solver.optical_substeps,
+            dz_um=grid.dz_um,
+            wavelength_um=wavelength_um,
+            interaction_length_um=request.grid.z_length_um,
+            gain_length_product=request.material.gain_length_product,
+            peak_intensity_reference=peak_reference,
+            background_intensity=request.material.background_intensity,
+            coherence_groups=request.beams.coherence_groups,
+            xp=xp,
+            _intensity_before=intensity_before,
+            _return_exit_intensity=True,
+        )
+        source[z_index] = np.asarray(asnumpy(source_plane))
+        _apply_canonical_scattering_after_slice(
+            A,
+            scattering=request.scattering,
+            z_index=z_index,
+            grid=grid,
+            z_length_um=request.grid.z_length_um,
+            xp=xp,
+            phase=(
+                None
+                if scattering_phase_stack is None
+                else xp.asarray(scattering_phase_stack[z_index])
+            ),
+        )
+    return A, source
+
+
+def _host_scattering_phase_stack(
+    scattering,
+    *,
+    grid,
+    z_length_um: float,
+    xp,
+):
+    """Cache runtime-backend scattering with only one GPU plane live."""
+
+    if scattering is None:
+        return None
+    phases = np.empty((grid.Nz, grid.Nx, grid.Ny), dtype=np.dtype(grid.real_dtype))
+    for z_index in range(grid.Nz):
+        phase = _canonical_scattering_phase_for_slice(
+            scattering,
+            z_index=z_index,
+            grid=grid,
+            z_length_um=z_length_um,
+            xp=xp,
+        )
+        phases[z_index] = np.asarray(asnumpy(phase))
+    return phases
 
 
 def _optical_pass_at_visibility(
@@ -367,20 +729,19 @@ def _optical_pass_at_visibility(
         "wavelength_um": wavelength_um,
         "dx_normalized": dx_normalized,
         "dy_normalized": dy_normalized,
-        "cancellation_token": None,
         "scattering_phase_stack": scattering_phase_stack,
     }
     if resolved == 1.0:
-        return _optical_pass(A0, psi, request=request, **common)
+        return _optical_pass_host_volume(A0, psi, request=request, **common)
 
     incoherent_request = _fully_incoherent_request(request)
-    A_incoherent, source_incoherent = _optical_pass(
+    A_incoherent, source_incoherent = _optical_pass_host_volume(
         A0, psi, request=incoherent_request, **common
     )
     if resolved == 0.0:
         return A_incoherent, source_incoherent
 
-    A_coherent, source_coherent = _optical_pass(
+    A_coherent, source_coherent = _optical_pass_host_volume(
         A0, psi, request=request, **common
     )
     source = source_incoherent + resolved * (
@@ -412,30 +773,40 @@ def _run_pr_transverse_static_at_visibility(
         complex_dtype=backend.complex_dtype,
         launch_elements=request.launch_elements,
     )
-    A0, psi = _initial_fields(
-        request,
-        launch=launch,
-        grid=grid,
-        complex_dtype=backend.complex_dtype,
-        real_dtype=backend.real_dtype,
-    )
-    psi = project_production_resolved_modes(
-        psi,
-        dx_normalized=request.material.characteristic_wavenumber_per_um * grid.dx_um,
-        dy_normalized=request.material.characteristic_wavenumber_per_um * grid.dy_um,
+    if request.initial_A is None:
+        A0 = launch.A0.copy()
+    else:
+        A0 = xp.asarray(request.initial_A, dtype=backend.complex_dtype).copy()
+        if A0.shape != launch.A0.shape:
+            raise ValueError(
+                f"initial_A shape {A0.shape} does not match {launch.A0.shape}"
+            )
+        if not bool(asnumpy(xp.all(xp.isfinite(A0)))):
+            raise ValueError("initial_A must contain only finite values")
+    k0 = request.material.characteristic_wavenumber_per_um
+    dx_normalized = k0 * grid.dx_um
+    dy_normalized = k0 * grid.dy_um
+    psi = _project_host_volume(
+        _host_initial_potential(
+            request, grid=grid, real_dtype=backend.real_dtype, xp=xp
+        ),
+        dx_normalized=dx_normalized,
+        dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
         xp=xp,
     )
     psi_initial = psi.copy()
-    initial_state = state_from_potential(
+    (
+        initial_state_valid,
+        _,
+        initial_carrier_minimum,
+        _,
+    ) = _host_volume_state_validity(
         psi,
-        dx_normalized=request.material.characteristic_wavenumber_per_um * grid.dx_um,
-        dy_normalized=request.material.characteristic_wavenumber_per_um * grid.dy_um,
+        dx_normalized=dx_normalized,
+        dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
         xp=xp,
-    )
-    initial_state_valid, _, initial_carrier_minimum, _ = _physical_state_validity(
-        initial_state, xp=xp
     )
     if not initial_state_valid:
         raise ValueError(
@@ -454,16 +825,15 @@ def _run_pr_transverse_static_at_visibility(
         xp=xp,
     )
     peak_reference = channel_peak_intensity_reference(A0, xp=xp)
-    scattering_phase_stack = _canonical_scattering_phase_stack(
+    # The deterministic cache is retained on the host.  Every optical pass
+    # transfers only its current phase plane, preserving the accepted cached
+    # scattering trajectory without a persistent Nz-sized GPU allocation.
+    scattering_phase_stack = _host_scattering_phase_stack(
         request.scattering,
         grid=grid,
         z_length_um=request.grid.z_length_um,
-        xp=xp,
+        xp=np,
     )
-    k0 = request.material.characteristic_wavenumber_per_um
-    dx_normalized = k0 * grid.dx_um
-    dy_normalized = k0 * grid.dy_um
-
     optical_seconds = 0.0
     material_seconds = 0.0
     zero_flux_material_seconds = 0.0
@@ -515,7 +885,7 @@ def _run_pr_transverse_static_at_visibility(
             break
         synchronize(xp)
         material_started = perf_counter()
-        material = solve_pr_transverse_static_intensity(
+        material = _solve_pr_transverse_static_intensity_host_volume(
             source_accepted,
             dx_normalized=dx_normalized,
             dy_normalized=dy_normalized,
@@ -545,12 +915,22 @@ def _run_pr_transverse_static_at_visibility(
                 )
                 for record in material.iteration_records
             )
+        material_proposal = material.psi
+        material_converged = material.converged
+        material_status = material.status
+        # The fixed-source residual volumes have served their convergence and
+        # provenance purpose inside the material solve.  Do not retain them
+        # through the coupled line search, which constructs refreshed residual
+        # volumes of its own.
+        del material
         if cancellation_token is not None and cancellation_token.is_cancelled():
+            del material_proposal
             cancelled = True
             termination_reason = "cancelled_at_accepted_boundary"
             break
-        if not material.converged:
-            termination_reason = f"material_{material.status}"
+        if not material_converged:
+            del material_proposal
+            termination_reason = f"material_{material_status}"
             if request.solver.record_iteration_history:
                 records.append(PRTransverseStaticCoupledRecord(
                     coupled_iteration=coupled_iteration,
@@ -577,7 +957,8 @@ def _run_pr_transverse_static_at_visibility(
                 ))
             break
 
-        direction = material.psi - psi
+        direction = material_proposal - psi
+        del material_proposal
         step_scale = 1.0
         accepted = False
         backtracks = 0
@@ -588,21 +969,20 @@ def _run_pr_transverse_static_at_visibility(
         candidate_equilibrium = equilibrium
         candidate_td = td_residual
         for backtracks in range(int(request.solver.max_backtracks) + 1):
-            trial_psi = project_production_resolved_modes(
+            trial_psi = _project_host_volume(
                 psi + step_scale * direction,
                 dx_normalized=dx_normalized,
                 dy_normalized=dy_normalized,
                 h_y=request.dielectric.h_y,
                 xp=xp,
             )
-            trial_state = state_from_potential(
+            valid_trial, _, _, _ = _host_volume_state_validity(
                 trial_psi,
                 dx_normalized=dx_normalized,
                 dy_normalized=dy_normalized,
                 h_y=request.dielectric.h_y,
                 xp=xp,
             )
-            valid_trial, _, _, _ = _physical_state_validity(trial_state, xp=xp)
             if valid_trial:
                 trial_A, trial_source = optical_pass(trial_psi)
                 trial_equilibrium, trial_td, trial_metrics = _residuals(
@@ -727,6 +1107,9 @@ def _run_pr_transverse_static_at_visibility(
                 message="transverse PR static outer iteration accepted",
             ))
 
+    # Accepted residuals are recomputed independently from the replayed source;
+    # releasing them first avoids overlapping two complete host residual pairs.
+    del equilibrium, td_residual
     replay_A, replay_source = optical_pass(psi)
     replay_field_match = bool(asnumpy(xp.allclose(
         replay_A,
@@ -734,12 +1117,12 @@ def _run_pr_transverse_static_at_visibility(
         rtol=float(request.solver.replay_rtol),
         atol=float(request.solver.replay_atol),
     )))
-    replay_source_match = bool(asnumpy(xp.allclose(
+    replay_source_match = bool(np.allclose(
         replay_source,
         source_accepted,
         rtol=float(request.solver.replay_rtol),
         atol=float(request.solver.replay_atol),
-    )))
+    ))
     replay_equilibrium, replay_td_residual, replay_metrics = _residuals(
         psi,
         replay_source,
@@ -760,7 +1143,7 @@ def _run_pr_transverse_static_at_visibility(
             replay_source, source_accepted, xp=xp
         )
         / max(
-            _difference_rms(replay_source, xp.zeros_like(replay_source), xp=xp),
+            _difference_rms(replay_source, np.zeros_like(replay_source), xp=xp),
             np.finfo(float).tiny,
         ),
         "complete_independent_replay": True,
@@ -775,41 +1158,39 @@ def _run_pr_transverse_static_at_visibility(
     td_residual = replay_td_residual
     metrics = replay_metrics
 
-    final_state = state_from_potential(
+    (
+        final_state_valid,
+        final_carrier_mean,
+        final_carrier_minimum,
+        final_potential_mean,
+    ) = _host_volume_state_validity(
         psi,
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
         xp=xp,
     )
-    (
-        final_state_valid,
-        final_carrier_mean,
-        final_carrier_minimum,
-        final_potential_mean,
-    ) = _physical_state_validity(final_state, xp=xp)
     if converged and not final_state_valid:
         converged = False
         termination_reason = "final_physical_state_invalid"
-    diagnostics = state_diagnostics(
-        final_state,
+    diagnostics = _host_volume_diagnostics(
+        psi,
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
         xp=xp,
     )
-    null = derivative_null_residual(
+    null_rms, null_max = _host_derivative_null_metrics(
         equilibrium,
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
         xp=xp,
     )
-    null_rms, null_max = _metrics(null, xp=xp)
     # The authoritative scalar convergence gates use the production-resolved
     # subspace. Export the same field while retaining the raw residual above
     # for the separately reported derivative-null diagnostic.
-    authoritative_equilibrium = project_production_resolved_modes(
+    authoritative_equilibrium = _project_host_volume(
         equilibrium,
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
@@ -859,6 +1240,12 @@ def _run_pr_transverse_static_at_visibility(
         "optical_power_relative_drift": (power_final - power_initial) / power_initial,
         "termination_reason": termination_reason,
         "cancelled": cancelled,
+        "memory_policy": {
+            "backend_working_set": "one_transverse_slice",
+            "retained_final_volumes": "host",
+            "retained_iteration_volumes": False,
+            "fft_batch_axes": "transverse_only",
+        },
     })
     scattering_provenance = None
     if request.scattering is not None:
@@ -902,13 +1289,11 @@ def _run_pr_transverse_static_at_visibility(
     return PRTransverseStaticRunResult(
         A_initial=np.asarray(asnumpy(A0)).copy(),
         A_final=np.asarray(asnumpy(replay_A)).copy(),
-        psi_initial=np.asarray(asnumpy(psi_initial)).copy(),
-        psi_final=np.asarray(asnumpy(psi)).copy(),
-        source_intensity_stack=np.asarray(asnumpy(replay_source)).copy(),
-        equilibrium_residual_stack=np.asarray(
-            asnumpy(authoritative_equilibrium)
-        ).copy(),
-        td_rhs_residual_stack=np.asarray(asnumpy(td_residual)).copy(),
+        psi_initial=psi_initial,
+        psi_final=psi,
+        source_intensity_stack=replay_source,
+        equilibrium_residual_stack=authoritative_equilibrium,
+        td_rhs_residual_stack=td_residual,
         power_initial=power_initial,
         power_final=power_final,
         converged=converged,
@@ -964,8 +1349,19 @@ def _run_pr_transverse_static_visibility_continuation(
 
     continuation_started = perf_counter()
     stage_request = request
-    stage_results: list[PRTransverseStaticRunResult] = []
     stage_records: list[dict[str, Any]] = []
+    timing_keys = (
+        "total_seconds",
+        "optical_pass_seconds",
+        "material_solve_seconds",
+        "zero_flux_material_seconds",
+        "continuum_initializer_seconds",
+        "discrete_corrector_seconds",
+    )
+    accumulated_timing = {
+        key: float(direct_result.timing[key]) for key in timing_keys
+    }
+    latest_stage: PRTransverseStaticRunResult | None = None
     last_attempted_visibility: float | None = None
     for visibility in PR_COHERENT_VISIBILITY_CONTINUATION_SCHEDULE:
         last_attempted_visibility = visibility
@@ -975,8 +1371,10 @@ def _run_pr_transverse_static_visibility_continuation(
             cancellation_token=cancellation_token,
             progress_callback=progress_callback,
         )
-        stage_results.append(stage_result)
+        latest_stage = stage_result
         stage_records.append(_continuation_stage_record(visibility, stage_result))
+        for key in timing_keys:
+            accumulated_timing[key] += float(stage_result.timing[key])
         if not stage_result.converged:
             returned = (
                 stage_result
@@ -986,11 +1384,12 @@ def _run_pr_transverse_static_visibility_continuation(
             break
         stage_request = replace(request, initial_psi=stage_result.psi_final)
     else:
-        returned = stage_results[-1]
+        assert latest_stage is not None
+        returned = latest_stage
 
     succeeded = bool(
-        stage_results
-        and stage_results[-1].converged
+        latest_stage is not None
+        and latest_stage.converged
         and last_attempted_visibility == 1.0
     )
     diagnostics = dict(returned.diagnostics)
@@ -1026,7 +1425,6 @@ def _run_pr_transverse_static_visibility_continuation(
             )
         ),
     })
-    attempted_results = (direct_result, *stage_results)
     timing = dict(returned.timing)
     for key in (
         "optical_pass_seconds",
@@ -1035,11 +1433,9 @@ def _run_pr_transverse_static_visibility_continuation(
         "continuum_initializer_seconds",
         "discrete_corrector_seconds",
     ):
-        timing[key] = sum(float(result.timing[key]) for result in attempted_results)
+        timing[key] = accumulated_timing[key]
     timing.update({
-        "total_seconds": sum(
-            float(result.timing["total_seconds"]) for result in attempted_results
-        ),
+        "total_seconds": accumulated_timing["total_seconds"],
         "direct_attempt_seconds": float(direct_result.timing["total_seconds"]),
         "visibility_continuation_seconds": perf_counter() - continuation_started,
     })

@@ -10,6 +10,7 @@ from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken
 from lcprop.pr.scattering import (
+    PR_CANONICAL_SCATTERING_V1,
     PR_CANONICAL_SCATTERING_V2,
     PRCanonicalScatteringSpec,
 )
@@ -130,10 +131,165 @@ def test_coupled_static_converges_with_refreshed_source_and_independent_replay()
     assert result.material_iteration_records
     assert isinstance(result.discrete_iteration_records, tuple)
     assert result.discrete_iteration_records == ()
+    assert result.diagnostics["memory_policy"] == {
+        "backend_working_set": "one_transverse_slice",
+        "retained_final_volumes": "host",
+        "retained_iteration_volumes": False,
+        "fft_batch_axes": "transverse_only",
+    }
     assert all(
         record.newton_record.plane_index in (0, 1)
         for record in result.material_iteration_records
     )
+
+
+def test_canonical_static_backend_material_operations_are_slice_local(monkeypatch):
+    import lcprop.pr.transverse.static as static_module
+    import lcprop.pr.transverse.static_workflow as workflow_module
+
+    names = (
+        "state_from_potential",
+        "static_equilibrium_residual",
+        "potential_rhs",
+        "project_production_resolved_modes",
+        "derivative_null_residual",
+    )
+    observed_shapes = []
+
+    def install(module, name):
+        if not hasattr(module, name):
+            return
+        original = getattr(module, name)
+
+        def checked(value, *args, **kwargs):
+            shape = np.shape(value)
+            observed_shapes.append((module.__name__, name, shape))
+            assert len(shape) == 2
+            return original(value, *args, **kwargs)
+
+        monkeypatch.setattr(module, name, checked)
+
+    for target in (static_module, workflow_module):
+        for name in names:
+            install(target, name)
+
+    result = run_pr_transverse_static(_request())
+
+    assert result.converged
+    assert observed_shapes
+    assert all(len(shape) == 2 for _, _, shape in observed_shapes)
+
+
+def test_float32_streamed_residual_metrics_preserve_precision_native_decisions(
+    monkeypatch,
+):
+    import lcprop.pr.transverse.static_workflow as workflow_module
+
+    x = np.arange(8, dtype=np.float32)[:, None]
+    y = np.arange(10, dtype=np.float32)[None, :]
+    psi_plane = (
+        np.float32(2.5e-3) * np.cos(np.float32(0.7) * x)
+        + np.float32(1.5e-3) * np.sin(np.float32(0.4) * y)
+    ).astype(np.float32)
+    psi_plane -= np.mean(psi_plane, dtype=np.float32)
+    psi = np.stack((psi_plane, np.float32(0.8) * psi_plane))
+    source = np.stack((
+        np.float32(0.7) + np.float32(0.03) * np.cos(x + y),
+        np.float32(0.9) + np.float32(0.02) * np.sin(x - y),
+    )).astype(np.float32)
+
+    def equilibrium_operator(potential, intensity, **kwargs):
+        return (potential + np.float32(0.125) * intensity).astype(np.float32)
+
+    def td_operator(potential, intensity, **kwargs):
+        return (np.float32(0.75) * potential - intensity).astype(np.float32)
+
+    monkeypatch.setattr(
+        workflow_module, "static_equilibrium_residual", equilibrium_operator
+    )
+    monkeypatch.setattr(workflow_module, "potential_rhs", td_operator)
+    monkeypatch.setattr(
+        workflow_module,
+        "project_production_resolved_modes",
+        lambda value, **kwargs: value.copy(),
+    )
+
+    equilibrium, td, streamed = workflow_module._residuals(
+        psi,
+        source,
+        dx_normalized=0.4,
+        dy_normalized=0.5,
+        h_y=1.0,
+        xp=np,
+    )
+    reference_equilibrium = equilibrium_operator(psi, source)
+    reference_td = td_operator(psi, source)
+    resolved = reference_equilibrium
+
+    def archived_metrics(value):
+        work = value.astype(np.float32, copy=False)
+        return (
+            float(np.sqrt(np.mean(work * work, dtype=np.float32))),
+            float(np.max(np.abs(work))),
+        )
+
+    reference = (*archived_metrics(resolved), *archived_metrics(reference_td))
+    np.testing.assert_array_equal(equilibrium, reference_equilibrium)
+    np.testing.assert_array_equal(td, reference_td)
+    np.testing.assert_allclose(streamed, reference, rtol=2 * np.finfo(np.float32).eps)
+
+    passing_rms = np.nextafter(max(streamed[0], reference[0]), np.inf)
+    passing_max = np.nextafter(max(streamed[1], reference[1]), np.inf)
+    failing_rms = np.nextafter(min(streamed[0], reference[0]), -np.inf)
+    options = replace(
+        _request().solver,
+        equilibrium_rms_tolerance=passing_rms,
+        equilibrium_max_tolerance=passing_max,
+    )
+    assert workflow_module._criteria_met(streamed, options)
+    assert reference[0] <= passing_rms and reference[1] <= passing_max
+    options = replace(options, equilibrium_rms_tolerance=failing_rms)
+    assert not workflow_module._criteria_met(streamed, options)
+    assert reference[0] > failing_rms
+
+
+def test_float32_streamed_physical_validity_preserves_dtype_boundary(monkeypatch):
+    from types import SimpleNamespace
+    import lcprop.pr.transverse.static_workflow as workflow_module
+
+    def fake_state(plane, **kwargs):
+        return SimpleNamespace(
+            psi=plane,
+            carrier_density=np.ones_like(plane, dtype=np.float32),
+        )
+
+    monkeypatch.setattr(workflow_module, "state_from_potential", fake_state)
+    epsilon = np.finfo(np.float32).eps
+    valid_volume = np.full((2, 4, 5), np.float32(32.0 * epsilon))
+    invalid_volume = np.full((2, 4, 5), np.float32(128.0 * epsilon))
+
+    valid, carrier_mean, carrier_minimum, potential_mean = (
+        workflow_module._host_volume_state_validity(
+            valid_volume,
+            dx_normalized=0.4,
+            dy_normalized=0.5,
+            h_y=1.0,
+            xp=np,
+        )
+    )
+    invalid, *_ = workflow_module._host_volume_state_validity(
+        invalid_volume,
+        dx_normalized=0.4,
+        dy_normalized=0.5,
+        h_y=1.0,
+        xp=np,
+    )
+
+    assert valid
+    assert not invalid
+    assert carrier_mean == 1.0
+    assert carrier_minimum == 1.0
+    assert potential_mean == float(np.float32(32.0 * epsilon))
 
 
 def test_outer_convergence_is_authoritative_on_refreshed_zero_flux_residual():
@@ -162,7 +318,7 @@ def test_outer_convergence_is_authoritative_on_refreshed_zero_flux_residual():
 def test_each_accepted_correction_uses_a_refreshed_midpoint_source(monkeypatch):
     import lcprop.pr.transverse.static_workflow as module
 
-    original = module._optical_pass
+    original = module._optical_pass_host_volume
     calls = []
 
     def counted(*args, **kwargs):
@@ -170,7 +326,7 @@ def test_each_accepted_correction_uses_a_refreshed_midpoint_source(monkeypatch):
         calls.append(np.asarray(result[1]).copy())
         return result
 
-    monkeypatch.setattr(module, "_optical_pass", counted)
+    monkeypatch.setattr(module, "_optical_pass_host_volume", counted)
     result = run_pr_transverse_static(_request())
     accepted = sum(record.accepted for record in result.iteration_records)
     assert result.converged
@@ -197,24 +353,29 @@ def test_canonical_scattering_is_deterministic_and_phase_only():
     assert "canonical_scattering" in first.diagnostics
 
 
-def test_cached_scattering_preserves_static_trajectory_exactly(monkeypatch):
+@pytest.mark.parametrize(
+    "algorithm_version",
+    (PR_CANONICAL_SCATTERING_V1, PR_CANONICAL_SCATTERING_V2),
+)
+def test_cached_scattering_preserves_static_trajectory_exactly(
+    monkeypatch, algorithm_version
+):
     import lcprop.pr.transverse.static_workflow as module
-    import lcprop.pr.workflow as pr_workflow
 
     scattering = PRCanonicalScatteringSpec(
         epsilon=1.0e-8,
         transverse_correlation_um=2.0,
         realization_seed=9182,
         canonical_dz_um=5.0,
-        algorithm_version=PR_CANONICAL_SCATTERING_V2,
+        algorithm_version=algorithm_version,
     )
     request = _request(scattering=scattering)
-    stack_builder = module._canonical_scattering_phase_stack
+    stack_builder = module._host_scattering_phase_stack
 
-    monkeypatch.setattr(module, "_canonical_scattering_phase_stack", lambda *a, **k: None)
+    monkeypatch.setattr(module, "_host_scattering_phase_stack", lambda *a, **k: None)
     uncached = run_pr_transverse_static(request)
-    monkeypatch.setattr(module, "_canonical_scattering_phase_stack", stack_builder)
-    phase_builder = pr_workflow._canonical_scattering_phase_for_slice
+    monkeypatch.setattr(module, "_host_scattering_phase_stack", stack_builder)
+    phase_builder = module._canonical_scattering_phase_for_slice
     phase_builds = 0
 
     def counted_phase(*args, **kwargs):
@@ -223,7 +384,7 @@ def test_cached_scattering_preserves_static_trajectory_exactly(monkeypatch):
         return phase_builder(*args, **kwargs)
 
     monkeypatch.setattr(
-        pr_workflow, "_canonical_scattering_phase_for_slice", counted_phase
+        module, "_canonical_scattering_phase_for_slice", counted_phase
     )
     cached = run_pr_transverse_static(request)
 
@@ -239,6 +400,48 @@ def test_cached_scattering_preserves_static_trajectory_exactly(monkeypatch):
     np.testing.assert_array_equal(
         cached.equilibrium_residual_stack, uncached.equilibrium_residual_stack
     )
+
+
+@pytest.mark.parametrize(
+    "algorithm_version",
+    (PR_CANONICAL_SCATTERING_V1, PR_CANONICAL_SCATTERING_V2),
+)
+def test_host_scattering_cache_uses_selected_runtime_backend(
+    monkeypatch, algorithm_version
+):
+    import lcprop.pr.transverse.static_workflow as module
+
+    runtime_backend = object()
+    observed_backends = []
+    grid = type(
+        "Grid",
+        (),
+        {"Nz": 3, "Nx": 4, "Ny": 5, "real_dtype": np.dtype(np.float32)},
+    )()
+    scattering = PRCanonicalScatteringSpec(
+        epsilon=1.0e-8,
+        transverse_correlation_um=2.0,
+        realization_seed=9182,
+        canonical_dz_um=5.0,
+        algorithm_version=algorithm_version,
+    )
+
+    def fake_phase(spec, *, z_index, grid, z_length_um, xp):
+        observed_backends.append(xp)
+        return np.full((grid.Nx, grid.Ny), z_index, dtype=grid.real_dtype)
+
+    monkeypatch.setattr(module, "_canonical_scattering_phase_for_slice", fake_phase)
+    cached = module._host_scattering_phase_stack(
+        scattering,
+        grid=grid,
+        z_length_um=15.0,
+        xp=runtime_backend,
+    )
+
+    assert observed_backends == [runtime_backend] * grid.Nz
+    assert isinstance(cached, np.ndarray)
+    assert cached.dtype == np.float32
+    np.testing.assert_array_equal(cached[:, 0, 0], np.arange(3, dtype=np.float32))
 
 
 def test_cancellation_before_work_retains_last_complete_accepted_state():
@@ -257,7 +460,7 @@ def test_cancellation_during_material_trial_discards_partial_candidate(monkeypat
     import lcprop.pr.transverse.static_workflow as module
 
     token = CancellationToken()
-    original = module.solve_pr_transverse_static_intensity
+    original = module._solve_pr_transverse_static_intensity_host_volume
 
     def cancelling_solve(*args, **kwargs):
         result = original(*args, **kwargs)
@@ -265,7 +468,7 @@ def test_cancellation_during_material_trial_discards_partial_candidate(monkeypat
         return result
 
     monkeypatch.setattr(
-        module, "solve_pr_transverse_static_intensity", cancelling_solve
+        module, "_solve_pr_transverse_static_intensity_host_volume", cancelling_solve
     )
     result = run_pr_transverse_static(_request(), cancellation_token=token)
     assert result.status == "cancelled"
@@ -368,7 +571,7 @@ def test_visibility_endpoints_are_exact_coherent_and_incoherent_sources(
         )
         return A0.copy(), source.copy()
 
-    monkeypatch.setattr(module, "_optical_pass", fake_pass)
+    monkeypatch.setattr(module, "_optical_pass_host_volume", fake_pass)
     common = {
         "request": request,
         "grid": object(),

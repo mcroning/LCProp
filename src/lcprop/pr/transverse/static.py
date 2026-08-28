@@ -1259,6 +1259,102 @@ def solve_pr_transverse_static_intensity(
     )
 
 
+def _solve_pr_transverse_static_intensity_host_volume(
+    intensity,
+    *,
+    dx_normalized: float,
+    dy_normalized: float,
+    initial_psi,
+    h_y: float = 1.0,
+    options: PRTransverseStaticMaterialSolverOptions | None = None,
+    xp: Any = np,
+) -> PRTransverseStaticMaterialResult:
+    """Solve a retained host volume with only one backend plane live.
+
+    The plane solve and its numerical ordering are exactly those used by
+    :func:`solve_pr_transverse_static_intensity`.  This storage adapter exists
+    for the coupled static workflow, whose longitudinal planes are independent
+    for a frozen optical source.  It prevents the retained ``Nz`` volume from
+    becoming a backend FFT batch while preserving per-plane diagnostics and
+    indices.
+    """
+
+    started = perf_counter()
+    driving_volume = np.asarray(intensity)
+    initial_volume = np.asarray(initial_psi)
+    if driving_volume.ndim != 3 or min(driving_volume.shape[-2:]) < 3:
+        raise ValueError("intensity must have shape (Nz, Nx, Ny)")
+    if initial_volume.shape != driving_volume.shape:
+        raise ValueError("initial_psi and intensity must have identical shapes")
+    if driving_volume.dtype not in (np.dtype(np.float32), np.dtype(np.float64)):
+        raise TypeError("intensity must have dtype float32 or float64")
+    if initial_volume.dtype != driving_volume.dtype:
+        raise TypeError("initial_psi and intensity must have identical dtypes")
+    for driving_plane, initial_plane in zip(driving_volume, initial_volume):
+        if not np.all(np.isfinite(driving_plane)):
+            raise ValueError("intensity must contain only finite values")
+        if not np.all(np.isfinite(initial_plane)):
+            raise ValueError("initial_psi must contain only finite values")
+        if np.any(driving_plane <= 0.0):
+            raise ValueError("static transport intensity must be strictly positive")
+    if xp is np and driving_volume.dtype != np.dtype(np.float64):
+        raise TypeError("NumPy static reference solver requires float64 intensity")
+    if not math.isfinite(float(dx_normalized)) or dx_normalized <= 0.0:
+        raise ValueError("dx_normalized must be finite and positive")
+    if not math.isfinite(float(dy_normalized)) or dy_normalized <= 0.0:
+        raise ValueError("dy_normalized must be finite and positive")
+    if not math.isfinite(float(h_y)) or float(h_y) != 1.0:
+        raise ValueError("Profile v1 static reference requires h_y=1")
+
+    resolved_options = options or PRTransverseStaticMaterialSolverOptions()
+    resolved_options.validate()
+    psi_volume = np.empty_like(driving_volume)
+    residual_volume = np.empty_like(driving_volume)
+    td_volume = np.empty_like(driving_volume)
+    summaries: list[PRTransverseStaticPlaneSummary] = []
+    records: list[PRTransverseStaticNewtonRecord] = []
+    spectral_operators = _symbols(
+        driving_volume.shape[-2:],
+        dx_normalized=dx_normalized,
+        dy_normalized=dy_normalized,
+        h_y=h_y,
+        xp=xp,
+    )
+    for plane_index in range(driving_volume.shape[0]):
+        driving_plane = xp.asarray(driving_volume[plane_index])
+        initial_plane = xp.asarray(initial_volume[plane_index])
+        psi_plane, residual_plane, td_plane, summary, plane_records = _solve_plane(
+            driving_plane,
+            initial_plane,
+            plane_index=plane_index,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=h_y,
+            options=resolved_options,
+            spectral_operators=spectral_operators,
+            xp=xp,
+        )
+        psi_volume[plane_index] = np.asarray(asnumpy(psi_plane))
+        residual_volume[plane_index] = np.asarray(asnumpy(residual_plane))
+        td_volume[plane_index] = np.asarray(asnumpy(td_plane))
+        summaries.append(summary)
+        records.extend(plane_records)
+    converged = all(summary.converged for summary in summaries)
+    status = "converged" if converged else next(
+        summary.status for summary in summaries if not summary.converged
+    )
+    return PRTransverseStaticMaterialResult(
+        psi=psi_volume,
+        equilibrium_residual=residual_volume,
+        td_rhs_residual=td_volume,
+        converged=converged,
+        status=status,
+        plane_summaries=tuple(summaries),
+        iteration_records=tuple(records),
+        elapsed_seconds=perf_counter() - started,
+    )
+
+
 def _discrete_criteria_met(
     residual_rms: float,
     residual_max: float,

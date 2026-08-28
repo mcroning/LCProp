@@ -158,7 +158,7 @@ def test_normal_gui_dispatch_runs_2d_zero_flux_and_presents_material_state(
     material_calls = []
     dispatch_calls = []
     original_material_solve = (
-        transverse_static_module.solve_pr_transverse_static_intensity
+        transverse_static_module._solve_pr_transverse_static_intensity_host_volume
     )
     original_dispatch = window.runner.run_registered
 
@@ -174,7 +174,7 @@ def test_normal_gui_dispatch_runs_2d_zero_flux_and_presents_material_state(
 
     monkeypatch.setattr(
         transverse_static_module,
-        "solve_pr_transverse_static_intensity",
+        "_solve_pr_transverse_static_intensity_host_volume",
         observed_material_solve,
     )
     window.runner.run_registered = observed_dispatch
