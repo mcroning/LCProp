@@ -9,7 +9,13 @@ from lcprop.lc.transport_codec import LC_STATIC_TRANSPORT_CODEC
 from lcprop.pr.operations import PR_STATIC_OPERATION, PR_TIMEDEPENDENT_OPERATION
 from lcprop.pr.static_transport_codec import PR_STATIC_TRANSPORT_CODEC
 from lcprop.pr.timedependent_transport_codec import PR_TIMEDEPENDENT_TRANSPORT_CODEC
-from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
+from lcprop.pr.transverse.operations import (
+    PR_TRANSVERSE_STATIC_OPERATION,
+    PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
+)
+from lcprop.pr.transverse.timedependent_transport_codec import (
+    PR_TRANSVERSE_TIMEDEPENDENT_TRANSPORT_CODEC,
+)
 from lcprop.pr.transverse.transport_codec import PR_TRANSVERSE_STATIC_TRANSPORT_CODEC
 from lcprop.runners.cluster_profiles import (
     ClusterCatalog,
@@ -27,6 +33,7 @@ def default_transport_registry() -> TransportCodecRegistry:
     registry.register(PR_TIMEDEPENDENT_TRANSPORT_CODEC)
     registry.register(PR_STATIC_TRANSPORT_CODEC)
     registry.register(PR_TRANSVERSE_STATIC_TRANSPORT_CODEC)
+    registry.register(PR_TRANSVERSE_TIMEDEPENDENT_TRANSPORT_CODEC)
     return registry
 
 
@@ -36,6 +43,7 @@ def default_transport_operations():
         PR_TIMEDEPENDENT_OPERATION,
         PR_STATIC_OPERATION,
         PR_TRANSVERSE_STATIC_OPERATION,
+        PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
     )
 
 

@@ -27,7 +27,14 @@ from lcprop.runners.source_deployment import (
 )
 from lcprop.pr.operations import PR_TIMEDEPENDENT_OPERATION
 from lcprop.pr.specs import PRMaterialSpec, PRRunRequest, PRSolverOptions
-from lcprop.pr.transverse.operations import PR_TRANSVERSE_STATIC_OPERATION
+from lcprop.pr.transverse.operations import (
+    PR_TRANSVERSE_STATIC_OPERATION,
+    PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
+)
+from lcprop.pr.transverse.specs import (
+    PRTransverseRunRequest,
+    PRTransverseSolverOptions,
+)
 from lcprop.pr.transverse.static_workflow import (
     PRTransverseStaticRunRequest, PRTransverseStaticWorkflowOptions,
 )
@@ -121,6 +128,39 @@ def _pr_td_request():
         solver=PRSolverOptions(Nt=0, dt_normalized=0.001),
         backend=BackendSpec(
             backend="auto", precision="float32", verbose=False
+        ),
+    )
+
+
+def _pr_transverse_td_request():
+    return PRTransverseRunRequest(
+        grid=GridSpec(
+            Nx=8,
+            Ny=8,
+            x_aperture_um=20.0,
+            y_aperture_um=20.0,
+            dz_um=2.0,
+            z_length_um=2.0,
+        ),
+        beams=BeamStack(
+            channels=(
+                BeamChannel(
+                    wavelength_um=0.633,
+                    waist_x_um=4.0,
+                    waist_y_um=4.0,
+                    coherence_group="remote-pr-transverse-td",
+                ),
+            )
+        ),
+        material=PRMaterialSpec(
+            dark_intensity=0.4,
+            uniform_background_intensity=0.1,
+            gain_length_product=1e-3,
+            characteristic_wavenumber_per_um_override=0.1,
+        ),
+        solver=PRTransverseSolverOptions(Nt=0, dt_normalized=0.001),
+        backend=BackendSpec(
+            backend="numpy", precision="float32", verbose=False
         ),
     )
 
@@ -640,6 +680,32 @@ def test_pr_transverse_static_uses_same_remote_artifacts_and_product_adapter(tmp
     assert _cleanup_commands(transport) == [
         ("rm", "-rf", "--", states[-1].remote_artifact_location)
     ]
+    assert states[-1].remote_cleanup_succeeded is True
+
+
+def test_pr_transverse_td_uses_same_remote_artifacts_and_product_adapter(tmp_path):
+    transport = FakeTransport()
+    states = []
+    runner = SlurmRunner(
+        _config(tmp_path),
+        (PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,),
+        transport=transport,
+        registry=default_transport_registry(),
+        sleep=lambda _seconds: None,
+    )
+    completed = runner.run_registered(
+        "pr",
+        "pr_transverse_timedependent",
+        _pr_transverse_td_request(),
+        resource_profile="H200 small",
+        progress_callback=states.append,
+    )
+    assert completed.kind == "pr_transverse_timedependent"
+    assert completed.run_data.workflow == "pr_transverse_timedependent"
+    assert transport.submissions == 1
+    assert states[-1].scientific_backend_requested == "numpy"
+    assert states[-1].scientific_backend_resolved == "numpy"
+    assert states[-1].device_summary["device"] == "NVIDIA H200"
     assert states[-1].remote_cleanup_succeeded is True
 
 

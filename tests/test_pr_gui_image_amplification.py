@@ -96,6 +96,80 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
+def _assert_nested_equal(actual, expected, *, ignored_keys=frozenset()):
+    if isinstance(actual, np.ndarray) or isinstance(expected, np.ndarray):
+        np.testing.assert_array_equal(actual, expected)
+    elif isinstance(actual, dict) and isinstance(expected, dict):
+        assert actual.keys() == expected.keys()
+        for key in expected:
+            if key not in ignored_keys:
+                _assert_nested_equal(
+                    actual[key], expected[key], ignored_keys=ignored_keys
+                )
+    elif isinstance(actual, (tuple, list)) and isinstance(
+        expected, (tuple, list)
+    ):
+        assert len(actual) == len(expected)
+        for actual_item, expected_item in zip(actual, expected):
+            _assert_nested_equal(
+                actual_item, expected_item, ignored_keys=ignored_keys
+            )
+    else:
+        assert actual == expected
+
+
+def _assert_run_data_equal(actual, expected):
+    assert actual.workflow == expected.workflow
+    assert actual.longitudinal_enabled == expected.longitudinal_enabled
+    assert actual.longitudinal_message == expected.longitudinal_message
+    assert actual.geometry.units == expected.geometry.units
+    for axis in ("x", "y", "z"):
+        _assert_nested_equal(
+            actual.geometry.coord(axis), expected.geometry.coord(axis)
+        )
+
+    assert tuple(actual.fields) == tuple(expected.fields)
+    for key in expected.fields:
+        actual_field = actual.fields[key]
+        expected_field = expected.fields[key]
+        for attribute in (
+            "key", "display_name", "axes", "kind", "units", "default_view",
+            "quantity", "value_unit", "colormap", "source_volume_key",
+            "default_display_extent", "initially_selected",
+        ):
+            assert getattr(actual_field, attribute) == getattr(
+                expected_field, attribute
+            )
+        _assert_nested_equal(actual_field.coordinates, expected_field.coordinates)
+        _assert_nested_equal(actual_field.data, expected_field.data)
+
+    assert tuple(actual.curves) == tuple(expected.curves)
+    for key in expected.curves:
+        actual_curve = actual.curves[key]
+        expected_curve = expected.curves[key]
+        for attribute in (
+            "key", "display_name", "x_label", "y_label", "units", "y_scale",
+            "series_labels",
+        ):
+            assert getattr(actual_curve, attribute) == getattr(
+                expected_curve, attribute
+            )
+        _assert_nested_equal(actual_curve.x, expected_curve.x)
+        _assert_nested_equal(actual_curve.y, expected_curve.y)
+
+    assert tuple(actual.diagnostics) == tuple(expected.diagnostics)
+    for key in expected.diagnostics:
+        actual_diagnostic = actual.diagnostics[key]
+        expected_diagnostic = expected.diagnostics[key]
+        assert actual_diagnostic.key == expected_diagnostic.key
+        assert actual_diagnostic.display_name == expected_diagnostic.display_name
+        _assert_nested_equal(
+            actual_diagnostic.values,
+            expected_diagnostic.values,
+            ignored_keys={"timing"},
+        )
+
+
 def _write_rgba(path, *, width=7, height=4):
     image = QImage(width, height, QImage.Format.Format_RGBA8888)
     for y in range(height):
@@ -1154,6 +1228,7 @@ def test_gui_slurm_eligibility_uses_registered_ordinary_operation(app):
             PR_TIMEDEPENDENT_OPERATION,
             PR_STATIC_OPERATION,
             PR_TRANSVERSE_STATIC_OPERATION,
+            PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
         )
 
     image_request = _valid_beampanel_image_amplification_request()
@@ -1190,7 +1265,7 @@ def test_gui_slurm_eligibility_uses_registered_ordinary_operation(app):
 
     assert starts and starts[0][0] is td_request
     assert window._slurm_supports_workflow(PR_TIMEDEPENDENT_WORKFLOW)
-    assert not window._slurm_supports_workflow(
+    assert window._slurm_supports_workflow(
         PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
     )
     starts.clear()
@@ -1204,11 +1279,7 @@ def test_gui_slurm_eligibility_uses_registered_ordinary_operation(app):
 
     window.run_clicked()
 
-    assert not starts
-    assert window.status_label.text() == "Invalid request"
-    assert "pr_transverse_timedependent" in (
-        window.results_panel.workspace.console.toPlainText()
-    )
+    assert starts and starts[0][0] is transverse_request
     window.close()
 
 
@@ -1618,6 +1689,10 @@ def test_legacy_static_image_experiment_dispatches_registered_operation(app):
         (PR_TIMEDEPENDENT_WORKFLOW, PR_TIMEDEPENDENT_OPERATION),
         (PR_STATIC_WORKFLOW, PR_STATIC_OPERATION),
         (PR_TRANSVERSE_STATIC_WORKFLOW, PR_TRANSVERSE_STATIC_OPERATION),
+        (
+            PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+            PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
+        ),
     ),
 )
 def test_image_experiment_matches_in_process_transport_roundtrip(
@@ -1654,14 +1729,17 @@ def test_image_experiment_matches_in_process_transport_roundtrip(
                 material_id=material_id,
             )
 
-    local = run_image_amplification_experiment(
+    local_runner_result = run_image_amplification_experiment(
         LocalRunner((operation,)), request
-    ).result
-    transported = run_image_amplification_experiment(
+    )
+    transported_runner_result = run_image_amplification_experiment(
         InProcessTransportRunner(), request
-    ).result
+    )
+    local = local_runner_result.result
+    transported = transported_runner_result.result
 
     assert transported.status == local.status
+    assert transported.base_status == local.base_status
     assert transported.analysis_status == local.analysis_status
     for name in ("A_initial", "A_final"):
         np.testing.assert_array_equal(
@@ -1687,6 +1765,9 @@ def test_image_experiment_matches_in_process_transport_roundtrip(
         assert getattr(transported.analysis_result, name) == pytest.approx(
             getattr(local.analysis_result, name), abs=0.0, rel=0.0
         )
+    _assert_run_data_equal(
+        transported_runner_result.run_data, local_runner_result.run_data
+    )
 
 
 def test_image_experiment_reduced_td_transformation_is_declarative():

@@ -162,10 +162,12 @@ def test_slurm_cancellation_variants_are_terminal(scheduler_state):
     )
 
 
-def test_default_transport_composition_registers_both_pr_static_operations():
+def test_default_transport_composition_registers_all_four_pr_operations():
     expected = {
         ("pr", "pr_static"),
         ("pr", "pr_transverse_static"),
+        ("pr", "pr_timedependent"),
+        ("pr", "pr_transverse_timedependent"),
     }
     assert expected.issubset(
         {codec.key for codec in default_transport_registry().codecs}
