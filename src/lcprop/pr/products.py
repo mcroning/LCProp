@@ -40,6 +40,129 @@ from lcprop.products.data_model import (
 )
 
 
+_FAST_VOLUME_MESSAGE = (
+    "Not retrieved in Fast mode; rerun with Full result retrieval to inspect "
+    "this volume."
+)
+
+
+def _is_fast_result(result: Any) -> bool:
+    return result.retention_summary.get("policy", "full") == "fast"
+
+
+def _fast_optical_run_data(result: Any, *, workflow: str, geometry: Geometry) -> RunData:
+    """Present retained optical endpoints without inventing missing volumes."""
+
+    A_initial = _copied_array(result.A_initial)
+    A_final = _copied_array(result.A_final)
+    launch_summary = deepcopy(result.launch_summary)
+    result_diagnostics = getattr(result, "diagnostics", {})
+    backend_summary = getattr(
+        result, "backend_summary", result_diagnostics.get("backend", {})
+    )
+    fields = FieldCollection()
+    for key, title, value in (
+        ("input_intensity", "Input Plane Intensity", A_initial),
+        ("output_intensity", "Output Plane Intensity", A_final),
+    ):
+        fields.add(key, make_field(
+            key,
+            title,
+            _optical_intensity(value, launch_summary),
+            ("x", "y"),
+            "intensity",
+            {"x": "um", "y": "um"},
+            quantity="normalized_intensity",
+            value_unit="1/µm²",
+        ))
+    wavelengths = launch_summary.get("wavelengths_um", [])
+    refractive_index = launch_summary.get("refractive_index")
+    if wavelengths and refractive_index is not None:
+        spectrum = direction_cosine_spectrum(
+            A_final,
+            dx_um=float(geometry.dx()),
+            dy_um=float(geometry.dy()),
+            wavelength_um=float(wavelengths[0]),
+            refractive_index=float(refractive_index),
+            coherence_groups=tuple(launch_summary["coherence_groups"]),
+            xp=np,
+        )
+        fields.add("far_field_intensity", make_field(
+            "far_field_intensity", "Output Far-Field Intensity",
+            np.asarray(spectrum.intensity), ("s_x", "s_y"),
+            "far_field_intensity", {"s_x": "1", "s_y": "1"},
+            quantity="direction_cosine_power_density",
+            value_unit="normalized power / direction-cosine²", colormap="magma",
+            coordinates={"s_x": spectrum.s_x, "s_y": spectrum.s_y},
+        ))
+    if workflow == PR_STATIC_WORKFLOW:
+        completed = int(result.completed_slices)
+        power_drift = float(result.power_final - result.power_initial)
+        summary = {
+            "material": "photorefractive",
+            "workflow": workflow,
+            "status": result.status,
+            "converged": bool(result.converged),
+            "completed_slices": completed,
+            "total_slices": int(result.grid_summary["Nz"]),
+            "z_reached_um": completed * float(result.grid_summary["dz_um"]),
+            "normalized_field_integral_initial": float(result.power_initial),
+            "normalized_field_integral_final": float(result.power_final),
+            "relative_power_drift": (
+                power_drift / float(result.power_initial)
+                if result.power_initial != 0.0 else 0.0
+            ),
+            "all_completed_slices_converged": all(
+                value.converged for value in result.slice_summaries
+            ),
+            "grid": deepcopy(result.grid_summary),
+            "launch": launch_summary,
+            "backend": deepcopy(result.backend_summary),
+            "resolved_tolerances": deepcopy(result.tolerance_provenance),
+            "replay": deepcopy(result.replay_diagnostics),
+            "result_retention": deepcopy(result.retention_summary),
+        }
+        diagnostics = DiagnosticCollection([
+            ("summary", DiagnosticData("summary", "Summary", summary)),
+            ("static_convergence", DiagnosticData(
+                "static_convergence", "Static Convergence by Slice",
+                {"rows": [asdict(value) for value in result.slice_summaries]},
+            )),
+            ("static_iteration_history", DiagnosticData(
+                "static_iteration_history", "Static Coupled Iteration History",
+                {"rows": [asdict(value) for value in result.iteration_records]},
+            )),
+        ])
+    else:
+        diagnostics = DiagnosticCollection([
+            ("summary", DiagnosticData("summary", "Summary", {
+                "material": "photorefractive",
+                "normalized_field_integral_initial": float(result.power_initial),
+                "normalized_field_integral_final": float(result.power_final),
+                "completed_material_steps": int(result.completed_steps),
+                "requested_material_steps": int(result.requested_steps),
+                "material_time_normalized": float(result.time_normalized),
+                "status": result.status,
+                "grid": deepcopy(result.grid_summary),
+                "launch": launch_summary,
+                "result_retention": deepcopy(result.retention_summary),
+            })),
+            ("pr_workflow", DiagnosticData(
+                "pr_workflow", "PR Workflow Diagnostics",
+                deepcopy(result_diagnostics)
+            )),
+        ])
+    return RunData(
+        workflow=workflow,
+        geometry=geometry,
+        fields=fields,
+        curves=CurveCollection(),
+        diagnostics=diagnostics,
+        longitudinal_enabled=False,
+        longitudinal_message=_FAST_VOLUME_MESSAGE,
+    )
+
+
 def _copied_array(value: Any) -> np.ndarray:
     """Return a detached host copy suitable for presentation ownership."""
 
@@ -239,6 +362,10 @@ def pr_result_to_run_data(result: PRRunResult) -> RunData:
         raise TypeError("result must be a PRRunResult")
 
     geometry = _geometry_from_pr_result(result)
+    if _is_fast_result(result):
+        return _fast_optical_run_data(
+            result, workflow=PR_TIMEDEPENDENT_WORKFLOW, geometry=geometry
+        )
     (
         A_initial,
         A_final,
@@ -781,6 +908,10 @@ def pr_static_result_to_run_data(result: PRStaticRunResult) -> RunData:
         result.grid_summary,
         completed_slices=completed,
     )
+    if _is_fast_result(result):
+        return _fast_optical_run_data(
+            result, workflow=PR_STATIC_WORKFLOW, geometry=geometry
+        )
     (
         A_initial,
         A_final,

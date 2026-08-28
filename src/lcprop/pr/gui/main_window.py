@@ -39,6 +39,7 @@ from lcprop.gui.remote_execution import (
     remote_status_text,
 )
 from lcprop.transport.status import RemoteRunState, RemoteRunStatus
+from lcprop.transport.result_policy import FAST_RESULT_POLICY, FULL_RESULT_POLICY
 from lcprop.persistence import (
     load_experiment,
     load_run_checkpoint,
@@ -199,6 +200,16 @@ class PRMainWindow(QWidget):
             self._execution_target_changed
         )
         header.addWidget(self.execution_target_selector)
+        header.addWidget(QLabel("Result retrieval:"))
+        self.result_policy_selector = QComboBox()
+        self.result_policy_selector.addItem("Fast / Exploratory", FAST_RESULT_POLICY)
+        self.result_policy_selector.addItem("Full", FULL_RESULT_POLICY)
+        self.result_policy_selector.setEnabled(False)
+        self.result_policy_selector.setToolTip(
+            "Fast retrieves optical endpoints and compact diagnostics; Full also "
+            "retrieves longitudinal material volumes."
+        )
+        header.addWidget(self.result_policy_selector)
         self.runner_label = QLabel(f"Runner: {self.runner.name}")
         header.addWidget(self.runner_label)
         self.status_label = QLabel("Idle")
@@ -866,6 +877,12 @@ class PRMainWindow(QWidget):
             self.runner = self.local_runner
             self.execution_target_selector.setCurrentIndex(0)
         self.runner_label.setText(f"Runner: {self.runner.name}")
+        self.result_policy_selector.setEnabled(target == "slurm")
+
+    def _remote_runner_kwargs(self) -> dict[str, str]:
+        values = self.remote_execution_controls.runner_kwargs()
+        values["result_policy"] = str(self.result_policy_selector.currentData())
+        return values
 
     def _run_registered(self, request, **kwargs):
         if isinstance(
@@ -881,7 +898,7 @@ class PRMainWindow(QWidget):
                 else image_amplification_experiment_request(request)
             )
             runner_kwargs = (
-                self.remote_execution_controls.runner_kwargs()
+                self._remote_runner_kwargs()
                 if self.runner is self.slurm_runner
                 else None
             )
@@ -942,7 +959,7 @@ class PRMainWindow(QWidget):
 
             kwargs["_before_product_conversion"] = before_product_conversion
         if self.runner is self.slurm_runner:
-            kwargs.update(self.remote_execution_controls.runner_kwargs())
+            kwargs.update(self._remote_runner_kwargs())
         return self.runner.run_registered(
             PR_MATERIAL_ID,
             self._workflow_id_for_request(request),

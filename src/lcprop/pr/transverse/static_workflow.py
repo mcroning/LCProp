@@ -196,11 +196,11 @@ class PRTransverseStaticRunResult:
 
     A_initial: np.ndarray
     A_final: np.ndarray
-    psi_initial: np.ndarray
-    psi_final: np.ndarray
-    source_intensity_stack: np.ndarray
-    equilibrium_residual_stack: np.ndarray
-    td_rhs_residual_stack: np.ndarray
+    psi_initial: np.ndarray | None
+    psi_final: np.ndarray | None
+    source_intensity_stack: np.ndarray | None
+    equilibrium_residual_stack: np.ndarray | None
+    td_rhs_residual_stack: np.ndarray | None
     power_initial: float
     power_final: float
     converged: bool
@@ -220,6 +220,9 @@ class PRTransverseStaticRunResult:
     diagnostics: dict[str, Any]
     timing: dict[str, float]
     status: str
+    retention_summary: dict[str, Any] = field(
+        default_factory=lambda: {"policy": "full", "omitted_fields": []}
+    )
 
 
 def _validate_request(request: PRTransverseStaticRunRequest) -> None:

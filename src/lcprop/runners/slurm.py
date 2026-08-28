@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import shlex
+import signal
 import subprocess
 import time
 from typing import Callable, Iterable, Protocol
@@ -15,6 +17,7 @@ from uuid import uuid4
 
 from lcprop.runners.base import RunnerResult, WorkflowOperation
 from lcprop.transport.io import read_result_package, write_request_package
+from lcprop.transport.result_policy import FULL_RESULT_POLICY, normalize_result_policy
 from lcprop.transport.envelopes import TransportVerificationError
 from lcprop.transport.status import (
     RemoteRunState,
@@ -36,8 +39,15 @@ class RemoteExecutionError(RuntimeError):
 class RemoteRunCancelled(RemoteExecutionError):
     """The scheduler confirmed cancellation of one submitted job."""
 
-    def __init__(self, job_id: str) -> None:
-        super().__init__("cancelled", f"Slurm job {job_id} was cancelled")
+    def __init__(self, job_id: str, *, reason: str | None = None) -> None:
+        super().__init__(
+            "cancelled",
+            reason or f"Slurm job {job_id} was cancelled",
+        )
+
+
+class _LocalRetrievalCancelled(RuntimeError):
+    """The user cancelled only the local result-transfer subprocess."""
 
 
 @dataclass(frozen=True)
@@ -221,6 +231,76 @@ class SubprocessRemoteTransport:
         local.mkdir(parents=True, exist_ok=True)
         self._run(["scp", "-q", "-r", f"{host}:{remote}", str(local)])
 
+    def download_with_progress(
+        self,
+        host: str,
+        remote: str,
+        local: Path,
+        progress_callback,
+        *,
+        cancellation_check=None,
+    ) -> None:
+        """Download one tree while reporting bounded, observational progress."""
+
+        local.mkdir(parents=True, exist_ok=True)
+        try:
+            total = int(self.ssh(host, "du", "-sb", remote).split()[0])
+        except (IndexError, TypeError, ValueError, subprocess.SubprocessError):
+            total = None
+        baseline = sum(
+            path.stat().st_size for path in local.rglob("*") if path.is_file()
+        )
+        started = time.monotonic()
+        process = subprocess.Popen(
+            ["scp", "-q", "-r", f"{host}:{remote}", str(local)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        def local_progress() -> tuple[int, str]:
+            files = [path for path in local.rglob("*") if path.is_file()]
+            transferred = max(
+                0, sum(path.stat().st_size for path in files) - baseline
+            )
+            current = (
+                str(max(files, key=lambda path: path.stat().st_mtime).relative_to(local))
+                if files
+                else remote
+            )
+            return transferred, current
+
+        while process.poll() is None:
+            if cancellation_check is not None and cancellation_check():
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                    process.wait(timeout=2.0)
+                except ProcessLookupError:
+                    pass
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait(timeout=2.0)
+                finally:
+                    process.communicate()
+                raise _LocalRetrievalCancelled(
+                    "local result retrieval was cancelled"
+                )
+            transferred, current = local_progress()
+            elapsed = max(time.monotonic() - started, 1e-9)
+            progress_callback(transferred, total, transferred / elapsed, current)
+            time.sleep(0.25)
+        stdout, stderr = process.communicate()
+        if process.returncode:
+            raise subprocess.CalledProcessError(
+                process.returncode, process.args, output=stdout, stderr=stderr
+            )
+        transferred, current = local_progress()
+        elapsed = max(time.monotonic() - started, 1e-9)
+        progress_callback(transferred, total, transferred / elapsed, current)
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -377,7 +457,8 @@ class SlurmRunner:
     def run_registered(
         self, material_id: str, workflow_id: str, request, *,
         resource_profile: str | None = None, progress_callback=None,
-        cancellation_token=None, **_ignored,
+        cancellation_token=None, result_policy: str = FULL_RESULT_POLICY,
+        **_ignored,
     ) -> RunnerResult:
         key = (material_id, workflow_id)
         if key not in self._operations:
@@ -388,6 +469,15 @@ class SlurmRunner:
                 "resource_profile is required when no configuration default exists"
             )
         profile = self.config.profile(profile_name)
+        result_policy = normalize_result_policy(result_policy)
+        codec = self._registry.codec(material_id, workflow_id)
+        if (
+            result_policy != FULL_RESULT_POLICY
+            and codec.encode_result_projection is None
+        ):
+            raise ValueError(
+                f"operation {key!r} does not support Fast result retrieval"
+            )
         requested_backend = getattr(
             getattr(request, "backend", None), "backend", "numpy"
         )
@@ -462,6 +552,7 @@ class SlurmRunner:
             workflow_id=workflow_id, request=request, run_id=run_id,
             resource_profile=profile.name,
             provenance=deployment_provenance,
+            result_policy=result_policy,
         )
         script = local_run / "launch.sbatch"
         script.write_text(
@@ -553,7 +644,48 @@ class SlurmRunner:
         if progress_callback:
             progress_callback(status)
         try:
-            self._transport.download(self.config.host, f"{remote_run}/output", local_run)
+            output_remote = f"{remote_run}/output"
+            progressive_download = getattr(
+                self._transport, "download_with_progress", None
+            )
+            if progressive_download is None:
+                self._transport.download(self.config.host, output_remote, local_run)
+            else:
+                def report_retrieval(transferred, total, rate, current_file):
+                    nonlocal status
+                    percentage = (
+                        None if not total else min(100.0, 100.0 * transferred / total)
+                    )
+                    status = transition_remote_status(
+                        status,
+                        RemoteRunState.RETRIEVING,
+                        state_message=(
+                            f"Retrieving {percentage:.1f}%"
+                            if percentage is not None
+                            else "Retrieving"
+                        ),
+                        progress_metadata={
+                            "bytes_transferred": int(transferred),
+                            "bytes_total": None if total is None else int(total),
+                            "percentage": percentage,
+                            "current_file": str(current_file),
+                            "bytes_per_second": float(rate),
+                        },
+                    )
+                    if progress_callback:
+                        progress_callback(status)
+
+                progressive_download(
+                    self.config.host,
+                    output_remote,
+                    local_run,
+                    report_retrieval,
+                    cancellation_check=(
+                        None
+                        if cancellation_token is None
+                        else cancellation_token.is_cancelled
+                    ),
+                )
             output_download = local_run / "output"
             nested = output_download / "output"
             if nested.is_dir():
@@ -570,6 +702,35 @@ class SlurmRunner:
                 execution_provenance = _read_execution_provenance(
                     local_run / "execution_provenance.json"
                 )
+        except _LocalRetrievalCancelled as exc:
+            # The scheduler job has already completed.  This cancellation is
+            # deliberately local: preserve the remote package and do not call
+            # either scancel or the successful-run cleanup path.
+            status = replace(
+                status,
+                state=RemoteRunState.CANCELLED,
+                state_message=(
+                    "Local result retrieval cancelled; remote artifacts retained"
+                ),
+                remote_cleanup_requested=False,
+                remote_cleanup_succeeded=False,
+                remote_cleanup_target=remote_run,
+                remote_artifacts_retained=True,
+                failure_reason=f"retrieval_cancelled: {exc}",
+                progress_metadata={
+                    **(status.progress_metadata or {}),
+                    "failure_category": "retrieval_cancelled",
+                },
+            )
+            if progress_callback:
+                progress_callback(status)
+            raise RemoteRunCancelled(
+                job_id,
+                reason=(
+                    "local result retrieval was cancelled; the completed "
+                    f"remote result remains at {remote_run}"
+                ),
+            ) from exc
         except Exception as exc:
             status = self._failed_status(
                 status, "retrieval", exc, progress_callback=progress_callback

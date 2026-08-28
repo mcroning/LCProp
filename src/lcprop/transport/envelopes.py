@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from lcprop.transport.result_policy import (
+    FULL_RESULT_POLICY,
+    normalize_result_policy,
+)
+
 
 TRANSPORT_SCHEMA_VERSION = 1
 FAILURE_SCHEMA_VERSION = 1
@@ -64,6 +69,13 @@ def _identifier(name: str, value: Any) -> str:
     return value
 
 
+def _result_policy(value: Any) -> str:
+    try:
+        return normalize_result_policy(value)
+    except ValueError as exc:
+        raise TransportFormatError(str(exc)) from exc
+
+
 @dataclass(frozen=True)
 class RequestEnvelope:
     run_id: str
@@ -77,6 +89,7 @@ class RequestEnvelope:
     execution_target: str = "slurm"
     resource_profile: str | None = None
     provenance: Mapping[str, Any] = field(default_factory=dict)
+    result_policy: str = FULL_RESULT_POLICY
     transport_schema_version: int = TRANSPORT_SCHEMA_VERSION
 
     def to_dict(self) -> dict[str, Any]:
@@ -94,6 +107,7 @@ class RequestEnvelope:
             "request_payload": dict(self.request_payload),
             "array_manifest": dict(self.array_manifest),
             "provenance": dict(self.provenance),
+            "result_policy": _result_policy(self.result_policy),
         }
 
     @classmethod
@@ -136,6 +150,9 @@ class RequestEnvelope:
             request_payload=dict(value["request_payload"]),
             array_manifest=dict(value["array_manifest"]),
             provenance=dict(value["provenance"]),
+            result_policy=_result_policy(
+                value.get("result_policy", FULL_RESULT_POLICY)
+            ),
         )
 
 
@@ -156,6 +173,7 @@ class ResultEnvelope:
     array_manifest: Mapping[str, Any] = field(default_factory=dict)
     device_summary: Mapping[str, Any] | None = None
     provenance: Mapping[str, Any] = field(default_factory=dict)
+    result_policy: str = FULL_RESULT_POLICY
     transport_schema_version: int = TRANSPORT_SCHEMA_VERSION
 
     def to_dict(self) -> dict[str, Any]:
@@ -177,6 +195,7 @@ class ResultEnvelope:
             "result_payload": dict(self.result_payload),
             "array_manifest": dict(self.array_manifest),
             "provenance": dict(self.provenance),
+            "result_policy": _result_policy(self.result_policy),
         }
 
     @classmethod
@@ -228,6 +247,9 @@ class ResultEnvelope:
             result_payload=dict(value["result_payload"]),
             array_manifest=dict(value["array_manifest"]),
             provenance=dict(value["provenance"]),
+            result_policy=_result_policy(
+                value.get("result_policy", FULL_RESULT_POLICY)
+            ),
         )
 
 

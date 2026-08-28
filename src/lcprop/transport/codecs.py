@@ -7,6 +7,11 @@ from typing import Any, Callable, Mapping
 
 import numpy as np
 
+from lcprop.transport.result_policy import (
+    FULL_RESULT_POLICY,
+    normalize_result_policy,
+)
+
 
 @dataclass(frozen=True)
 class PortablePayload:
@@ -29,6 +34,7 @@ class EncodedResult:
     termination_reason: str | None
     scientific_backend_resolved: str
     device_summary: Mapping[str, Any] | None = None
+    result_policy: str = FULL_RESULT_POLICY
 
 
 @dataclass(frozen=True)
@@ -45,6 +51,7 @@ class TransportCodec:
     result_type: type
     encode_result: Callable[[Any], EncodedResult]
     decode_result: Callable[[Mapping[str, Any], Mapping[str, np.ndarray]], Any]
+    encode_result_projection: Callable[[Any, str], EncodedResult] | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -67,10 +74,31 @@ class TransportCodec:
         ):
             if not callable(getattr(self, name)):
                 raise TypeError(f"{name} must be callable")
+        if (
+            self.encode_result_projection is not None
+            and not callable(self.encode_result_projection)
+        ):
+            raise TypeError("encode_result_projection must be callable or None")
 
     @property
     def key(self) -> tuple[str, str]:
         return self.material_id, self.workflow_id
+
+    def encode_result_for_policy(self, result: Any, policy: str) -> EncodedResult:
+        """Encode one codec-owned projection without material logic in callers."""
+
+        resolved = normalize_result_policy(policy)
+        if self.encode_result_projection is None:
+            encoded = self.encode_result(result)
+            if resolved != FULL_RESULT_POLICY:
+                raise ValueError(
+                    f"codec {self.result_codec_id!r} does not support Fast results"
+                )
+            return encoded
+        encoded = self.encode_result_projection(result, resolved)
+        if normalize_result_policy(encoded.result_policy) != resolved:
+            raise ValueError("result codec returned the wrong result policy")
+        return encoded
 
 
 class TransportCodecRegistry:

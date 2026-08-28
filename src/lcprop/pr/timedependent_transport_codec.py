@@ -37,6 +37,11 @@ from lcprop.transport.codecs import (
     TransportCodec,
 )
 from lcprop.transport.envelopes import TransportCodecError
+from lcprop.transport.result_policy import (
+    FAST_RESULT_POLICY,
+    FULL_RESULT_POLICY,
+    normalize_result_policy,
+)
 
 
 PR_TIMEDEPENDENT_REQUEST_CODEC_ID = "pr.timedependent.request"
@@ -200,24 +205,34 @@ def _decode_checkpoint(
     return checkpoint
 
 
-def encode_pr_timedependent_transport_result(result: PRRunResult) -> EncodedResult:
+_FAST_OMITTED_FIELDS = (
+    "E_initial",
+    "E_final",
+    "source_intensity_stack",
+    "checkpoint",
+)
+
+
+def encode_pr_timedependent_transport_result(
+    result: PRRunResult,
+    result_policy: str = FULL_RESULT_POLICY,
+) -> EncodedResult:
     """Encode the complete canonical reduced-TD result and checkpoint."""
 
     if not isinstance(result, PRRunResult):
         raise TypeError("result must be a PRRunResult")
-    if not isinstance(result.checkpoint, PRTimeDependentCheckpoint):
+    policy = normalize_result_policy(result_policy)
+    if policy == FULL_RESULT_POLICY and not isinstance(
+        result.checkpoint, PRTimeDependentCheckpoint
+    ):
         raise ValueError("PR time-dependent result must contain a checkpoint")
     arrays: dict[str, np.ndarray] = {}
     metadata = {
         "A_initial": pack_portable(result.A_initial, arrays, "result.A_initial"),
         "A_final": pack_portable(result.A_final, arrays, "result.A_final"),
-        "E_initial": pack_portable(result.E_initial, arrays, "result.E_initial"),
-        "E_final": pack_portable(result.E_final, arrays, "result.E_final"),
-        "source_intensity_stack": pack_portable(
-            result.source_intensity_stack,
-            arrays,
-            "result.source_intensity_stack",
-        ),
+        "E_initial": None,
+        "E_final": None,
+        "source_intensity_stack": None,
         "power_initial": float(result.power_initial),
         "power_final": float(result.power_final),
         "completed_steps": int(result.completed_steps),
@@ -230,11 +245,32 @@ def encode_pr_timedependent_transport_result(result: PRRunResult) -> EncodedResu
         ),
         "status": result.status,
         "requested_steps": int(result.requested_steps),
-        "checkpoint": _encode_checkpoint(result.checkpoint, arrays),
+        "checkpoint": None,
         "diagnostics": pack_portable(
             result.diagnostics, arrays, "result.diagnostics"
         ),
+        "retention_summary": {
+            "policy": policy,
+            "omitted_fields": (
+                list(_FAST_OMITTED_FIELDS)
+                if policy == FAST_RESULT_POLICY
+                else []
+            ),
+        },
     }
+    if policy == FULL_RESULT_POLICY:
+        metadata.update({
+            "E_initial": pack_portable(
+                result.E_initial, arrays, "result.E_initial"
+            ),
+            "E_final": pack_portable(result.E_final, arrays, "result.E_final"),
+            "source_intensity_stack": pack_portable(
+                result.source_intensity_stack,
+                arrays,
+                "result.source_intensity_stack",
+            ),
+            "checkpoint": _encode_checkpoint(result.checkpoint, arrays),
+        })
     backend_summary = result.diagnostics.get("backend", {})
     backend = str(backend_summary.get("backend", "unknown"))
     cancelled = result.status == "cancelled"
@@ -252,6 +288,7 @@ def encode_pr_timedependent_transport_result(result: PRRunResult) -> EncodedResu
         device_summary=pack_portable(
             backend_summary, arrays, "device_summary"
         ),
+        result_policy=policy,
     )
 
 
@@ -301,11 +338,38 @@ def _validate_result(values: Mapping[str, Any]) -> None:
     nch = _positive_dimension(launch, "Nch")
     _require_array(values, "A_initial", (nch, nx, ny), "complex")
     _require_array(values, "A_final", (nch, nx, ny), "complex")
-    _require_array(values, "E_initial", (nz, nx, ny), "real")
-    _require_array(values, "E_final", (nz, nx, ny), "real")
-    _require_array(
-        values, "source_intensity_stack", (nz, nx, ny), "real"
-    )
+    retention = values.get("retention_summary", {
+        "policy": FULL_RESULT_POLICY,
+        "omitted_fields": [],
+    })
+    if not isinstance(retention, Mapping):
+        raise TransportCodecError("PR time-dependent retention summary is invalid")
+    try:
+        policy = normalize_result_policy(retention.get("policy", FULL_RESULT_POLICY))
+    except ValueError as exc:
+        raise TransportCodecError(str(exc)) from exc
+    expected_omitted = set(_FAST_OMITTED_FIELDS if policy == FAST_RESULT_POLICY else ())
+    omitted = retention.get("omitted_fields", [])
+    if not isinstance(omitted, (tuple, list)) or set(omitted) != expected_omitted:
+        raise TransportCodecError(
+            "PR time-dependent omitted fields disagree with result policy"
+        )
+    if policy == FULL_RESULT_POLICY:
+        _require_array(values, "E_initial", (nz, nx, ny), "real")
+        _require_array(values, "E_final", (nz, nx, ny), "real")
+        _require_array(
+            values, "source_intensity_stack", (nz, nx, ny), "real"
+        )
+        if not isinstance(values.get("checkpoint"), Mapping):
+            raise TransportCodecError(
+                "PR time-dependent Full result lacks a checkpoint"
+            )
+    else:
+        for name in _FAST_OMITTED_FIELDS:
+            if values.get(name) is not None:
+                raise TransportCodecError(
+                    f"PR time-dependent Fast result unexpectedly retained {name}"
+                )
     status = values.get("status")
     if status not in {"completed", "cancelled"}:
         raise TransportCodecError("PR time-dependent result status is invalid")
@@ -385,8 +449,14 @@ def decode_pr_timedependent_transport_result(
     try:
         values = unpack_portable(dict(metadata), arrays)
         _validate_result(values)
-        checkpoint = _decode_checkpoint(values["checkpoint"], arrays)
-        _validate_checkpoint_consistency(values, checkpoint)
+        retention = dict(values.get("retention_summary", {
+            "policy": FULL_RESULT_POLICY,
+            "omitted_fields": [],
+        }))
+        checkpoint = None
+        if retention["policy"] == FULL_RESULT_POLICY:
+            checkpoint = _decode_checkpoint(values["checkpoint"], arrays)
+            _validate_checkpoint_consistency(values, checkpoint)
         return PRRunResult(
             A_initial=values["A_initial"],
             A_final=values["A_final"],
@@ -403,6 +473,7 @@ def decode_pr_timedependent_transport_result(
             requested_steps=values["requested_steps"],
             checkpoint=checkpoint,
             diagnostics=dict(values["diagnostics"]),
+            retention_summary=retention,
         )
     except TransportCodecError:
         raise
@@ -425,6 +496,7 @@ PR_TIMEDEPENDENT_TRANSPORT_CODEC = TransportCodec(
     result_type=PRRunResult,
     encode_result=encode_pr_timedependent_transport_result,
     decode_result=decode_pr_timedependent_transport_result,
+    encode_result_projection=encode_pr_timedependent_transport_result,
 )
 
 

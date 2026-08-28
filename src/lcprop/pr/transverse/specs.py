@@ -146,8 +146,8 @@ class PRTransverseRunResult:
 
     A_initial: Any
     A_final: Any
-    psi_initial: Any
-    psi_final: Any
+    psi_initial: Any | None
+    psi_final: Any | None
     power_initial: float
     power_final: float
     completed_steps: int
@@ -159,6 +159,9 @@ class PRTransverseRunResult:
     status: str = "completed"
     requested_steps: int = 0
     diagnostics: dict[str, Any] = field(default_factory=dict)
+    retention_summary: dict[str, Any] = field(
+        default_factory=lambda: {"policy": "full", "omitted_fields": []}
+    )
 
 
 __all__ = [

@@ -158,9 +158,9 @@ class PRRunResult:
 
     A_initial: Any
     A_final: Any
-    E_initial: Any
-    E_final: Any
-    source_intensity_stack: Any
+    E_initial: Any | None
+    E_final: Any | None
+    source_intensity_stack: Any | None
     power_initial: float
     power_final: float
     completed_steps: int
@@ -171,6 +171,9 @@ class PRRunResult:
     requested_steps: int = 0
     checkpoint: Any | None = None
     diagnostics: dict[str, Any] = field(default_factory=dict)
+    retention_summary: dict[str, Any] = field(
+        default_factory=lambda: {"policy": "full", "omitted_fields": []}
+    )
 
 
 __all__ = [

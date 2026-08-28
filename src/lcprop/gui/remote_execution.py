@@ -40,7 +40,7 @@ from lcprop.runners.cluster_profiles import (
 )
 from lcprop.runners.slurm import SlurmResourceProfile
 from lcprop.transport.defaults import default_slurm_runner_from_environment
-from lcprop.transport.status import RemoteRunStatus
+from lcprop.transport.status import RemoteRunState, RemoteRunStatus
 
 
 @dataclass(frozen=True)
@@ -721,6 +721,24 @@ def remote_status_text(status: RemoteRunStatus) -> str:
         )
         if device:
             parts.append(f"Device: {device}")
+    if status.state == RemoteRunState.RETRIEVING and status.progress_metadata:
+        progress = status.progress_metadata
+        transferred = progress.get("bytes_transferred")
+        total = progress.get("bytes_total")
+        percentage = progress.get("percentage")
+        rate = progress.get("bytes_per_second")
+        current_file = progress.get("current_file")
+        if transferred is not None:
+            detail = f"Retrieved {int(transferred) / (1024 ** 2):.1f} MiB"
+            if total:
+                detail += f" / {int(total) / (1024 ** 2):.1f} MiB"
+            if percentage is not None:
+                detail += f" ({float(percentage):.1f}%)"
+            if rate is not None:
+                detail += f" at {float(rate) / (1024 ** 2):.2f} MiB/s"
+            parts.append(detail)
+        if current_file:
+            parts.append(f"Current object: {current_file}")
     if status.state.value == "completed":
         if status.remote_cleanup_succeeded:
             parts.append("Remote artifacts cleaned up")

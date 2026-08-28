@@ -39,6 +39,11 @@ from lcprop.transport.codecs import (
     TransportCodec,
 )
 from lcprop.transport.envelopes import TransportCodecError
+from lcprop.transport.result_policy import (
+    FAST_RESULT_POLICY,
+    FULL_RESULT_POLICY,
+    normalize_result_policy,
+)
 
 
 PR_TRANSVERSE_TIMEDEPENDENT_REQUEST_CODEC_ID = (
@@ -191,21 +196,24 @@ def decode_pr_transverse_timedependent_transport_request(
         ) from exc
 
 
+_FAST_OMITTED_FIELDS = ("psi_initial", "psi_final")
+
+
 def encode_pr_transverse_timedependent_transport_result(
     result: PRTransverseRunResult,
+    result_policy: str = FULL_RESULT_POLICY,
 ) -> EncodedResult:
     """Encode the complete canonical transverse-TD result."""
 
     if not isinstance(result, PRTransverseRunResult):
         raise TypeError("result must be a PRTransverseRunResult")
+    policy = normalize_result_policy(result_policy)
     arrays: dict[str, np.ndarray] = {}
     metadata = {
         "A_initial": pack_portable(result.A_initial, arrays, "result.A_initial"),
         "A_final": pack_portable(result.A_final, arrays, "result.A_final"),
-        "psi_initial": pack_portable(
-            result.psi_initial, arrays, "result.psi_initial"
-        ),
-        "psi_final": pack_portable(result.psi_final, arrays, "result.psi_final"),
+        "psi_initial": None,
+        "psi_final": None,
         "power_initial": float(result.power_initial),
         "power_final": float(result.power_final),
         "completed_steps": int(result.completed_steps),
@@ -227,7 +235,24 @@ def encode_pr_transverse_timedependent_transport_result(
         "diagnostics": pack_portable(
             result.diagnostics, arrays, "result.diagnostics"
         ),
+        "retention_summary": {
+            "policy": policy,
+            "omitted_fields": (
+                list(_FAST_OMITTED_FIELDS)
+                if policy == FAST_RESULT_POLICY
+                else []
+            ),
+        },
     }
+    if policy == FULL_RESULT_POLICY:
+        metadata.update({
+            "psi_initial": pack_portable(
+                result.psi_initial, arrays, "result.psi_initial"
+            ),
+            "psi_final": pack_portable(
+                result.psi_final, arrays, "result.psi_final"
+            ),
+        })
     _validate_result(unpack_portable(metadata, arrays))
     backend_summary = dict(result.backend_summary)
     backend = str(backend_summary.get("backend", "unknown"))
@@ -244,6 +269,7 @@ def encode_pr_transverse_timedependent_transport_result(
         ),
         scientific_backend_resolved=backend,
         device_summary=backend_summary,
+        result_policy=policy,
     )
 
 
@@ -300,6 +326,7 @@ def _validate_result(values: Mapping[str, Any]) -> None:
         "status",
         "requested_steps",
         "diagnostics",
+        "retention_summary",
     }
     _require_exact_keys(values, required, label="PR transverse-TD result")
     grid = values["grid_summary"]
@@ -316,15 +343,34 @@ def _validate_result(values: Mapping[str, Any]) -> None:
         values, "A_initial", (nch, nx, ny), "complex"
     )
     A_final = _require_array(values, "A_final", (nch, nx, ny), "complex")
-    psi_initial = _require_array(
-        values, "psi_initial", (nz, nx, ny), "real"
-    )
-    psi_final = _require_array(values, "psi_final", (nz, nx, ny), "real")
+    retention = values["retention_summary"]
+    if not isinstance(retention, Mapping):
+        raise TransportCodecError("PR transverse-TD retention summary is invalid")
+    try:
+        policy = normalize_result_policy(retention.get("policy", FULL_RESULT_POLICY))
+    except ValueError as exc:
+        raise TransportCodecError(str(exc)) from exc
+    expected_omitted = set(_FAST_OMITTED_FIELDS if policy == FAST_RESULT_POLICY else ())
+    omitted = retention.get("omitted_fields", [])
+    if not isinstance(omitted, (tuple, list)) or set(omitted) != expected_omitted:
+        raise TransportCodecError(
+            "PR transverse-TD omitted fields disagree with result policy"
+        )
+    psi_initial = psi_final = None
+    if policy == FULL_RESULT_POLICY:
+        psi_initial = _require_array(
+            values, "psi_initial", (nz, nx, ny), "real"
+        )
+        psi_final = _require_array(values, "psi_final", (nz, nx, ny), "real")
+    elif values["psi_initial"] is not None or values["psi_final"] is not None:
+        raise TransportCodecError(
+            "PR transverse-TD Fast result unexpectedly retained material volumes"
+        )
     if A_initial.dtype != A_final.dtype:
         raise TransportCodecError(
             "PR transverse-TD initial/final optical dtypes disagree"
         )
-    if psi_initial.dtype != psi_final.dtype:
+    if psi_initial is not None and psi_initial.dtype != psi_final.dtype:
         raise TransportCodecError(
             "PR transverse-TD initial/final material dtypes disagree"
         )
@@ -362,7 +408,10 @@ def _validate_result(values: Mapping[str, Any]) -> None:
         )
     expected_real = backend.get("real_dtype")
     expected_complex = backend.get("complex_dtype")
-    if str(psi_final.dtype) != expected_real or str(A_final.dtype) != expected_complex:
+    if (
+        (psi_final is not None and str(psi_final.dtype) != expected_real)
+        or str(A_final.dtype) != expected_complex
+    ):
         raise TransportCodecError(
             "PR transverse-TD result dtypes disagree with backend provenance"
         )
@@ -424,6 +473,10 @@ def decode_pr_transverse_timedependent_transport_result(
 
     try:
         values = unpack_portable(dict(metadata), arrays)
+        values.setdefault("retention_summary", {
+            "policy": FULL_RESULT_POLICY,
+            "omitted_fields": [],
+        })
         _validate_result(values)
         return PRTransverseRunResult(
             A_initial=values["A_initial"],
@@ -441,6 +494,7 @@ def decode_pr_transverse_timedependent_transport_result(
             status=values["status"],
             requested_steps=values["requested_steps"],
             diagnostics=dict(values["diagnostics"]),
+            retention_summary=dict(values["retention_summary"]),
         )
     except TransportCodecError:
         raise
@@ -463,6 +517,7 @@ PR_TRANSVERSE_TIMEDEPENDENT_TRANSPORT_CODEC = TransportCodec(
     result_type=PRTransverseRunResult,
     encode_result=encode_pr_transverse_timedependent_transport_result,
     decode_result=decode_pr_transverse_timedependent_transport_result,
+    encode_result_projection=encode_pr_transverse_timedependent_transport_result,
 )
 
 

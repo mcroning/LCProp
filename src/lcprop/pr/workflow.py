@@ -728,7 +728,10 @@ def run_pr_timedependent(
         completed_steps=completed_steps,
         time_normalized=current_time,
         grid_summary=grid.summary(),
-        launch_summary=launch.summary(),
+        launch_summary={
+            **launch.summary(),
+            "refractive_index": float(request.material.refractive_index),
+        },
         status=status,
         requested_steps=requested_steps,
         checkpoint=checkpoint,

@@ -35,12 +35,94 @@ from lcprop.products.data_model import (
 _FAR_FIELD_LOG_FLOOR_DB = -120.0
 _STATE_RECONSTRUCTION_CHUNK_BYTES = 2 * 1024 * 1024
 _STATE_RECONSTRUCTION_MIN_PLANE_CELLS = 512 * 512
+_FAST_VOLUME_MESSAGE = (
+    "Not retrieved in Fast mode; rerun with Full result retrieval to inspect "
+    "this volume."
+)
 
 
 def _readonly_view(value) -> np.ndarray:
     view = np.asarray(value).view()
     view.flags.writeable = False
     return view
+
+
+def _fast_optical_run_data(result, *, workflow: str, geometry: Geometry) -> RunData:
+    """Present compact optical endpoints and far field for a Fast result."""
+
+    groups = tuple(result.launch_summary["coherence_groups"])
+    input_intensity = np.asarray(total_intensity(
+        result.A_initial, coherence_groups=groups, xp=np
+    ))
+    output_intensity = np.asarray(total_intensity(
+        result.A_final, coherence_groups=groups, xp=np
+    ))
+    profile = result.resolved_profile
+    channels = profile["beam_request"]["channels"]
+    spectrum = direction_cosine_spectrum(
+        np.asarray(result.A_final),
+        dx_um=float(result.grid_summary["dx_um"]),
+        dy_um=float(result.grid_summary["dy_um"]),
+        wavelength_um=float(channels[0]["wavelength_um"]),
+        refractive_index=float(profile["material"]["refractive_index"]),
+        coherence_groups=groups,
+        xp=np,
+    )
+    fields = FieldCollection()
+    for key, title, data in (
+        ("input_intensity", "Input Plane Intensity", input_intensity),
+        ("output_intensity", "Output Plane Intensity", output_intensity),
+    ):
+        fields.add(key, make_field(
+            key, title, data, ("x", "y"), "intensity",
+            {"x": "um", "y": "um"}, quantity="normalized_intensity",
+            value_unit="1/µm²",
+        ))
+    fields.add("far_field_intensity", make_field(
+        "far_field_intensity", "Output Far-Field Intensity",
+        np.asarray(spectrum.intensity), ("s_x", "s_y"),
+        "far_field_intensity", {"s_x": "1", "s_y": "1"},
+        quantity="direction_cosine_power_density",
+        value_unit="normalized power / direction-cosine²", colormap="magma",
+        coordinates={"s_x": spectrum.s_x, "s_y": spectrum.s_y},
+    ))
+    summary = {
+        "material": "photorefractive",
+        "workflow": workflow,
+        "status": result.status,
+        "physics_profile": deepcopy(profile),
+        "backend": deepcopy(result.backend_summary),
+        "result_retention": deepcopy(result.retention_summary),
+    }
+    diagnostic_items = []
+    if workflow == PR_TRANSVERSE_STATIC_WORKFLOW:
+        summary.update({
+            "converged": result.converged,
+            "completed_coupled_iterations": result.completed_coupled_iterations,
+            "timing": deepcopy(result.timing),
+        })
+    else:
+        summary.update({
+            "completed_material_steps": result.completed_steps,
+            "requested_material_steps": result.requested_steps,
+            "material_time_normalized": result.time_normalized,
+        })
+    diagnostic_items.extend([
+        ("summary", DiagnosticData("summary", "Summary", summary)),
+        ("transverse_pr", DiagnosticData(
+            "transverse_pr", "Transverse PR Diagnostics", deepcopy(result.diagnostics)
+        )),
+    ])
+    if workflow == PR_TRANSVERSE_STATIC_WORKFLOW:
+        diagnostic_items.append(("replay", DiagnosticData(
+            "replay", "Independent Replay", deepcopy(result.replay_diagnostics)
+        )))
+    diagnostics = DiagnosticCollection(diagnostic_items)
+    return RunData(
+        workflow=workflow, geometry=geometry, fields=fields,
+        curves=CurveCollection(), diagnostics=diagnostics,
+        longitudinal_enabled=False, longitudinal_message=_FAST_VOLUME_MESSAGE,
+    )
 
 
 def _state_from_potential_for_products(
@@ -407,6 +489,11 @@ def pr_transverse_result_to_run_data(result: PRTransverseRunResult) -> RunData:
     y = (np.arange(ny) - 0.5 * (ny - 1)) * float(summary["dy_um"])
     z = np.arange(nz) * float(summary["dz_um"])
     geometry = Geometry(x=x, y=y, z=z, units="um")
+    if result.retention_summary.get("policy", "full") == "fast":
+        return _fast_optical_run_data(
+            result, workflow=PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+            geometry=geometry,
+        )
     psi = np.asarray(result.psi_final)
     if psi.shape != (nz, nx, ny):
         raise ValueError("psi_final does not match grid_summary")
@@ -491,6 +578,11 @@ def pr_transverse_static_result_to_run_data(
     y = (np.arange(ny) - 0.5 * (ny - 1)) * float(summary["dy_um"])
     z = (np.arange(nz) + 0.5) * float(summary["dz_um"])
     geometry = Geometry(x=x, y=y, z=z, units="um")
+    if result.retention_summary.get("policy", "full") == "fast":
+        return _fast_optical_run_data(
+            result, workflow=PR_TRANSVERSE_STATIC_WORKFLOW,
+            geometry=geometry,
+        )
     psi = np.asarray(result.psi_final)
     if psi.shape != (nz, nx, ny):
         raise ValueError("psi_final does not match grid_summary")

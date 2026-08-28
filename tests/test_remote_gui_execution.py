@@ -53,6 +53,21 @@ def test_pr_execution_target_is_independent_of_scientific_backend():
     window.close()
 
 
+def test_pr_remote_result_retrieval_defaults_fast_and_full_is_explicit():
+    _app()
+    window = PRMainWindow(slurm_runner=DummySlurmRunner())
+    assert window.result_policy_selector.currentData() == "fast"
+    assert not window.result_policy_selector.isEnabled()
+    window.execution_target_selector.setCurrentIndex(1)
+    assert window.result_policy_selector.isEnabled()
+    assert window._remote_runner_kwargs()["result_policy"] == "fast"
+    window.result_policy_selector.setCurrentIndex(1)
+    assert window._remote_runner_kwargs()["result_policy"] == "full"
+    window.execution_target_selector.setCurrentIndex(0)
+    assert not window.result_policy_selector.isEnabled()
+    window.close()
+
+
 def test_remote_status_display_includes_job_and_requested_resolved_backend():
     status = RemoteRunStatus(
         run_id="run", execution_target="slurm", state=RemoteRunState.COMPLETED,
@@ -64,6 +79,23 @@ def test_remote_status_display_includes_job_and_requested_resolved_backend():
     assert "Backend requested: auto" in text
     assert "Backend resolved: cupy" in text
     assert "Device: H200" in text
+
+
+def test_remote_status_display_includes_retrieval_progress():
+    status = RemoteRunStatus(
+        run_id="run", execution_target="slurm", state=RemoteRunState.RETRIEVING,
+        progress_metadata={
+            "bytes_transferred": 5 * 1024**2,
+            "bytes_total": 20 * 1024**2,
+            "percentage": 25.0,
+            "bytes_per_second": 2 * 1024**2,
+            "current_file": "output/result_arrays.npz",
+        },
+    )
+    text = remote_status_text(status)
+    assert "5.0 MiB / 20.0 MiB (25.0%)" in text
+    assert "2.00 MiB/s" in text
+    assert "Current object: output/result_arrays.npz" in text
 
 
 def test_remote_cancellation_is_presented_as_stopped_not_failed():
@@ -148,4 +180,81 @@ def test_pr_window_close_after_remote_cancel_joins_worker_thread():
     assert window.run_status == "stopped"
     assert not window._background_running
     assert window.last_remote_status.state == RemoteRunState.CANCELLED
+    assert not window.isVisible()
+
+
+def test_pr_window_stop_during_retrieval_joins_worker_thread():
+    app = _app()
+    window = PRMainWindow(slurm_runner=DummySlurmRunner())
+    window.show()
+    request = window.build_request()
+
+    def cancelled_retrieval(
+        _request, *, cancellation_token, progress_callback
+    ):
+        base = {
+            "run_id": "lcprop-" + "b" * 32,
+            "execution_target": "slurm",
+            "remote_job_id": "789",
+            "remote_artifact_location": "/runs/lcprop-" + "b" * 32,
+        }
+        progress_callback(
+            RemoteRunStatus(
+                state=RemoteRunState.RETRIEVING,
+                progress_metadata={
+                    "bytes_transferred": 4096,
+                    "bytes_total": 8192,
+                    "percentage": 50.0,
+                    "bytes_per_second": 1024.0,
+                    "current_file": "output/result_arrays.npz",
+                },
+                **base,
+            )
+        )
+        while not cancellation_token.is_cancelled():
+            sleep(0.001)
+        progress_callback(
+            RemoteRunStatus(
+                state=RemoteRunState.CANCELLED,
+                state_message=(
+                    "Local result retrieval cancelled; remote artifacts retained"
+                ),
+                remote_cleanup_requested=False,
+                remote_cleanup_succeeded=False,
+                remote_cleanup_target=base["remote_artifact_location"],
+                remote_artifacts_retained=True,
+                **base,
+            )
+        )
+        raise RemoteRunCancelled(
+            "789", reason="local result retrieval was cancelled"
+        )
+
+    window._start_background(
+        request,
+        summary="retrieval cancellation lifecycle",
+        runner_callable=cancelled_retrieval,
+        run_label="Running",
+    )
+    deadline = monotonic() + 5.0
+    while (
+        window.last_remote_status is None
+        or window.last_remote_status.state != RemoteRunState.RETRIEVING
+    ):
+        assert monotonic() < deadline
+        app.processEvents()
+        sleep(0.001)
+
+    window.stop_clicked()
+    window.close()
+    while window._thread is not None:
+        assert monotonic() < deadline
+        app.processEvents()
+        sleep(0.001)
+
+    app.processEvents()
+    assert window.run_status == "stopped"
+    assert not window._background_running
+    assert window.last_remote_status.state == RemoteRunState.CANCELLED
+    assert window.last_remote_status.remote_artifacts_retained is True
     assert not window.isVisible()

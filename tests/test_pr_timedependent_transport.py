@@ -242,6 +242,30 @@ def test_reduced_td_transport_preserves_float32_and_backend_provenance():
     assert decoded.diagnostics["backend"]["real_dtype"] == "float32"
 
 
+def test_reduced_td_fast_projection_keeps_optics_and_omits_full_volumes():
+    result = PR_TIMEDEPENDENT_OPERATION.run(_request())
+    encoded = encode_pr_timedependent_transport_result(result, "fast")
+    decoded = decode_pr_timedependent_transport_result(
+        encoded.payload.metadata, encoded.payload.arrays
+    )
+    assert encoded.result_policy == "fast"
+    np.testing.assert_array_equal(decoded.A_initial, result.A_initial)
+    np.testing.assert_array_equal(decoded.A_final, result.A_final)
+    assert decoded.E_initial is None
+    assert decoded.E_final is None
+    assert decoded.source_intensity_stack is None
+    assert decoded.checkpoint is None
+    assert set(decoded.retention_summary["omitted_fields"]) == {
+        "E_initial", "E_final", "source_intensity_stack", "checkpoint"
+    }
+    products = PR_TIMEDEPENDENT_OPERATION.to_run_data(decoded)
+    assert tuple(products.fields) == (
+        "input_intensity", "output_intensity", "far_field_intensity"
+    )
+    assert products.longitudinal_enabled is False
+    assert "Full result retrieval" in products.longitudinal_message
+
+
 @pytest.mark.parametrize("after_accepted_step", (False, True))
 def test_reduced_td_cancelled_transport_is_explicit_and_preserves_boundary(
     after_accepted_step,

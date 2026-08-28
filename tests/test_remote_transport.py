@@ -45,7 +45,7 @@ from lcprop.transport.artifacts import (
 )
 from lcprop.transport.defaults import default_transport_operations, default_transport_registry
 from lcprop.transport.envelopes import (
-    RequestEnvelope, TransportCodecError, TransportSchemaError,
+    RequestEnvelope, TransportCodecError, TransportFormatError, TransportSchemaError,
     TransportVerificationError,
 )
 from lcprop.transport.executor import execute_run_directory
@@ -327,6 +327,80 @@ def test_pr_static_transport_rejects_malformed_result_shape():
     arrays["result__E_final"] = arrays["result__E_final"][:, :-1, :]
     with pytest.raises(TransportCodecError, match="E_final shape"):
         decode_pr_static_transport_result(encoded.payload.metadata, arrays)
+
+
+def test_pr_static_fast_projection_omits_volumes_and_presents_optics():
+    result = PR_STATIC_OPERATION.run(_pr_static_request())
+    encoded = encode_pr_static_transport_result(result, "fast")
+    decoded = decode_pr_static_transport_result(
+        encoded.payload.metadata, encoded.payload.arrays
+    )
+    np.testing.assert_array_equal(decoded.A_final, result.A_final)
+    assert decoded.E_initial is None
+    assert decoded.E_final is None
+    assert decoded.source_intensity_stack is None
+    assert decoded.residual_stack is None
+    products = PR_STATIC_OPERATION.to_run_data(decoded)
+    assert tuple(products.fields) == (
+        "input_intensity", "output_intensity", "far_field_intensity"
+    )
+    assert products.longitudinal_enabled is False
+
+
+def test_fast_policy_is_bound_across_request_and_result_packages(tmp_path):
+    registry = default_transport_registry()
+    request = _pr_static_request()
+    run_dir = tmp_path / "fast-static"
+    write_request_package(
+        run_dir, registry=registry,
+        material_id=PR_STATIC_OPERATION.material_id,
+        workflow_id=PR_STATIC_OPERATION.workflow_id,
+        request=request, run_id="fast-static-run", execution_target="local",
+        result_policy="fast",
+    )
+    decoded_request = read_request_package(run_dir, registry=registry)
+    assert decoded_request.envelope.result_policy == "fast"
+    result = PR_STATIC_OPERATION.run(decoded_request.request)
+    write_result_package(
+        run_dir, codec=decoded_request.codec, result=result,
+        request_envelope=decoded_request.envelope,
+    )
+    decoded_result = read_result_package(run_dir, registry=registry)
+    assert decoded_result.envelope.result_policy == "fast"
+    assert decoded_result.result.E_final is None
+    assert (run_dir / "output" / "result_arrays.npz").stat().st_size < (
+        result.A_initial.nbytes + result.A_final.nbytes + 4096
+    )
+
+
+def test_legacy_request_envelope_defaults_to_full_and_invalid_policy_is_rejected():
+    value = RequestEnvelope(
+        run_id="legacy", material_id="pr", workflow_id="pr_static",
+        codec_id="codec", codec_version=1,
+        scientific_backend_requested="numpy", request_payload={},
+    ).to_dict()
+    value.pop("result_policy")
+    assert RequestEnvelope.from_dict(value).result_policy == "full"
+    value["result_policy"] = "quick"
+    with pytest.raises(TransportFormatError, match="fast.*full"):
+        RequestEnvelope.from_dict(value)
+
+
+def test_pr_transverse_static_fast_projection_omits_volumes_and_keeps_far_field():
+    result = PR_TRANSVERSE_STATIC_OPERATION.run(_pr_request())
+    encoded = encode_pr_transverse_static_transport_result(result, "fast")
+    decoded = decode_pr_transverse_static_transport_result(
+        encoded.payload.metadata, encoded.payload.arrays
+    )
+    np.testing.assert_array_equal(decoded.A_final, result.A_final)
+    assert decoded.psi_initial is None
+    assert decoded.psi_final is None
+    assert decoded.source_intensity_stack is None
+    assert decoded.equilibrium_residual_stack is None
+    assert decoded.td_rhs_residual_stack is None
+    products = PR_TRANSVERSE_STATIC_OPERATION.to_run_data(decoded)
+    assert "far_field_intensity" in products.fields
+    assert products.longitudinal_enabled is False
 
 
 def test_pr_static_cancelled_result_transport_preserves_accepted_boundary():

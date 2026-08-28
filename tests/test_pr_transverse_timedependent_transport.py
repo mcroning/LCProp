@@ -195,6 +195,24 @@ def test_transverse_td_codec_and_operation_are_registered_by_default():
     assert key in {operation.key for operation in default_transport_operations()}
 
 
+def test_transverse_td_fast_projection_retains_optics_and_far_field():
+    result = PR_TRANSVERSE_TIMEDEPENDENT_OPERATION.run(_request())
+    encoded = encode_pr_transverse_timedependent_transport_result(result, "fast")
+    decoded = decode_pr_transverse_timedependent_transport_result(
+        encoded.payload.metadata, encoded.payload.arrays
+    )
+    assert encoded.result_policy == "fast"
+    np.testing.assert_array_equal(decoded.A_initial, result.A_initial)
+    np.testing.assert_array_equal(decoded.A_final, result.A_final)
+    assert decoded.psi_initial is None
+    assert decoded.psi_final is None
+    products = PR_TRANSVERSE_TIMEDEPENDENT_OPERATION.to_run_data(decoded)
+    assert "input_intensity" in products.fields
+    assert "output_intensity" in products.fields
+    assert "far_field_intensity" in products.fields
+    assert products.longitudinal_enabled is False
+
+
 @pytest.mark.parametrize("factory", (_request, _screened_request))
 def test_transverse_td_local_and_fake_remote_execution_are_exact(factory):
     request = factory()

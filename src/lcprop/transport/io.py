@@ -20,6 +20,7 @@ from lcprop.transport.envelopes import (
     TransportCodecError,
     TransportVerificationError,
 )
+from lcprop.transport.result_policy import FULL_RESULT_POLICY, normalize_result_policy
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ def write_request_package(
     provenance: Mapping[str, Any] | None = None,
     execution_target: str = "slurm",
     resource_profile: str | None = None,
+    result_policy: str = FULL_RESULT_POLICY,
 ) -> Path:
     codec = registry.codec(material_id, workflow_id)
     if not isinstance(request, codec.request_type):
@@ -68,6 +70,7 @@ def write_request_package(
         request_payload=encoded.payload.metadata,
         array_manifest=array_manifest(encoded.payload.arrays, filename=arrays_name),
         provenance={} if provenance is None else provenance,
+        result_policy=normalize_result_policy(result_policy),
     )
     return write_artifact_bundle(
         Path(run_directory) / "request",
@@ -131,7 +134,7 @@ def write_result_package(
         request_envelope.workflow_id,
     ):
         raise TransportCodecError("result codec identity disagrees with request")
-    encoded = codec.encode_result(result)
+    encoded = codec.encode_result_for_policy(result, request_envelope.result_policy)
     arrays_name = "result_arrays.npz"
     envelope = ResultEnvelope(
         run_id=request_envelope.run_id,
@@ -151,6 +154,7 @@ def write_result_package(
         result_payload=encoded.payload.metadata,
         array_manifest=array_manifest(encoded.payload.arrays, filename=arrays_name),
         provenance={} if provenance is None else provenance,
+        result_policy=encoded.result_policy,
     )
     destination = (
         Path(output_directory)
@@ -185,6 +189,8 @@ def read_result_package(
         raise TransportVerificationError("request/result run_id mismatch")
     if (envelope.material_id, envelope.workflow_id) != request.codec.key:
         raise TransportVerificationError("request/result operation mismatch")
+    if envelope.result_policy != request.envelope.result_policy:
+        raise TransportVerificationError("request/result policy mismatch")
     codec = registry.codec(envelope.material_id, envelope.workflow_id)
     if (
         envelope.codec_id != codec.result_codec_id
@@ -204,7 +210,7 @@ def read_result_package(
     result = codec.decode_result(envelope.result_payload, arrays)
     if not isinstance(result, codec.result_type):
         raise TransportCodecError("result codec reconstructed the wrong type")
-    checked = codec.encode_result(result)
+    checked = codec.encode_result_for_policy(result, envelope.result_policy)
     common = (
         checked.scientific_status,
         checked.converged,

@@ -86,6 +86,7 @@ from lcprop.pr.transverse.operations import (
     PR_TRANSVERSE_STATIC_OPERATION,
     PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
 )
+from lcprop.transport.result_policy import FAST_RESULT_POLICY, FULL_RESULT_POLICY
 from lcprop.runners.base import RunnerResult
 from lcprop.runners.local import LocalRunner
 from lcprop.transport.defaults import default_transport_registry
@@ -167,6 +168,33 @@ def _assert_run_data_equal(actual, expected):
             actual_diagnostic.values,
             expected_diagnostic.values,
             ignored_keys={"timing"},
+        )
+
+
+class _ProjectedResultRunner:
+    """Exercise one ordinary operation through its real transport projection."""
+
+    name = "Projected"
+    supports_parallel_sweeps = False
+
+    def __init__(self, operation, policy):
+        self.operation = operation
+        self.policy = policy
+        self.registered_operations = (operation,)
+
+    def run_registered(self, material_id, workflow_id, request, **kwargs):
+        local = LocalRunner((self.operation,)).run_registered(
+            material_id, workflow_id, request, **kwargs
+        )
+        codec = default_transport_registry().codec(material_id, workflow_id)
+        encoded = codec.encode_result_for_policy(local.result, self.policy)
+        decoded = codec.decode_result(
+            encoded.payload.metadata, encoded.payload.arrays
+        )
+        return replace(
+            local,
+            result=decoded,
+            run_data=self.operation.to_run_data(decoded),
         )
 
 
@@ -1146,6 +1174,7 @@ def test_static_image_amplification_is_allowed_by_capable_slurm_and_forwards_pro
             self.calls.append((material_id, workflow_id, request, kwargs))
             local_kwargs = dict(kwargs)
             local_kwargs.pop("resource_profile", None)
+            local_kwargs.pop("result_policy", None)
             return LocalRunner((PR_STATIC_OPERATION,)).run_registered(
                 material_id, workflow_id, request, **local_kwargs
             )
@@ -1184,7 +1213,142 @@ def test_static_image_amplification_is_allowed_by_capable_slurm_and_forwards_pro
     assert len(runner.calls) == 1
     assert runner.calls[0][0:2] == ("pr", PR_STATIC_WORKFLOW)
     assert runner.calls[0][3]["resource_profile"] == "gpu-test"
+    assert runner.calls[0][3]["result_policy"] == "fast"
+    assert "image_amplification" in result.run_data.diagnostics
+    assert "output_signal_intensity" in result.run_data.fields
     window.close()
+
+
+@pytest.mark.parametrize(
+    ("workflow_id", "operation"),
+    (
+        (PR_STATIC_WORKFLOW, PR_STATIC_OPERATION),
+        (PR_TRANSVERSE_STATIC_WORKFLOW, PR_TRANSVERSE_STATIC_OPERATION),
+        (PR_TIMEDEPENDENT_WORKFLOW, PR_TIMEDEPENDENT_OPERATION),
+        (
+            PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+            PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
+        ),
+    ),
+)
+def test_image_amplification_actual_fast_and_full_projections_are_equivalent(
+    workflow_id, operation
+):
+    image_request = _valid_beampanel_image_amplification_request()
+    material = replace(
+        image_request.material,
+        applied_field=0.0,
+        gain_length_product=0.0,
+        characteristic_wavenumber_per_um_override=0.1,
+    )
+    common = {
+        "grid": image_request.grid,
+        "beams": image_request.launch_configuration.beams,
+        "material": material,
+        "backend": BackendSpec("numpy", "float64", False),
+    }
+    if workflow_id == PR_STATIC_WORKFLOW:
+        base = PRStaticRunRequest(**common)
+    elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
+        base = PRTransverseStaticRunRequest(**common)
+    elif workflow_id == PR_TIMEDEPENDENT_WORKFLOW:
+        base = PRRunRequest(
+            **common, solver=PRSolverOptions(Nt=0, dt_normalized=1.0e-4)
+        )
+    else:
+        base = PRTransverseRunRequest(
+            **common,
+            solver=PRTransverseSolverOptions(
+                Nt=0, dt_normalized=1.0e-4, optical_substeps=1
+            ),
+        )
+    experiment = image_amplification_experiment_request(
+        replace(image_request, material=material),
+        base_workflow_id=workflow_id,
+        base_request=base,
+    )
+    full_runner_result = run_image_amplification_experiment(
+        _ProjectedResultRunner(operation, FULL_RESULT_POLICY), experiment
+    )
+    fast_runner_result = run_image_amplification_experiment(
+        _ProjectedResultRunner(operation, FAST_RESULT_POLICY), experiment
+    )
+    full = full_runner_result.result
+    fast = fast_runner_result.result
+
+    assert full.base_status == fast.base_status
+    assert full.analysis_status == fast.analysis_status == "completed"
+    assert full.analysis_result is not None and fast.analysis_result is not None
+    full_analysis, fast_analysis = full.analysis_result, fast.analysis_result
+    for name in (
+        "signal_carrier_mask",
+        "input_signal_field",
+        "output_signal_field",
+        "backpropagated_signal_field",
+        "zero_response_backpropagated_signal_field",
+    ):
+        np.testing.assert_array_equal(
+            getattr(fast_analysis, name), getattr(full_analysis, name)
+        )
+    for name in (
+        "measured_absolute_signal_gain",
+        "analytic_absolute_signal_gain",
+        "image_intensity_correlation",
+        "normalized_image_rmse",
+        "normalized_power_relative_drift",
+    ):
+        assert getattr(fast_analysis, name) == pytest.approx(
+            getattr(full_analysis, name), rel=0.0, abs=0.0
+        )
+
+    full_run_data = full_runner_result.run_data
+    fast_run_data = fast_runner_result.run_data
+    assert full_run_data is not None and fast_run_data is not None
+    assert full_run_data.workflow == fast_run_data.workflow
+    for axis in ("x", "y", "z"):
+        np.testing.assert_array_equal(
+            fast_run_data.geometry.coord(axis),
+            full_run_data.geometry.coord(axis),
+        )
+    specialized = (
+        "image_source",
+        "image_transmission",
+        "input_signal_intensity",
+        "output_signal_intensity",
+        "amplified_image",
+        "zero_response_image",
+        "signal_carrier_mask",
+        "far_field_intensity",
+        "far_field_log_db",
+    )
+    for key in specialized:
+        assert key in full_run_data.fields and key in fast_run_data.fields
+        full_field = full_run_data.fields[key]
+        fast_field = fast_run_data.fields[key]
+        for attribute in (
+            "key", "display_name", "axes", "kind", "units", "quantity",
+            "value_unit", "colormap", "default_display_extent",
+            "initially_selected",
+        ):
+            assert getattr(fast_field, attribute) == getattr(full_field, attribute)
+        _assert_nested_equal(fast_field.coordinates, full_field.coordinates)
+        np.testing.assert_array_equal(fast_field.data, full_field.data)
+    for key in ("image_amplification_metrics", "image_amplification"):
+        _assert_nested_equal(
+            fast_run_data.diagnostics[key].values,
+            full_run_data.diagnostics[key].values,
+        )
+    common_diagnostics = (
+        set(full_run_data.diagnostics) & set(fast_run_data.diagnostics)
+    ) - {"presentation", "image_amplification_metrics", "image_amplification"}
+    assert "summary" in common_diagnostics
+    for key in common_diagnostics:
+        full_values = dict(full_run_data.diagnostics[key].values)
+        fast_values = dict(fast_run_data.diagnostics[key].values)
+        fast_values.pop("result_retention", None)
+        _assert_nested_equal(
+            fast_values, full_values, ignored_keys={"timing"}
+        )
 
 
 def test_image_amplification_rejects_unregistered_slurm_base_operation(app):

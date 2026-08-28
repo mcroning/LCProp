@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import math
 from typing import Any, Mapping
 
@@ -45,11 +45,23 @@ from lcprop.pr.transverse.static_workflow import (
 )
 from lcprop.transport.codecs import EncodedRequest, EncodedResult, PortablePayload, TransportCodec
 from lcprop.transport.envelopes import TransportCodecError
+from lcprop.transport.result_policy import (
+    FAST_RESULT_POLICY,
+    FULL_RESULT_POLICY,
+    normalize_result_policy,
+)
 
 
 PR_TRANSVERSE_STATIC_REQUEST_CODEC_ID = "pr.transverse_static.request"
 PR_TRANSVERSE_STATIC_RESULT_CODEC_ID = "pr.transverse_static.result"
 PR_TRANSVERSE_STATIC_TRANSPORT_CODEC_VERSION = 2
+_FAST_OMITTED_FIELDS = (
+    "psi_initial",
+    "psi_final",
+    "source_intensity_stack",
+    "equilibrium_residual_stack",
+    "td_rhs_residual_stack",
+)
 
 
 def _validate_request(request: PRTransverseStaticRunRequest) -> None:
@@ -145,11 +157,26 @@ def decode_pr_transverse_static_transport_request(metadata: Mapping[str, Any], a
         raise TransportCodecError(f"invalid PR transverse-static request payload: {exc}") from exc
 
 
-def encode_pr_transverse_static_transport_result(result: PRTransverseStaticRunResult) -> EncodedResult:
+def encode_pr_transverse_static_transport_result(
+    result: PRTransverseStaticRunResult,
+    result_policy: str = FULL_RESULT_POLICY,
+) -> EncodedResult:
     if not isinstance(result, PRTransverseStaticRunResult):
         raise TypeError("result must be a PRTransverseStaticRunResult")
+    policy = normalize_result_policy(result_policy)
     arrays: dict[str, np.ndarray] = {}
-    metadata = pack_portable(asdict(result), arrays, "result")
+    omitted = _FAST_OMITTED_FIELDS if policy == FAST_RESULT_POLICY else ()
+    projected = (
+        replace(result, **{name: None for name in omitted})
+        if omitted
+        else result
+    )
+    values = asdict(projected)
+    values["retention_summary"] = {
+        "policy": policy,
+        "omitted_fields": list(omitted),
+    }
+    metadata = pack_portable(values, arrays, "result")
     backend = str(result.backend_summary.get("backend", "unknown"))
     device_summary = pack_portable(
         result.backend_summary, arrays, "device_summary"
@@ -163,6 +190,7 @@ def encode_pr_transverse_static_transport_result(result: PRTransverseStaticRunRe
         termination_reason=None if termination is None else str(termination),
         scientific_backend_resolved=backend,
         device_summary=device_summary,
+        result_policy=policy,
     )
 
 
@@ -182,6 +210,19 @@ def _validate_result_shapes(values: Mapping[str, Any]) -> None:
     ny = _summary_dimension(grid, "Ny")
     nz = _summary_dimension(grid, "Nz")
     nch = _summary_dimension(launch, "Nch")
+    retention = values.get("retention_summary", {
+        "policy": FULL_RESULT_POLICY,
+        "omitted_fields": [],
+    })
+    if not isinstance(retention, Mapping):
+        raise TransportCodecError("PR result retention_summary must be a mapping")
+    policy = normalize_result_policy(retention.get("policy", FULL_RESULT_POLICY))
+    expected_omitted = set(
+        _FAST_OMITTED_FIELDS if policy == FAST_RESULT_POLICY else ()
+    )
+    omitted = retention.get("omitted_fields", [])
+    if not isinstance(omitted, (tuple, list)) or set(omitted) != expected_omitted:
+        raise TransportCodecError("PR result omitted_fields disagree with result policy")
     expected = {
         "A_initial": (nch, nx, ny),
         "A_final": (nch, nx, ny),
@@ -193,6 +234,12 @@ def _validate_result_shapes(values: Mapping[str, Any]) -> None:
     }
     for name, shape in expected.items():
         value = values.get(name)
+        if name in expected_omitted:
+            if value is not None:
+                raise TransportCodecError(
+                    f"Fast PR result must omit {name}"
+                )
+            continue
         if not isinstance(value, np.ndarray):
             raise TransportCodecError(f"PR result {name} must be a numeric array")
         if value.dtype.hasobject:
@@ -319,6 +366,10 @@ def _validate_continuation(values: Mapping[str, Any]) -> None:
 def decode_pr_transverse_static_transport_result(metadata: Mapping[str, Any], arrays: Mapping[str, np.ndarray]) -> PRTransverseStaticRunResult:
     try:
         values = unpack_portable(dict(metadata), arrays)
+        values.setdefault("retention_summary", {
+            "policy": FULL_RESULT_POLICY,
+            "omitted_fields": [],
+        })
         _validate_result_shapes(values)
         _validate_continuation(values)
         material_records = []
@@ -355,9 +406,12 @@ def decode_pr_transverse_static_transport_result(metadata: Mapping[str, Any], ar
             backend_summary=dict(values["backend_summary"]), resolved_profile=dict(values["resolved_profile"]),
             replay_diagnostics=dict(values["replay_diagnostics"]), diagnostics=diagnostics,
             timing=dict(values["timing"]), status=str(values["status"]),
+            retention_summary=dict(values["retention_summary"]),
         )
     except Exception as exc:
         raise TransportCodecError(f"invalid PR transverse-static result payload: {exc}") from exc
+    if result.equilibrium_residual_stack is None:
+        return result
     residual = np.asarray(result.equilibrium_residual_stack)
     rms = float(np.sqrt(np.mean(np.square(residual, dtype=np.float64))))
     maximum = float(np.max(np.abs(residual)))
@@ -389,6 +443,7 @@ PR_TRANSVERSE_STATIC_TRANSPORT_CODEC = TransportCodec(
     result_codec_version=PR_TRANSVERSE_STATIC_TRANSPORT_CODEC_VERSION,
     result_type=PRTransverseStaticRunResult,
     encode_result=encode_pr_transverse_static_transport_result,
+    encode_result_projection=encode_pr_transverse_static_transport_result,
     decode_result=decode_pr_transverse_static_transport_result,
 )
 

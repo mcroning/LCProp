@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any, Mapping
 
 import numpy as np
@@ -36,6 +36,11 @@ from lcprop.transport.codecs import (
     TransportCodec,
 )
 from lcprop.transport.envelopes import TransportCodecError
+from lcprop.transport.result_policy import (
+    FAST_RESULT_POLICY,
+    FULL_RESULT_POLICY,
+    normalize_result_policy,
+)
 
 
 PR_STATIC_REQUEST_CODEC_ID = "pr.static.request"
@@ -130,13 +135,36 @@ def decode_pr_static_transport_request(
         ) from exc
 
 
-def encode_pr_static_transport_result(result: PRStaticRunResult) -> EncodedResult:
+_FAST_OMITTED_FIELDS = (
+    "E_initial",
+    "E_final",
+    "source_intensity_stack",
+    "residual_stack",
+)
+
+
+def encode_pr_static_transport_result(
+    result: PRStaticRunResult,
+    result_policy: str = FULL_RESULT_POLICY,
+) -> EncodedResult:
     """Encode the complete canonical reduced-static result."""
 
     if not isinstance(result, PRStaticRunResult):
         raise TypeError("result must be a PRStaticRunResult")
+    policy = normalize_result_policy(result_policy)
     arrays: dict[str, np.ndarray] = {}
-    metadata = pack_portable(asdict(result), arrays, "result")
+    omitted = _FAST_OMITTED_FIELDS if policy == FAST_RESULT_POLICY else ()
+    projected = (
+        replace(result, **{name: None for name in omitted})
+        if omitted
+        else result
+    )
+    values = asdict(projected)
+    values["retention_summary"] = {
+        "policy": policy,
+        "omitted_fields": list(omitted),
+    }
+    metadata = pack_portable(values, arrays, "result")
     backend = str(result.backend_summary.get("backend", "unknown"))
     termination = (
         "cancelled_at_accepted_boundary"
@@ -157,6 +185,7 @@ def encode_pr_static_transport_result(result: PRStaticRunResult) -> EncodedResul
         device_summary=pack_portable(
             result.backend_summary, arrays, "device_summary"
         ),
+        result_policy=policy,
     )
 
 
@@ -185,6 +214,20 @@ def _validate_result(values: Mapping[str, Any]) -> None:
         raise TransportCodecError(
             "PR static completed_slices is outside the declared grid"
         )
+    retention = values.get("retention_summary", {
+        "policy": FULL_RESULT_POLICY,
+        "omitted_fields": [],
+    })
+    if not isinstance(retention, Mapping):
+        raise TransportCodecError("PR static retention summary must be an object")
+    try:
+        policy = normalize_result_policy(retention.get("policy", FULL_RESULT_POLICY))
+    except ValueError as exc:
+        raise TransportCodecError(str(exc)) from exc
+    expected_omitted = set(_FAST_OMITTED_FIELDS if policy == FAST_RESULT_POLICY else ())
+    omitted = retention.get("omitted_fields", [])
+    if not isinstance(omitted, (tuple, list)) or set(omitted) != expected_omitted:
+        raise TransportCodecError("PR static omitted fields disagree with result policy")
     expected = {
         "A_initial": (nch, nx, ny),
         "A_final": (nch, nx, ny),
@@ -195,6 +238,12 @@ def _validate_result(values: Mapping[str, Any]) -> None:
     }
     for name, shape in expected.items():
         array = values.get(name)
+        if name in expected_omitted:
+            if array is not None:
+                raise TransportCodecError(
+                    f"PR static Fast result unexpectedly retained {name}"
+                )
+            continue
         if not isinstance(array, np.ndarray):
             raise TransportCodecError(
                 f"PR static result {name} must be a numeric array"
@@ -257,6 +306,10 @@ def decode_pr_static_transport_result(
             tolerance_provenance=dict(values["tolerance_provenance"]),
             replay_diagnostics=dict(values["replay_diagnostics"]),
             status=values["status"],
+            retention_summary=dict(values.get("retention_summary", {
+                "policy": FULL_RESULT_POLICY,
+                "omitted_fields": [],
+            })),
         )
         return result
     except TransportCodecError:
@@ -280,6 +333,7 @@ PR_STATIC_TRANSPORT_CODEC = TransportCodec(
     result_type=PRStaticRunResult,
     encode_result=encode_pr_static_transport_result,
     decode_result=decode_pr_static_transport_result,
+    encode_result_projection=encode_pr_static_transport_result,
 )
 
 

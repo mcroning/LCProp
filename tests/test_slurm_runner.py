@@ -19,7 +19,8 @@ from lcprop.lc.requests import OutputOptions, StaticRunRequest, StaticSolverOpti
 from lcprop.lc.specs import BiasSpec, LCMaterial
 from lcprop.runners.slurm import (
     RemoteExecutionError, RemoteRunCancelled, SlurmExecutionConfig,
-    SlurmResourceProfile, SlurmRunner, _device_pattern_preflight,
+    SlurmResourceProfile, SlurmRunner, SubprocessRemoteTransport,
+    _device_pattern_preflight,
 )
 from lcprop.runners.source_deployment import (
     ResolvedSourceDeployment,
@@ -416,6 +417,39 @@ def test_final_remote_status_uses_verified_cupy_envelope_for_td_result(
     assert states[-1].device_summary["device"] == "NVIDIA H200"
 
 
+def test_slurm_runner_passes_fast_policy_to_material_owned_codec(tmp_path):
+    transport = FakeTransport()
+    runner = SlurmRunner(
+        _config(tmp_path),
+        (PR_TIMEDEPENDENT_OPERATION,),
+        transport=transport,
+        registry=default_transport_registry(),
+        sleep=lambda _seconds: None,
+    )
+    completed = runner.run_registered(
+        "pr", "pr_timedependent", _pr_td_request(),
+        resource_profile="H200 small", result_policy="fast",
+    )
+    assert completed.result.retention_summary["policy"] == "fast"
+    assert completed.result.E_final is None
+    assert completed.run_data.longitudinal_enabled is False
+    assert len(_cleanup_commands(transport)) == 1
+
+
+def test_slurm_runner_rejects_fast_before_submission_for_unsupported_codec(tmp_path):
+    transport = FakeTransport()
+    runner = SlurmRunner(
+        _config(tmp_path), (LC_STATIC_OPERATION,), transport=transport,
+        registry=default_transport_registry(), sleep=lambda _seconds: None,
+    )
+    with pytest.raises(ValueError, match="does not support Fast"):
+        runner.run_registered(
+            "lc", "static", _request(), resource_profile="CPU small",
+            result_policy="fast",
+        )
+    assert not transport.submissions
+
+
 def test_commissioning_script_defaults_to_accepted_stage_d_snapshot():
     script = (
         Path(__file__).resolve().parents[1]
@@ -523,6 +557,97 @@ def test_cancellation_is_idempotent_monotonic_and_terminal(
 class RetrievalFailureTransport(FakeTransport):
     def download(self, host, remote, local):
         raise OSError("synthetic retrieval failure")
+
+
+class RetrievalCancellationTransport(FakeTransport):
+    def download_with_progress(
+        self, host, remote, local, progress_callback, *, cancellation_check
+    ):
+        self.commands.append((host, ("download", remote, str(local))))
+        progress_callback(4096, 8192, 1024.0, "output/result_arrays.npz")
+        assert cancellation_check()
+        raise slurm_module._LocalRetrievalCancelled(
+            "local result retrieval was cancelled"
+        )
+
+
+def test_subprocess_retrieval_cancellation_reaps_process_group(
+    tmp_path, monkeypatch
+):
+    events = []
+
+    class Process:
+        pid = 4321
+        returncode = None
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            events.append(("wait", timeout))
+            self.returncode = -15
+            return self.returncode
+
+        def communicate(self):
+            events.append(("communicate", None))
+            return "", ""
+
+    monkeypatch.setattr(slurm_module.subprocess, "Popen", lambda *a, **k: Process())
+    monkeypatch.setattr(
+        slurm_module.os,
+        "killpg",
+        lambda pid, signum: events.append(("killpg", pid, signum)),
+    )
+    monkeypatch.setattr(
+        SubprocessRemoteTransport,
+        "ssh",
+        lambda self, host, *arguments: "8192 /remote/output",
+    )
+    with pytest.raises(
+        slurm_module._LocalRetrievalCancelled, match="retrieval was cancelled"
+    ):
+        SubprocessRemoteTransport().download_with_progress(
+            "host",
+            "/remote/output",
+            tmp_path,
+            lambda *_args: None,
+            cancellation_check=lambda: True,
+        )
+    assert ("killpg", 4321, slurm_module.signal.SIGTERM) in events
+    assert ("wait", 2.0) in events
+    assert events[-1] == ("communicate", None)
+
+
+def test_retrieval_cancellation_preserves_remote_result_and_skips_cleanup(tmp_path):
+    token = CancellationToken()
+    states = []
+    transport = RetrievalCancellationTransport()
+
+    def observe(status):
+        states.append(status)
+        if status.state == RemoteRunState.RETRIEVING:
+            token.cancel()
+
+    runner = SlurmRunner(
+        _config(tmp_path), (LC_STATIC_OPERATION,), transport=transport,
+        registry=default_transport_registry(), sleep=lambda _seconds: None,
+    )
+    with pytest.raises(RemoteRunCancelled, match="remote result remains"):
+        runner.run_registered(
+            "lc", "static", _request(), cancellation_token=token,
+            progress_callback=observe,
+        )
+    assert states[-1].state == RemoteRunState.CANCELLED
+    assert states[-1].remote_artifacts_retained is True
+    assert states[-1].remote_cleanup_requested is False
+    assert states[-1].progress_metadata["failure_category"] == (
+        "retrieval_cancelled"
+    )
+    assert _cleanup_commands(transport) == []
+    assert not any(
+        arguments and arguments[0] == "scancel"
+        for _host, arguments in transport.commands
+    )
 
 
 def _run_phase_failure(tmp_path, *, transport=None, operation=None):

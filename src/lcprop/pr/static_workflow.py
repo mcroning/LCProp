@@ -147,10 +147,10 @@ class PRStaticRunResult:
 
     A_initial: np.ndarray
     A_final: np.ndarray
-    E_initial: np.ndarray
-    E_final: np.ndarray
-    source_intensity_stack: np.ndarray
-    residual_stack: np.ndarray
+    E_initial: np.ndarray | None
+    E_final: np.ndarray | None
+    source_intensity_stack: np.ndarray | None
+    residual_stack: np.ndarray | None
     power_initial: float
     power_final: float
     converged: bool
@@ -163,6 +163,9 @@ class PRStaticRunResult:
     tolerance_provenance: dict[str, Any]
     replay_diagnostics: dict[str, Any]
     status: str
+    retention_summary: dict[str, Any] = field(
+        default_factory=lambda: {"policy": "full", "omitted_fields": []}
+    )
 
 
 def _backend_scalar(value) -> float:
@@ -778,7 +781,10 @@ def run_pr_static(
         iteration_records=tuple(records),
         slice_summaries=tuple(summaries),
         grid_summary=grid.summary(),
-        launch_summary=launch.summary(),
+        launch_summary={
+            **launch.summary(),
+            "refractive_index": float(request.material.refractive_index),
+        },
         backend_summary=backend.summary(),
         tolerance_provenance=tolerances.provenance(),
         replay_diagnostics={
