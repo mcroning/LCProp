@@ -1,4 +1,4 @@
-"""NumPy reference for periodic biased full-transverse PR linearization.
+"""Backend-aware reference for periodic biased full-transverse PR linearization.
 
 This module is intentionally isolated from workflow registration.  It solves
 the frozen-intensity material tangent problem for the fixed-mean-field,
@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+from typing import Any
 
 import numpy as np
 
+from lcprop.core.backend import Backend, BackendSpec, asnumpy, get_backend
 from lcprop.pr.transverse.transport import spectral_wavevectors
 
 
@@ -55,33 +57,39 @@ class PRBiasedLinearizedReferenceSpec:
 class PRBiasedLinearizedFourierSymbol:
     """Discrete spectral coordinates and the accepted response symbol."""
 
-    kx: np.ndarray
-    ky: np.ndarray
-    a_M: np.ndarray
-    a_H: np.ndarray
-    denominator: np.ndarray
-    response_kernel: np.ndarray
-    resolved_mask: np.ndarray
+    kx: Any
+    ky: Any
+    a_M: Any
+    a_H: Any
+    denominator: Any
+    response_kernel: Any
+    resolved_mask: Any
 
 
 @dataclass(frozen=True)
 class PRBiasedLinearizedReferenceResult:
     """Material perturbations and compact scientific provenance."""
 
-    delta_psi: np.ndarray
-    delta_E_x: np.ndarray
-    delta_E_y: np.ndarray
-    delta_P: np.ndarray
-    delta_mean_current: np.ndarray
-    mean_intensity_perturbation: np.ndarray
-    response_kernel: np.ndarray
-    denominator: np.ndarray
+    delta_psi: Any
+    delta_E_x: Any
+    delta_E_y: Any
+    delta_P: Any
+    delta_mean_current: Any
+    mean_intensity_perturbation: Any
+    response_kernel: Any
+    denominator: Any
     reference_intensity: float
     applied_field: float
     dx_normalized: float
     dy_normalized: float
     m_y: float
     h_y: float
+    requested_backend: str
+    resolved_backend: str
+    real_dtype: str
+    complex_dtype: str
+    is_gpu: bool
+    device_identity: str | None
     model_id: str = PR_PERIODIC_BIASED_LINEARIZED_REFERENCE_V1
     profile_id: str = PR_PERIODIC_BIASED_CURRENT_PROFILE_V1
     electrical_ensemble: str = FIXED_MEAN_FIELD_ENSEMBLE
@@ -89,23 +97,62 @@ class PRBiasedLinearizedReferenceResult:
     inverse_fft_count: int = 4
 
 
-def _validated_intensity(intensity) -> np.ndarray:
-    array = np.asarray(intensity)
-    if array.dtype != np.dtype(np.float64):
-        raise TypeError("NumPy linearized reference requires float64 intensity")
+_DEFAULT_BACKEND = BackendSpec(
+    backend="numpy",
+    precision="float64",
+    verbose=False,
+)
+
+
+def _resolve_backend(spec: BackendSpec | str) -> tuple[Backend, str]:
+    if isinstance(spec, str):
+        requested = spec
+        backend = get_backend(spec, precision="float64")
+    else:
+        requested = spec.backend
+        backend = get_backend(spec)
+    return backend, requested
+
+
+def _validated_intensity(intensity, *, backend: Backend):
+    xp = backend.xp
+    if xp is np:
+        array = np.asarray(asnumpy(intensity))
+    else:
+        array = xp.asarray(intensity)
+    expected_dtype = np.dtype(backend.real_dtype)
+    if array.dtype != expected_dtype:
+        raise TypeError(
+            f"{backend.name} linearized reference requires "
+            f"{expected_dtype.name} intensity"
+        )
     if array.ndim not in (2, 3) or min(array.shape[-2:]) < 3:
-        raise ValueError("intensity must have shape (Nx, Ny) or (Nz, Nx, Ny)")
-    if not np.all(np.isfinite(array)):
-        raise ValueError("intensity must contain only finite values")
-    if np.any(array <= 0.0):
-        raise ValueError("physical total intensity must be strictly positive")
+        raise ValueError(
+            "intensity must have shape (Nx, Ny) or (Nbatch, Nx, Ny); "
+            "Nbatch contains independent frozen-intensity planes, not "
+            "longitudinal evolution or retained z history"
+        )
+    valid = xp.all(xp.isfinite(array) & (array > 0.0))
+    # This is the sole CuPy synchronization in the solver: validation occurs
+    # once at the API boundary before the device-native computational path.
+    if not bool(asnumpy(valid)):
+        raise ValueError(
+            "physical total intensity must be finite and strictly positive"
+        )
     return array
+
+
+def _device_identity(backend: Backend) -> str | None:
+    if not backend.is_gpu:
+        return None
+    return f"cuda:{backend.xp.cuda.Device().id}"
 
 
 def biased_linearized_fourier_symbol(
     shape: tuple[int, int],
     *,
     spec: PRBiasedLinearizedReferenceSpec,
+    backend: BackendSpec | str = _DEFAULT_BACKEND,
 ) -> PRBiasedLinearizedFourierSymbol:
     """Return the repository-consistent Fourier grid and response kernel.
 
@@ -115,15 +162,33 @@ def biased_linearized_fourier_symbol(
     on even grids, the corresponding Nyquist null combinations.
     """
 
+    resolved_backend, _ = _resolve_backend(backend)
+    return _biased_linearized_fourier_symbol(
+        shape,
+        spec=spec,
+        backend=resolved_backend,
+    )
+
+
+def _biased_linearized_fourier_symbol(
+    shape: tuple[int, int],
+    *,
+    spec: PRBiasedLinearizedReferenceSpec,
+    backend: Backend,
+) -> PRBiasedLinearizedFourierSymbol:
     spec.validate()
     if len(shape) != 2 or min(shape) < 3:
         raise ValueError("shape must contain transverse sizes (Nx, Ny), each at least 3")
+    resolved_backend = backend
+    xp = resolved_backend.xp
     kx, ky = spectral_wavevectors(
         shape,
         dx_normalized=float(spec.dx_normalized),
         dy_normalized=float(spec.dy_normalized),
-        xp=np,
+        xp=xp,
     )
+    kx = kx.astype(resolved_backend.real_dtype, copy=False)
+    ky = ky.astype(resolved_backend.real_dtype, copy=False)
     a_M = kx * kx + float(spec.m_y) * ky * ky
     a_H = kx * kx + float(spec.h_y) * ky * ky
     bias_kx = float(spec.applied_field) * kx
@@ -132,13 +197,25 @@ def biased_linearized_fourier_symbol(
     )
     numerator = -(a_M + 1j * bias_kx)
     resolved_mask = a_H > 0.0
-    response_kernel = np.zeros(shape, dtype=np.complex128)
-    np.divide(
-        numerator,
-        denominator,
-        out=response_kernel,
-        where=resolved_mask,
-    )
+    denominator = denominator.astype(resolved_backend.complex_dtype, copy=False)
+    numerator = numerator.astype(resolved_backend.complex_dtype, copy=False)
+    if xp is np:
+        response_kernel = np.zeros(shape, dtype=resolved_backend.complex_dtype)
+        np.divide(
+            numerator,
+            denominator,
+            out=response_kernel,
+            where=resolved_mask,
+        )
+    else:
+        # CuPy does not support NumPy's combined out/where ufunc form.
+        # Avoid evaluating a division at the joint derivative-null modes.
+        safe_denominator = xp.where(resolved_mask, denominator, 1.0)
+        response_kernel = xp.where(
+            resolved_mask,
+            numerator / safe_denominator,
+            0.0,
+        ).astype(resolved_backend.complex_dtype, copy=False)
     return PRBiasedLinearizedFourierSymbol(
         kx=kx,
         ky=ky,
@@ -154,6 +231,7 @@ def solve_pr_biased_linearized_reference(
     intensity,
     *,
     spec: PRBiasedLinearizedReferenceSpec,
+    backend: BackendSpec | str = _DEFAULT_BACKEND,
 ) -> PRBiasedLinearizedReferenceResult:
     """Solve the frozen-intensity biased material tangent problem.
 
@@ -163,58 +241,72 @@ def solve_pr_biased_linearized_reference(
     potential in the fixed-reference solve, but changes the first-order mean
     current by ``-applied_field * mean(delta_I)``.
 
+    ``backend`` uses the repository's :class:`BackendSpec` convention. The
+    default preserves the original NumPy/float64 API. Result arrays belong to
+    the resolved backend; no implicit host conversion occurs on return.
+
     The solve performs one forward two-dimensional FFT and four inverse FFTs
-    (potential, two field components, and carrier perturbation).
+    (potential, two field components, and carrier perturbation). For 3-D
+    input, the leading axis is an independent batch of frozen transverse
+    planes, not a retained longitudinal volume.
     """
 
     spec.validate()
-    driving = _validated_intensity(intensity)
-    symbol = biased_linearized_fourier_symbol(driving.shape[-2:], spec=spec)
+    resolved_backend, requested_backend = _resolve_backend(backend)
+    xp = resolved_backend.xp
+    driving = _validated_intensity(intensity, backend=resolved_backend)
+    symbol = _biased_linearized_fourier_symbol(
+        driving.shape[-2:],
+        spec=spec,
+        backend=resolved_backend,
+    )
     delta_intensity = driving - float(spec.reference_intensity)
-    mean_intensity_perturbation = np.mean(
+    mean_intensity_perturbation = xp.mean(
         delta_intensity,
         axis=(-2, -1),
     )
-    zero_mean_delta_intensity = delta_intensity - np.expand_dims(
+    zero_mean_delta_intensity = delta_intensity - xp.expand_dims(
         mean_intensity_perturbation,
         axis=(-2, -1),
     )
-    delta_intensity_hat = np.fft.fft2(
+    delta_intensity_hat = xp.fft.fft2(
         zero_mean_delta_intensity,
         axes=(-2, -1),
     )
     delta_psi_hat = delta_intensity_hat * symbol.response_kernel
 
-    delta_psi = np.fft.ifft2(delta_psi_hat, axes=(-2, -1)).real
-    delta_E_x = np.fft.ifft2(
+    delta_psi = xp.fft.ifft2(delta_psi_hat, axes=(-2, -1)).real
+    delta_E_x = xp.fft.ifft2(
         -1j * symbol.kx * delta_psi_hat,
         axes=(-2, -1),
     ).real
-    delta_E_y = np.fft.ifft2(
+    delta_E_y = xp.fft.ifft2(
         -1j * symbol.ky * delta_psi_hat,
         axes=(-2, -1),
     ).real
-    delta_P = np.fft.ifft2(
+    delta_P = xp.fft.ifft2(
         symbol.a_H * delta_psi_hat,
         axes=(-2, -1),
     ).real
 
-    delta_mean_current = np.stack(
+    delta_mean_current = xp.stack(
         (
             -float(spec.applied_field) * mean_intensity_perturbation,
-            np.zeros_like(mean_intensity_perturbation),
+            xp.zeros_like(mean_intensity_perturbation),
         ),
         axis=-1,
     )
 
     return PRBiasedLinearizedReferenceResult(
-        delta_psi=delta_psi.astype(np.float64, copy=False),
-        delta_E_x=delta_E_x.astype(np.float64, copy=False),
-        delta_E_y=delta_E_y.astype(np.float64, copy=False),
-        delta_P=delta_P.astype(np.float64, copy=False),
-        delta_mean_current=delta_mean_current.astype(np.float64, copy=False),
-        mean_intensity_perturbation=np.asarray(
-            mean_intensity_perturbation, dtype=np.float64
+        delta_psi=delta_psi.astype(resolved_backend.real_dtype, copy=False),
+        delta_E_x=delta_E_x.astype(resolved_backend.real_dtype, copy=False),
+        delta_E_y=delta_E_y.astype(resolved_backend.real_dtype, copy=False),
+        delta_P=delta_P.astype(resolved_backend.real_dtype, copy=False),
+        delta_mean_current=delta_mean_current.astype(
+            resolved_backend.real_dtype, copy=False
+        ),
+        mean_intensity_perturbation=xp.asarray(
+            mean_intensity_perturbation, dtype=resolved_backend.real_dtype
         ),
         response_kernel=symbol.response_kernel,
         denominator=symbol.denominator,
@@ -224,12 +316,18 @@ def solve_pr_biased_linearized_reference(
         dy_normalized=float(spec.dy_normalized),
         m_y=float(spec.m_y),
         h_y=float(spec.h_y),
+        requested_backend=requested_backend,
+        resolved_backend=resolved_backend.name,
+        real_dtype=np.dtype(resolved_backend.real_dtype).name,
+        complex_dtype=np.dtype(resolved_backend.complex_dtype).name,
+        is_gpu=resolved_backend.is_gpu,
+        device_identity=_device_identity(resolved_backend),
     )
 
 
 def total_fields_from_perturbation(
     result: PRBiasedLinearizedReferenceResult,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[Any, Any]:
     """Return total fields without obscuring perturbation-result semantics."""
 
     return result.applied_field + result.delta_E_x, result.delta_E_y.copy()
