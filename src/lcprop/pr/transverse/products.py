@@ -568,7 +568,7 @@ def pr_transverse_result_to_run_data(result: PRTransverseRunResult) -> RunData:
 def pr_transverse_static_result_to_run_data(
     result: PRTransverseStaticRunResult,
 ) -> RunData:
-    """Reconstruct static Profile-v1 state and residual products."""
+    """Reconstruct static full-transverse state and applicable products."""
 
     if not isinstance(result, PRTransverseStaticRunResult):
         raise TypeError("result must be a PRTransverseStaticRunResult")
@@ -587,6 +587,9 @@ def pr_transverse_static_result_to_run_data(
     if psi.shape != (nz, nx, ny):
         raise ValueError("psi_final does not match grid_summary")
     profile = result.resolved_profile
+    material_response = profile.get("material_response", {}).get(
+        "model", "nonlinear"
+    )
     state = _state_from_potential_for_products(
         psi,
         dx_normalized=float(profile["dx_normalized"]),
@@ -606,7 +609,7 @@ def pr_transverse_static_result_to_run_data(
     spatial_units = {"x": "um", "y": "um"}
     volume_units = {"z": "um", "x": "um", "y": "um"}
     fields = FieldCollection()
-    for key, name, value, kind, cmap in (
+    volume_fields = [
         ("psi", "PR Electrostatic Potential", state.psi, "pr_potential", "coolwarm"),
         ("P", "Normalized Carrier Density", state.carrier_density, "pr_carrier", "viridis"),
         ("E_x", "Transverse Space-Charge Field E_x", state.E_x, "pr_space_charge", "coolwarm"),
@@ -621,19 +624,25 @@ def pr_transverse_static_result_to_run_data(
         ),
         (
             "equilibrium_residual",
-            "Authoritative Zero-Flux Static Residual",
+            (
+                "Material-Response Consistency Residual"
+                if material_response == "linearized"
+                else "Authoritative Zero-Flux Static Residual"
+            ),
             result.equilibrium_residual_stack,
             "residual",
             "coolwarm",
         ),
-        (
+    ]
+    if result.td_rhs_residual_stack is not None:
+        volume_fields.append((
             "td_rhs_residual",
             "Diagnostic Production TD RHS at Zero-Flux Static State",
             result.td_rhs_residual_stack,
             "residual",
             "coolwarm",
-        ),
-    ):
+        ))
+    for key, name, value, kind, cmap in volume_fields:
         fields.add(key, make_field(
             key, name, value, ("z", "x", "y"), kind, volume_units,
             "longitudinal", quantity=key, value_unit="1", colormap=cmap,

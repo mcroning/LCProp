@@ -23,6 +23,7 @@ from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.pr.specs import PRMaterialSpec, PR_MATERIAL_ID
 from lcprop.pr.transport_common import pack_portable, unpack_portable
 from lcprop.pr.transverse.specs import (
+    PR_FULL_TRANSVERSE_PROFILE_V1,
     PRTransverseBoundaryProfile,
     PRTransverseDielectricProfile,
     PRTransverseProjectionProfile,
@@ -84,6 +85,11 @@ def _validate_request(request: PRTransverseRunRequest) -> None:
     request.projection.validate()
     request.solver.validate()
     request.backend.validate()
+    if request.boundary.profile_id != PR_FULL_TRANSVERSE_PROFILE_V1:
+        raise ValueError(
+            "time-dependent Profile v1 does not support the periodic biased "
+            "electrical profile"
+        )
     validate_channel_launch_elements(
         request.launch_elements,
         n_channels=len(request.beams.channels),

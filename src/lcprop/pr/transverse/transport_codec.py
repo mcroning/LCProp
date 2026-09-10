@@ -25,6 +25,7 @@ from lcprop.pr.transport_common import pack_portable, unpack_portable
 from lcprop.pr.transverse.specs import (
     PRTransverseBoundaryProfile,
     PRTransverseDielectricProfile,
+    PRTransverseMaterialResponseSpec,
     PRTransverseProjectionProfile,
     PRTransverseTransportProfile,
 )
@@ -72,6 +73,13 @@ def _validate_request(request: PRTransverseStaticRunRequest) -> None:
     request.dielectric.validate()
     request.boundary.validate()
     request.projection.validate()
+    request.material_response.validate_configuration(
+        material_applied_field=request.material.applied_field,
+        transport=request.transport,
+        dielectric=request.dielectric,
+        boundary=request.boundary,
+        projection=request.projection,
+    )
     request.solver.validate()
     request.backend.validate()
     validate_channel_launch_elements(
@@ -105,6 +113,7 @@ def encode_pr_transverse_static_transport_request(request: PRTransverseStaticRun
         "dielectric": asdict(request.dielectric),
         "boundary": asdict(request.boundary),
         "projection": asdict(request.projection),
+        "material_response": asdict(request.material_response),
         "solver": pack_portable(request.solver, arrays, "solver"),
         "backend": asdict(request.backend),
         "launch_elements": encode_launch_elements(request.launch_elements),
@@ -131,6 +140,9 @@ def decode_pr_transverse_static_transport_request(metadata: Mapping[str, Any], a
             dielectric=PRTransverseDielectricProfile(**values["dielectric"]),
             boundary=PRTransverseBoundaryProfile(**values["boundary"]),
             projection=PRTransverseProjectionProfile(**values["projection"]),
+            material_response=PRTransverseMaterialResponseSpec(
+                **values.get("material_response", {})
+            ),
             solver=PRTransverseStaticWorkflowOptions(
                 material_solver=material_solver,
                 discrete_corrector=discrete_corrector,
@@ -232,6 +244,11 @@ def _validate_result_shapes(values: Mapping[str, Any]) -> None:
         "equilibrium_residual_stack": (nz, nx, ny),
         "td_rhs_residual_stack": (nz, nx, ny),
     }
+    material_response = (
+        values.get("resolved_profile", {})
+        .get("material_response", {})
+        .get("model", "nonlinear")
+    )
     for name, shape in expected.items():
         value = values.get(name)
         if name in expected_omitted:
@@ -239,6 +256,12 @@ def _validate_result_shapes(values: Mapping[str, Any]) -> None:
                 raise TransportCodecError(
                     f"Fast PR result must omit {name}"
                 )
+            continue
+        if (
+            name == "td_rhs_residual_stack"
+            and material_response == "linearized"
+            and value is None
+        ):
             continue
         if not isinstance(value, np.ndarray):
             raise TransportCodecError(f"PR result {name} must be a numeric array")

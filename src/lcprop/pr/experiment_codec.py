@@ -44,8 +44,10 @@ from lcprop.pr.static_workflow import (
 )
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.pr.transverse.specs import (
+    PR_FULL_TRANSVERSE_PROFILE_V1,
     PRTransverseBoundaryProfile,
     PRTransverseDielectricProfile,
+    PRTransverseMaterialResponseSpec,
     PRTransverseProjectionProfile,
     PRTransverseRunRequest,
     PRTransverseSolverOptions,
@@ -63,8 +65,9 @@ from lcprop.pr.transverse.static_workflow import (
 )
 
 
-PR_EXPERIMENT_REQUEST_SCHEMA_VERSION = 2
+PR_EXPERIMENT_REQUEST_SCHEMA_VERSION = 3
 _PR_LEGACY_EXPERIMENT_REQUEST_SCHEMA_VERSION = 1
+_PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION = 2
 
 
 def _encode_launch_elements(
@@ -145,6 +148,19 @@ def _validate_transverse_request(
     request.dielectric.validate()
     request.boundary.validate()
     request.projection.validate()
+    if isinstance(request, PRTransverseStaticRunRequest):
+        request.material_response.validate_configuration(
+            material_applied_field=request.material.applied_field,
+            transport=request.transport,
+            dielectric=request.dielectric,
+            boundary=request.boundary,
+            projection=request.projection,
+        )
+    elif request.boundary.profile_id != PR_FULL_TRANSVERSE_PROFILE_V1:
+        raise ValueError(
+            "time-dependent Profile v1 does not support the periodic biased "
+            "electrical profile"
+        )
     request.solver.validate()
     request.backend.validate()
     if request.scattering is not None:
@@ -179,6 +195,7 @@ def encode_pr_transverse_static_request(
         "dielectric": asdict(request.dielectric),
         "boundary": asdict(request.boundary),
         "projection": asdict(request.projection),
+        "material_response": asdict(request.material_response),
         "solver": asdict(request.solver),
         "backend": asdict(request.backend),
         "scattering": (
@@ -230,6 +247,7 @@ def _payload(value: Any) -> dict[str, Any]:
     version = payload.get("schema_version")
     if type(version) is not int or version not in (
         _PR_LEGACY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+        _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
     ):
         raise ExperimentSchemaError(
@@ -247,12 +265,12 @@ def _payload(value: Any) -> dict[str, Any]:
         },
         optional=(
             {"launch_elements"}
-            if version == PR_EXPERIMENT_REQUEST_SCHEMA_VERSION
+            if version >= _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION
             else set()
         ),
         name="PR request_payload",
     )
-    if version == PR_EXPERIMENT_REQUEST_SCHEMA_VERSION and (
+    if version >= _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION and (
         "launch_elements" not in payload
     ):
         raise ExperimentPayloadError(
@@ -356,6 +374,7 @@ def decode_pr_transverse_static_request(
     version = payload.get("schema_version")
     if type(version) is not int or version not in (
         _PR_LEGACY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+        _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
     ):
         raise ExperimentSchemaError(
@@ -376,15 +395,20 @@ def decode_pr_transverse_static_request(
             "solver",
             "backend",
             "scattering",
-        },
-        optional=(
+        }
+        | (
             {"launch_elements"}
+            if version >= _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION
+            else set()
+        )
+        | (
+            {"material_response"}
             if version == PR_EXPERIMENT_REQUEST_SCHEMA_VERSION
             else set()
         ),
         name="PR transverse-static request_payload",
     )
-    if version == PR_EXPERIMENT_REQUEST_SCHEMA_VERSION and (
+    if version >= _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION and (
         "launch_elements" not in payload
     ):
         raise ExperimentPayloadError(
@@ -443,6 +467,20 @@ def decode_pr_transverse_static_request(
                     PRTransverseProjectionProfile,
                     payload["projection"],
                     name="PR transverse-static request_payload.projection",
+                )
+            ),
+            material_response=PRTransverseMaterialResponseSpec(
+                **(
+                    dataclass_values(
+                        PRTransverseMaterialResponseSpec,
+                        payload["material_response"],
+                        name=(
+                            "PR transverse-static request_payload."
+                            "material_response"
+                        ),
+                    )
+                    if "material_response" in payload
+                    else {}
                 )
             ),
             solver=PRTransverseStaticWorkflowOptions(
@@ -512,7 +550,10 @@ def decode_pr_transverse_timedependent_request(
     version = payload.get("schema_version")
     if (
         type(version) is not int
-        or version != PR_EXPERIMENT_REQUEST_SCHEMA_VERSION
+        or version not in (
+            _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+            PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+        )
     ):
         raise ExperimentSchemaError(
             "unsupported PR transverse-TD experiment request schema version: "

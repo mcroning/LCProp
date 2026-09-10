@@ -75,6 +75,11 @@ def _validate_request(request: PRTransverseRunRequest) -> None:
         raise ValueError(
             "Profile v1 requires explicit backend='numpy' or backend='cupy'"
         )
+    if request.boundary.profile_id != PR_FULL_TRANSVERSE_PROFILE_V1:
+        raise ValueError(
+            "time-dependent Profile v1 does not support the periodic biased "
+            "electrical profile"
+        )
     if float(request.material.applied_field) != 0.0:
         raise ValueError("Profile v1 requires material.applied_field=0")
 

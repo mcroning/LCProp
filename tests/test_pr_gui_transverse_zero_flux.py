@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication
 
 import lcprop.pr.transverse.static_workflow as transverse_static_module
 from lcprop.pr.gui.main_window import PRMainWindow
+from lcprop.pr.image_amplification import image_amplification_base_capabilities
 from lcprop.pr.gui.request_adapter import (
     validate_pr_transverse_static_gui_request,
 )
@@ -25,6 +26,11 @@ from lcprop.pr.specs import PR_MATERIAL_ID
 from lcprop.pr.transverse.operations import (
     PR_TRANSVERSE_STATIC_OPERATION,
     PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
+)
+from lcprop.pr.transverse.specs import (
+    PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1,
+    PR_MATERIAL_RESPONSE_LINEARIZED,
+    PR_MATERIAL_RESPONSE_NONLINEAR,
 )
 from lcprop.pr.transverse.static_workflow import (
     PRTransverseStaticRunRequest,
@@ -78,10 +84,10 @@ def test_gui_static_choice_identifies_canonical_2d_and_legacy_paths(app):
     assert canonical_index >= 0
     assert legacy_index >= 0
     assert canonical_index < legacy_index
-    assert "2D transverse zero-flux" in (
+    assert "Full transverse PR transport" in (
         window.evolution_panel.workflow.itemText(canonical_index)
     )
-    assert "legacy x-only" in window.evolution_panel.workflow.itemText(
+    assert "Reduced x-only PR transport" in window.evolution_panel.workflow.itemText(
         legacy_index
     )
     assert window.runner.registered_operations == (
@@ -122,12 +128,92 @@ def test_gui_builds_valid_canonical_transverse_static_request(app):
     assert request.solver.optical_substeps == 1
     assert preflight.aperture is not None
     assert "Workflow: pr_transverse_static" in summary
-    assert "nonlinear 2D transverse zero-flux" in summary
+    assert "Static material model: Fully nonlinear" in summary
+    assert "Transport: Full transverse PR transport" in summary
     assert "Solved material fields: E_x and E_y" in summary
     assert "Scalar optical projection: E_active = E_x" in summary
     assert window.evolution_panel.Nt.isHidden()
     assert window.evolution_panel.dt_normalized.isHidden()
     assert window.evolution_panel.integrator.isHidden()
+    window.close()
+
+
+def test_gui_exposes_linearized_response_only_for_full_transverse_static(app):
+    window = _configured_window(app)
+    panel = window.evolution_panel
+    linearized_index = panel.material_response.findData(
+        PR_MATERIAL_RESPONSE_LINEARIZED
+    )
+    panel.material_response.setCurrentIndex(linearized_index)
+    panel.reference_intensity.setValue(1.5)
+    panel.transverse_applied_field.setValue(0.25)
+
+    request = window.build_request()
+    summary = window.describe_request(request)
+    assert request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+    assert request.material_response.reference_intensity == 1.5
+    assert request.boundary.profile_id == (
+        PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1
+    )
+    assert request.boundary.applied_field_x == 0.25
+    assert "Linearized material response [Experimental]" in summary
+    assert "Linearization intensity I₀: 1.5" in summary
+    assert "fixed harmonic mean field" in summary
+    assert not panel.reference_intensity.isHidden()
+    assert not panel.transverse_applied_field.isHidden()
+
+    panel.set_workflow_id(PR_TRANSVERSE_TIMEDEPENDENT_OPERATION.workflow_id)
+    assert panel.material_response.currentData() == PR_MATERIAL_RESPONSE_NONLINEAR
+    assert panel.material_response.isHidden()
+    assert panel.reference_intensity.isHidden()
+    window.close()
+
+
+@pytest.mark.parametrize(
+    ("material_response", "expected_badge", "expected_status", "warns"),
+    (
+        (
+            PR_MATERIAL_RESPONSE_NONLINEAR,
+            "[Validated]",
+            "Validated for the Image Amplification experiment.",
+            False,
+        ),
+        (
+            PR_MATERIAL_RESPONSE_LINEARIZED,
+            "[Experimental]",
+            "Experimental: compatible architecture",
+            True,
+        ),
+    ),
+)
+def test_image_amplification_status_tracks_transverse_material_response(
+    app,
+    material_response,
+    expected_badge,
+    expected_status,
+    warns,
+):
+    window = _configured_window(app)
+    panel = window.evolution_panel
+    panel.set_image_amplification_mode(True)
+    response_index = panel.material_response.findData(material_response)
+    panel.material_response.setCurrentIndex(response_index)
+
+    workflow_index = panel.workflow.findData(PR_TRANSVERSE_STATIC_WORKFLOW)
+    assert expected_badge in panel.workflow.itemText(workflow_index)
+    assert expected_status in panel.algorithm_status.text()
+
+    request = window.build_request()
+    capability = next(
+        capability
+        for capability in image_amplification_base_capabilities()
+        if capability.workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW
+    )
+    before = window.results_panel.workspace.console.toPlainText()
+    window._append_image_amplification_validation_warning(capability, request)
+    after = window.results_panel.workspace.console.toPlainText()
+    warning = "experimental; specialized validation is pending"
+    assert (warning in after[len(before):]) is warns
     window.close()
 
 

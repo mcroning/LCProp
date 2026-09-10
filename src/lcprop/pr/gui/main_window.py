@@ -98,6 +98,7 @@ from lcprop.pr.transverse.operations import (
     PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
 )
 from lcprop.pr.transverse.specs import (
+    PR_MATERIAL_RESPONSE_LINEARIZED,
     PRTransverseRunRequest,
     PRTransverseRunResult,
     PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
@@ -110,6 +111,18 @@ from lcprop.pr.transverse.static_workflow import (
 from lcprop.pr.workflow import continue_pr_timedependent
 from lcprop.runners.base import RunnerResult
 from lcprop.runners.local import LocalRunner
+
+
+def _image_amplification_validation_status(capability, base_request) -> str:
+    """Resolve IA validation without changing workflow-level capability data."""
+
+    if (
+        isinstance(base_request, PRTransverseStaticRunRequest)
+        and base_request.material_response.model
+        == PR_MATERIAL_RESPONSE_LINEARIZED
+    ):
+        return "compatible_validation_pending"
+    return capability.validation_status
 
 
 def _continue_pr_operation(
@@ -405,6 +418,16 @@ class PRMainWindow(QWidget):
             "grid": self.grid_panel.grid(),
             "material": self.material_panel.material(),
             "solver": solver,
+            "material_response": (
+                self.evolution_panel.transverse_material_response()
+                if workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW
+                else None
+            ),
+            "transverse_applied_field": (
+                self.evolution_panel.transverse_applied_field.value()
+                if workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW
+                else 0.0
+            ),
             "backend": self.evolution_panel.backend_spec(),
             "beam_stack": self.beam_panel.beam_stack_definition,
             "launch_elements": self.beam_panel.launch_elements(),
@@ -422,6 +445,10 @@ class PRMainWindow(QWidget):
         if workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
             self.evolution_panel.set_transverse_solver(state["solver"])
         elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
+            self.evolution_panel.set_transverse_material_response(
+                state["material_response"],
+                applied_field_x=state["transverse_applied_field"],
+            )
             self.evolution_panel.set_transverse_static_solver(state["solver"])
         elif workflow_id == PR_STATIC_WORKFLOW:
             self.evolution_panel.set_static_solver(state["solver"])
@@ -592,9 +619,12 @@ class PRMainWindow(QWidget):
             channels = request.launch_configuration.beams.channels
             pump = channels[request.pump_channel_index]
             signal = channels[request.signal_channel_index]
+            validation_status = _image_amplification_validation_status(
+                capability, prepared
+            )
             status = (
                 "Validated"
-                if capability.validation_status == "compatible_and_validated"
+                if validation_status == "compatible_and_validated"
                 else "Experimental — validation pending"
             )
             lines = [
@@ -800,8 +830,18 @@ class PRMainWindow(QWidget):
                 f"Normalized timestep: {request.solver.dt_normalized:g}",
             ])
         elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
+            linearized = (
+                request.material_response.model
+                == PR_MATERIAL_RESPONSE_LINEARIZED
+            )
             lines.extend([
-                "Static material model: nonlinear 2D transverse zero-flux",
+                (
+                    "Static material model: Linearized material response "
+                    "[Experimental]"
+                    if linearized
+                    else "Static material model: Fully nonlinear"
+                ),
+                "Transport: Full transverse PR transport",
                 "Authoritative material state: periodic zero-mean psi",
                 "Solved material fields: E_x and E_y",
                 "Scalar optical projection: E_active = E_x",
@@ -810,6 +850,19 @@ class PRMainWindow(QWidget):
                     f"{request.solver.max_coupled_iterations}"
                 ),
             ])
+            if linearized:
+                lines.extend([
+                    (
+                        "Linearization intensity I₀: "
+                        f"{request.material_response.reference_intensity:g} "
+                        "normalized total transport intensity"
+                    ),
+                    (
+                        "Transverse applied mean field: "
+                        f"{request.boundary.applied_field_x:g} normalized"
+                    ),
+                    "Electrical ensemble: fixed harmonic mean field",
+                ])
         else:
             lines.extend([
                 (
@@ -1182,11 +1235,9 @@ class PRMainWindow(QWidget):
                 for capability in image_amplification_base_capabilities()
                 if capability.workflow_id == composite.base_workflow_id
             )
-            if capability.validation_status != "compatible_and_validated":
-                self.results_panel.append_console(
-                    "WARNING: selected Image Amplification base algorithm is "
-                    "experimental; specialized validation is pending."
-                )
+            self._append_image_amplification_validation_warning(
+                capability, preflight_request
+            )
         elif isinstance(request, PRImageAmplificationRunRequest):
             preflight_request, _transmission, _grating = (
                 prepare_image_amplification_workflow_request(request)
@@ -1227,6 +1278,20 @@ class PRMainWindow(QWidget):
         self._thread = thread
         self._worker = worker
         thread.start()
+
+    def _append_image_amplification_validation_warning(
+        self,
+        capability,
+        base_request,
+    ) -> None:
+        if (
+            _image_amplification_validation_status(capability, base_request)
+            != "compatible_and_validated"
+        ):
+            self.results_panel.append_console(
+                "WARNING: selected Image Amplification base algorithm is "
+                "experimental; specialized validation is pending."
+            )
 
     def _set_configuration_enabled(self, enabled: bool) -> None:
         for panel in (
@@ -1303,8 +1368,10 @@ class PRMainWindow(QWidget):
                     f"elapsed={progress.elapsed_wall_time:.3f} s"
                 )
                 return
+            linearized = diagnostics.get("material_response") == "linearized"
             self.status_label.setText(
-                "2D zero-flux iteration "
+                ("Linearized outer iteration " if linearized else "2D zero-flux iteration ")
+                +
                 f"{progress.completed_units}/{progress.total_units}"
             )
             self.results_panel.set_td_time_indicator(
@@ -1315,9 +1382,11 @@ class PRMainWindow(QWidget):
                 "PR transverse static progress: "
                 f"iteration {progress.completed_units}/"
                 f"{progress.total_units}; "
-                "equilibrium RMS="
-                f"{diagnostics.get('equilibrium_rms', float('nan')):.6g}; "
-                f"max={diagnostics.get('equilibrium_max', float('nan')):.6g}; "
+                +
+                ("material consistency RMS=" if linearized else "equilibrium RMS=")
+                +
+                f"{diagnostics.get('material_response_rms', float('nan')):.6g}; "
+                f"max={diagnostics.get('material_response_max', float('nan')):.6g}; "
                 f"elapsed={progress.elapsed_wall_time:.3f} s"
             )
             return
@@ -1515,18 +1584,24 @@ class PRMainWindow(QWidget):
                 )
             elif runner_result.kind == PR_TRANSVERSE_STATIC_WORKFLOW:
                 diagnostics = result.diagnostics
+                linearized = diagnostics.get("material_response") == "linearized"
+                model_name = (
+                    "linearized material-response"
+                    if linearized
+                    else "2D zero-flux"
+                )
                 if result.status == "cancelled":
                     self.run_status = "stopped"
                     self.status_label.setText("Stopped")
-                    message = "2D zero-flux static run cancelled"
+                    message = f"{model_name} static run cancelled"
                 elif result.status == "converged":
                     self.run_status = "completed"
                     self.status_label.setText("Converged")
-                    message = "2D zero-flux static solve converged"
+                    message = f"{model_name} static solve converged"
                 else:
                     self.run_status = "not_converged"
                     self.status_label.setText("Not converged")
-                    message = "2D zero-flux static solve did not converge"
+                    message = f"{model_name} static solve did not converge"
                 requested = int(
                     result.resolved_profile["solver"][
                         "max_coupled_iterations"
@@ -1538,7 +1613,12 @@ class PRMainWindow(QWidget):
                     "coupled iterations"
                 )
                 self.results_panel.append_console(
-                    "Authoritative zero-flux residual: "
+                    (
+                        "Material-response consistency residual: "
+                        if linearized
+                        else "Authoritative zero-flux residual: "
+                    )
+                    +
                     f"RMS={diagnostics['equilibrium_residual_rms']:.8g}; "
                     f"max={diagnostics['equilibrium_residual_max']:.8g}"
                 )
@@ -1548,14 +1628,21 @@ class PRMainWindow(QWidget):
                     f"max|E_y|={diagnostics['E_y_max_abs']:.8g}; "
                     f"carrier minimum={diagnostics['carrier_minimum']:.8g}"
                 )
-                solver_summary = diagnostics["discrete_corrector"]
-                self.results_panel.append_console(
-                    "Material solve work: "
-                    "Newton="
-                    f"{solver_summary['continuum_newton_iterations_attempted']}; "
-                    f"PCG={solver_summary['continuum_pcg_iterations']}; "
-                    f"termination={diagnostics['termination_reason']}"
-                )
+                if linearized:
+                    self.results_panel.append_console(
+                        "Material solve work: analytic Fourier response; "
+                        f"calls={diagnostics['material_response_calls']}; "
+                        f"termination={diagnostics['termination_reason']}"
+                    )
+                else:
+                    solver_summary = diagnostics["discrete_corrector"]
+                    self.results_panel.append_console(
+                        "Material solve work: "
+                        "Newton="
+                        f"{solver_summary['continuum_newton_iterations_attempted']}; "
+                        f"PCG={solver_summary['continuum_pcg_iterations']}; "
+                        f"termination={diagnostics['termination_reason']}"
+                    )
             else:
                 total_slices = int(result.grid_summary["Nz"])
                 z_reached_um = float(

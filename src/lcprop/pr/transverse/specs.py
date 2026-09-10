@@ -15,6 +15,15 @@ from lcprop.pr.specs import PRMaterialSpec
 
 
 PR_FULL_TRANSVERSE_PROFILE_V1 = "pr_full_transverse_unbiased_reference_v1"
+PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1 = (
+    "pr_full_transverse_periodic_biased_current_v1"
+)
+PR_MATERIAL_RESPONSE_NONLINEAR = "nonlinear"
+PR_MATERIAL_RESPONSE_LINEARIZED = "linearized"
+PR_MATERIAL_RESPONSE_MODELS = (
+    PR_MATERIAL_RESPONSE_NONLINEAR,
+    PR_MATERIAL_RESPONSE_LINEARIZED,
+)
 PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW = "pr_transverse_timedependent"
 PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE = "explicit_euler_reference"
 PR_TRANSVERSE_IMEX_EULER = "spectral_imex_euler"
@@ -69,7 +78,7 @@ class PRTransverseProjectionProfile:
 
 @dataclass(frozen=True)
 class PRTransverseBoundaryProfile:
-    """Periodic unbiased electrical boundary and potential-gauge profile."""
+    """Periodic electrical boundary, mean-field, and potential-gauge profile."""
 
     profile_id: str = PR_FULL_TRANSVERSE_PROFILE_V1
     x_boundary: str = "periodic"
@@ -78,14 +87,90 @@ class PRTransverseBoundaryProfile:
     applied_field_x: float = 0.0
 
     def validate(self) -> None:
-        if self.profile_id != PR_FULL_TRANSVERSE_PROFILE_V1:
+        if self.profile_id not in (
+            PR_FULL_TRANSVERSE_PROFILE_V1,
+            PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1,
+        ):
             raise ValueError("unsupported transverse electrical boundary profile")
         if self.x_boundary != "periodic" or self.y_boundary != "periodic":
             raise ValueError("Profile v1 requires periodic x and y boundaries")
         if self.potential_gauge != "zero_mean_per_z_slice":
             raise ValueError("Profile v1 requires zero-mean psi on every z slice")
-        if float(self.applied_field_x) != 0.0:
+        if not math.isfinite(float(self.applied_field_x)):
+            raise ValueError("transverse applied field must be finite")
+        if (
+            self.profile_id == PR_FULL_TRANSVERSE_PROFILE_V1
+            and float(self.applied_field_x) != 0.0
+        ):
             raise ValueError("Profile v1 is unbiased and requires E_app=0")
+
+
+@dataclass(frozen=True)
+class PRTransverseMaterialResponseSpec:
+    """Independent full-transverse constitutive material-response axis.
+
+    The nonlinear default preserves the established Profile-v1 workflow.
+    Linearized execution requires an explicit uniform total transport
+    reference intensity; no background or beam-derived value is inferred.
+    """
+
+    model: str = PR_MATERIAL_RESPONSE_NONLINEAR
+    reference_intensity: float | None = None
+
+    def validate(self) -> None:
+        if self.model not in PR_MATERIAL_RESPONSE_MODELS:
+            raise ValueError(
+                "material response must be one of "
+                + ", ".join(PR_MATERIAL_RESPONSE_MODELS)
+            )
+        if self.model == PR_MATERIAL_RESPONSE_NONLINEAR:
+            if self.reference_intensity is not None:
+                raise ValueError(
+                    "nonlinear material response does not use reference_intensity"
+                )
+            return
+        value = self.reference_intensity
+        if value is None or not math.isfinite(float(value)) or float(value) <= 0.0:
+            raise ValueError(
+                "linearized material response requires a finite positive "
+                "reference_intensity"
+            )
+
+    def validate_configuration(
+        self,
+        *,
+        material_applied_field: float,
+        transport: PRTransverseTransportProfile,
+        dielectric: PRTransverseDielectricProfile,
+        boundary: PRTransverseBoundaryProfile,
+        projection: PRTransverseProjectionProfile,
+    ) -> None:
+        """Validate profile identity and the single transverse bias owner."""
+
+        self.validate()
+        if float(material_applied_field) != 0.0:
+            raise ValueError(
+                "full-transverse workflows require zero normalized applied "
+                "field in the reduced x-only material setting"
+            )
+        component_profile_ids = {
+            transport.profile_id,
+            dielectric.profile_id,
+            projection.profile_id,
+        }
+        expected_boundary_profile = (
+            PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1
+            if self.model == PR_MATERIAL_RESPONSE_LINEARIZED
+            else PR_FULL_TRANSVERSE_PROFILE_V1
+        )
+        if (
+            component_profile_ids != {PR_FULL_TRANSVERSE_PROFILE_V1}
+            or boundary.profile_id != expected_boundary_profile
+        ):
+            raise ValueError(
+                "transverse component and electrical boundary profiles must "
+                "match the selected material response"
+            )
 
 
 @dataclass(frozen=True)
@@ -166,12 +251,17 @@ class PRTransverseRunResult:
 
 __all__ = [
     "PR_FULL_TRANSVERSE_PROFILE_V1",
+    "PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1",
+    "PR_MATERIAL_RESPONSE_LINEARIZED",
+    "PR_MATERIAL_RESPONSE_MODELS",
+    "PR_MATERIAL_RESPONSE_NONLINEAR",
     "PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE",
     "PR_TRANSVERSE_IMEX_EULER",
     "PR_TRANSVERSE_INTEGRATORS",
     "PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW",
     "PRTransverseBoundaryProfile",
     "PRTransverseDielectricProfile",
+    "PRTransverseMaterialResponseSpec",
     "PRTransverseProjectionProfile",
     "PRTransverseRunRequest",
     "PRTransverseRunResult",

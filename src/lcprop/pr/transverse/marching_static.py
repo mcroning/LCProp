@@ -372,6 +372,11 @@ def _validate_request(request: PRTransverseMarchingStaticRunRequest) -> None:
         raise ValueError(
             "marching static reference requires explicit backend='numpy' or 'cupy'"
         )
+    if request.boundary.profile_id != PR_FULL_TRANSVERSE_PROFILE_V1:
+        raise ValueError(
+            "marching static Profile v1 does not support the periodic biased "
+            "electrical profile"
+        )
     if float(request.material.applied_field) != 0.0:
         raise ValueError("Profile v1 requires material.applied_field=0")
 

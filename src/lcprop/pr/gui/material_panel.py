@@ -58,7 +58,9 @@ class PRMaterialPanel(QWidget):
             "Uniform background (normalized)",
             self.uniform_background_intensity,
         )
-        primary.addRow("Applied field (normalized)", self.applied_field)
+        primary.addRow(
+            "Reduced x-only applied field (normalized)", self.applied_field
+        )
         primary.addRow("Gain-length product", self.gain_length_product)
         primary.addRow("Refractive index", self.refractive_index)
         layout.addLayout(primary)

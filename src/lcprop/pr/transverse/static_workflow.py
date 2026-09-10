@@ -34,11 +34,21 @@ from lcprop.pr.scattering import (
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.specs import PRMaterialSpec
 from lcprop.pr.transverse.diagnostics import state_diagnostics
+from lcprop.pr.transverse.linearized_reference import (
+    FIXED_MEAN_FIELD_ENSEMBLE,
+    PR_PERIODIC_BIASED_LINEARIZED_REFERENCE_V1,
+    PRBiasedLinearizedReferenceSpec,
+    solve_pr_biased_linearized_reference,
+)
 from lcprop.pr.transverse.projection import project_active_field
 from lcprop.pr.transverse.specs import (
+    PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1,
     PR_FULL_TRANSVERSE_PROFILE_V1,
+    PR_MATERIAL_RESPONSE_LINEARIZED,
+    PR_MATERIAL_RESPONSE_NONLINEAR,
     PRTransverseBoundaryProfile,
     PRTransverseDielectricProfile,
+    PRTransverseMaterialResponseSpec,
     PRTransverseProjectionProfile,
     PRTransverseTransportProfile,
 )
@@ -145,6 +155,9 @@ class PRTransverseStaticRunRequest:
     initial_A: Any | None = None
     initial_psi: Any | None = None
     scattering: PRCanonicalScatteringSpec | None = None
+    material_response: PRTransverseMaterialResponseSpec = field(
+        default_factory=PRTransverseMaterialResponseSpec
+    )
 
 
 @dataclass(frozen=True)
@@ -233,6 +246,13 @@ def _validate_request(request: PRTransverseStaticRunRequest) -> None:
     request.dielectric.validate()
     request.boundary.validate()
     request.projection.validate()
+    request.material_response.validate_configuration(
+        material_applied_field=request.material.applied_field,
+        transport=request.transport,
+        dielectric=request.dielectric,
+        boundary=request.boundary,
+        projection=request.projection,
+    )
     request.solver.validate()
     request.backend.validate()
     LaunchConfiguration(request.beams, request.launch_elements)
@@ -244,12 +264,14 @@ def _validate_request(request: PRTransverseStaticRunRequest) -> None:
             "full-transverse static workflow requires explicit "
             "backend='numpy' or backend='cupy'"
         )
-    if request.backend.backend == "numpy" and request.backend.precision != "float64":
+    if (
+        request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR
+        and request.backend.backend == "numpy"
+        and request.backend.precision != "float64"
+    ):
         raise ValueError(
             "full-transverse static NumPy reference requires precision='float64'"
         )
-    if float(request.material.applied_field) != 0.0:
-        raise ValueError("Profile v1 requires material.applied_field=0")
 
 
 def _metrics(value, *, xp) -> tuple[float, float]:
@@ -588,6 +610,63 @@ def _criteria_met(metrics, options: PRTransverseStaticWorkflowOptions) -> bool:
     )
 
 
+@dataclass(frozen=True)
+class _LinearizedVolumeResponse:
+    delta_psi: np.ndarray
+    delta_mean_current: np.ndarray
+    mean_intensity_perturbation: np.ndarray
+    plane_solves: int
+    forward_fft_count: int = 1
+    inverse_fft_count: int = 4
+
+
+def _linearized_material_response(
+    source,
+    *,
+    request: PRTransverseStaticRunRequest,
+    dx_normalized: float,
+    dy_normalized: float,
+):
+    """Apply the commissioned frozen-intensity operator to a source batch."""
+
+    reference_intensity = request.material_response.reference_intensity
+    if reference_intensity is None:  # guarded by request validation
+        raise ValueError("linearized material response requires reference_intensity")
+    source_volume = np.asarray(source)
+    if source_volume.ndim != 3:
+        raise ValueError("production linearized source must have shape (Nz, Nx, Ny)")
+    spec = PRBiasedLinearizedReferenceSpec(
+        reference_intensity=float(reference_intensity),
+        applied_field=float(request.boundary.applied_field_x),
+        dx_normalized=dx_normalized,
+        dy_normalized=dy_normalized,
+        m_y=float(request.transport.m_y),
+        h_y=float(request.dielectric.h_y),
+    )
+    potential = np.empty_like(source_volume)
+    mean_current = np.empty((source_volume.shape[0], 2), dtype=source_volume.dtype)
+    mean_intensity = np.empty(source_volume.shape[0], dtype=source_volume.dtype)
+    for plane_index, source_plane in enumerate(source_volume):
+        response = solve_pr_biased_linearized_reference(
+            source_plane,
+            spec=spec,
+            backend=request.backend,
+        )
+        potential[plane_index] = np.asarray(asnumpy(response.delta_psi))
+        mean_current[plane_index] = np.asarray(
+            asnumpy(response.delta_mean_current)
+        )
+        mean_intensity[plane_index] = float(
+            np.asarray(asnumpy(response.mean_intensity_perturbation))
+        )
+    return _LinearizedVolumeResponse(
+        delta_psi=potential,
+        delta_mean_current=mean_current,
+        mean_intensity_perturbation=mean_intensity,
+        plane_solves=source_volume.shape[0],
+    )
+
+
 def _contains_coherent_interference(beams: BeamStack) -> bool:
     """Return whether two or more channels contribute coherent cross terms."""
 
@@ -840,6 +919,9 @@ def _run_pr_transverse_static_at_visibility(
     optical_seconds = 0.0
     material_seconds = 0.0
     zero_flux_material_seconds = 0.0
+    linearized_material_seconds = 0.0
+    material_response_calls = 0
+    latest_linearized_response = None
 
     def optical_pass(state):
         nonlocal optical_seconds
@@ -862,14 +944,32 @@ def _run_pr_transverse_static_at_visibility(
         optical_seconds += perf_counter() - pass_started
         return result
 
+    def material_residuals(state, source):
+        nonlocal material_response_calls, latest_linearized_response
+        if request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR:
+            return _residuals(
+                state,
+                source,
+                dx_normalized=dx_normalized,
+                dy_normalized=dy_normalized,
+                h_y=request.dielectric.h_y,
+                xp=xp,
+            )
+        response = _linearized_material_response(
+            source,
+            request=request,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+        )
+        material_response_calls += response.plane_solves
+        latest_linearized_response = response
+        residual = np.asarray(state) - np.asarray(asnumpy(response.delta_psi))
+        rms, maximum = _metrics(residual, xp=np)
+        return residual, np.zeros_like(residual), (rms, maximum, 0.0, 0.0)
+
     A_accepted, source_accepted = optical_pass(psi)
-    equilibrium, td_residual, metrics = _residuals(
-        psi,
-        source_accepted,
-        dx_normalized=dx_normalized,
-        dy_normalized=dy_normalized,
-        h_y=request.dielectric.h_y,
-        xp=xp,
+    equilibrium, td_residual, metrics = material_residuals(
+        psi, source_accepted
     )
     records: list[PRTransverseStaticCoupledRecord] = []
     material_records: list[PRTransverseStaticMaterialIterationRecord] = []
@@ -888,39 +988,60 @@ def _run_pr_transverse_static_at_visibility(
             break
         synchronize(xp)
         material_started = perf_counter()
-        material = _solve_pr_transverse_static_intensity_host_volume(
-            source_accepted,
-            dx_normalized=dx_normalized,
-            dy_normalized=dy_normalized,
-            initial_psi=psi,
-            h_y=request.dielectric.h_y,
-            options=request.solver.material_solver,
-            xp=xp,
-        )
-        synchronize(xp)
-        material_seconds += perf_counter() - material_started
-        zero_flux_material_seconds += material.elapsed_seconds
-        material_newton = sum(
-            summary.newton_iterations
-            for summary in material.plane_summaries
-        )
-        material_pcg = sum(
-            summary.pcg_iterations
-            for summary in material.plane_summaries
-        )
-        material_discrete_newton = 0
-        material_gmres = 0
-        if request.solver.record_iteration_history:
-            material_records.extend(
-                PRTransverseStaticMaterialIterationRecord(
-                    coupled_iteration=coupled_iteration,
-                    newton_record=record,
-                )
-                for record in material.iteration_records
+        if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
+            material = _linearized_material_response(
+                source_accepted,
+                request=request,
+                dx_normalized=dx_normalized,
+                dy_normalized=dy_normalized,
             )
-        material_proposal = material.psi
-        material_converged = material.converged
-        material_status = material.status
+            material_response_calls += material.plane_solves
+            latest_linearized_response = material
+            material_proposal = np.asarray(asnumpy(material.delta_psi))
+            material_converged = True
+            material_status = "analytic_frozen_intensity_solve"
+            material_newton = 0
+            material_pcg = 0
+            material_discrete_newton = 0
+            material_gmres = 0
+        else:
+            material = _solve_pr_transverse_static_intensity_host_volume(
+                source_accepted,
+                dx_normalized=dx_normalized,
+                dy_normalized=dy_normalized,
+                initial_psi=psi,
+                h_y=request.dielectric.h_y,
+                options=request.solver.material_solver,
+                xp=xp,
+            )
+            material_proposal = material.psi
+            material_converged = material.converged
+            material_status = material.status
+            material_newton = sum(
+                summary.newton_iterations
+                for summary in material.plane_summaries
+            )
+            material_pcg = sum(
+                summary.pcg_iterations
+                for summary in material.plane_summaries
+            )
+            material_discrete_newton = 0
+            material_gmres = 0
+            if request.solver.record_iteration_history:
+                material_records.extend(
+                    PRTransverseStaticMaterialIterationRecord(
+                        coupled_iteration=coupled_iteration,
+                        newton_record=record,
+                    )
+                    for record in material.iteration_records
+                )
+        synchronize(xp)
+        elapsed_material = perf_counter() - material_started
+        material_seconds += elapsed_material
+        if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
+            linearized_material_seconds += elapsed_material
+        else:
+            zero_flux_material_seconds += material.elapsed_seconds
         # The fixed-source residual volumes have served their convergence and
         # provenance purpose inside the material solve.  Do not retain them
         # through the coupled line search, which constructs refreshed residual
@@ -988,13 +1109,8 @@ def _run_pr_transverse_static_at_visibility(
             )
             if valid_trial:
                 trial_A, trial_source = optical_pass(trial_psi)
-                trial_equilibrium, trial_td, trial_metrics = _residuals(
-                    trial_psi,
-                    trial_source,
-                    dx_normalized=dx_normalized,
-                    dy_normalized=dy_normalized,
-                    h_y=request.dielectric.h_y,
-                    xp=xp,
+                trial_equilibrium, trial_td, trial_metrics = material_residuals(
+                    trial_psi, trial_source
                 )
                 if (
                     math.isfinite(trial_metrics[0])
@@ -1102,6 +1218,9 @@ def _run_pr_transverse_static_at_visibility(
                     "psi_current": np.asarray(asnumpy(psi)).copy()
                 },
                 diagnostics={
+                    "material_response": request.material_response.model,
+                    "material_response_rms": metrics[0],
+                    "material_response_max": metrics[1],
                     "equilibrium_rms": metrics[0],
                     "equilibrium_max": metrics[1],
                     "td_rhs_rms": metrics[2],
@@ -1126,13 +1245,8 @@ def _run_pr_transverse_static_at_visibility(
         rtol=float(request.solver.replay_rtol),
         atol=float(request.solver.replay_atol),
     ))
-    replay_equilibrium, replay_td_residual, replay_metrics = _residuals(
-        psi,
-        replay_source,
-        dx_normalized=dx_normalized,
-        dy_normalized=dy_normalized,
-        h_y=request.dielectric.h_y,
-        xp=xp,
+    replay_equilibrium, replay_td_residual, replay_metrics = material_residuals(
+        psi, replay_source
     )
     replay_diagnostics = {
         "field_match": bool(replay_field_match),
@@ -1156,7 +1270,11 @@ def _run_pr_transverse_static_at_visibility(
         termination_reason = "replay_mismatch"
     if converged and not _criteria_met(replay_metrics, request.solver):
         converged = False
-        termination_reason = "final_zero_flux_residual_not_met"
+        termination_reason = (
+            "final_material_response_consistency_not_met"
+            if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+            else "final_zero_flux_residual_not_met"
+        )
     equilibrium = replay_equilibrium
     td_residual = replay_td_residual
     metrics = replay_metrics
@@ -1250,6 +1368,43 @@ def _run_pr_transverse_static_at_visibility(
             "fft_batch_axes": "transverse_only",
         },
     })
+    if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
+        if latest_linearized_response is None:
+            raise RuntimeError("linearized material response provenance is unavailable")
+        delta_mean_current = np.asarray(
+            asnumpy(latest_linearized_response.delta_mean_current)
+        )
+        total_mean_current = delta_mean_current.copy()
+        total_mean_current[..., 0] -= (
+            float(request.material_response.reference_intensity)
+            * float(request.boundary.applied_field_x)
+        )
+        diagnostics.pop("td_rhs_residual_rms", None)
+        diagnostics.pop("td_rhs_residual_max", None)
+        diagnostics.pop("discrete_corrector", None)
+        diagnostics.update({
+            "material_response": PR_MATERIAL_RESPONSE_LINEARIZED,
+            "material_response_validation": "experimental",
+            "authoritative_static_residual": "material_response_consistency",
+            "material_response_consistency_rms": metrics[0],
+            "material_response_consistency_max": metrics[1],
+            "frozen_intensity_material_equation": "analytic_fourier_solve",
+            "outer_problem": "self_consistent_optical_material_fixed_point",
+            "nonlinear_material_iterations": "not_applicable",
+            "td_rhs_residual_role": "unavailable_for_linearized_static_response",
+            "material_response_calls": material_response_calls,
+            "reference_operator_fft_counts_per_call": {
+                "forward": latest_linearized_response.forward_fft_count,
+                "inverse": latest_linearized_response.inverse_fft_count,
+            },
+            "mean_current_per_plane": total_mean_current.tolist(),
+            "mean_intensity_perturbation_per_plane": np.asarray(
+                asnumpy(latest_linearized_response.mean_intensity_perturbation)
+            ).tolist(),
+        })
+    else:
+        diagnostics["material_response"] = PR_MATERIAL_RESPONSE_NONLINEAR
+        diagnostics["material_response_validation"] = "validated"
     scattering_provenance = None
     if request.scattering is not None:
         scattering_provenance = canonical_scattering_provenance(
@@ -1263,9 +1418,18 @@ def _run_pr_transverse_static_at_visibility(
             xp=xp,
         )
         diagnostics["canonical_scattering"] = scattering_provenance
+    physics_profile_id = (
+        PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1
+        if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+        else PR_FULL_TRANSVERSE_PROFILE_V1
+    )
     resolved_profile = {
-        "physics_profile_id": PR_FULL_TRANSVERSE_PROFILE_V1,
+        "physics_profile_id": physics_profile_id,
         "workflow": PR_TRANSVERSE_STATIC_WORKFLOW,
+        "transport_model": "full_transverse",
+        "material_response": asdict(request.material_response),
+        "requested_backend": request.backend.backend,
+        "precision": request.backend.precision,
         "grid_request": asdict(request.grid),
         "beam_request": asdict(request.beams),
         "material": asdict(request.material),
@@ -1278,6 +1442,16 @@ def _run_pr_transverse_static_at_visibility(
         "dx_normalized": dx_normalized,
         "dy_normalized": dy_normalized,
     }
+    if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
+        resolved_profile.update({
+            "linearized_model_id": PR_PERIODIC_BIASED_LINEARIZED_REFERENCE_V1,
+            "electrical_ensemble": FIXED_MEAN_FIELD_ENSEMBLE,
+            "reference_intensity": float(
+                request.material_response.reference_intensity
+            ),
+            "applied_field": float(request.boundary.applied_field_x),
+            "validation_status": "experimental",
+        })
     if scattering_provenance is not None:
         resolved_profile["canonical_scattering"] = scattering_provenance
     timing = {
@@ -1285,6 +1459,7 @@ def _run_pr_transverse_static_at_visibility(
         "optical_pass_seconds": optical_seconds,
         "material_solve_seconds": material_seconds,
         "zero_flux_material_seconds": zero_flux_material_seconds,
+        "linearized_material_seconds": linearized_material_seconds,
         "continuum_initializer_seconds": zero_flux_material_seconds,
         "discrete_corrector_seconds": 0.0,
     }
@@ -1296,7 +1471,11 @@ def _run_pr_transverse_static_at_visibility(
         psi_final=psi,
         source_intensity_stack=replay_source,
         equilibrium_residual_stack=authoritative_equilibrium,
-        td_rhs_residual_stack=td_residual,
+        td_rhs_residual_stack=(
+            None
+            if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+            else td_residual
+        ),
         power_initial=power_initial,
         power_final=power_final,
         converged=converged,
@@ -1358,6 +1537,7 @@ def _run_pr_transverse_static_visibility_continuation(
         "optical_pass_seconds",
         "material_solve_seconds",
         "zero_flux_material_seconds",
+        "linearized_material_seconds",
         "continuum_initializer_seconds",
         "discrete_corrector_seconds",
     )
@@ -1433,6 +1613,7 @@ def _run_pr_transverse_static_visibility_continuation(
         "optical_pass_seconds",
         "material_solve_seconds",
         "zero_flux_material_seconds",
+        "linearized_material_seconds",
         "continuum_initializer_seconds",
         "discrete_corrector_seconds",
     ):

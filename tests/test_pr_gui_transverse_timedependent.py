@@ -76,7 +76,7 @@ def test_gui_builds_canonical_transverse_td_request_and_registers_operation(app)
     summary = window.describe_request(request)
 
     assert window.evolution_panel.workflow.model().item(index).isEnabled()
-    assert "2D transverse zero-flux" in (
+    assert "Full transverse PR transport" in (
         window.evolution_panel.workflow.itemText(index)
     )
     assert isinstance(request, PRTransverseRunRequest)

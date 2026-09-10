@@ -20,8 +20,16 @@ from lcprop.pr.static_workflow import (
     PR_STATIC_WORKFLOW,
 )
 from lcprop.pr.transverse.specs import (
+    PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1,
+    PR_FULL_TRANSVERSE_PROFILE_V1,
+    PR_MATERIAL_RESPONSE_LINEARIZED,
+    PR_MATERIAL_RESPONSE_NONLINEAR,
+    PRTransverseBoundaryProfile,
+    PRTransverseDielectricProfile,
+    PRTransverseProjectionProfile,
     PRTransverseRunRequest,
     PRTransverseSolverOptions,
+    PRTransverseTransportProfile,
     PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
 )
 from lcprop.pr.transverse.static_workflow import (
@@ -124,21 +132,26 @@ def validate_pr_transverse_static_gui_request(
     request.dielectric.validate()
     request.boundary.validate()
     request.projection.validate()
+    request.material_response.validate_configuration(
+        material_applied_field=request.material.applied_field,
+        transport=request.transport,
+        dielectric=request.dielectric,
+        boundary=request.boundary,
+        projection=request.projection,
+    )
     if request.backend.backend not in ("numpy", "cupy"):
         raise ValueError(
             "2D zero-flux static workflow requires an explicit NumPy or "
             "CuPy backend"
         )
     if (
+        request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR
+        and
         request.backend.backend == "numpy"
         and request.backend.precision != "float64"
     ):
         raise ValueError(
             "2D zero-flux static NumPy execution requires float64 precision"
-        )
-    if float(request.material.applied_field) != 0.0:
-        raise ValueError(
-            "2D zero-flux Profile v1 requires zero normalized applied field"
         )
     return PRStaticRequestPreflight(aperture=aperture)
 
@@ -155,6 +168,11 @@ def validate_pr_transverse_gui_request(
     request.dielectric.validate()
     request.boundary.validate()
     request.projection.validate()
+    if request.boundary.profile_id != PR_FULL_TRANSVERSE_PROFILE_V1:
+        raise ValueError(
+            "time-dependent full-transverse execution supports only the "
+            "unbiased nonlinear Profile v1"
+        )
     if request.backend.backend not in ("numpy", "cupy"):
         raise ValueError(
             "2D zero-flux time-dependent workflow requires an explicit "
@@ -222,8 +240,26 @@ def build_pr_request(
     elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
         transverse_common = dict(common)
         transverse_common.pop("initial_E")
+        material_response = evolution_panel.transverse_material_response()
+        boundary_profile_id = (
+            PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1
+            if material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+            else PR_FULL_TRANSVERSE_PROFILE_V1
+        )
         request = PRTransverseStaticRunRequest(
             **transverse_common,
+            transport=PRTransverseTransportProfile(),
+            dielectric=PRTransverseDielectricProfile(),
+            boundary=PRTransverseBoundaryProfile(
+                profile_id=boundary_profile_id,
+                applied_field_x=(
+                    evolution_panel.transverse_applied_field.value()
+                    if material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+                    else 0.0
+                ),
+            ),
+            projection=PRTransverseProjectionProfile(),
+            material_response=material_response,
             initial_psi=None,
             solver=evolution_panel.transverse_static_solver(),
         )
@@ -320,6 +356,10 @@ def apply_pr_request(
         evolution_panel.set_transverse_solver(request.solver)
     elif isinstance(request, PRTransverseStaticRunRequest):
         evolution_panel.set_workflow_id(PR_TRANSVERSE_STATIC_WORKFLOW)
+        evolution_panel.set_transverse_material_response(
+            request.material_response,
+            applied_field_x=request.boundary.applied_field_x,
+        )
         evolution_panel.set_transverse_static_solver(request.solver)
     elif isinstance(request, PRStaticRunRequest):
         evolution_panel.set_workflow_id(PR_STATIC_WORKFLOW)

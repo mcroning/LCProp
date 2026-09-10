@@ -1,7 +1,8 @@
 """Full-transverse photorefractive production API.
 
-This package implements the frozen, unbiased isotropic Profile v1 without
-changing the established reduced-x A7 workflow.
+This package implements the established nonlinear Profile v1 and the
+experimental static linearized periodic biased profile without changing the
+reduced-x A7 workflow.
 """
 
 from lcprop.pr.transverse.operations import (
@@ -13,13 +14,18 @@ from lcprop.pr.transverse.products import (
     pr_transverse_static_result_to_run_data,
 )
 from lcprop.pr.transverse.specs import (
+    PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1,
     PR_FULL_TRANSVERSE_PROFILE_V1,
+    PR_MATERIAL_RESPONSE_LINEARIZED,
+    PR_MATERIAL_RESPONSE_MODELS,
+    PR_MATERIAL_RESPONSE_NONLINEAR,
     PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE,
     PR_TRANSVERSE_IMEX_EULER,
     PR_TRANSVERSE_INTEGRATORS,
     PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
     PRTransverseBoundaryProfile,
     PRTransverseDielectricProfile,
+    PRTransverseMaterialResponseSpec,
     PRTransverseProjectionProfile,
     PRTransverseRunRequest,
     PRTransverseRunResult,
@@ -71,7 +77,11 @@ from lcprop.pr.transverse.marching_static import (
 __all__ = [
     "PR_MARCHING_FLOAT64_MATERIAL_COMPLEX64_OPTICS_V1",
     "PR_MARCHING_FULL_FLOAT64_REFERENCE_V1",
+    "PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1",
     "PR_FULL_TRANSVERSE_PROFILE_V1",
+    "PR_MATERIAL_RESPONSE_LINEARIZED",
+    "PR_MATERIAL_RESPONSE_MODELS",
+    "PR_MATERIAL_RESPONSE_NONLINEAR",
     "PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE",
     "PR_TRANSVERSE_IMEX_EULER",
     "PR_TRANSVERSE_INTEGRATORS",
@@ -82,6 +92,7 @@ __all__ = [
     "PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW",
     "PRTransverseBoundaryProfile",
     "PRTransverseDielectricProfile",
+    "PRTransverseMaterialResponseSpec",
     "PRTransverseProjectionProfile",
     "PRTransverseRunRequest",
     "PRTransverseRunResult",
