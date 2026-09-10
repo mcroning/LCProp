@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from time import perf_counter
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -16,6 +16,26 @@ from lcprop.pr.transverse.transport import (
     spectral_wavevectors,
     state_from_potential,
 )
+
+
+CancellationCheck = Callable[[], bool]
+
+
+class _StaticCancellationRequested(Exception):
+    """Abort a discardable nonlinear material candidate at a safe checkpoint."""
+
+    def __init__(self, stage: str) -> None:
+        super().__init__(stage)
+        self.stage = stage
+
+
+def _raise_if_cancelled(
+    cancellation_check: CancellationCheck | None,
+    *,
+    stage: str,
+) -> None:
+    if cancellation_check is not None and cancellation_check():
+        raise _StaticCancellationRequested(stage)
 
 
 @dataclass(frozen=True)
@@ -743,6 +763,7 @@ def _pcg(
     options: PRTransverseStaticMaterialSolverOptions,
     relative_tolerance: float,
     absolute_tolerance: float,
+    cancellation_check: CancellationCheck | None = None,
     xp: Any = np,
 ) -> tuple[Any, int, bool, str, float, float]:
     """Solve the zero-flux Newton system with a true-residual PCG recurrence.
@@ -754,6 +775,7 @@ def _pcg(
     quantity on both NumPy and CuPy.
     """
 
+    _raise_if_cancelled(cancellation_check, stage="material_pcg_iteration")
     solution = xp.zeros_like(rhs)
     residual = rhs.copy()
     norm_rhs = scalar_float(xp.linalg.norm(rhs.ravel()))
@@ -778,6 +800,7 @@ def _pcg(
             norm_rhs,
         )
     for iteration in range(1, int(options.max_pcg_iterations) + 1):
+        _raise_if_cancelled(cancellation_check, stage="material_pcg_iteration")
         image = _jacobian_action(
             direction,
             weight=weight,
@@ -785,6 +808,7 @@ def _pcg(
             null_mask=null_mask,
             xp=xp,
         )
+        _raise_if_cancelled(cancellation_check, stage="material_pcg_iteration")
         curvature = scalar_float(xp.vdot(direction.ravel(), image.ravel()).real)
         if not math.isfinite(curvature) or curvature <= 0.0:
             return (
@@ -894,6 +918,7 @@ def _solve_plane(
     h_y: float,
     options: PRTransverseStaticMaterialSolverOptions,
     spectral_operators=None,
+    cancellation_check: CancellationCheck | None = None,
     xp: Any = np,
 ) -> tuple[
     Any,
@@ -902,6 +927,7 @@ def _solve_plane(
     PRTransverseStaticPlaneSummary,
     list[PRTransverseStaticNewtonRecord],
 ]:
+    _raise_if_cancelled(cancellation_check, stage="material_plane_boundary")
     if spectral_operators is None:
         spectral_operators = _symbols(
             intensity.shape,
@@ -929,6 +955,9 @@ def _solve_plane(
     status = "maximum_newton_iterations"
 
     for newton_iteration in range(int(options.max_newton_iterations) + 1):
+        _raise_if_cancelled(
+            cancellation_check, stage="material_newton_iteration"
+        )
         residual = _static_equilibrium_residual_arrays(
             psi,
             intensity,
@@ -937,6 +966,9 @@ def _solve_plane(
             dy_normalized=dy_normalized,
             h_y=h_y,
             xp=xp,
+        )
+        _raise_if_cancelled(
+            cancellation_check, stage="material_residual_construction"
         )
         td_residual = potential_rhs(
             psi,
@@ -983,6 +1015,7 @@ def _solve_plane(
             options=options,
             relative_tolerance=pcg_relative,
             absolute_tolerance=pcg_absolute,
+            cancellation_check=cancellation_check,
             xp=xp,
         )
         total_pcg += pcg_iterations
@@ -1011,6 +1044,9 @@ def _solve_plane(
         after_max = equilibrium_max
         backtracks = 0
         for backtracks in range(int(options.max_backtracks) + 1):
+            _raise_if_cancelled(
+                cancellation_check, stage="material_line_search"
+            )
             trial = _project_resolved_modes(
                 psi + step_scale * direction,
                 null_mask=null_mask,
@@ -1035,6 +1071,9 @@ def _solve_plane(
                     dy_normalized=dy_normalized,
                     h_y=h_y,
                     xp=xp,
+                )
+                _raise_if_cancelled(
+                    cancellation_check, stage="material_line_search"
                 )
                 trial_resolved_residual = _project_resolved_modes(
                     trial_residual,
@@ -1076,6 +1115,7 @@ def _solve_plane(
             status = "line_search_failed"
             break
 
+    _raise_if_cancelled(cancellation_check, stage="material_final_residual")
     residual = _static_equilibrium_residual_arrays(
         psi,
         intensity,
@@ -1267,6 +1307,7 @@ def _solve_pr_transverse_static_intensity_host_volume(
     initial_psi,
     h_y: float = 1.0,
     options: PRTransverseStaticMaterialSolverOptions | None = None,
+    cancellation_check: CancellationCheck | None = None,
     xp: Any = np,
 ) -> PRTransverseStaticMaterialResult:
     """Solve a retained host volume with only one backend plane live.
@@ -1321,6 +1362,7 @@ def _solve_pr_transverse_static_intensity_host_volume(
         xp=xp,
     )
     for plane_index in range(driving_volume.shape[0]):
+        _raise_if_cancelled(cancellation_check, stage="material_plane_boundary")
         driving_plane = xp.asarray(driving_volume[plane_index])
         initial_plane = xp.asarray(initial_volume[plane_index])
         psi_plane, residual_plane, td_plane, summary, plane_records = _solve_plane(
@@ -1332,6 +1374,7 @@ def _solve_pr_transverse_static_intensity_host_volume(
             h_y=h_y,
             options=resolved_options,
             spectral_operators=spectral_operators,
+            cancellation_check=cancellation_check,
             xp=xp,
         )
         psi_volume[plane_index] = np.asarray(asnumpy(psi_plane))

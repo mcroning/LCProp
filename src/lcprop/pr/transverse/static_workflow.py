@@ -57,6 +57,7 @@ from lcprop.pr.transverse.static import (
     PRTransverseDiscreteStaticNewtonRecord,
     PRTransverseStaticMaterialSolverOptions,
     PRTransverseStaticNewtonRecord,
+    _StaticCancellationRequested,
     _solve_pr_transverse_static_intensity_host_volume,
     derivative_null_residual,
     project_production_resolved_modes,
@@ -341,12 +342,15 @@ def _project_host_volume(
     dy_normalized: float,
     h_y: float,
     xp,
+    cancellation_check=None,
 ) -> np.ndarray:
     """Project a host longitudinal volume without a backend batch FFT."""
 
     source = np.asarray(volume)
     projected = np.empty_like(source)
     for plane_index in range(source.shape[0]):
+        if cancellation_check is not None and cancellation_check():
+            raise _StaticCancellationRequested("coupled_projection_plane")
         plane = project_production_resolved_modes(
             xp.asarray(source[plane_index]),
             dx_normalized=dx_normalized,
@@ -365,6 +369,7 @@ def _host_volume_state_validity(
     dy_normalized: float,
     h_y: float,
     xp,
+    cancellation_check=None,
 ) -> tuple[bool, float, float, float]:
     """Validate every retained plane while keeping state scratch slice-local."""
 
@@ -380,6 +385,8 @@ def _host_volume_state_validity(
     potential_max_abs = 0.0
     count = 0
     for plane_index, plane in enumerate(volume_array):
+        if cancellation_check is not None and cancellation_check():
+            raise _StaticCancellationRequested("coupled_validity_plane")
         state = state_from_potential(
             xp.asarray(plane),
             dx_normalized=dx_normalized,
@@ -523,6 +530,7 @@ def _residuals(
     dy_normalized: float,
     h_y: float,
     xp,
+    cancellation_check=None,
 ):
     potential_volume = np.asarray(psi)
     source_volume = np.asarray(source)
@@ -541,6 +549,8 @@ def _residuals(
     td_max = 0.0
     count = int(potential_volume.size)
     for plane_index in range(potential_volume.shape[0]):
+        if cancellation_check is not None and cancellation_check():
+            raise _StaticCancellationRequested("coupled_residual_plane")
         potential_plane = xp.asarray(potential_volume[plane_index])
         source_plane = xp.asarray(source_volume[plane_index])
         equilibrium_plane = static_equilibrium_residual(
@@ -626,6 +636,7 @@ def _linearized_material_response(
     request: PRTransverseStaticRunRequest,
     dx_normalized: float,
     dy_normalized: float,
+    cancellation_check=None,
 ):
     """Apply the commissioned frozen-intensity operator to a source batch."""
 
@@ -647,6 +658,8 @@ def _linearized_material_response(
     mean_current = np.empty((source_volume.shape[0], 2), dtype=source_volume.dtype)
     mean_intensity = np.empty(source_volume.shape[0], dtype=source_volume.dtype)
     for plane_index, source_plane in enumerate(source_volume):
+        if cancellation_check is not None and cancellation_check():
+            raise _StaticCancellationRequested("linearized_material_plane")
         response = solve_pr_biased_linearized_reference(
             source_plane,
             spec=spec,
@@ -698,6 +711,8 @@ def _optical_pass_host_volume(
     dx_normalized: float,
     dy_normalized: float,
     scattering_phase_stack=None,
+    cancellation_check=None,
+    cancellation_stage: str = "optical_z_march",
 ):
     """Propagate through host-retained material with slice-local GPU state."""
 
@@ -710,6 +725,8 @@ def _optical_pass_host_volume(
     A = A0.copy()
     intensity_before = None
     for z_index in range(grid.Nz):
+        if cancellation_check is not None and cancellation_check():
+            raise _StaticCancellationRequested(cancellation_stage)
         state = state_from_potential(
             xp.asarray(potential_volume[z_index]),
             dx_normalized=dx_normalized,
@@ -791,6 +808,8 @@ def _optical_pass_at_visibility(
     dx_normalized: float,
     dy_normalized: float,
     scattering_phase_stack=None,
+    cancellation_check=None,
+    cancellation_stage: str = "optical_z_march",
 ):
     """Return the exact endpoint or blended-visibility midpoint source.
 
@@ -812,6 +831,8 @@ def _optical_pass_at_visibility(
         "dx_normalized": dx_normalized,
         "dy_normalized": dy_normalized,
         "scattering_phase_stack": scattering_phase_stack,
+        "cancellation_check": cancellation_check,
+        "cancellation_stage": cancellation_stage,
     }
     if resolved == 1.0:
         return _optical_pass_host_volume(A0, psi, request=request, **common)
@@ -923,7 +944,7 @@ def _run_pr_transverse_static_at_visibility(
     material_response_calls = 0
     latest_linearized_response = None
 
-    def optical_pass(state):
+    def optical_pass(state, *, cancellable: bool = False):
         nonlocal optical_seconds
         synchronize(xp)
         pass_started = perf_counter()
@@ -939,12 +960,18 @@ def _run_pr_transverse_static_at_visibility(
             dx_normalized=dx_normalized,
             dy_normalized=dy_normalized,
             scattering_phase_stack=scattering_phase_stack,
+            cancellation_check=(
+                cancellation_token.is_cancelled
+                if cancellable and cancellation_token is not None
+                else None
+            ),
+            cancellation_stage="coupled_optical_z_march",
         )
         synchronize(xp)
         optical_seconds += perf_counter() - pass_started
         return result
 
-    def material_residuals(state, source):
+    def material_residuals(state, source, *, cancellable: bool = False):
         nonlocal material_response_calls, latest_linearized_response
         if request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR:
             return _residuals(
@@ -953,6 +980,11 @@ def _run_pr_transverse_static_at_visibility(
                 dx_normalized=dx_normalized,
                 dy_normalized=dy_normalized,
                 h_y=request.dielectric.h_y,
+                cancellation_check=(
+                    cancellation_token.is_cancelled
+                    if cancellable and cancellation_token is not None
+                    else None
+                ),
                 xp=xp,
             )
         response = _linearized_material_response(
@@ -960,6 +992,11 @@ def _run_pr_transverse_static_at_visibility(
             request=request,
             dx_normalized=dx_normalized,
             dy_normalized=dy_normalized,
+            cancellation_check=(
+                cancellation_token.is_cancelled
+                if cancellable and cancellation_token is not None
+                else None
+            ),
         )
         material_response_calls += response.plane_solves
         latest_linearized_response = response
@@ -977,11 +1014,13 @@ def _run_pr_transverse_static_at_visibility(
     completed_iterations = 0
     converged = _criteria_met(metrics, request.solver)
     cancelled = False
+    cancellation_observed_stage = None
     termination_reason = "residual_tolerance" if converged else "maximum_coupled_iterations"
 
     for coupled_iteration in range(1, int(request.solver.max_coupled_iterations) + 1):
         if cancellation_token is not None and cancellation_token.is_cancelled():
             cancelled = True
+            cancellation_observed_stage = "coupled_iteration_boundary"
             termination_reason = "cancelled_at_accepted_boundary"
             break
         if converged:
@@ -989,12 +1028,27 @@ def _run_pr_transverse_static_at_visibility(
         synchronize(xp)
         material_started = perf_counter()
         if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
-            material = _linearized_material_response(
-                source_accepted,
-                request=request,
-                dx_normalized=dx_normalized,
-                dy_normalized=dy_normalized,
-            )
+            try:
+                material = _linearized_material_response(
+                    source_accepted,
+                    request=request,
+                    dx_normalized=dx_normalized,
+                    dy_normalized=dy_normalized,
+                    cancellation_check=(
+                        cancellation_token.is_cancelled
+                        if cancellation_token is not None
+                        else None
+                    ),
+                )
+            except _StaticCancellationRequested as exc:
+                synchronize(xp)
+                elapsed_material = perf_counter() - material_started
+                material_seconds += elapsed_material
+                linearized_material_seconds += elapsed_material
+                cancelled = True
+                cancellation_observed_stage = exc.stage
+                termination_reason = "cancelled_during_material_trial"
+                break
             material_response_calls += material.plane_solves
             latest_linearized_response = material
             material_proposal = np.asarray(asnumpy(material.delta_psi))
@@ -1005,15 +1059,30 @@ def _run_pr_transverse_static_at_visibility(
             material_discrete_newton = 0
             material_gmres = 0
         else:
-            material = _solve_pr_transverse_static_intensity_host_volume(
-                source_accepted,
-                dx_normalized=dx_normalized,
-                dy_normalized=dy_normalized,
-                initial_psi=psi,
-                h_y=request.dielectric.h_y,
-                options=request.solver.material_solver,
-                xp=xp,
-            )
+            try:
+                material = _solve_pr_transverse_static_intensity_host_volume(
+                    source_accepted,
+                    dx_normalized=dx_normalized,
+                    dy_normalized=dy_normalized,
+                    initial_psi=psi,
+                    h_y=request.dielectric.h_y,
+                    options=request.solver.material_solver,
+                    cancellation_check=(
+                        cancellation_token.is_cancelled
+                        if cancellation_token is not None
+                        else None
+                    ),
+                    xp=xp,
+                )
+            except _StaticCancellationRequested as exc:
+                synchronize(xp)
+                elapsed_material = perf_counter() - material_started
+                material_seconds += elapsed_material
+                zero_flux_material_seconds += elapsed_material
+                cancelled = True
+                cancellation_observed_stage = exc.stage
+                termination_reason = "cancelled_during_material_trial"
+                break
             material_proposal = material.psi
             material_converged = material.converged
             material_status = material.status
@@ -1050,6 +1119,7 @@ def _run_pr_transverse_static_at_visibility(
         if cancellation_token is not None and cancellation_token.is_cancelled():
             del material_proposal
             cancelled = True
+            cancellation_observed_stage = "after_material_candidate"
             termination_reason = "cancelled_at_accepted_boundary"
             break
         if not material_converged:
@@ -1093,25 +1163,54 @@ def _run_pr_transverse_static_at_visibility(
         candidate_equilibrium = equilibrium
         candidate_td = td_residual
         for backtracks in range(int(request.solver.max_backtracks) + 1):
-            trial_psi = _project_host_volume(
-                psi + step_scale * direction,
-                dx_normalized=dx_normalized,
-                dy_normalized=dy_normalized,
-                h_y=request.dielectric.h_y,
-                xp=xp,
-            )
-            valid_trial, _, _, _ = _host_volume_state_validity(
-                trial_psi,
-                dx_normalized=dx_normalized,
-                dy_normalized=dy_normalized,
-                h_y=request.dielectric.h_y,
-                xp=xp,
-            )
-            if valid_trial:
-                trial_A, trial_source = optical_pass(trial_psi)
-                trial_equilibrium, trial_td, trial_metrics = material_residuals(
-                    trial_psi, trial_source
+            if cancellation_token is not None and cancellation_token.is_cancelled():
+                cancelled = True
+                cancellation_observed_stage = "coupled_line_search"
+                termination_reason = "cancelled_during_trial"
+                break
+            try:
+                trial_psi = _project_host_volume(
+                    psi + step_scale * direction,
+                    dx_normalized=dx_normalized,
+                    dy_normalized=dy_normalized,
+                    h_y=request.dielectric.h_y,
+                    xp=xp,
+                    cancellation_check=(
+                        cancellation_token.is_cancelled
+                        if cancellation_token is not None
+                        else None
+                    ),
                 )
+                valid_trial, _, _, _ = _host_volume_state_validity(
+                    trial_psi,
+                    dx_normalized=dx_normalized,
+                    dy_normalized=dy_normalized,
+                    h_y=request.dielectric.h_y,
+                    xp=xp,
+                    cancellation_check=(
+                        cancellation_token.is_cancelled
+                        if cancellation_token is not None
+                        else None
+                    ),
+                )
+            except _StaticCancellationRequested as exc:
+                cancelled = True
+                cancellation_observed_stage = exc.stage
+                termination_reason = "cancelled_during_trial"
+                break
+            if valid_trial:
+                try:
+                    trial_A, trial_source = optical_pass(
+                        trial_psi, cancellable=True
+                    )
+                    trial_equilibrium, trial_td, trial_metrics = material_residuals(
+                        trial_psi, trial_source, cancellable=True
+                    )
+                except _StaticCancellationRequested as exc:
+                    cancelled = True
+                    cancellation_observed_stage = exc.stage
+                    termination_reason = "cancelled_during_trial"
+                    break
                 if (
                     math.isfinite(trial_metrics[0])
                     and math.isfinite(trial_metrics[1])
@@ -1139,6 +1238,7 @@ def _run_pr_transverse_static_at_visibility(
         ):
             accepted = False
             cancelled = True
+            cancellation_observed_stage = "after_coupled_trial"
             termination_reason = "cancelled_during_trial"
             candidate_metrics = metrics
             candidate_psi = psi
@@ -1191,6 +1291,7 @@ def _run_pr_transverse_static_at_visibility(
             break
         if cancellation_token is not None and cancellation_token.is_cancelled():
             cancelled = True
+            cancellation_observed_stage = "before_accepting_coupled_trial"
             termination_reason = "cancelled_at_accepted_boundary"
             break
         psi = candidate_psi
@@ -1361,6 +1462,7 @@ def _run_pr_transverse_static_at_visibility(
         "optical_power_relative_drift": (power_final - power_initial) / power_initial,
         "termination_reason": termination_reason,
         "cancelled": cancelled,
+        "cancellation_observed_stage": cancellation_observed_stage,
         "memory_policy": {
             "backend_working_set": "one_transverse_slice",
             "retained_final_volumes": "host",

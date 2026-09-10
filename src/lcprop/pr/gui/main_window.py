@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -59,6 +60,11 @@ from lcprop.pr.gui.image_input_panel import (
     PRImageInputPanel,
 )
 from lcprop.pr.gui.material_panel import PRMaterialPanel
+from lcprop.pr.gui.run_cost import (
+    LocalRunCostAssessment,
+    LocalRunCostClass,
+    classify_pr_run_cost,
+)
 from lcprop.pr.gui.request_adapter import (
     apply_pr_request,
     build_pr_request,
@@ -1181,6 +1187,9 @@ class PRMainWindow(QWidget):
             self.tabs.setCurrentWidget(self.results_panel)
             return
 
+        if not self._local_run_cost_guard(request):
+            return
+
         if (
             self.last_checkpoint is not None
             and self._workflow_id_for_request(request)
@@ -1196,6 +1205,103 @@ class PRMainWindow(QWidget):
             runner_callable=self._run_registered,
             run_label="Running",
         )
+
+    def _request_for_local_cost(self, request):
+        if isinstance(
+            request,
+            (
+                PRBeamPanelImageAmplificationRunRequest,
+                PRImageAmplificationExperimentRequest,
+            ),
+        ):
+            composite = (
+                request
+                if isinstance(request, PRImageAmplificationExperimentRequest)
+                else image_amplification_experiment_request(request)
+            )
+            base_request, _transmission, _grating = (
+                prepare_image_amplification_base_request(composite)
+            )
+            return base_request
+        if isinstance(request, PRImageAmplificationRunRequest):
+            base_request, _transmission, _grating = (
+                prepare_image_amplification_workflow_request(request)
+            )
+            return base_request
+        return request
+
+    @staticmethod
+    def _local_cost_warning_text(assessment: LocalRunCostAssessment) -> str:
+        nx, ny, nz = assessment.grid_shape
+        return (
+            f"Selected model: {assessment.model_label}\n"
+            f"Grid: {nx} x {ny} x {nz}\n"
+            "Execution: Local\n\n"
+            "Full-transverse nonlinear PR can be very slow locally. "
+            "Use Slurm/H200 for large full-transverse nonlinear PR runs.\n\n"
+            "Stop is observed at the next safe solver cancellation checkpoint; "
+            "an in-progress trial is discarded and the last accepted state is "
+            "preserved."
+        )
+
+    def _show_potentially_expensive_local_warning(
+        self, assessment: LocalRunCostAssessment
+    ) -> None:
+        QMessageBox.warning(
+            self,
+            "Potentially expensive local calculation",
+            self._local_cost_warning_text(assessment),
+        )
+
+    def _confirm_very_expensive_local_run(
+        self, assessment: LocalRunCostAssessment
+    ) -> str:
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle("Very expensive local calculation")
+        dialog.setText(self._local_cost_warning_text(assessment))
+        cancel_button = dialog.addButton(
+            "Cancel", QMessageBox.ButtonRole.RejectRole
+        )
+        slurm_button = dialog.addButton(
+            "Use Slurm/H200", QMessageBox.ButtonRole.ActionRole
+        )
+        run_button = dialog.addButton(
+            "Run locally anyway", QMessageBox.ButtonRole.DestructiveRole
+        )
+        slurm_button.setEnabled(self.slurm_runner is not None)
+        dialog.setDefaultButton(cancel_button)
+        dialog.exec()
+        clicked = dialog.clickedButton()
+        if clicked is run_button:
+            return "run_local"
+        if clicked is slurm_button:
+            return "use_slurm"
+        return "cancel"
+
+    def _local_run_cost_guard(self, request) -> bool:
+        target = str(self.execution_target_selector.currentData())
+        assessment = classify_pr_run_cost(
+            self._request_for_local_cost(request), execution_target=target
+        )
+        if assessment.classification is LocalRunCostClass.NORMAL:
+            return True
+        if assessment.classification is LocalRunCostClass.POTENTIALLY_EXPENSIVE:
+            self._show_potentially_expensive_local_warning(assessment)
+            return True
+
+        action = self._confirm_very_expensive_local_run(assessment)
+        if action == "run_local":
+            return True
+        if action == "use_slurm":
+            index = self.execution_target_selector.findData("slurm")
+            if index >= 0 and self.slurm_runner is not None:
+                self.execution_target_selector.setCurrentIndex(index)
+                self.results_panel.append_console(
+                    "Very expensive local calculation not started; Slurm/H200 "
+                    "selected. Press Run to submit explicitly."
+                )
+        return False
 
     def _start_background(
         self,
@@ -1330,14 +1436,15 @@ class PRMainWindow(QWidget):
             PRStaticRunRequest,
         )
         self.status_label.setText(
-            "Stopping…"
+            "Stopping at next safe solver checkpoint…"
             if is_static
             else "Stopping at next safe internal boundary…"
         )
         self.stop_button.setEnabled(False)
         self.stop_button.setText("Stopping…")
         self.results_panel.append_console(
-            "Stop requested; finishing the current accepted coupled iteration."
+            "Stop requested; discarding the in-progress trial at the next safe "
+            "solver checkpoint; the last accepted state will be preserved."
             if is_transverse_static
             else "Stop requested; finishing the current accepted z slice."
             if is_static
