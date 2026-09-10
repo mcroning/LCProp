@@ -74,6 +74,7 @@ from lcprop.pr.static_workflow import (
     PR_STATIC_WORKFLOW,
 )
 from lcprop.pr.transverse.specs import (
+    PR_MATERIAL_RESPONSE_LINEARIZED,
     PRTransverseRunRequest,
     PRTransverseSolverOptions,
     PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
@@ -1726,6 +1727,45 @@ def test_transverse_static_image_experiment_is_functional_and_coherent(app):
         gui.results_panel.workspace.console.toPlainText()
     )
     gui.close()
+
+
+def test_reduced_linearized_static_uses_common_image_postprocessor(app):
+    window = _configured_multi_algorithm_image_window(app)
+    panel = window.evolution_panel
+    panel.set_workflow_id(PR_STATIC_WORKFLOW)
+    response_index = panel.material_response.findData(
+        PR_MATERIAL_RESPONSE_LINEARIZED
+    )
+    panel.material_response.setCurrentIndex(response_index)
+    panel.reference_intensity.setValue(
+        window.material_panel.material().background_intensity + 1.0
+    )
+    request = window.build_request()
+    window.close()
+
+    runner_result = run_image_amplification_experiment(
+        LocalRunner(operations=(PR_STATIC_OPERATION,)), request
+    )
+    result = runner_result.result
+
+    assert result.status == "converged"
+    assert result.analysis_status == "completed"
+    assert result.run_result.material_response_summary["model"] == "linearized"
+    assert result.run_result.material_response_summary[
+        "validation_status"
+    ] == "experimental"
+    analysis = result.analysis_result
+    assert analysis is not None
+    assert np.all(np.isfinite(analysis.backpropagated_signal_field))
+    for value in (
+        analysis.measured_absolute_signal_gain,
+        analysis.analytic_absolute_signal_gain,
+        analysis.image_intensity_correlation,
+        analysis.normalized_image_rmse,
+        analysis.normalized_power_relative_drift,
+    ):
+        assert np.isfinite(value)
+    assert "image_amplification" in runner_result.run_data.diagnostics
 
 
 def test_gui_runs_transverse_static_image_progress_and_completion(app):

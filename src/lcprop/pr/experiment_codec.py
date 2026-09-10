@@ -110,6 +110,8 @@ def _validate_common(request: PRRunRequest | PRStaticRunRequest) -> None:
     request.material.validate()
     request.solver.validate()
     request.backend.validate()
+    if isinstance(request, PRStaticRunRequest):
+        request.material_response.validate()
 
 
 def _encode_common(request: PRRunRequest | PRStaticRunRequest) -> dict:
@@ -135,7 +137,9 @@ def encode_pr_timedependent_request(request: PRRunRequest) -> dict:
 def encode_pr_static_request(request: PRStaticRunRequest) -> dict:
     if not isinstance(request, PRStaticRunRequest):
         raise TypeError("request must be a PRStaticRunRequest")
-    return _encode_common(request)
+    payload = _encode_common(request)
+    payload["material_response"] = asdict(request.material_response)
+    return payload
 
 
 def _validate_transverse_request(
@@ -242,7 +246,7 @@ def encode_pr_transverse_timedependent_request(
     }
 
 
-def _payload(value: Any) -> dict[str, Any]:
+def _payload(value: Any, *, reduced_static: bool = False) -> dict[str, Any]:
     payload = require_mapping(value, name="PR request_payload")
     version = payload.get("schema_version")
     if type(version) is not int or version not in (
@@ -264,9 +268,18 @@ def _payload(value: Any) -> dict[str, Any]:
             "backend",
         },
         optional=(
-            {"launch_elements"}
-            if version >= _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION
-            else set()
+            (
+                {"launch_elements"}
+                if version
+                >= _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION
+                else set()
+            )
+            | (
+                {"material_response"}
+                if reduced_static
+                and version == PR_EXPERIMENT_REQUEST_SCHEMA_VERSION
+                else set()
+            )
         ),
         name="PR request_payload",
     )
@@ -335,7 +348,7 @@ def decode_pr_timedependent_request(value: Any) -> PRRunRequest:
 
 
 def decode_pr_static_request(value: Any) -> PRStaticRunRequest:
-    payload = _payload(value)
+    payload = _payload(value, reduced_static=True)
     solver_values = dataclass_values(
         PRStaticWorkflowOptions,
         payload["solver"],
@@ -357,6 +370,17 @@ def decode_pr_static_request(value: Any) -> PRStaticRunRequest:
             solver=PRStaticWorkflowOptions(
                 material_solver=material_solver,
                 **solver_values,
+            ),
+            material_response=PRTransverseMaterialResponseSpec(
+                **(
+                    dataclass_values(
+                        PRTransverseMaterialResponseSpec,
+                        payload["material_response"],
+                        name="PR request_payload.material_response",
+                    )
+                    if "material_response" in payload
+                    else {}
+                )
             ),
         )
         _validate_common(request)

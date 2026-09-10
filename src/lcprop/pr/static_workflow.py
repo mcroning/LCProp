@@ -22,11 +22,22 @@ from lcprop.optics.launch_configuration import (
 from lcprop.optics.screens import ChannelLaunchElements
 from lcprop.optics.splitstep import linear_kernel
 from lcprop.pr.evolution import hopping_rhs
+from lcprop.pr.reduced_linearized import (
+    PR_REDUCED_LINEARIZED_RESPONSE_V1,
+    PRReducedLinearizedSpec,
+    reduced_linearized_residual,
+    solve_pr_reduced_linearized_intensity,
+)
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.specs import PRMaterialSpec
 from lcprop.pr.static import (
     PRStaticSolverOptions,
     solve_pr_static_intensity_batched,
+)
+from lcprop.pr.transverse.specs import (
+    PR_MATERIAL_RESPONSE_LINEARIZED,
+    PR_MATERIAL_RESPONSE_NONLINEAR,
+    PRTransverseMaterialResponseSpec,
 )
 from lcprop.pr.workflow import advance_pr_slice_with_midpoint_source
 
@@ -107,6 +118,9 @@ class PRStaticRunRequest:
     launch_elements: tuple[ChannelLaunchElements, ...] = ()
     initial_A: Any | None = None
     initial_E: Any | None = None
+    material_response: PRTransverseMaterialResponseSpec = field(
+        default_factory=PRTransverseMaterialResponseSpec
+    )
 
 
 @dataclass(frozen=True)
@@ -165,6 +179,12 @@ class PRStaticRunResult:
     status: str
     retention_summary: dict[str, Any] = field(
         default_factory=lambda: {"policy": "full", "omitted_fields": []}
+    )
+    material_response_summary: dict[str, Any] = field(
+        default_factory=lambda: {
+            "model": PR_MATERIAL_RESPONSE_NONLINEAR,
+            "validation_status": "validated",
+        }
     )
 
 
@@ -227,6 +247,7 @@ def _resolve_static_tolerances(
     options: PRStaticWorkflowOptions,
     *,
     real_dtype: Any,
+    linearized: bool = False,
 ) -> _ResolvedStaticTolerances:
     precision = str(np.dtype(real_dtype))
     if precision == "float64":
@@ -239,8 +260,8 @@ def _resolve_static_tolerances(
     elif precision == "float32":
         material_rms = 2e-6
         material_max = 1e-5
-        coupled_rms = 2e-6
-        coupled_max = 1e-5
+        coupled_rms = 5e-6 if linearized else 2e-6
+        coupled_max = 2e-5 if linearized else 1e-5
         replay_rtol = 2e-6
         replay_atol = 2e-7
     else:  # pragma: no cover - backend precision validation owns this case.
@@ -327,7 +348,8 @@ def run_pr_static(
     """Solve the self-consistent static PR problem by a local coupled z-march.
 
     At each slice, the accepted incoming optical field remains fixed while a
-    prescribed-intensity Newton solve supplies a block material correction.
+    prescribed-intensity solve supplies a block material correction (Newton
+    for nonlinear response, direct Fourier response for linearized response).
     Every trial correction is checked against a freshly propagated midpoint
     intensity. A final independent replay verifies the assembled state.
     """
@@ -336,6 +358,7 @@ def run_pr_static(
     request.grid.validate()
     request.beams.validate()
     request.material.validate()
+    request.material_response.validate()
     request.solver.validate()
     request.backend.validate()
     LaunchConfiguration(request.beams, request.launch_elements)
@@ -346,11 +369,15 @@ def run_pr_static(
     if any(value != wavelengths[0] for value in wavelengths[1:]):
         raise ValueError("minimal PR workflow requires one shared wavelength")
 
+    linearized = (
+        request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+    )
     backend = get_backend(request.backend)
     xp = backend.xp
     tolerances = _resolve_static_tolerances(
         request.solver,
         real_dtype=backend.real_dtype,
+        linearized=linearized,
     )
     grid = make_grid(request.grid, xp=backend.xp, real_dtype=backend.real_dtype)
     launch = build_launch(
@@ -359,6 +386,20 @@ def run_pr_static(
         complex_dtype=backend.complex_dtype,
         launch_elements=request.launch_elements,
     )
+    dx_normalized = (
+        request.material.characteristic_wavenumber_per_um * grid.dx_um
+    )
+    linearized_spec = None
+    if linearized:
+        linearized_spec = PRReducedLinearizedSpec(
+            reference_intensity=float(
+                request.material_response.reference_intensity
+            ),
+            applied_field=float(request.material.applied_field),
+            background_intensity=float(request.material.background_intensity),
+            dx_normalized=dx_normalized,
+        )
+        linearized_spec.validate()
     if request.initial_A is None:
         A0 = launch.A0.copy()
     else:
@@ -371,6 +412,8 @@ def run_pr_static(
     E_shape = (grid.Nz, grid.Nx, grid.Ny)
     if request.initial_E is None:
         E_initial = xp.zeros(E_shape, dtype=backend.real_dtype)
+        if linearized:
+            E_initial.fill(linearized_spec.equilibrium_field)
     else:
         E_initial = xp.asarray(
             request.initial_E,
@@ -392,9 +435,6 @@ def run_pr_static(
         xp=xp,
     )
     peak_reference = channel_peak_intensity_reference(A0, xp=xp)
-    dx_normalized = (
-        request.material.characteristic_wavenumber_per_um * grid.dx_um
-    )
     groups = request.beams.coherence_groups
     E_stack = xp.empty(E_shape, dtype=backend.real_dtype)
     source_stack = xp.empty(E_shape, dtype=backend.real_dtype)
@@ -404,6 +444,7 @@ def run_pr_static(
     summaries: list[PRCoupledStaticSliceSummary] = []
     completed_slices = 0
     cancelled = False
+    material_response_calls = 0
 
     def advance_slice(A_in, state):
         return advance_pr_slice_with_midpoint_source(
@@ -422,6 +463,13 @@ def run_pr_static(
         )
 
     def residual_at(state, intensity):
+        if linearized:
+            return reduced_linearized_residual(
+                state,
+                intensity,
+                spec=linearized_spec,
+                xp=xp,
+            )
         return hopping_rhs(
             state,
             intensity,
@@ -483,17 +531,31 @@ def run_pr_static(
             if converged:
                 break
             coupled_passes = coupled_pass
-            material_result = solve_pr_static_intensity_batched(
-                intensity,
-                applied_field=request.material.applied_field,
-                background_intensity=request.material.background_intensity,
-                dx_normalized=dx_normalized,
-                initial_E=state,
-                options=tolerances.material_solver,
-                xp=xp,
-            )
-            if not material_result.converged:
-                termination_reason = f"material_{material_result.status}"
+            if linearized:
+                material_result = solve_pr_reduced_linearized_intensity(
+                    intensity,
+                    spec=linearized_spec,
+                    backend=request.backend,
+                )
+                material_response_calls += 1
+                material_converged = True
+                material_status = "analytic_fourier_solve"
+                material_state = material_result.E
+            else:
+                material_result = solve_pr_static_intensity_batched(
+                    intensity,
+                    applied_field=request.material.applied_field,
+                    background_intensity=request.material.background_intensity,
+                    dx_normalized=dx_normalized,
+                    initial_E=state,
+                    options=tolerances.material_solver,
+                    xp=xp,
+                )
+                material_converged = material_result.converged
+                material_status = material_result.status
+                material_state = material_result.E
+            if not material_converged:
+                termination_reason = f"material_{material_status}"
                 if request.solver.record_iteration_history:
                     records.append(
                         PRCoupledStaticIterationRecord(
@@ -506,13 +568,13 @@ def run_pr_static(
                             delta_E_rms=0.0,
                             delta_E_max=0.0,
                             step_scale=0.0,
-                            material_status=material_result.status,
+                            material_status=material_status,
                             accepted=False,
                         )
                     )
                 break
 
-            direction = material_result.E - state
+            direction = material_state - state
             merit = 0.5 * residual_rms * residual_rms
             step_scale = 1.0
             accepted = False
@@ -567,7 +629,7 @@ def run_pr_static(
                             delta_E_rms=0.0,
                             delta_E_max=0.0,
                             step_scale=0.0,
-                            material_status=material_result.status,
+                            material_status=material_status,
                             accepted=False,
                         )
                     )
@@ -590,7 +652,7 @@ def run_pr_static(
                         delta_E_rms=final_delta_rms,
                         delta_E_max=final_delta_max,
                         step_scale=step_scale,
-                        material_status=material_result.status,
+                        material_status=material_status,
                         accepted=True,
                     )
                 )
@@ -786,7 +848,16 @@ def run_pr_static(
             "refractive_index": float(request.material.refractive_index),
         },
         backend_summary=backend.summary(),
-        tolerance_provenance=tolerances.provenance(),
+        tolerance_provenance=(
+            {
+                **tolerances.provenance(),
+                "material_solver": {
+                    "source": "not_applicable_direct_linearized_solve"
+                },
+            }
+            if linearized
+            else tolerances.provenance()
+        ),
         replay_diagnostics={
             "performed_slices": completed_slices,
             "requested_slices": grid.Nz,
@@ -804,6 +875,28 @@ def run_pr_static(
             "cancelled"
             if cancelled
             else ("converged" if converged else "not_converged")
+        ),
+        material_response_summary=(
+            {
+                "model": PR_MATERIAL_RESPONSE_LINEARIZED,
+                "validation_status": "experimental",
+                "operator": PR_REDUCED_LINEARIZED_RESPONSE_V1,
+                "reference_intensity": float(
+                    request.material_response.reference_intensity
+                ),
+                "background_intensity": float(
+                    request.material.background_intensity
+                ),
+                "applied_field": float(request.material.applied_field),
+                "equilibrium_field": float(linearized_spec.equilibrium_field),
+                "material_response_calls": int(material_response_calls),
+                "solver": "analytic_centered_difference_fourier",
+            }
+            if linearized
+            else {
+                "model": PR_MATERIAL_RESPONSE_NONLINEAR,
+                "validation_status": "validated",
+            }
         ),
     )
 

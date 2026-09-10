@@ -28,6 +28,7 @@ from lcprop.pr.static_workflow import (
     PRStaticWorkflowOptions,
     PR_STATIC_WORKFLOW,
 )
+from lcprop.pr.transverse.specs import PRTransverseMaterialResponseSpec
 from lcprop.pr.transport_common import pack_portable, unpack_portable
 from lcprop.transport.codecs import (
     EncodedRequest,
@@ -54,6 +55,7 @@ def _validate_request(request: PRStaticRunRequest) -> None:
     request.material.validate()
     request.solver.validate()
     request.backend.validate()
+    request.material_response.validate()
     validate_channel_launch_elements(
         request.launch_elements, n_channels=len(request.beams.channels)
     )
@@ -85,6 +87,7 @@ def encode_pr_static_transport_request(
         "material": asdict(request.material),
         "solver": pack_portable(request.solver, arrays, "solver"),
         "backend": asdict(request.backend),
+        "material_response": asdict(request.material_response),
         "launch_elements": encode_launch_elements(request.launch_elements),
         "initial_A": pack_portable(request.initial_A, arrays, "initial_A"),
         "initial_E": pack_portable(request.initial_E, arrays, "initial_E"),
@@ -124,6 +127,9 @@ def decode_pr_static_transport_request(
             ),
             initial_A=values["initial_A"],
             initial_E=values["initial_E"],
+            material_response=PRTransverseMaterialResponseSpec(
+                **values.get("material_response", {})
+            ),
         )
         _validate_request(request)
         return request
@@ -271,6 +277,14 @@ def _validate_result(values: Mapping[str, Any]) -> None:
         raise TransportCodecError(
             "PR static convergence flag disagrees with result status"
         )
+    material_response = values.get(
+        "material_response_summary",
+        {"model": "nonlinear", "validation_status": "validated"},
+    )
+    if not isinstance(material_response, Mapping):
+        raise TransportCodecError(
+            "PR static material_response_summary must be a mapping"
+        )
 
 
 def decode_pr_static_transport_result(
@@ -310,6 +324,12 @@ def decode_pr_static_transport_result(
                 "policy": FULL_RESULT_POLICY,
                 "omitted_fields": [],
             })),
+            material_response_summary=dict(
+                values.get(
+                    "material_response_summary",
+                    {"model": "nonlinear", "validation_status": "validated"},
+                )
+            ),
         )
         return result
     except TransportCodecError:

@@ -426,7 +426,10 @@ class PRMainWindow(QWidget):
             "solver": solver,
             "material_response": (
                 self.evolution_panel.transverse_material_response()
-                if workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW
+                if workflow_id in (
+                    PR_STATIC_WORKFLOW,
+                    PR_TRANSVERSE_STATIC_WORKFLOW,
+                )
                 else None
             ),
             "transverse_applied_field": (
@@ -457,6 +460,10 @@ class PRMainWindow(QWidget):
             )
             self.evolution_panel.set_transverse_static_solver(state["solver"])
         elif workflow_id == PR_STATIC_WORKFLOW:
+            self.evolution_panel.set_transverse_material_response(
+                state["material_response"],
+                applied_field_x=state["material"].applied_field,
+            )
             self.evolution_panel.set_static_solver(state["solver"])
         else:
             self.evolution_panel.set_solver(state["solver"])
@@ -870,13 +877,45 @@ class PRMainWindow(QWidget):
                     "Electrical ensemble: fixed harmonic mean field",
                 ])
         else:
+            linearized = (
+                request.material_response.model
+                == PR_MATERIAL_RESPONSE_LINEARIZED
+            )
             lines.extend([
+                (
+                    "Static material model: Linearized material response "
+                    "[Experimental]"
+                    if linearized
+                    else "Static material model: Fully nonlinear"
+                ),
+                "Transport: Reduced x-only PR transport",
                 (
                     "Maximum coupled passes per z slice: "
                     f"{request.solver.max_coupled_passes}"
                 ),
-                "Static material solver: precision-aware automatic defaults",
+                (
+                    "Static material solver: direct centered-difference "
+                    "Fourier response"
+                    if linearized
+                    else (
+                        "Static material solver: precision-aware automatic "
+                        "defaults"
+                    )
+                ),
             ])
+            if linearized:
+                lines.extend([
+                    (
+                        "Linearization intensity I₀: "
+                        f"{request.material_response.reference_intensity:g} "
+                        "normalized total transport intensity"
+                    ),
+                    (
+                        "Reduced applied field: "
+                        f"{request.material.applied_field:g} normalized"
+                    ),
+                    "Uniform equilibrium field E₀ = E_app I_b / I₀",
+                ])
         lines.extend([
             f"Optical substeps per z slice: {request.solver.optical_substeps}",
             (

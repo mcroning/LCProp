@@ -115,6 +115,7 @@ def validate_pr_static_gui_request(
 
     if not isinstance(request, PRStaticRunRequest):
         raise TypeError("request must be a PRStaticRunRequest")
+    request.material_response.validate()
     return PRStaticRequestPreflight(
         aperture=_validate_pr_gui_common(request),
     )
@@ -236,6 +237,7 @@ def build_pr_request(
         request = PRStaticRunRequest(
             **common,
             solver=evolution_panel.static_solver(),
+            material_response=evolution_panel.transverse_material_response(),
         )
     elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
         transverse_common = dict(common)
@@ -363,6 +365,10 @@ def apply_pr_request(
         evolution_panel.set_transverse_static_solver(request.solver)
     elif isinstance(request, PRStaticRunRequest):
         evolution_panel.set_workflow_id(PR_STATIC_WORKFLOW)
+        evolution_panel.set_transverse_material_response(
+            request.material_response,
+            applied_field_x=request.material.applied_field,
+        )
         evolution_panel.set_static_solver(request.solver)
     else:
         evolution_panel.set_workflow_id(PR_TIMEDEPENDENT_WORKFLOW)

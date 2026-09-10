@@ -107,9 +107,10 @@ class PRTransverseBoundaryProfile:
 
 @dataclass(frozen=True)
 class PRTransverseMaterialResponseSpec:
-    """Independent full-transverse constitutive material-response axis.
+    """Independent constitutive response axis shared by static PR transport.
 
-    The nonlinear default preserves the established Profile-v1 workflow.
+    The nonlinear default preserves the established reduced and transverse
+    workflows.
     Linearized execution requires an explicit uniform total transport
     reference intensity; no background or beam-derived value is inferred.
     """

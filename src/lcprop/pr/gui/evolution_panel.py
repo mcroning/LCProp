@@ -215,21 +215,28 @@ class PREvolutionPanel(QWidget):
         is_transverse_static = (
             workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW
         )
-        if not is_transverse_static:
+        is_static = workflow_id in (
+            PR_STATIC_WORKFLOW,
+            PR_TRANSVERSE_STATIC_WORKFLOW,
+        )
+        if not is_static:
             nonlinear_index = self.material_response.findData(
                 PR_MATERIAL_RESPONSE_NONLINEAR
             )
             self.material_response.setCurrentIndex(nonlinear_index)
-        self.material_response.setEnabled(is_transverse_static)
-        self._set_row_visible(self.material_response, is_transverse_static)
+        self.material_response.setEnabled(is_static)
+        self._set_row_visible(self.material_response, is_static)
         is_linearized = (
-            is_transverse_static
+            is_static
             and self.material_response.currentData()
             == PR_MATERIAL_RESPONSE_LINEARIZED
         )
         self._refresh_workflow_labels()
         self._set_row_visible(self.reference_intensity, is_linearized)
-        self._set_row_visible(self.transverse_applied_field, is_linearized)
+        self._set_row_visible(
+            self.transverse_applied_field,
+            is_transverse_static and is_linearized,
+        )
         self._refresh_integrator_choices()
         for widget in (self.Nt, self.dt_normalized, self.integrator):
             self._set_row_visible(widget, is_time_dependent)

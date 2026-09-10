@@ -96,21 +96,31 @@ def classify_pr_run_cost(
         very_threshold = 5.0e10
         rationale = "full-transverse material steps and optical z marches"
     elif isinstance(request, PRStaticRunRequest):
-        material_iterations = (
-            request.solver.material_solver.max_iterations
-            if request.solver.material_solver is not None
-            else 40
-        )
-        model = "Reduced x-only PR transport — Fully nonlinear static"
-        score = (
-            points
-            * int(request.solver.max_coupled_passes)
-            * int(material_iterations)
-            * factor
-        )
+        if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
+            model = "Reduced x-only PR transport — Linearized material response"
+            score = (
+                points
+                * int(request.solver.max_coupled_passes)
+                * 2.0
+                * factor
+            )
+            rationale = "one-dimensional FFT material response per coupled pass"
+        else:
+            material_iterations = (
+                request.solver.material_solver.max_iterations
+                if request.solver.material_solver is not None
+                else 40
+            )
+            model = "Reduced x-only PR transport — Fully nonlinear static"
+            score = (
+                points
+                * int(request.solver.max_coupled_passes)
+                * int(material_iterations)
+                * factor
+            )
+            rationale = "reduced static material and coupled-pass work"
         potential_threshold = 2.0e10
         very_threshold = 2.0e11
-        rationale = "reduced static material and coupled-pass work"
     elif isinstance(request, PRRunRequest):
         model = "Reduced x-only PR transport — Fully nonlinear time dependent"
         score = points * int(request.solver.Nt) * factor
