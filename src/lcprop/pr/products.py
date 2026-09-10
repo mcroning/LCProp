@@ -16,6 +16,10 @@ import numpy as np
 from lcprop.core.backend import asnumpy
 from lcprop.optics.farfield import direction_cosine_spectrum
 from lcprop.optics.splitstep import total_intensity
+from lcprop.pr.carrier_power import (
+    carrier_channels_from_beams,
+    carrier_power_diagnostic_from_summary,
+)
 from lcprop.pr.image_amplification import (
     PR_IMAGE_AMPLIFICATION_WORKFLOW,
     PRBeamPanelImageAmplificationRunRequest,
@@ -48,6 +52,31 @@ _FAST_VOLUME_MESSAGE = (
 
 def _is_fast_result(result: Any) -> bool:
     return result.retention_summary.get("policy", "full") == "fast"
+
+
+def _add_carrier_power_diagnostic(
+    diagnostics: DiagnosticCollection,
+    result: Any,
+) -> None:
+    launch_summary = deepcopy(result.launch_summary)
+    checkpoint = getattr(result, "checkpoint", None)
+    if "carrier_channels" not in launch_summary and checkpoint is not None:
+        launch_summary["carrier_channels"] = carrier_channels_from_beams(
+            checkpoint.request.beams
+        )
+    diagnostics.add(
+        "carrier_power",
+        DiagnosticData(
+            "carrier_power",
+            "Carrier-Resolved Optical Power",
+            carrier_power_diagnostic_from_summary(
+                result.A_initial,
+                result.A_final,
+                grid_summary=result.grid_summary,
+                launch_summary=launch_summary,
+            ),
+        ),
+    )
 
 
 def _fast_optical_run_data(result: Any, *, workflow: str, geometry: Geometry) -> RunData:
@@ -153,6 +182,7 @@ def _fast_optical_run_data(result: Any, *, workflow: str, geometry: Geometry) ->
                 deepcopy(result_diagnostics)
             )),
         ])
+    _add_carrier_power_diagnostic(diagnostics, result)
     return RunData(
         workflow=workflow,
         geometry=geometry,
@@ -529,6 +559,7 @@ def pr_result_to_run_data(result: PRRunResult) -> RunData:
         ),
     ])
 
+    _add_carrier_power_diagnostic(diagnostics, result)
     return RunData(
         workflow=PR_TIMEDEPENDENT_WORKFLOW,
         geometry=geometry,
@@ -737,6 +768,23 @@ def augment_pr_image_amplification_run_data(
         )
 
     diagnostics = DiagnosticCollection(list(base.diagnostics.items()))
+    launch_summary = deepcopy(result.run_result.launch_summary)
+    launch_summary["carrier_channels"] = carrier_channels_from_beams(
+        result.request.beams
+    )
+    diagnostics.add(
+        "carrier_power",
+        DiagnosticData(
+            "carrier_power",
+            "Carrier-Resolved Optical Power",
+            carrier_power_diagnostic_from_summary(
+                result.run_result.A_initial,
+                result.run_result.A_final,
+                grid_summary=result.run_result.grid_summary,
+                launch_summary=launch_summary,
+            ),
+        ),
+    )
     diagnostics.add(
         "image_amplification_metrics",
         DiagnosticData(
@@ -1166,6 +1214,7 @@ def pr_static_result_to_run_data(result: PRStaticRunResult) -> RunData:
         ),
     ])
 
+    _add_carrier_power_diagnostic(diagnostics, result)
     return RunData(
         workflow=PR_STATIC_WORKFLOW,
         geometry=geometry,

@@ -21,6 +21,7 @@ from lcprop.optics.launch_configuration import (
 )
 from lcprop.optics.screens import ChannelLaunchElements
 from lcprop.optics.splitstep import linear_kernel
+from lcprop.pr.carrier_power import carrier_channels_from_beams
 from lcprop.pr.evolution import hopping_rhs
 from lcprop.pr.reduced_linearized import (
     PR_REDUCED_LINEARIZED_RESPONSE_V1,
@@ -846,6 +847,7 @@ def run_pr_static(
         launch_summary={
             **launch.summary(),
             "refractive_index": float(request.material.refractive_index),
+            "carrier_channels": carrier_channels_from_beams(request.beams),
         },
         backend_summary=backend.summary(),
         tolerance_provenance=(

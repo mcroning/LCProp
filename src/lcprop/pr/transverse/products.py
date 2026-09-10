@@ -8,6 +8,7 @@ import numpy as np
 
 from lcprop.optics.farfield import direction_cosine_spectrum
 from lcprop.optics.splitstep import total_intensity
+from lcprop.pr.carrier_power import carrier_power_diagnostic_from_summary
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.transverse.projection import project_active_field
 from lcprop.pr.transverse.specs import (
@@ -39,6 +40,35 @@ _FAST_VOLUME_MESSAGE = (
     "Not retrieved in Fast mode; rerun with Full result retrieval to inspect "
     "this volume."
 )
+
+
+def _add_carrier_power_diagnostic(diagnostics, result) -> None:
+    launch_summary = deepcopy(result.launch_summary)
+    if "carrier_channels" not in launch_summary:
+        channels = result.resolved_profile.get("beam_request", {}).get(
+            "channels", []
+        )
+        launch_summary["carrier_channels"] = [
+            {
+                "name": str(channel.get("name") or f"Carrier {index + 1}"),
+                "kx_rad_per_um": float(channel["tilt_x_rad_per_um"]),
+                "ky_rad_per_um": float(channel["tilt_y_rad_per_um"]),
+            }
+            for index, channel in enumerate(channels)
+        ]
+    diagnostics.add(
+        "carrier_power",
+        DiagnosticData(
+            "carrier_power",
+            "Carrier-Resolved Optical Power",
+            carrier_power_diagnostic_from_summary(
+                result.A_initial,
+                result.A_final,
+                grid_summary=result.grid_summary,
+                launch_summary=launch_summary,
+            ),
+        ),
+    )
 
 
 def _readonly_view(value) -> np.ndarray:
@@ -118,6 +148,7 @@ def _fast_optical_run_data(result, *, workflow: str, geometry: Geometry) -> RunD
             "replay", "Independent Replay", deepcopy(result.replay_diagnostics)
         )))
     diagnostics = DiagnosticCollection(diagnostic_items)
+    _add_carrier_power_diagnostic(diagnostics, result)
     return RunData(
         workflow=workflow, geometry=geometry, fields=fields,
         curves=CurveCollection(), diagnostics=diagnostics,
@@ -556,6 +587,7 @@ def pr_transverse_result_to_run_data(result: PRTransverseRunResult) -> RunData:
             "transverse_pr", "Transverse PR Diagnostics", deepcopy(result.diagnostics)
         )),
     ])
+    _add_carrier_power_diagnostic(diagnostics, result)
     return RunData(
         workflow=PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
         geometry=geometry,
@@ -697,6 +729,7 @@ def pr_transverse_static_result_to_run_data(
             presentation_diagnostics,
         )),
     ])
+    _add_carrier_power_diagnostic(diagnostics, result)
     return RunData(
         workflow=PR_TRANSVERSE_STATIC_WORKFLOW,
         geometry=geometry,

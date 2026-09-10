@@ -137,7 +137,23 @@ class Workspace(QWidget):
             lines.append("")
             lines.append(f"[{name}] {diagnostic.display_name}")
             for key, value in diagnostic.values.items():
-                if key == "rows":
+                if key == "rows" and name == "carrier_power" and value:
+                    lines.append(
+                        "Carrier | Input Power (normalized) | "
+                        "Output Power (normalized) | Gain | "
+                        "Delta Power (normalized)"
+                    )
+                    for row in value:
+                        gain = row["gain"]
+                        gain_text = "n/a" if gain is None else f"{gain:.6g}"
+                        lines.append(
+                            f"{row['carrier']} | "
+                            f"{row['input_power_normalized']:.6g} | "
+                            f"{row['output_power_normalized']:.6g} | "
+                            f"{gain_text} | "
+                            f"{row['delta_power_normalized']:.6g}"
+                        )
+                elif key == "rows":
                     lines.append(f"{key}: {len(value)} rows")
                 else:
                     lines.append(f"{key}: {value}")

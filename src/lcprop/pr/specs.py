@@ -10,6 +10,7 @@ from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.optics.screens import ChannelLaunchElements
+from lcprop.pr.carrier_power import carrier_channels_from_beams
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 
 
@@ -174,6 +175,24 @@ class PRRunResult:
     retention_summary: dict[str, Any] = field(
         default_factory=lambda: {"policy": "full", "omitted_fields": []}
     )
+
+    def __post_init__(self) -> None:
+        """Retain compact launch directions when checkpoint provenance exists."""
+
+        if "carrier_channels" in self.launch_summary:
+            return
+        request = getattr(self.checkpoint, "request", None)
+        beams = getattr(request, "beams", None)
+        if beams is None:
+            return
+        object.__setattr__(
+            self,
+            "launch_summary",
+            {
+                **self.launch_summary,
+                "carrier_channels": carrier_channels_from_beams(beams),
+            },
+        )
 
 
 __all__ = [

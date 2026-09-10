@@ -26,6 +26,7 @@ from lcprop.optics.screens import (
     prepare_intensity_raster_transmission,
 )
 from lcprop.optics.splitstep import linear_kernel
+from lcprop.pr.carrier_power import nearest_carrier_partition
 from lcprop.pr.coupling import analytic_plane_wave_gain_length
 from lcprop.pr.geometry import crossing_beam_channels
 from lcprop.pr.image_sources import (
@@ -1119,11 +1120,17 @@ def signal_carrier_mask(
 ) -> np.ndarray:
     """Return the PRProp3D nearest-carrier Fourier partition for the signal."""
 
-    kx = 2.0 * math.pi * np.fft.fftfreq(grid.Nx, d=float(grid.dx_um))[:, None]
-    ky = 2.0 * math.pi * np.fft.fftfreq(grid.Ny, d=float(grid.dy_um))[None, :]
-    signal_distance = (kx - float(signal_kx_rad_per_um)) ** 2 + ky**2
-    pump_distance = (kx - float(pump_kx_rad_per_um)) ** 2 + ky**2
-    return signal_distance <= pump_distance
+    partition = nearest_carrier_partition(
+        (grid.Nx, grid.Ny),
+        dx_um=float(grid.dx_um),
+        dy_um=float(grid.dy_um),
+        centers_k_rad_per_um=(
+            (float(pump_kx_rad_per_um), 0.0),
+            (float(signal_kx_rad_per_um), 0.0),
+        ),
+        tie_policy="second",
+    )
+    return partition.weights[1].astype(bool)
 
 
 def isolate_signal_carrier(field, mask: np.ndarray) -> np.ndarray:
