@@ -1,0 +1,226 @@
+{
+  "manifest": {
+    "evidence_artifact_sha256": {
+      "summary.csv": "23f1ddfde3e518b5f1169e4f128bd24f4aa6085495abe9a11b9a290851547f6b"
+    },
+    "fixed_total_power_mW": 2.0,
+    "geometries": [
+      {
+        "beam_1_center_um": [
+          23.312426692243992,
+          -23.312426692243992
+        ],
+        "beam_1_k_rad_per_um": [
+          -1.1107207345395915,
+          1.1107207345395915
+        ],
+        "beam_2_center_um": [
+          -23.312426692243992,
+          23.312426692243992
+        ],
+        "beam_2_k_rad_per_um": [
+          1.1107207345395915,
+          -1.1107207345395915
+        ],
+        "delta_k_rad_per_um": [
+          2.221441469079183,
+          -2.221441469079183
+        ],
+        "grating_magnitude_rad_per_um": 3.141592653589793,
+        "grating_period_um": 2.0,
+        "name": "45deg"
+      }
+    ],
+    "grids": [
+      256
+    ],
+    "harness_sha256": "9109aeb8952dd1e444961268628d3ccc7eddfb22938514083eab9d72f77e00fa",
+    "modulations": [
+      1.0
+    ],
+    "numpy_version": "2.5.1",
+    "pending_external_nonlinear_job_used": false,
+    "production_source_clean": true,
+    "production_source_commit": "5cbdbeb149b5b2d6960d5fe7572fdf29195f97a3",
+    "production_source_status_porcelain": "",
+    "python_version": "3.12.13",
+    "reference_experiment": {
+      "Nz": 100,
+      "aperture_um": [
+        200.0,
+        200.0
+      ],
+      "dark_intensity": 0.01,
+      "gain_length_product": 3.0,
+      "interaction_length_um": 1000.0,
+      "max_coupled_iterations": 20,
+      "normalized_applied_field": 0.0,
+      "optical_dz_um": 10.0,
+      "optical_substeps": 1,
+      "precision": "float64",
+      "realistic_waist_um": 20.0,
+      "refractive_index": 2.4,
+      "uniform_background": 0.0,
+      "wavelength_um": 0.633
+    },
+    "scheduler_submission": "never",
+    "scientific_payload_sha256": "41211d2a7004394d83bd7efd4a53d54aa6a9ba7d90e4d5c138e2d31f959c9553",
+    "study": "production"
+  },
+  "rows": [
+    {
+      "N": 256,
+      "carrier_gain_difference": 1.1101140966826937,
+      "carrier_power_balance_error": 5.551115123125783e-17,
+      "carrier_separation_quality": 0.9999999999999989,
+      "converged": true,
+      "dx_um": 0.78125,
+      "fixture": "gaussian_20um",
+      "geometry": "45deg",
+      "harmonic_1_magnitude": 0.001582865886371048,
+      "harmonic_1_phase_rad": 1.729943823444268,
+      "harmonic_1_relative_to_K": 1.0,
+      "harmonic_1_resolution": "marginal",
+      "harmonic_2_magnitude": null,
+      "harmonic_2_phase_rad": null,
+      "harmonic_2_relative_to_K": null,
+      "harmonic_2_resolution": "underresolved",
+      "harmonic_3_magnitude": null,
+      "harmonic_3_phase_rad": null,
+      "harmonic_3_relative_to_K": null,
+      "harmonic_3_resolution": "underresolved",
+      "launch_attenuation": "none",
+      "linear_response_rms": 0.00781929965772427,
+      "m": 1.0,
+      "material_abs_L2_vs_linearized": 0.03681980020195387,
+      "material_max_abs_vs_linearized": 1.731281809912682,
+      "material_rel_L2_vs_linearized": 4.708836061239743,
+      "model": "reduced_nonlinear",
+      "optical_rel_L2_vs_linearized": 0.25881970619727784,
+      "output_intensity_rel_L2_vs_linearized": 0.3144694597301943,
+      "periodic_fundamental_bin_offsets": [
+        0.28932188134524495,
+        0.28932188134524495
+      ],
+      "periodic_fundamental_commensurate": false,
+      "periodic_fundamental_mode_components": [
+        70.71067811865476,
+        -70.71067811865476
+      ],
+      "points_per_2K": 1.28,
+      "points_per_3K": 0.8533333333333334,
+      "points_per_K": 2.56,
+      "power_drift": 2.098321516541546e-14,
+      "pump_delta_power_normalized": -0.27752852417066304,
+      "pump_gain": 0.4449429516586739,
+      "pump_power_input_normalized": 0.5,
+      "pump_power_output_normalized": 0.22247147582933696,
+      "reference_intensity": 1.01,
+      "resolution_2K": "underresolved",
+      "resolution_3K": "underresolved",
+      "resolution_K": "marginal",
+      "runtime_s": 5.529829749983037,
+      "signal_delta_power_normalized": 0.27752852417068374,
+      "signal_gain": 1.5550570483413675,
+      "signal_power_input_normalized": 0.5,
+      "signal_power_output_normalized": 0.7775285241706837,
+      "study": "production_static",
+      "total_power_mW": 2.0
+    },
+    {
+      "N": 256,
+      "carrier_gain_difference": 0.37913609162758033,
+      "carrier_power_balance_error": -1.1102230246251565e-16,
+      "carrier_separation_quality": 0.9999999999999989,
+      "converged": true,
+      "dx_um": 0.78125,
+      "fixture": "gaussian_20um",
+      "geometry": "45deg",
+      "harmonic_1_magnitude": 3.447953919525168e-05,
+      "harmonic_1_phase_rad": 1.5782515757783881,
+      "harmonic_1_relative_to_K": 1.0,
+      "harmonic_1_resolution": "marginal",
+      "harmonic_2_magnitude": null,
+      "harmonic_2_phase_rad": null,
+      "harmonic_2_relative_to_K": null,
+      "harmonic_2_resolution": "underresolved",
+      "harmonic_3_magnitude": null,
+      "harmonic_3_phase_rad": null,
+      "harmonic_3_relative_to_K": null,
+      "harmonic_3_resolution": "underresolved",
+      "launch_attenuation": "none",
+      "linear_response_rms": 0.00781929965772427,
+      "m": 1.0,
+      "material_abs_L2_vs_linearized": 0.03681980020195387,
+      "material_max_abs_vs_linearized": 1.731281809912682,
+      "material_rel_L2_vs_linearized": 4.708836061239743,
+      "model": "reduced_linearized",
+      "optical_rel_L2_vs_linearized": 0.25881970619727784,
+      "output_intensity_rel_L2_vs_linearized": 0.3144694597301943,
+      "periodic_fundamental_bin_offsets": [
+        0.28932188134524495,
+        0.28932188134524495
+      ],
+      "periodic_fundamental_commensurate": false,
+      "periodic_fundamental_mode_components": [
+        70.71067811865476,
+        -70.71067811865476
+      ],
+      "points_per_2K": 1.28,
+      "points_per_3K": 0.8533333333333334,
+      "points_per_K": 2.56,
+      "power_drift": 2.0539125955565396e-14,
+      "pump_delta_power_normalized": -0.09478402290688492,
+      "pump_gain": 0.8104319541862302,
+      "pump_power_input_normalized": 0.5,
+      "pump_power_output_normalized": 0.4052159770931151,
+      "reference_intensity": 1.01,
+      "resolution_2K": "underresolved",
+      "resolution_3K": "underresolved",
+      "resolution_K": "marginal",
+      "runtime_s": 3.1898277919972315,
+      "signal_delta_power_normalized": 0.09478402290690524,
+      "signal_gain": 1.1895680458138105,
+      "signal_power_input_normalized": 0.5,
+      "signal_power_output_normalized": 0.5947840229069052,
+      "study": "production_static",
+      "total_power_mW": 2.0
+    }
+  ],
+  "summary": {
+    "asymptotics": [],
+    "grid_convergence_statement": "N=256 is not adequate for nonlinear-harmonic conclusions; N=512 resolves K, leaves 2K marginal and 3K underresolved; therefore a 512-grid nonlinear carrier gain is not established as grid-converged without comparison to 1024 or finer.",
+    "resolution": [
+      {
+        "N": 256,
+        "dx_um": 0.78125,
+        "points_per_2K": 1.28,
+        "points_per_3K": 0.8533333333333334,
+        "points_per_K": 2.56,
+        "resolution_2K": "underresolved",
+        "resolution_3K": "underresolved",
+        "resolution_K": "marginal"
+      },
+      {
+        "N": 512,
+        "dx_um": 0.390625,
+        "points_per_2K": 2.56,
+        "points_per_3K": 1.7066666666666668,
+        "points_per_K": 5.12,
+        "resolution_2K": "marginal",
+        "resolution_3K": "underresolved",
+        "resolution_K": "resolved"
+      },
+      {
+        "N": 1024,
+        "dx_um": 0.1953125,
+        "points_per_2K": 5.12,
+        "points_per_3K": 3.4133333333333336,
+        "points_per_K": 10.24,
+        "resolution_2K": "resolved",
+        "resolution_3K": "marginal",
+        "resolution_K": "resolved"
+      }
+    ]
+  }
+}
