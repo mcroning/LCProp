@@ -19,25 +19,98 @@ previous workflow stage.
 
 ## Philosophy
 
-LCProp separates planning and scientific review from implementation and
-execution. Planning and review are performed independently from implementation and execution.
+LCProp separates planning and scientific review from implementation and execution to encourage independent review.
 
-The normal lifecycle is:
+After any required architecture decision, the normal change lifecycle is:
 
 ```text
-Architecture
-→ Development and local validation
-→ Review and commit approval
-→ Cluster commissioning
-→ Research pilot
-→ Scientific review
-→ Scaling or convergence study
-→ Permanent research record
+Preflight
+→ Development + Local Validation
+→ Development Self-Review
+→ Pre-Commit Review
+→ Commit
 ```
+
+Commissioning and Research follow a committed milestone and may add further
+approval gates for preparation, execution, scientific review, scaling, and
+permanent research records. Once local validation passes, finish self-review,
+pre-commit review, and commit before starting a new milestone or scientific
+tangent. An explicitly exploratory tangent may precede commit only when it does
+not create authoritative evidence from dirty production source.
 
 Every significant computational result should be reproducible from an
 exact Git revision, an identified execution environment, an immutable
 launch manifest, and preserved evidence.
+
+## Canonical Lifecycle and Evidence Gates
+
+This section is the shared source of truth for Development, Pre-Commit Review,
+Commissioning, and Research prompts. Those procedures should reference these
+gates and add task-specific details rather than restating them.
+
+### Preflight
+
+Before implementation, record the baseline SHA, branch, intended candidate
+boundary, equations or model being changed, expected scientific non-change
+areas, acceptance tests, evidence/provenance strategy, explicit exclusions,
+and whether cluster or GPU access is authorized. Stop if the baseline has
+drifted or the candidate boundary is ambiguous.
+
+### Authoritative numerical evidence
+
+Any numerical result that may be documented, committed, scientifically
+compared, commissioned, or consumed downstream must execute against an exact
+committed production SHA in a clean immutable checkout or worktree with empty
+`git status --porcelain`. Dirty imported production source is a mandatory
+pre-execution hard stop, not a warning. An uncommitted analysis or sweep
+harness is permitted only as a separately supplied, SHA-256-checksummed input.
+
+Its evidence manifest must record at minimum:
+
+- production source SHA, clean flag, and exact `status --porcelain` result;
+- harness or script SHA-256;
+- canonical scientific-data checksum;
+- checksums for committed CSV, JSON, figure, and other evidence artifacts;
+- backend and precision when scientifically relevant.
+
+Evidence fields encode units or normalization whenever ambiguity is possible,
+using names such as `_normalized`, `_mW`, `_um`, and `_rad_per_um`. Missing
+required provenance or ambiguous evidence schema blocks Development.
+
+### Development self-review
+
+Before reporting `Passed`, Development verifies the exact candidate manifest,
+absence of mixed unrelated hunks, public positional and API compatibility,
+persistence/transport backward compatibility where touched, evidence units and
+normalization, mode-specific `Experimental` versus `Validated` presentation,
+all required scientific qualifications, and executable-test or retained-
+evidence support for every acceptance criterion. It also verifies syntax
+compilation, `git diff --check`, exact exclusions, and preservation of unrelated
+dirty-tree content. A new model axis requires status/warning presentation tests
+when it affects user-visible validation status, and a specific experimental
+mode must not inherit a broader workflow-level `Validated` label.
+
+For scientific model comparisons, distinguish physical-model,
+discretization, resolution, normalization, and approximation-regime effects.
+Claims that depend on convergence, asymptotic scaling, or a special
+qualification require quantitative evidence rather than prose alone.
+
+### Hard stops and feedback
+
+Stop on dirty production source before authoritative evidence generation, an
+unresolved predecessor lifecycle gate, unexpected production-source changes in
+an analysis-only milestone, an ambiguous candidate boundary, missing required
+units or provenance, or source-baseline drift.
+
+When pre-commit review identifies a recurring defect class, update the
+appropriate reusable standard after the milestone so Development catches it
+earlier. Formal pre-commit review independently confirms readiness; it should
+not be the first routine check for the self-review items above.
+
+Historical prompt instances remain immutable records. Re-executing an instance
+uses the current standards: an older instance that relies on an uncommitted
+production overlay must be re-instantiated with committed clean source before
+its output can be treated as authoritative.
 
 ## Directory Organization
 
@@ -107,10 +180,17 @@ changes materially.
 | ------------------------------------------------------- | --------- | ------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------ | ------------------------------------------------------ |
 | `TEMPLATE.md`                                           | Draft     | Author a new operational prompt                               | N/A                                             | None until specialized               | N/A                                                    |
 | `01_Architecture/architecture_review.md`                | Validated | Review a proposed architecture without implementation         | Design proposal                                 | Local read-only review               | Implementation and Local Validation                    |
-| `02_Development/implementation_and_local_validation.md` | Reviewed  | Implement a bounded local change and validate it              | Approved architecture or implementation request | Local repository changes and tests   | Pre-Commit Review (planned)                            |
+| `02_Development/implementation_and_local_validation.md` | Reviewed  | Implement a bounded local change and validate it              | Approved architecture or implementation request | Local repository changes and tests   | Development Self-Review, then Pre-Commit Review        |
+| `02_Development/pre_commit_review.md`                   | Reviewed  | Independently review a completed local implementation         | Completed implementation, local validation, and Development Self-Review | Local read-only inspection only | `Approve commit`                                       |
 | `03_Commissioning/cluster_onboarding.md`                | Validated | Characterize a cluster without modifying it                   | Approved cluster access                         | Local and remote read-only discovery | Cluster Checkout Preparation (planned)                 |
 | `03_Commissioning/cpu_smoke.md`                         | Validated | Execute one approved CPU commissioning job                    | Approved checkout and scheduler-job preparation | Exactly one CPU submission           | GPU Smoke Test                                         |
-| `03_Commissioning/gpu_smoke.md`                         | Validated | Verify CuPy GPU execution against an identified CPU reference | Passed CPU smoke test                           | Exactly one GPU submission           | PR Image Amplification Pilot                           |
+| `03_Commissioning/gpu_smoke.md`                         | Validated | Verify CuPy GPU execution against an identified CPU reference | Passed CPU smoke test                           | Exactly one GPU submission           | GPU Validation Benchmark or approved Research instance |
+| `03_Commissioning/gpu_validation_benchmark.md`          | Reviewed  | Validate numerical equivalence and GPU performance before/after a bounded implementation change | Passed GPU smoke test and an exact committed, locally validated candidate | Approved bounded GPU submissions | Pre-Commit Review or Research prompt                   |
+
+GPU Validation Benchmark is a conditional post-development
+commissioning path for performance-sensitive changes on an already
+commissioned GPU. It does not replace GPU Smoke Test and is not a
+required prelude to scientific research.
 
 The library currently has no reusable prompt in `04_Research/`.
 Research procedures may remain preserved locally as task-specific
@@ -183,7 +263,8 @@ Each prompt should contain:
 13. deliverables;
 14. stop conditions;
 15. required report;
-16. approval gate.
+16. approval context;
+17. approval gate.
 
 Specialized prompts may omit sections that are genuinely inapplicable.
 Task-specific result terminology is allowed when it is declared
@@ -209,6 +290,40 @@ manifest containing the script path and checksum, Git SHA, input
 checksums, environment, resources, payload, output locations, authorized
 submission count, and retry policy.
 
+## Approval Vocabulary
+
+Procedures define how work is performed. Canonical approval phrases
+authorize one transition to the next resolved lifecycle state.
+
+| Phrase                        | Required prior state                         | Authorization                                                  | Stopping point                                      |
+| ----------------------------- | -------------------------------------------- | -------------------------------------------------------------- | --------------------------------------------------- |
+| `Approve implementation`      | Approved bounded design or implementation request | Perform the declared local implementation and validation       | After the implementation report                     |
+| `Approve review`              | Completed local implementation with resolved review scope | Perform the declared pre-commit review                         | After the review report                              |
+| `Approve commit`              | Ready-to-commit review with exact files and message | Commit only the reviewed files with the reviewed message       | After reporting the commit SHA and repository status |
+| `Approve push`                | Reviewed commit at HEAD with an unambiguous upstream | Push only that reviewed commit without force                   | After verifying the remote SHA and repository status |
+| `Approve cluster preparation` | Approved remote target and expected Git SHA  | Perform only the declared checkout and scheduler preparation   | Before job submission                                |
+| `Approve submission`          | Fully resolved immutable launch manifest     | Submit exactly the authorized job count with no automatic retry | At the stopping point declared by the execution prompt |
+
+Each approval is single-use and applies only to the most recently
+prepared unambiguous target in the current lifecycle. It does not resolve
+placeholders, authorize an adjacent stage, or permit scope expansion.
+Codex must stop if repository, manifest, remote, or scheduler state has
+drifted from the approved context. Ambiguous approvals require
+clarification.
+
+Generic words such as `approved`, `proceed`, or `continue` are not
+canonical shorthand unless their exact target and authorized action are
+otherwise unambiguous.
+
+`Approve push` does not authorize pulling, rebasing, force-pushing,
+changing branches, reconciling divergence, including additional commits,
+or beginning remote execution. `Approve submission` is invalid until the
+launch manifest contains every required concrete value or `N/A`.
+
+Retrieval remains part of the currently validated submission procedures.
+Add `Approve retrieval` only if retrieval later becomes a genuinely
+separate lifecycle gate.
+
 ## Operational Status and Scientific Assessment
 
 Execution and research outcomes are not interchangeable.
@@ -224,10 +339,10 @@ commissioning objective.
 
 ## Reproducibility
 
-Research and commissioning calculations should record, when applicable:
+Authoritative calculations first satisfy **Canonical Lifecycle and Evidence
+Gates**. Research and commissioning manifests additionally record, when
+applicable:
 
-- exact Git SHA and branch;
-- repository cleanliness;
 - Python executable and package versions;
 - CUDA module, runtime, and driver;
 - backend requested and reported;
@@ -235,7 +350,7 @@ Research and commissioning calculations should record, when applicable:
 - GPU model and device identity;
 - synchronized timing and memory measurements;
 - numerical tolerances and measured differences;
-- script and input checksums;
+- input checksums not already covered by the canonical evidence manifest;
 - stdout, stderr, exit code, metrics, and provenance;
 - persistent and retrieved output locations.
 
