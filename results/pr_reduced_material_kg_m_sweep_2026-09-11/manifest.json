@@ -1,0 +1,83 @@
+{
+  "artifacts": {
+    "figures/fundamental_enhancement_heatmap.png": "9d80359d57837b87bde664eb2edb46709a3594fb62051b6f565c3effeca36a59",
+    "figures/second_harmonic_heatmap.png": "befb256d0f85fdeaedc609fe21a1df7fd69ed2f403ae4d0229d8f70600d73e29",
+    "figures/selected_fundamental_ratio_curves.png": "2506efa0809e0eabf24fe670f998670cc069e5c81d9a3cb98ed4ca37a781d7a7",
+    "figures/selected_harmonic_ratio_curves.png": "5341f10b1096c59e782b18b5ae3958ffbf268ad7abef1ce00591d853e6ebbda9",
+    "figures/small_m_coefficient_vs_frequency.png": "4996d12ac90db0b3865d01b191425de7586653d8437c68f0441f801d58cfc393",
+    "figures/third_harmonic_heatmap.png": "981b44820e041933dc034130ce673176014fd598bc2cffbaec5f1bab7974e8b7",
+    "resolution.csv": "2fa5d5e8151624d253e22110a35d424cb96fbe6db080943b3338916e4d31e839",
+    "small_m_fits.csv": "64e4386e0f53f510c5d420502f1a0a2f3dcf5034d652cb97c0bb8c44f5ea9084",
+    "summary.csv": "46c60cec30f403cf6d1444275adccb3f2ad47167f981f8926aff47c4ba501eb8"
+  },
+  "canonical_sha256": {
+    "resolution_rows": "ac953c352b8f80b37f061f3498120680667fc17dbc752233d02e2a82da33b143",
+    "scientific_rows": "6860a68b0142a6e0e34190f244e3b78cddb7c6cfbfa65df47b42936d7c86317e",
+    "small_m_fits": "26f74e41cfbe5e58e0c8c6d449ebb07bcf231d43ffcf0b0d507cd11e0671c874"
+  },
+  "configuration": {
+    "N1024_resolution_residual_tolerances": {
+      "max": 2e-11,
+      "rms": 5e-12
+    },
+    "applied_field": 0.0,
+    "background_intensity": 0.0,
+    "characteristic_wavenumber_per_um": 4.282893587390008,
+    "dimensionless_frequency": "kg_over_kD = kg_rad_per_um / kD",
+    "grid_size": 512,
+    "kg_rad_per_um": [
+      0.25,
+      0.5,
+      0.75,
+      1.0,
+      1.5,
+      2.0,
+      3.141592653589793,
+      4.282893587390008,
+      6.0,
+      8.0
+    ],
+    "modulations": [
+      0.01,
+      0.02,
+      0.05,
+      0.1,
+      0.2,
+      0.4,
+      0.6,
+      0.8,
+      0.95
+    ],
+    "one_exact_period": true,
+    "primary_residual_tolerances": {
+      "max": 1e-11,
+      "rms": 1e-12
+    },
+    "reference_intensity": 1.0,
+    "resolution_grid_sizes": [
+      256,
+      512,
+      1024
+    ],
+    "resolution_kg_rad_per_um": [
+      0.25,
+      3.141592653589793,
+      8.0
+    ]
+  },
+  "harness_sha256": "2b444cc7613e1c07cecdafc131f0b2c84f768d9aae2b8682f44aa0776b65b695",
+  "production_source": {
+    "clean_after": true,
+    "clean_before": true,
+    "commit": "c3edb6f46fb82a0e158b98fa599f49f406687a13",
+    "status_porcelain_after": "",
+    "status_porcelain_before": ""
+  },
+  "schema_version": 1,
+  "study": "reduced_pr_material_kg_m_nonlinearity_map",
+  "versions": {
+    "matplotlib": "3.11.0",
+    "numpy": "2.5.1",
+    "python": "3.12.13"
+  }
+}
