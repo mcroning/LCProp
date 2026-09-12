@@ -90,11 +90,24 @@ def classify_pr_run_cost(
             very_threshold = 5.0e11
             rationale = "nonlinear coupled, per-plane Newton, and PCG work"
     elif isinstance(request, PRTransverseRunRequest):
-        model = "Full transverse PR transport — Fully nonlinear time dependent"
-        score = points * int(request.solver.Nt) * 8.0 * factor
+        linearized = (
+            request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+        )
+        model = (
+            "Full transverse PR transport — Linearized time dependent"
+            if linearized
+            else "Full transverse PR transport — Fully nonlinear time dependent"
+        )
+        score = points * int(request.solver.Nt) * (
+            5.0 if linearized else 8.0
+        ) * factor
         potential_threshold = 5.0e9
         very_threshold = 5.0e10
-        rationale = "full-transverse material steps and optical z marches"
+        rationale = (
+            "exact plane-local Fourier material updates and optical z marches"
+            if linearized
+            else "full-transverse material steps and optical z marches"
+        )
     elif isinstance(request, PRStaticRunRequest):
         if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
             model = "Reduced x-only PR transport — Linearized material response"

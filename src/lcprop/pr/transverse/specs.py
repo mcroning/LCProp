@@ -107,7 +107,7 @@ class PRTransverseBoundaryProfile:
 
 @dataclass(frozen=True)
 class PRTransverseMaterialResponseSpec:
-    """Independent constitutive response axis shared by static PR transport.
+    """Independent constitutive response axis shared by transverse PR transport.
 
     The nonlinear default preserves the established reduced and transverse
     workflows.
@@ -224,6 +224,9 @@ class PRTransverseRunRequest:
     initial_psi: Any | None = None
     scattering: PRCanonicalScatteringSpec | None = None
     launch_elements: tuple[ChannelLaunchElements, ...] = ()
+    material_response: PRTransverseMaterialResponseSpec = field(
+        default_factory=PRTransverseMaterialResponseSpec
+    )
 
 
 @dataclass(frozen=True)

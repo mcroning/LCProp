@@ -157,7 +157,10 @@ class PREvolutionPanel(QWidget):
             if capability.workflow_id == workflow_id
         )
         if (
-            workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW
+            workflow_id in (
+                PR_TRANSVERSE_STATIC_WORKFLOW,
+                PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+            )
             and self.material_response.currentData()
             == PR_MATERIAL_RESPONSE_LINEARIZED
         ):
@@ -215,19 +218,23 @@ class PREvolutionPanel(QWidget):
         is_transverse_static = (
             workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW
         )
+        is_transverse_timedependent = (
+            workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
+        )
         is_static = workflow_id in (
             PR_STATIC_WORKFLOW,
             PR_TRANSVERSE_STATIC_WORKFLOW,
         )
-        if not is_static:
+        supports_material_response = is_static or is_transverse_timedependent
+        if not supports_material_response:
             nonlinear_index = self.material_response.findData(
                 PR_MATERIAL_RESPONSE_NONLINEAR
             )
             self.material_response.setCurrentIndex(nonlinear_index)
-        self.material_response.setEnabled(is_static)
-        self._set_row_visible(self.material_response, is_static)
+        self.material_response.setEnabled(supports_material_response)
+        self._set_row_visible(self.material_response, supports_material_response)
         is_linearized = (
-            is_static
+            supports_material_response
             and self.material_response.currentData()
             == PR_MATERIAL_RESPONSE_LINEARIZED
         )
@@ -235,7 +242,8 @@ class PREvolutionPanel(QWidget):
         self._set_row_visible(self.reference_intensity, is_linearized)
         self._set_row_visible(
             self.transverse_applied_field,
-            is_transverse_static and is_linearized,
+            (is_transverse_static or is_transverse_timedependent)
+            and is_linearized,
         )
         self._refresh_integrator_choices()
         for widget in (self.Nt, self.dt_normalized, self.integrator):

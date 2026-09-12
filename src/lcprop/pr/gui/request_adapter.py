@@ -169,19 +169,17 @@ def validate_pr_transverse_gui_request(
     request.dielectric.validate()
     request.boundary.validate()
     request.projection.validate()
-    if request.boundary.profile_id != PR_FULL_TRANSVERSE_PROFILE_V1:
-        raise ValueError(
-            "time-dependent full-transverse execution supports only the "
-            "unbiased nonlinear Profile v1"
-        )
+    request.material_response.validate_configuration(
+        material_applied_field=request.material.applied_field,
+        transport=request.transport,
+        dielectric=request.dielectric,
+        boundary=request.boundary,
+        projection=request.projection,
+    )
     if request.backend.backend not in ("numpy", "cupy"):
         raise ValueError(
             "2D zero-flux time-dependent workflow requires an explicit "
             "NumPy or CuPy backend"
-        )
-    if float(request.material.applied_field) != 0.0:
-        raise ValueError(
-            "2D zero-flux Profile v1 requires zero normalized applied field"
         )
     return PRRequestPreflight(
         conservative_dt_limit=float("nan"),
@@ -268,8 +266,26 @@ def build_pr_request(
     elif workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
         transverse_common = dict(common)
         transverse_common.pop("initial_E")
+        material_response = evolution_panel.transverse_material_response()
+        boundary_profile_id = (
+            PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1
+            if material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+            else PR_FULL_TRANSVERSE_PROFILE_V1
+        )
         request = PRTransverseRunRequest(
             **transverse_common,
+            transport=PRTransverseTransportProfile(),
+            dielectric=PRTransverseDielectricProfile(),
+            boundary=PRTransverseBoundaryProfile(
+                profile_id=boundary_profile_id,
+                applied_field_x=(
+                    evolution_panel.transverse_applied_field.value()
+                    if material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+                    else 0.0
+                ),
+            ),
+            projection=PRTransverseProjectionProfile(),
+            material_response=material_response,
             initial_psi=None,
             solver=evolution_panel.transverse_solver(),
         )
@@ -355,6 +371,10 @@ def apply_pr_request(
     material_panel.set_material(request.material)
     if isinstance(request, PRTransverseRunRequest):
         evolution_panel.set_workflow_id(PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW)
+        evolution_panel.set_transverse_material_response(
+            request.material_response,
+            applied_field_x=request.boundary.applied_field_x,
+        )
         evolution_panel.set_transverse_solver(request.solver)
     elif isinstance(request, PRTransverseStaticRunRequest):
         evolution_panel.set_workflow_id(PR_TRANSVERSE_STATIC_WORKFLOW)

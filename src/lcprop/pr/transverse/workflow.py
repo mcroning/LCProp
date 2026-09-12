@@ -1,4 +1,4 @@
-"""Backend-native time-dependent workflow for full-transverse PR Profile v1."""
+"""Backend-native nonlinear and linearized full-transverse PR dynamics."""
 
 from __future__ import annotations
 
@@ -18,9 +18,21 @@ from lcprop.optics.splitstep import linear_kernel
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.scattering import canonical_scattering_provenance
 from lcprop.pr.transverse.diagnostics import state_diagnostics
+from lcprop.pr.transverse.linearized_reference import (
+    FIXED_MEAN_FIELD_ENSEMBLE,
+    PRBiasedLinearizedReferenceSpec,
+)
+from lcprop.pr.transverse.linearized_timedependent_reference import (
+    PR_PERIODIC_BIASED_LINEARIZED_TIMEDEPENDENT_REFERENCE_V1,
+    linearized_timedependent_rhs,
+    solve_pr_biased_linearized_timedependent_reference,
+)
 from lcprop.pr.transverse.projection import project_active_field
 from lcprop.pr.transverse.specs import (
+    PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1,
     PR_FULL_TRANSVERSE_PROFILE_V1,
+    PR_MATERIAL_RESPONSE_LINEARIZED,
+    PR_MATERIAL_RESPONSE_NONLINEAR,
     PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE,
     PR_TRANSVERSE_IMEX_EULER,
     PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
@@ -62,6 +74,21 @@ def _validate_request(request: PRTransverseRunRequest) -> None:
     request.dielectric.validate()
     request.boundary.validate()
     request.projection.validate()
+    if request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR:
+        if request.boundary.profile_id != PR_FULL_TRANSVERSE_PROFILE_V1:
+            raise ValueError(
+                "time-dependent Profile v1 does not support the periodic biased "
+                "electrical profile"
+            )
+        if float(request.material.applied_field) != 0.0:
+            raise ValueError("Profile v1 requires material.applied_field=0")
+    request.material_response.validate_configuration(
+        material_applied_field=request.material.applied_field,
+        transport=request.transport,
+        dielectric=request.dielectric,
+        boundary=request.boundary,
+        projection=request.projection,
+    )
     request.solver.validate()
     request.backend.validate()
     if request.scattering is not None:
@@ -75,13 +102,53 @@ def _validate_request(request: PRTransverseRunRequest) -> None:
         raise ValueError(
             "Profile v1 requires explicit backend='numpy' or backend='cupy'"
         )
-    if request.boundary.profile_id != PR_FULL_TRANSVERSE_PROFILE_V1:
-        raise ValueError(
-            "time-dependent Profile v1 does not support the periodic biased "
-            "electrical profile"
+
+
+def _linearized_reference_spec(
+    request: PRTransverseRunRequest,
+    *,
+    dx_normalized: float,
+    dy_normalized: float,
+) -> PRBiasedLinearizedReferenceSpec:
+    reference_intensity = request.material_response.reference_intensity
+    if reference_intensity is None:  # guarded by request validation
+        raise ValueError("linearized material response requires reference_intensity")
+    return PRBiasedLinearizedReferenceSpec(
+        reference_intensity=float(reference_intensity),
+        applied_field=float(request.boundary.applied_field_x),
+        dx_normalized=dx_normalized,
+        dy_normalized=dy_normalized,
+        m_y=float(request.transport.m_y),
+        h_y=float(request.dielectric.h_y),
+    )
+
+
+def _linearized_material_step(
+    psi,
+    source,
+    *,
+    request: PRTransverseRunRequest,
+    spec: PRBiasedLinearizedReferenceSpec,
+    xp,
+    cancellation_token: CancellationToken | None,
+    material_response_calls: list[int],
+):
+    """Advance independent planes with the accepted exact modal propagator."""
+
+    candidate = xp.empty_like(psi)
+    for plane_index in range(source.shape[0]):
+        _check_cancel(cancellation_token, "linearized_material_plane")
+        response = solve_pr_biased_linearized_timedependent_reference(
+            source[plane_index],
+            time_normalized=float(request.solver.dt_normalized),
+            spec=spec,
+            initial_delta_psi=psi[plane_index],
+            backend=request.backend,
         )
-    if float(request.material.applied_field) != 0.0:
-        raise ValueError("Profile v1 requires material.applied_field=0")
+        candidate[plane_index] = response.delta_psi
+        material_response_calls[0] += 1
+        _check_cancel(cancellation_token, "linearized_material_plane")
+    return candidate
 
 
 def _initial_fields(request, *, launch, grid, complex_dtype, real_dtype):
@@ -235,6 +302,7 @@ def run_pr_transverse_timedependent(
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
+        applied_field_x=request.boundary.applied_field_x,
         xp=xp,
     )
     initial_carrier = xp.sum(initial_state.carrier_density, axis=(-2, -1))
@@ -242,6 +310,16 @@ def run_pr_transverse_timedependent(
     completed_steps = 0
     cancelled = False
     cancellation_stage = None
+    material_response_calls = [0]
+    linearized_spec = (
+        _linearized_reference_spec(
+            request,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+        )
+        if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+        else None
+    )
 
     for step_index in range(int(request.solver.Nt)):
         try:
@@ -259,25 +337,36 @@ def run_pr_transverse_timedependent(
                 cancellation_token=cancellation_token,
                 scattering_phase_stack=scattering_phase_stack,
             )
-            if request.solver.integrator == PR_TRANSVERSE_IMEX_EULER:
-                step_function = imex_euler_step
-            elif request.solver.integrator == PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE:
-                step_function = explicit_euler_step
-            else:  # guarded by PRTransverseSolverOptions.validate()
-                raise ValueError(
-                    f"unknown transverse PR integrator: {request.solver.integrator}"
+            if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
+                candidate = _linearized_material_step(
+                    psi,
+                    source,
+                    request=request,
+                    spec=linearized_spec,
+                    xp=xp,
+                    cancellation_token=cancellation_token,
+                    material_response_calls=material_response_calls,
                 )
-            candidate = step_function(
-                psi,
-                source,
-                dt_normalized=request.solver.dt_normalized,
-                dx_normalized=dx_normalized,
-                dy_normalized=dy_normalized,
-                m_y=request.transport.m_y,
-                h_y=request.dielectric.h_y,
-                applied_field_x=request.boundary.applied_field_x,
-                xp=xp,
-            )
+            else:
+                if request.solver.integrator == PR_TRANSVERSE_IMEX_EULER:
+                    step_function = imex_euler_step
+                elif request.solver.integrator == PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE:
+                    step_function = explicit_euler_step
+                else:  # guarded by PRTransverseSolverOptions.validate()
+                    raise ValueError(
+                        f"unknown transverse PR integrator: {request.solver.integrator}"
+                    )
+                candidate = step_function(
+                    psi,
+                    source,
+                    dt_normalized=request.solver.dt_normalized,
+                    dx_normalized=dx_normalized,
+                    dy_normalized=dy_normalized,
+                    m_y=request.transport.m_y,
+                    h_y=request.dielectric.h_y,
+                    applied_field_x=request.boundary.applied_field_x,
+                    xp=xp,
+                )
             _check_cancel(cancellation_token, "after_material_candidate")
         except _CancellationRequested as exc:
             cancelled = True
@@ -291,6 +380,7 @@ def run_pr_transverse_timedependent(
             dx_normalized=dx_normalized,
             dy_normalized=dy_normalized,
             h_y=request.dielectric.h_y,
+            applied_field_x=request.boundary.applied_field_x,
             xp=xp,
         )
         current_carrier = xp.sum(accepted_state.carrier_density, axis=(-2, -1))
@@ -317,6 +407,15 @@ def run_pr_transverse_timedependent(
                         "psi_current": np.asarray(asnumpy(psi)).copy()
                     },
                     message="transverse PR material-time step accepted",
+                    diagnostics={
+                        "material_response": request.material_response.model,
+                        "material_update": (
+                            "exact_frozen_source_modal"
+                            if request.material_response.model
+                            == PR_MATERIAL_RESPONSE_LINEARIZED
+                            else request.solver.integrator
+                        ),
+                    },
                     completed_step=completed_steps,
                     total_steps=int(request.solver.Nt),
                     current_time=material_time,
@@ -329,7 +428,7 @@ def run_pr_transverse_timedependent(
             )
 
     # A complete replay through the last accepted state keeps products physical.
-    A_final, _ = _optical_pass(
+    A_final, final_source = _optical_pass(
         A0,
         psi,
         request=request,
@@ -346,6 +445,7 @@ def run_pr_transverse_timedependent(
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
+        applied_field_x=request.boundary.applied_field_x,
         xp=xp,
     )
     diagnostics = state_diagnostics(
@@ -364,13 +464,56 @@ def run_pr_transverse_timedependent(
             "finite_optical_state": bool(asnumpy(xp.all(xp.isfinite(A_final)))),
             "cancellation_observed_stage": cancellation_stage,
             "integrator_policy": (
-                "production_first_order_spectral_imex"
-                if request.solver.integrator == PR_TRANSVERSE_IMEX_EULER
-                else "transparent_reference_not_production_default"
+                "exact_frozen_source_linearized_modal_update"
+                if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+                else (
+                    "production_first_order_spectral_imex"
+                    if request.solver.integrator == PR_TRANSVERSE_IMEX_EULER
+                    else "transparent_reference_not_production_default"
+                )
             ),
             "complete_final_optical_replay": True,
+            "material_response": request.material_response.model,
+            "material_response_validation": (
+                "experimental"
+                if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+                else "validated"
+            ),
+            "material_response_calls": material_response_calls[0],
+            "accepted_material_steps": completed_steps,
+            "material_time_normalized": (
+                completed_steps * float(request.solver.dt_normalized)
+            ),
         }
     )
+    if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
+        rhs_sum_squares = 0.0
+        rhs_max = 0.0
+        rhs_cells = 0
+        for plane_index in range(final_source.shape[0]):
+            rhs_plane = linearized_timedependent_rhs(
+                psi[plane_index],
+                final_source[plane_index],
+                spec=linearized_spec,
+                backend=request.backend,
+            )
+            rhs_sum_squares += scalar_float(xp.sum(rhs_plane * rhs_plane))
+            rhs_max = max(rhs_max, scalar_float(xp.max(xp.abs(rhs_plane))))
+            rhs_cells += int(rhs_plane.size)
+        diagnostics.update({
+            "frozen_intensity_material_equation": (
+                "exact_analytic_fourier_transient"
+            ),
+            "source_cadence": "one_complete_optical_pass_per_material_interval",
+            "nonlinear_material_iterations": "not_applicable",
+            "linearized_rhs_rms": (rhs_sum_squares / rhs_cells) ** 0.5,
+            "linearized_rhs_max": rhs_max,
+            "memory_policy": {
+                "backend_working_set": "one_transverse_material_plane",
+                "retained_material_state": "full_longitudinal_volume",
+                "fft_batch_axes": "transverse_only",
+            },
+        })
     scattering_provenance = None
     if request.scattering is not None:
         scattering_provenance = canonical_scattering_provenance(
@@ -384,8 +527,16 @@ def run_pr_transverse_timedependent(
             xp=xp,
         )
         diagnostics["canonical_scattering"] = scattering_provenance
+    physics_profile_id = (
+        PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1
+        if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+        else PR_FULL_TRANSVERSE_PROFILE_V1
+    )
     resolved_profile = {
-        "physics_profile_id": PR_FULL_TRANSVERSE_PROFILE_V1,
+        "physics_profile_id": physics_profile_id,
+        "workflow": PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+        "transport_model": "full_transverse",
+        "material_response": asdict(request.material_response),
         "grid_request": asdict(request.grid),
         "beam_request": asdict(request.beams),
         "material": asdict(request.material),
@@ -398,6 +549,18 @@ def run_pr_transverse_timedependent(
         "dx_normalized": dx_normalized,
         "dy_normalized": dy_normalized,
     }
+    if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
+        resolved_profile.update({
+            "linearized_model_id": (
+                PR_PERIODIC_BIASED_LINEARIZED_TIMEDEPENDENT_REFERENCE_V1
+            ),
+            "electrical_ensemble": FIXED_MEAN_FIELD_ENSEMBLE,
+            "reference_intensity": float(
+                request.material_response.reference_intensity
+            ),
+            "applied_field": float(request.boundary.applied_field_x),
+            "validation_status": "experimental",
+        })
     if scattering_provenance is not None:
         resolved_profile["canonical_scattering"] = scattering_provenance
     return PRTransverseRunResult(

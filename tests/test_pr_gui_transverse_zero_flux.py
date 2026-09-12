@@ -138,7 +138,7 @@ def test_gui_builds_valid_canonical_transverse_static_request(app):
     window.close()
 
 
-def test_gui_exposes_linearized_response_only_for_full_transverse_static(app):
+def test_gui_preserves_response_control_when_switching_to_transverse_td(app):
     window = _configured_window(app)
     panel = window.evolution_panel
     linearized_index = panel.material_response.findData(
@@ -163,9 +163,10 @@ def test_gui_exposes_linearized_response_only_for_full_transverse_static(app):
     assert not panel.transverse_applied_field.isHidden()
 
     panel.set_workflow_id(PR_TRANSVERSE_TIMEDEPENDENT_OPERATION.workflow_id)
-    assert panel.material_response.currentData() == PR_MATERIAL_RESPONSE_NONLINEAR
-    assert panel.material_response.isHidden()
-    assert panel.reference_intensity.isHidden()
+    assert panel.material_response.currentData() == PR_MATERIAL_RESPONSE_LINEARIZED
+    assert not panel.material_response.isHidden()
+    assert not panel.reference_intensity.isHidden()
+    assert not panel.transverse_applied_field.isHidden()
     window.close()
 
 

@@ -123,7 +123,10 @@ def _image_amplification_validation_status(capability, base_request) -> str:
     """Resolve IA validation without changing workflow-level capability data."""
 
     if (
-        isinstance(base_request, PRTransverseStaticRunRequest)
+        isinstance(
+            base_request,
+            (PRTransverseRunRequest, PRTransverseStaticRunRequest),
+        )
         and base_request.material_response.model
         == PR_MATERIAL_RESPONSE_LINEARIZED
     ):
@@ -833,15 +836,41 @@ class PRMainWindow(QWidget):
                 ),
             ])
         elif workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
+            linearized = (
+                request.material_response.model
+                == PR_MATERIAL_RESPONSE_LINEARIZED
+            )
             lines.extend([
-                "Time-dependent material model: full 2D transverse zero-flux",
+                (
+                    "Time-dependent material model: Linearized full transverse "
+                    "[Experimental]"
+                    if linearized
+                    else "Time-dependent material model: full 2D transverse zero-flux"
+                ),
                 "Authoritative material state: periodic zero-mean psi",
                 "Solved material fields: E_x and E_y",
                 "Scalar optical projection: E_active = E_x",
                 f"Material steps: {request.solver.Nt}",
-                f"Material integrator: {request.solver.integrator}",
+                (
+                    "Material integrator: exact frozen-source modal update"
+                    if linearized
+                    else f"Material integrator: {request.solver.integrator}"
+                ),
                 f"Normalized timestep: {request.solver.dt_normalized:g}",
             ])
+            if linearized:
+                lines.extend([
+                    (
+                        "Linearization intensity I₀: "
+                        f"{request.material_response.reference_intensity:g} "
+                        "normalized total transport intensity"
+                    ),
+                    (
+                        "Transverse applied mean field: "
+                        f"{request.boundary.applied_field_x:g} normalized"
+                    ),
+                    "Electrical ensemble: fixed harmonic mean field",
+                ])
         elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
             linearized = (
                 request.material_response.model

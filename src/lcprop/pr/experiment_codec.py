@@ -152,19 +152,13 @@ def _validate_transverse_request(
     request.dielectric.validate()
     request.boundary.validate()
     request.projection.validate()
-    if isinstance(request, PRTransverseStaticRunRequest):
-        request.material_response.validate_configuration(
-            material_applied_field=request.material.applied_field,
-            transport=request.transport,
-            dielectric=request.dielectric,
-            boundary=request.boundary,
-            projection=request.projection,
-        )
-    elif request.boundary.profile_id != PR_FULL_TRANSVERSE_PROFILE_V1:
-        raise ValueError(
-            "time-dependent Profile v1 does not support the periodic biased "
-            "electrical profile"
-        )
+    request.material_response.validate_configuration(
+        material_applied_field=request.material.applied_field,
+        transport=request.transport,
+        dielectric=request.dielectric,
+        boundary=request.boundary,
+        projection=request.projection,
+    )
     request.solver.validate()
     request.backend.validate()
     if request.scattering is not None:
@@ -237,6 +231,7 @@ def encode_pr_transverse_timedependent_request(
         "dielectric": asdict(request.dielectric),
         "boundary": asdict(request.boundary),
         "projection": asdict(request.projection),
+        "material_response": asdict(request.material_response),
         "solver": asdict(request.solver),
         "backend": asdict(request.backend),
         "scattering": (
@@ -599,6 +594,11 @@ def decode_pr_transverse_timedependent_request(
             "scattering",
             "launch_elements",
         },
+        optional=(
+            {"material_response"}
+            if version == PR_EXPERIMENT_REQUEST_SCHEMA_VERSION
+            else set()
+        ),
         name="PR transverse-TD request_payload",
     )
     scattering_values = payload["scattering"]
@@ -646,6 +646,20 @@ def decode_pr_transverse_timedependent_request(
                     PRTransverseProjectionProfile,
                     payload["projection"],
                     name="PR transverse-TD request_payload.projection",
+                )
+            ),
+            material_response=PRTransverseMaterialResponseSpec(
+                **(
+                    dataclass_values(
+                        PRTransverseMaterialResponseSpec,
+                        payload["material_response"],
+                        name=(
+                            "PR transverse-TD request_payload."
+                            "material_response"
+                        ),
+                    )
+                    if "material_response" in payload
+                    else {}
                 )
             ),
             solver=PRTransverseSolverOptions(

@@ -21,6 +21,8 @@ from lcprop.pr.gui.request_adapter import validate_pr_transverse_gui_request
 from lcprop.pr.image_sources import PRImageSource
 from lcprop.pr.transverse.operations import PR_TRANSVERSE_TIMEDEPENDENT_OPERATION
 from lcprop.pr.transverse.specs import (
+    PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1,
+    PR_MATERIAL_RESPONSE_LINEARIZED,
     PRTransverseRunRequest,
     PR_TRANSVERSE_IMEX_EULER,
     PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
@@ -108,6 +110,37 @@ def test_transverse_td_gui_preserves_supported_backend_policy(app):
     window.evolution_panel.precision.setCurrentText("float32")
     request = window.build_request()
     assert request.backend == BackendSpec("cupy", "float32", False)
+    window.close()
+
+
+def test_gui_builds_linearized_transverse_td_as_experimental(app):
+    window = _window(app)
+    panel = window.evolution_panel
+    response_index = panel.material_response.findData(
+        PR_MATERIAL_RESPONSE_LINEARIZED
+    )
+    panel.material_response.setCurrentIndex(response_index)
+    panel.reference_intensity.setValue(1.75)
+    panel.transverse_applied_field.setValue(0.3)
+
+    request = window.build_request()
+    summary = window.describe_request(request)
+
+    assert request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+    assert request.material_response.reference_intensity == 1.75
+    assert request.boundary.profile_id == (
+        PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1
+    )
+    assert request.boundary.applied_field_x == 0.3
+    assert "Linearized full transverse [Experimental]" in summary
+    assert "exact frozen-source modal update" in summary
+    assert not panel.material_response.isHidden()
+    assert not panel.reference_intensity.isHidden()
+    assert not panel.transverse_applied_field.isHidden()
+    panel.set_image_amplification_mode(True)
+    workflow_index = panel.workflow.findData(PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW)
+    assert "[Experimental]" in panel.workflow.itemText(workflow_index)
+    assert "Experimental:" in panel.algorithm_status.text()
     window.close()
 
 

@@ -23,9 +23,9 @@ from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.pr.specs import PRMaterialSpec, PR_MATERIAL_ID
 from lcprop.pr.transport_common import pack_portable, unpack_portable
 from lcprop.pr.transverse.specs import (
-    PR_FULL_TRANSVERSE_PROFILE_V1,
     PRTransverseBoundaryProfile,
     PRTransverseDielectricProfile,
+    PRTransverseMaterialResponseSpec,
     PRTransverseProjectionProfile,
     PRTransverseRunRequest,
     PRTransverseRunResult,
@@ -57,6 +57,7 @@ PR_TRANSVERSE_TIMEDEPENDENT_TRANSPORT_CODEC_VERSION = 1
 _CANCELLATION_OBSERVED_STAGES = {
     "material_step_boundary",
     "material_source_optical_z_march",
+    "linearized_material_plane",
     "after_material_candidate",
 }
 
@@ -85,11 +86,13 @@ def _validate_request(request: PRTransverseRunRequest) -> None:
     request.projection.validate()
     request.solver.validate()
     request.backend.validate()
-    if request.boundary.profile_id != PR_FULL_TRANSVERSE_PROFILE_V1:
-        raise ValueError(
-            "time-dependent Profile v1 does not support the periodic biased "
-            "electrical profile"
-        )
+    request.material_response.validate_configuration(
+        material_applied_field=request.material.applied_field,
+        transport=request.transport,
+        dielectric=request.dielectric,
+        boundary=request.boundary,
+        projection=request.projection,
+    )
     validate_channel_launch_elements(
         request.launch_elements,
         n_channels=len(request.beams.channels),
@@ -129,6 +132,7 @@ def encode_pr_transverse_timedependent_transport_request(
         "dielectric": asdict(request.dielectric),
         "boundary": asdict(request.boundary),
         "projection": asdict(request.projection),
+        "material_response": asdict(request.material_response),
         "solver": asdict(request.solver),
         "backend": asdict(request.backend),
         "initial_A": pack_portable(request.initial_A, arrays, "request.initial_A"),
@@ -166,7 +170,17 @@ def decode_pr_transverse_timedependent_transport_request(
         "launch_elements",
     }
     try:
-        _require_exact_keys(metadata, required, label="PR transverse-TD request")
+        extra = set(metadata) - required - {"material_response"}
+        missing = required - set(metadata)
+        if missing or extra:
+            details = []
+            if missing:
+                details.append("missing " + ", ".join(sorted(missing)))
+            if extra:
+                details.append("unexpected " + ", ".join(sorted(extra)))
+            raise TransportCodecError(
+                "PR transverse-TD request has " + "; ".join(details)
+            )
         values = unpack_portable(dict(metadata), arrays)
         beams = decode_beam_stack(values["beams"])
         scattering = values["scattering"]
@@ -178,6 +192,9 @@ def decode_pr_transverse_timedependent_transport_request(
             dielectric=PRTransverseDielectricProfile(**values["dielectric"]),
             boundary=PRTransverseBoundaryProfile(**values["boundary"]),
             projection=PRTransverseProjectionProfile(**values["projection"]),
+            material_response=PRTransverseMaterialResponseSpec(
+                **values.get("material_response", {})
+            ),
             solver=PRTransverseSolverOptions(**values["solver"]),
             backend=BackendSpec(**values["backend"]),
             initial_A=values["initial_A"],
