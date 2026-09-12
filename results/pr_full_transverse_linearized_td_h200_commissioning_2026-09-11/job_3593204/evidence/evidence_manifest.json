@@ -1,0 +1,48 @@
+{
+  "backend": {
+    "complex_dtype": "complex128",
+    "is_gpu": true,
+    "name": "cupy",
+    "precision": "float64",
+    "real_dtype": "float64"
+  },
+  "canonical_scientific_data": {
+    "path": "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/commissioning_metrics.json",
+    "sha256": "6541a6258e293843f9c4373d0adb2e5b78948e07d93ab47b26b90ca2c1f42ec3"
+  },
+  "commissioning_job": {
+    "exit_code": "0:0",
+    "job_id": "3593204",
+    "state": "COMPLETED"
+  },
+  "harness": {
+    "path": "scripts/checks/pr_full_transverse_linearized_td_h200_commissioning.py",
+    "sha256": "0e58fce9bb6d4558c2ff3631eac82b0575592abbca68ab4c29416adc83072fbf"
+  },
+  "production_source": {
+    "git_sha": "f865c5e30c5233c8f5b89e478f0bde68b28b2763",
+    "source_clean": true,
+    "status_porcelain": ""
+  },
+  "retained_artifact_checksums": {
+    "docs/development/pr_full_transverse_linearized_td_h200_slurm_commissioning.md": "ee8fc2ea929207bd32415c838f09d207d041a85af3e8f2767f8636385496b36f",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/LOCAL_RECONSTRUCTION.json": "8564d9c1a2c56eabbc7941997dfb338247762cb8362c24b361fb1fc09f4701f6",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/REMOTE_CLEANUP_VERIFIED.txt": "3571aabdee2ab9f2ae2322aa903606083d14e0db630a1842fa9fecbfaa91fe0b",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/SCHEDULER_ACCOUNTING_FINAL.txt": "1f41724f71b56a98682908d46ac56ea2fe32b8416a83b4fbd2d9b9b96c2c2eac",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/case_b_fast/output/RESULT_READY.json": "b6ed354913a2467abd0508ab757664107a365c9f8439f0badfa5aa006f79b0d4",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/case_b_fast/output/checksums.sha256": "bdcc2c3ab9e9e0689949bce1039ccbba89350185bb5cf75151f15132da26dd85",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/case_b_fast/output/manifest.json": "1318ca4aafe7111e9fecac5937b26cfbd8cfb54b1f344af8dec91893e2d1bf18",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/case_b_fast/output/result.json": "ba5e033fa4e98ea7e42a910235f5da7ba28db6afb96699aaceda82769e930356",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/case_b_fast/output/result_arrays.npz": "1ae621759cfd8e47ce4a9c1b579ab164a48e4c6f2eaf48808f482e28f3a8dccd",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/case_b_fast/request/READY.json": "87f58d8321eed1795e1e642030647aecaec0ea396536f4c7dde1eec724df12db",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/case_b_fast/request/checksums.sha256": "ae94fc15b622e9bcc2c7c78e2364c4119bdc483d7622880367e397843e896d26",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/case_b_fast/request/manifest.json": "6140925778c09e80a458259613825c7dfb03f5997be2c0eb487c5506224b27e0",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/case_b_fast/request/request.json": "878c835de848876179b29f24dee2950239e5655089ae0b4cda82819c201d6c6e",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/commissioning_metrics.json": "6541a6258e293843f9c4373d0adb2e5b78948e07d93ab47b26b90ca2c1f42ec3",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/gpu_memory_baseline.csv": "9616b5c55be7124b4bc488c6e61e97757b46e0f7a77f47a4c328d047c4858795",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/gpu_process_memory_samples.csv": "60cf139766b9a04741198547dc0507a8a85a1159092ebd4b53ce62fc707f8e4f",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/execution_provenance.json": "1bd649a70e9ed415ddf7547282a0689e0d74986a146fb0e24e1adaa5998988a6",
+    "scripts/checks/pr_full_transverse_linearized_td_h200_commissioning.py": "0e58fce9bb6d4558c2ff3631eac82b0575592abbca68ab4c29416adc83072fbf"
+  },
+  "schema_version": 2
+}

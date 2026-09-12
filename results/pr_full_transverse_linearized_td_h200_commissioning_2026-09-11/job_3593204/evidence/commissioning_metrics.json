@@ -1,0 +1,690 @@
+{
+  "cases": {
+    "biased": {
+      "backend": {
+        "backend": "cupy",
+        "complex_dtype": "complex128",
+        "is_gpu": true,
+        "real_dtype": "float64"
+      },
+      "bias": 0.35,
+      "comparisons": {
+        "E_active": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 1.1879386363489175e-14,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 4.955896663920709e-15,
+          "rtol": 3e-11,
+          "shape": [
+            2,
+            256,
+            256
+          ]
+        },
+        "E_x": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 1.1879386363489175e-14,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 4.955896663920709e-15,
+          "rtol": 3e-11,
+          "shape": [
+            2,
+            256,
+            256
+          ]
+        },
+        "E_y": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 9.96425164601078e-15,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 3.8237935498588197e-14,
+          "rtol": 3e-11,
+          "shape": [
+            2,
+            256,
+            256
+          ]
+        },
+        "final_optical_field": {
+          "actual_dtype": "complex128",
+          "atol": 3e-12,
+          "maximum_absolute": 4.4328888959487825e-17,
+          "passed": true,
+          "reference_dtype": "complex128",
+          "relative_l2": 9.432392166158771e-16,
+          "rtol": 3e-11,
+          "shape": [
+            2,
+            256,
+            256
+          ]
+        },
+        "final_source_intensity": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 2.6645352591003757e-15,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 2.4363055828206854e-16,
+          "rtol": 3e-11,
+          "shape": [
+            2,
+            256,
+            256
+          ]
+        },
+        "psi": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 2.220446049250313e-16,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 3.915223320264731e-16,
+          "rtol": 3e-11,
+          "shape": [
+            2,
+            256,
+            256
+          ]
+        }
+      },
+      "cupy_diagnostics": {
+        "E_x_max_abs": 0.49195131518322927,
+        "E_x_rms": 0.3527868701580132,
+        "E_y_max_abs": 0.18060990794214002,
+        "E_y_rms": 0.043149743219150084,
+        "P_minus_one_max_abs": 0.75380004517088,
+        "P_minus_one_rms": 0.12735156439697817,
+        "accepted_material_steps": 3,
+        "cancellation_observed_stage": null,
+        "carrier_integrals_per_z": [
+          163.84000000000003,
+          163.84000000000003
+        ],
+        "carrier_relative_drift_max": 2.220446049250313e-16,
+        "complete_final_optical_replay": true,
+        "curl_max": 7.417677583276827e-15,
+        "curl_rms": 1.6932832380103906e-15,
+        "finite_material_state": true,
+        "finite_optical_state": true,
+        "frozen_intensity_material_equation": "exact_analytic_fourier_transient",
+        "gauss_max": 4.604094883120524e-13,
+        "gauss_rms": 6.203137708344168e-14,
+        "integrator_policy": "exact_frozen_source_linearized_modal_update",
+        "linearized_rhs_max": 0.23337511511974007,
+        "linearized_rhs_rms": 0.07826460361911053,
+        "material_response": "linearized",
+        "material_response_calls": 6,
+        "material_response_validation": "experimental",
+        "material_time_normalized": 0.6000000000000001,
+        "memory_policy": {
+          "backend_working_set": "one_transverse_material_plane",
+          "fft_batch_axes": "transverse_only",
+          "retained_material_state": "full_longitudinal_volume"
+        },
+        "nonlinear_material_iterations": "not_applicable",
+        "optical_power_relative_drift": 4.440892098500626e-16,
+        "potential_mean_max_abs": 3.9302328752599536e-19,
+        "source_cadence": "one_complete_optical_pass_per_material_interval"
+      },
+      "cupy_timing": {
+        "instrumented_material_calls": 6,
+        "linearized_material_seconds": 0.010497980169020593,
+        "optical_pass_calls": 4,
+        "optical_pass_seconds": 0.008834655047394335,
+        "scientific_total_seconds": 0.03357275703456253
+      },
+      "diagnostic_comparisons": {
+        "carrier_integrals_per_z": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 0.0,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 0.0,
+          "rtol": 3e-11,
+          "shape": [
+            2
+          ]
+        },
+        "carrier_relative_drift_max": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 2.220446049250313e-16,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 2.220446049250313e-16,
+          "rtol": 3e-11,
+          "shape": []
+        },
+        "linearized_rhs_max": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 3.475830734345209e-13,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 1.4893750486450338e-12,
+          "rtol": 3e-11,
+          "shape": []
+        },
+        "linearized_rhs_rms": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 1.3877787807814457e-17,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 1.7731882825796103e-16,
+          "rtol": 3e-11,
+          "shape": []
+        },
+        "optical_power_relative_drift": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 3.3306690738754696e-16,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 2.9999999999999996,
+          "rtol": 3e-11,
+          "shape": []
+        },
+        "potential_mean_max_abs": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 3.076423664427619e-18,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 0.88671875,
+          "rtol": 3e-11,
+          "shape": []
+        }
+      },
+      "exact_diagnostic_fields": [
+        "finite_material_state",
+        "finite_optical_state",
+        "integrator_policy",
+        "complete_final_optical_replay",
+        "material_response",
+        "material_response_validation",
+        "material_response_calls",
+        "accepted_material_steps",
+        "source_cadence",
+        "nonlinear_material_iterations"
+      ],
+      "numpy_diagnostics": {
+        "E_x_max_abs": 0.4919513151832292,
+        "E_x_rms": 0.3527868701580132,
+        "E_y_max_abs": 0.18060990794213855,
+        "E_y_rms": 0.043149743219150084,
+        "P_minus_one_max_abs": 0.7538000451707207,
+        "P_minus_one_rms": 0.12735156439697817,
+        "accepted_material_steps": 3,
+        "cancellation_observed_stage": null,
+        "carrier_integrals_per_z": [
+          163.84000000000003,
+          163.84000000000003
+        ],
+        "carrier_relative_drift_max": 0.0,
+        "complete_final_optical_replay": true,
+        "curl_max": 6.5503158452884236e-15,
+        "curl_rms": 1.611929284662588e-15,
+        "finite_material_state": true,
+        "finite_optical_state": true,
+        "frozen_intensity_material_equation": "exact_analytic_fourier_transient",
+        "gauss_max": 4.709010958947601e-13,
+        "gauss_rms": 5.737565118911547e-14,
+        "integrator_policy": "exact_frozen_source_linearized_modal_update",
+        "linearized_rhs_max": 0.23337511512008766,
+        "linearized_rhs_rms": 0.07826460361911054,
+        "material_response": "linearized",
+        "material_response_calls": 6,
+        "material_response_validation": "experimental",
+        "material_time_normalized": 0.6000000000000001,
+        "memory_policy": {
+          "backend_working_set": "one_transverse_material_plane",
+          "fft_batch_axes": "transverse_only",
+          "retained_material_state": "full_longitudinal_volume"
+        },
+        "nonlinear_material_iterations": "not_applicable",
+        "optical_power_relative_drift": 1.1102230246251568e-16,
+        "potential_mean_max_abs": 3.469446951953614e-18,
+        "source_cadence": "one_complete_optical_pass_per_material_interval"
+      },
+      "numpy_timing": {
+        "instrumented_material_calls": 6,
+        "linearized_material_seconds": 0.08200642501469702,
+        "optical_pass_calls": 4,
+        "optical_pass_seconds": 0.11718057317193598,
+        "scientific_total_seconds": 0.3038907089503482
+      },
+      "power": {
+        "final": 1.0000000000000004,
+        "initial": 1.0,
+        "relative_drift": 4.440892098500626e-16
+      }
+    },
+    "unbiased": {
+      "backend": {
+        "backend": "cupy",
+        "complex_dtype": "complex128",
+        "is_gpu": true,
+        "real_dtype": "float64"
+      },
+      "bias": 0.0,
+      "comparisons": {
+        "E_active": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 1.1806527977498149e-14,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 3.840377587477131e-14,
+          "rtol": 3e-11,
+          "shape": [
+            2,
+            256,
+            256
+          ]
+        },
+        "E_x": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 1.1806527977498149e-14,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 3.840377587477131e-14,
+          "rtol": 3e-11,
+          "shape": [
+            2,
+            256,
+            256
+          ]
+        },
+        "E_y": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 1.1657341758564144e-14,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 3.584026695028946e-14,
+          "rtol": 3e-11,
+          "shape": [
+            2,
+            256,
+            256
+          ]
+        },
+        "final_optical_field": {
+          "actual_dtype": "complex128",
+          "atol": 3e-12,
+          "maximum_absolute": 4.906538933386797e-17,
+          "passed": true,
+          "reference_dtype": "complex128",
+          "relative_l2": 9.285110846631e-16,
+          "rtol": 3e-11,
+          "shape": [
+            2,
+            256,
+            256
+          ]
+        },
+        "final_source_intensity": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 2.6645352591003757e-15,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 2.511418562399941e-16,
+          "rtol": 3e-11,
+          "shape": [
+            2,
+            256,
+            256
+          ]
+        },
+        "psi": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 2.220446049250313e-16,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 3.7512593641916135e-16,
+          "rtol": 3e-11,
+          "shape": [
+            2,
+            256,
+            256
+          ]
+        }
+      },
+      "cupy_diagnostics": {
+        "E_x_max_abs": 0.17121119115654865,
+        "E_x_rms": 0.040409561857102455,
+        "E_y_max_abs": 0.1781083856933715,
+        "E_y_rms": 0.04259465477314952,
+        "P_minus_one_max_abs": 0.7523945482622569,
+        "P_minus_one_rms": 0.12683253929865917,
+        "accepted_material_steps": 3,
+        "cancellation_observed_stage": null,
+        "carrier_integrals_per_z": [
+          163.84,
+          163.84000000000003
+        ],
+        "carrier_relative_drift_max": 1.1102230246251565e-16,
+        "complete_final_optical_replay": true,
+        "curl_max": 3.4555691641457997e-15,
+        "curl_rms": 5.384288148176516e-16,
+        "finite_material_state": true,
+        "finite_optical_state": true,
+        "frozen_intensity_material_equation": "exact_analytic_fourier_transient",
+        "gauss_max": 4.0273340218277554e-13,
+        "gauss_rms": 5.3101304832862577e-14,
+        "integrator_policy": "exact_frozen_source_linearized_modal_update",
+        "linearized_rhs_max": 0.21911062399989675,
+        "linearized_rhs_rms": 0.07120822248001886,
+        "material_response": "linearized",
+        "material_response_calls": 6,
+        "material_response_validation": "experimental",
+        "material_time_normalized": 0.6000000000000001,
+        "memory_policy": {
+          "backend_working_set": "one_transverse_material_plane",
+          "fft_batch_axes": "transverse_only",
+          "retained_material_state": "full_longitudinal_volume"
+        },
+        "nonlinear_material_iterations": "not_applicable",
+        "optical_power_relative_drift": 6.661338147750939e-16,
+        "potential_mean_max_abs": 1.7211709488207383e-18,
+        "source_cadence": "one_complete_optical_pass_per_material_interval"
+      },
+      "cupy_timing": {
+        "instrumented_material_calls": 6,
+        "linearized_material_seconds": 0.2361195901175961,
+        "optical_pass_calls": 4,
+        "optical_pass_seconds": 0.02156938286498189,
+        "scientific_total_seconds": 0.7989715100266039
+      },
+      "diagnostic_comparisons": {
+        "carrier_integrals_per_z": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 2.842170943040401e-14,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 1.734723475976807e-16,
+          "rtol": 3e-11,
+          "shape": [
+            2
+          ]
+        },
+        "carrier_relative_drift_max": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 0.0,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 0.0,
+          "rtol": 3e-11,
+          "shape": []
+        },
+        "linearized_rhs_max": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 2.6498248040240924e-13,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 1.2093547796304648e-12,
+          "rtol": 3e-11,
+          "shape": []
+        },
+        "linearized_rhs_rms": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 1.3877787807814457e-17,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 1.9489024335228404e-16,
+          "rtol": 3e-11,
+          "shape": []
+        },
+        "optical_power_relative_drift": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 5.551115123125783e-16,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 4.999999999999999,
+          "rtol": 3e-11,
+          "shape": []
+        },
+        "potential_mean_max_abs": {
+          "actual_dtype": "float64",
+          "atol": 3e-12,
+          "maximum_absolute": 8.809142651444724e-19,
+          "passed": true,
+          "reference_dtype": "float64",
+          "relative_l2": 0.3385416666666667,
+          "rtol": 3e-11,
+          "shape": []
+        }
+      },
+      "exact_diagnostic_fields": [
+        "finite_material_state",
+        "finite_optical_state",
+        "integrator_policy",
+        "complete_final_optical_replay",
+        "material_response",
+        "material_response_validation",
+        "material_response_calls",
+        "accepted_material_steps",
+        "source_cadence",
+        "nonlinear_material_iterations"
+      ],
+      "numpy_diagnostics": {
+        "E_x_max_abs": 0.17121119115654196,
+        "E_x_rms": 0.04040956185710245,
+        "E_y_max_abs": 0.17810838569337173,
+        "E_y_rms": 0.042594654773149505,
+        "P_minus_one_max_abs": 0.752394548262022,
+        "P_minus_one_rms": 0.12683253929865915,
+        "accepted_material_steps": 3,
+        "cancellation_observed_stage": null,
+        "carrier_integrals_per_z": [
+          163.84000000000003,
+          163.84
+        ],
+        "carrier_relative_drift_max": 1.1102230246251565e-16,
+        "complete_final_optical_replay": true,
+        "curl_max": 2.7478019859472624e-15,
+        "curl_rms": 5.240666375860602e-16,
+        "finite_material_state": true,
+        "finite_optical_state": true,
+        "frozen_intensity_material_equation": "exact_analytic_fourier_transient",
+        "gauss_max": 3.650690860723671e-13,
+        "gauss_rms": 4.990158457288645e-14,
+        "integrator_policy": "exact_frozen_source_linearized_modal_update",
+        "linearized_rhs_max": 0.21911062400016174,
+        "linearized_rhs_rms": 0.07120822248001885,
+        "material_response": "linearized",
+        "material_response_calls": 6,
+        "material_response_validation": "experimental",
+        "material_time_normalized": 0.6000000000000001,
+        "memory_policy": {
+          "backend_working_set": "one_transverse_material_plane",
+          "fft_batch_axes": "transverse_only",
+          "retained_material_state": "full_longitudinal_volume"
+        },
+        "nonlinear_material_iterations": "not_applicable",
+        "optical_power_relative_drift": 1.1102230246251568e-16,
+        "potential_mean_max_abs": 2.6020852139652106e-18,
+        "source_cadence": "one_complete_optical_pass_per_material_interval"
+      },
+      "numpy_timing": {
+        "instrumented_material_calls": 6,
+        "linearized_material_seconds": 0.0779801489552483,
+        "optical_pass_calls": 4,
+        "optical_pass_seconds": 0.11786142596974969,
+        "scientific_total_seconds": 0.3355049570091069
+      },
+      "power": {
+        "final": 1.0000000000000007,
+        "initial": 1.0,
+        "relative_drift": 6.661338147750939e-16
+      }
+    }
+  },
+  "cupy_memory_pool": {
+    "after": {
+      "total_bytes": 53494272,
+      "used_bytes": 0
+    },
+    "before": {
+      "total_bytes": 0,
+      "used_bytes": 0
+    }
+  },
+  "environment": {
+    "cuda_driver": 12090,
+    "cuda_runtime": 12090,
+    "cupy": "13.6.0",
+    "gpu_name": "NVIDIA H200",
+    "numpy": "2.1.0",
+    "python": "3.10.4",
+    "slurm_job_id": "3593204",
+    "slurm_node": "pax009"
+  },
+  "fast_package": {
+    "files": {
+      "case_b_fast/output/RESULT_READY.json": "b6ed354913a2467abd0508ab757664107a365c9f8439f0badfa5aa006f79b0d4",
+      "case_b_fast/output/checksums.sha256": "bdcc2c3ab9e9e0689949bce1039ccbba89350185bb5cf75151f15132da26dd85",
+      "case_b_fast/output/manifest.json": "1318ca4aafe7111e9fecac5937b26cfbd8cfb54b1f344af8dec91893e2d1bf18",
+      "case_b_fast/output/result.json": "ba5e033fa4e98ea7e42a910235f5da7ba28db6afb96699aaceda82769e930356",
+      "case_b_fast/output/result_arrays.npz": "1ae621759cfd8e47ce4a9c1b579ab164a48e4c6f2eaf48808f482e28f3a8dccd",
+      "case_b_fast/request/READY.json": "87f58d8321eed1795e1e642030647aecaec0ea396536f4c7dde1eec724df12db",
+      "case_b_fast/request/checksums.sha256": "ae94fc15b622e9bcc2c7c78e2364c4119bdc483d7622880367e397843e896d26",
+      "case_b_fast/request/manifest.json": "6140925778c09e80a458259613825c7dfb03f5997be2c0eb487c5506224b27e0",
+      "case_b_fast/request/request.json": "878c835de848876179b29f24dee2950239e5655089ae0b4cda82819c201d6c6e"
+    },
+    "omitted_fields": [
+      "psi_initial",
+      "psi_final"
+    ],
+    "package_bytes": 4207592,
+    "policy": "fast",
+    "product_conversion_seconds": 0.0317986779846251,
+    "product_fields": [
+      "far_field_intensity",
+      "input_intensity",
+      "output_intensity"
+    ],
+    "retained_optical_endpoints": [
+      "A_initial",
+      "A_final"
+    ]
+  },
+  "modal_sanity": {
+    "bias_reversal": {
+      "actual_dtype": "complex128",
+      "atol": 3e-12,
+      "maximum_absolute": 3.2344605847625726e-13,
+      "passed": true,
+      "reference_dtype": "complex128",
+      "relative_l2": 2.4614212308298346e-15,
+      "rtol": 3e-11,
+      "shape": []
+    },
+    "joint_null_mode_maximum": 2.902951316829938e-17,
+    "negative_coefficient": [
+      -131.398803039077,
+      1.3960932393259216
+    ],
+    "positive_coefficient": [
+      -131.39880303907705,
+      -1.3960932393256031
+    ],
+    "selected_fft_bin": [
+      5,
+      5
+    ],
+    "static_limit": {
+      "E_active": {
+        "actual_dtype": "float64",
+        "atol": 3e-12,
+        "maximum_absolute": 0.0,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 0.0,
+        "rtol": 3e-11,
+        "shape": [
+          256,
+          256
+        ]
+      },
+      "E_x": {
+        "actual_dtype": "float64",
+        "atol": 3e-12,
+        "maximum_absolute": 0.0,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 0.0,
+        "rtol": 3e-11,
+        "shape": [
+          256,
+          256
+        ]
+      },
+      "E_y": {
+        "actual_dtype": "float64",
+        "atol": 3e-12,
+        "maximum_absolute": 0.0,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 0.0,
+        "rtol": 3e-11,
+        "shape": [
+          256,
+          256
+        ]
+      },
+      "psi": {
+        "actual_dtype": "float64",
+        "atol": 3e-12,
+        "maximum_absolute": 0.0,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 0.0,
+        "rtol": 3e-11,
+        "shape": [
+          256,
+          256
+        ]
+      }
+    }
+  },
+  "production_git_sha": "f865c5e30c5233c8f5b89e478f0bde68b28b2763",
+  "production_git_status_porcelain": "",
+  "request": {
+    "Nz": 2,
+    "accepted_intervals": 3,
+    "biases": [
+      0.0,
+      0.35
+    ],
+    "dt_normalized": 0.2,
+    "gain_length_product": 0.025,
+    "grid": [
+      256,
+      256
+    ],
+    "precision": "float64",
+    "reference_intensity": 1.5,
+    "result_policy": "fast"
+  },
+  "schema_version": 1,
+  "source_clean": true,
+  "timing_semantics": "Per-backend measurements after explicit CUDA/CuPy initialization; synchronized around instrumented optical and material calls."
+}

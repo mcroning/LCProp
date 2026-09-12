@@ -1,0 +1,41 @@
+{
+  "backend_provenance": {
+    "backend": "cupy",
+    "complex_dtype": "complex128",
+    "is_gpu": true,
+    "real_dtype": "float64"
+  },
+  "completed_steps": 3,
+  "diagnostics": [
+    "carrier_power",
+    "summary",
+    "transverse_pr"
+  ],
+  "elapsed_seconds": 0.014882415998727083,
+  "fields": [
+    "far_field_intensity",
+    "input_intensity",
+    "output_intensity"
+  ],
+  "geometry": {
+    "units": "um",
+    "x_shape": [256],
+    "y_shape": [256],
+    "z_shape": [2]
+  },
+  "material_response": {
+    "model": "linearized",
+    "reference_intensity": 1.5
+  },
+  "production_source_used_for_decode": "f865c5e30c5233c8f5b89e478f0bde68b28b2763",
+  "production_source_status_porcelain": "",
+  "retention": {
+    "omitted_fields": [
+      "psi_initial",
+      "psi_final"
+    ],
+    "policy": "fast"
+  },
+  "status": "completed",
+  "validation_status": "experimental"
+}

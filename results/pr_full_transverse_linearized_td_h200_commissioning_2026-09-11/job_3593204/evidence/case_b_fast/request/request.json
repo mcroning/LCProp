@@ -1,0 +1,108 @@
+{
+  "array_manifest": {},
+  "codec_id": "pr.transverse_timedependent.request",
+  "codec_version": 1,
+  "execution_target": "slurm",
+  "format": "lcprop-remote-request",
+  "material_id": "pr",
+  "provenance": {
+    "production_git_sha": "f865c5e30c5233c8f5b89e478f0bde68b28b2763"
+  },
+  "request_payload": {
+    "backend": {
+      "backend": "cupy",
+      "precision": "float64",
+      "verbose": false
+    },
+    "beams": {
+      "channels": [
+        {
+          "coherence_group": "td-commissioning",
+          "name": "pump",
+          "phase_rad": 0.0,
+          "power_mW": 1.0,
+          "tilt_x_rad_per_um": 0.2945243112740431,
+          "tilt_y_rad_per_um": 0.19634954084936207,
+          "waist_x_um": 22.0,
+          "waist_y_um": 19.0,
+          "wavelength_um": 0.633,
+          "x0_um": 0.0,
+          "y0_um": 0.0
+        },
+        {
+          "coherence_group": "td-commissioning",
+          "name": "signal",
+          "phase_rad": 0.37,
+          "power_mW": 1.0,
+          "tilt_x_rad_per_um": -0.19634954084936207,
+          "tilt_y_rad_per_um": -0.2945243112740431,
+          "waist_x_um": 21.0,
+          "waist_y_um": 20.0,
+          "wavelength_um": 0.633,
+          "x0_um": 0.0,
+          "y0_um": 0.0
+        }
+      ],
+      "coherence": "coherent"
+    },
+    "boundary": {
+      "applied_field_x": 0.35,
+      "potential_gauge": "zero_mean_per_z_slice",
+      "profile_id": "pr_full_transverse_periodic_biased_current_v1",
+      "x_boundary": "periodic",
+      "y_boundary": "periodic"
+    },
+    "dielectric": {
+      "h_y": 1.0,
+      "profile_id": "pr_full_transverse_unbiased_reference_v1"
+    },
+    "grid": {
+      "Nx": 256,
+      "Ny": 256,
+      "dz_um": 5.0,
+      "x_aperture_um": 64.0,
+      "y_aperture_um": 64.0,
+      "z_length_um": 10.0
+    },
+    "initial_A": null,
+    "initial_psi": null,
+    "launch_elements": [],
+    "material": {
+      "applied_field": 0.0,
+      "characteristic_wavenumber_per_um_override": 0.2,
+      "dark_intensity": 0.4,
+      "gain_length_product": 0.025,
+      "mobile_charge_density_m3": 6.4e+22,
+      "refractive_index": 2.4,
+      "relative_permittivity": 2500.0,
+      "temperature_K": 293.0,
+      "uniform_background_intensity": 0.1
+    },
+    "material_response": {
+      "model": "linearized",
+      "reference_intensity": 1.5
+    },
+    "projection": {
+      "g_x": 1.0,
+      "g_y": 0.0,
+      "profile_id": "pr_full_transverse_unbiased_reference_v1"
+    },
+    "scattering": null,
+    "solver": {
+      "Nt": 3,
+      "dt_normalized": 0.2,
+      "integrator": "spectral_imex_euler",
+      "optical_substeps": 1
+    },
+    "transport": {
+      "m_y": 1.0,
+      "profile_id": "pr_full_transverse_unbiased_reference_v1"
+    }
+  },
+  "resource_profile": null,
+  "result_policy": "fast",
+  "run_id": "3593204",
+  "scientific_backend_requested": "cupy",
+  "transport_schema_version": 1,
+  "workflow_id": "pr_transverse_timedependent"
+}
