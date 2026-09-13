@@ -42,6 +42,7 @@ from lcprop.pr.transverse.specs import (
 from lcprop.pr.transverse.transport import (
     explicit_euler_step,
     imex_euler_step,
+    potential_rhs,
     state_from_potential,
 )
 from lcprop.pr.workflow import (
@@ -305,12 +306,25 @@ def run_pr_transverse_timedependent(
         applied_field_x=request.boundary.applied_field_x,
         xp=xp,
     )
+    if request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR:
+        initial_state_is_physical = xp.all(
+            xp.isfinite(initial_state.psi)
+            & xp.isfinite(initial_state.carrier_density)
+            & xp.isfinite(initial_state.E_x)
+            & xp.isfinite(initial_state.E_y)
+            & (initial_state.carrier_density > 0.0)
+        )
+        if not bool(asnumpy(initial_state_is_physical)):
+            raise ValueError(
+                "initial_psi must reconstruct a finite positive carrier state"
+            )
     initial_carrier = xp.sum(initial_state.carrier_density, axis=(-2, -1))
     max_carrier_drift = xp.asarray(0.0, dtype=real_dtype)
     completed_steps = 0
     cancelled = False
     cancellation_stage = None
     material_response_calls = [0]
+    optical_passes_completed = 0
     linearized_spec = (
         _linearized_reference_spec(
             request,
@@ -337,6 +351,7 @@ def run_pr_transverse_timedependent(
                 cancellation_token=cancellation_token,
                 scattering_phase_stack=scattering_phase_stack,
             )
+            optical_passes_completed += 1
             if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
                 candidate = _linearized_material_step(
                     psi,
@@ -367,22 +382,36 @@ def run_pr_transverse_timedependent(
                     applied_field_x=request.boundary.applied_field_x,
                     xp=xp,
                 )
+                material_response_calls[0] += 1
             _check_cancel(cancellation_token, "after_material_candidate")
         except _CancellationRequested as exc:
             cancelled = True
             cancellation_stage = exc.stage
             break
 
-        psi = candidate
-        completed_steps = step_index + 1
         accepted_state = state_from_potential(
-            psi,
+            candidate,
             dx_normalized=dx_normalized,
             dy_normalized=dy_normalized,
             h_y=request.dielectric.h_y,
             applied_field_x=request.boundary.applied_field_x,
             xp=xp,
         )
+        if request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR:
+            candidate_is_physical = xp.all(
+                xp.isfinite(accepted_state.psi)
+                & xp.isfinite(accepted_state.carrier_density)
+                & xp.isfinite(accepted_state.E_x)
+                & xp.isfinite(accepted_state.E_y)
+                & (accepted_state.carrier_density > 0.0)
+            )
+            if not bool(asnumpy(candidate_is_physical)):
+                raise FloatingPointError(
+                    "nonlinear transverse TD candidate is nonfinite or has "
+                    "nonpositive carrier density"
+                )
+        psi = candidate
+        completed_steps = step_index + 1
         current_carrier = xp.sum(accepted_state.carrier_density, axis=(-2, -1))
         max_carrier_drift = xp.maximum(
             max_carrier_drift,
@@ -440,6 +469,7 @@ def run_pr_transverse_timedependent(
         dy_normalized=dy_normalized,
         scattering_phase_stack=scattering_phase_stack,
     )
+    optical_passes_completed += 1
     final_state = state_from_potential(
         psi,
         dx_normalized=dx_normalized,
@@ -512,6 +542,55 @@ def run_pr_transverse_timedependent(
                 "backend_working_set": "one_transverse_material_plane",
                 "retained_material_state": "full_longitudinal_volume",
                 "fft_batch_axes": "transverse_only",
+            },
+        })
+    else:
+        rhs_sum_squares = 0.0
+        rhs_max = 0.0
+        rhs_cells = 0
+        for plane_index in range(final_source.shape[0]):
+            rhs_plane = potential_rhs(
+                psi[plane_index],
+                final_source[plane_index],
+                dx_normalized=dx_normalized,
+                dy_normalized=dy_normalized,
+                m_y=request.transport.m_y,
+                h_y=request.dielectric.h_y,
+                applied_field_x=request.boundary.applied_field_x,
+                xp=xp,
+            )
+            rhs_sum_squares += scalar_float(xp.sum(rhs_plane * rhs_plane))
+            rhs_max = max(rhs_max, scalar_float(xp.max(xp.abs(rhs_plane))))
+            rhs_cells += int(rhs_plane.size)
+        carrier_minimum = scalar_float(xp.min(final_state.carrier_density))
+        diagnostics.update({
+            "frozen_intensity_material_equation": (
+                "full_transverse_nonlinear_potential_rate"
+            ),
+            "source_cadence": (
+                "one_complete_optical_pass_per_material_interval_with_"
+                "source_frozen_during_each_material_update"
+            ),
+            "optical_passes_completed": optical_passes_completed,
+            "nonlinear_td_rhs_rms": (
+                rhs_sum_squares / rhs_cells
+            ) ** 0.5,
+            "nonlinear_td_rhs_max": rhs_max,
+            "carrier_density_minimum": carrier_minimum,
+            "physical_state_valid": bool(
+                diagnostics["finite_material_state"]
+                and carrier_minimum > 0.0
+            ),
+            "nonlinear_material_iterations": (
+                "not_applicable_fixed_step_time_integrator"
+            ),
+            "memory_policy": {
+                "backend_working_set": (
+                    "accepted material and frozen source volumes with "
+                    "transverse FFT batches"
+                ),
+                "retained_material_state": "initial_and_final_longitudinal_volumes",
+                "retained_material_time_history": False,
             },
         })
     scattering_provenance = None
