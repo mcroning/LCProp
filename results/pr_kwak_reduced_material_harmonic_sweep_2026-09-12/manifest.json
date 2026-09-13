@@ -1,0 +1,69 @@
+{
+  "analysis": "Kwak-parameter reduced PR material harmonic sweep",
+  "analysis_harness_path": "/private/tmp/lcprop-kwak-02-34-analysis/pr_kwak_reduced_material_harmonic_sweep.py",
+  "analysis_harness_sha256": "0ca643f6d331dbe4959a51d4d1b1dc2f716c84a1535870423b636237d3dbe660",
+  "analysis_test_path": "/private/tmp/lcprop-kwak-02-34-analysis/test_pr_kwak_reduced_material_harmonic_sweep.py",
+  "analysis_test_sha256": "021ead578b49af5bdd6583f343ffaca871ea35ceb45e4ba4593748593c0f5c98",
+  "artifact_sha256": {
+    "dark_sensitivity.csv": "ebb25e277713e7726d5969833e78b2cc5144aaaf0e5390cba6f5524a34864ebc",
+    "figures/dark_background_sensitivity.png": "db86264f8d210519f5c5e95a183622bf580e1f7b25a3b352f1d7a23fe76a0559",
+    "figures/fundamental_phase_difference.png": "7b208a37aa0d822066f3f6407fd03795f4cfd5cf45c3734b0e30edd5adda4aa4",
+    "figures/fundamental_ratio_comparison.png": "18e631b6a180c57e5fc9c33dd460db505783f4ff1b8c24e032a54aa89a8a7590",
+    "figures/harmonic_ratios.png": "a261cbd987ca7ff091cd57efad57b8d39f5296b5dd4366a7c7ddea7a1707e0bd",
+    "figures/resolution_comparison.png": "6e59a7958ac1afb3df92835ac6b88b5bdab2caa94e00263d0baac2b72c4d3b50",
+    "resolution.csv": "426757db4808e7b8c019c683320978dbc8382331e9c4eb3ca5a792de71db48f6",
+    "small_m_fits.json": "a4e8cea482cd47877b11dc014ba42c4fd577e7bf3afc4ff68a55b30bf5693a9c",
+    "summary.csv": "f90ef13e0eb48ffc14c17fe0b6baee8aec6062727fe02ae5d9a2daa5db6d20ff"
+  },
+  "canonical_scientific_data_sha256": "1dec5d8ae010634c6910e2b5b846d8d4d9cfec75b6f5e21d2ef6c5fe13ebd4e5",
+  "fixture": {
+    "I0": 1.0,
+    "applied_field": 0.0,
+    "characteristic_wavenumber_per_um": 5.285348354275176,
+    "dark_mapping": "driving_intensity=I0*(1+m*sin(Kx))+Id; background_intensity=Id",
+    "kg_over_kD": 0.5403604701164361,
+    "kg_rad_per_um": 2.855993321445266,
+    "mobile_charge_density_m3": 2e+22,
+    "modulations": [
+      0.01,
+      0.02,
+      0.05,
+      0.1,
+      0.2,
+      0.4,
+      0.6,
+      0.8,
+      0.9,
+      0.95,
+      0.98,
+      0.99,
+      0.995,
+      0.999
+    ],
+    "period_um": 2.2,
+    "primary_Id_over_I0": 0.0,
+    "relative_permittivity": 513.0,
+    "temperature_K": 293.0,
+    "wavelength_nm_context_only": 514.5
+  },
+  "matplotlib_version": "3.11.0",
+  "normal_repository": {
+    "clean": false,
+    "commit": "d21a95e816d6750bab2e7b5e9f18cfc1ece6e5cf",
+    "status_porcelain": " M docs/codex/01_Architecture/architecture_review.md\n M docs/codex/03_Commissioning/cluster_onboarding.md\n M docs/codex/03_Commissioning/cpu_smoke.md\n M docs/codex/03_Commissioning/gpu_smoke.md\n M docs/codex/TEMPLATE.md\n M src/lcprop/optics/launch.py\n M src/lcprop/pr/README.md\n M src/lcprop/pr/__init__.py\n M src/lcprop/pr/static.py\n M src/lcprop/pr/static_streaming.py\n M src/lcprop/pr/workflow.py\n M tests/test_launch.py\n M tests/test_pr_static.py\n M tests/test_pr_static_streaming.py\n?? docs/Architecture_Review_Feedback_for_Codex.md\n?? docs/Architecture_Update_ThetaWeight_Removal_Review.md\n?? docs/architecture/ChatGPT_Architectural_Review_Material_Generalization_Aug5_2026.docx\n?? docs/architecture/Codex_Approve_Slurm_Account_Correction.docx\n?? docs/architecture/Codex_Cluster_Onboarding_Prompt.docx\n?? docs/architecture/Codex_GPU_CuPy_Smoke_Test_Approval.docx\n?? docs/architecture/Codex_Phase3_Cluster_Preparation.docx\n?? docs/architecture/Codex_Phase3_Cluster_Preparation_with_Scratch.docx\n?? docs/architecture/Codex_Prompt_Library_Consistency_Pass.docx\n?? docs/architecture/Codex_Scaled_GPU_PR_Image_Amplification_Pilot_Prompt.docx\n?? docs/architecture_audit.md\n?? docs/codex_add_standard_pre_commit_review.md\n?? docs/development/full_transverse_hopping_model_recovery.md\n?? docs/development/pr_full_transverse_linearized_image_amplification_h200_slurm_commissioning.md\n?? docs/development/pr_static_slurm_commissioning.md\n?? docs/development/pr_timedependent_slurm_commissioning.md\n?? docs/development/pr_transverse_reference_completion.md\n?? docs/development/pr_transverse_reference_completion_full.md\n?? docs/development/slurm_fast_recovery_job_2994555.md\n?? docs/gpu_validation_benchmark.md\n?? docs/performance/pr_2d_gpu_optimization_stage01.md\n?? docs/performance/pr_2d_gpu_optimization_stage02.md\n?? docs/performance/pr_end_to_end_1024_reprofile.md\n?? docs/performance/pr_material_transform_sync_audit.md\n?? docs/pr_linearized_models_biased_full_transverse_extension.md\n?? docs/pr_linearized_models_derivation_and_paper_comparison.md\n?? docs/pr_periodic_biased_current_carrying_profile_definition.md\n?? docs/propagator_general_dev.md\n?? docs/research/assets/pr_cadence_factorial_diagnostic_2026-08-09/\n?? docs/research/assets/pr_fast_static_substepping_preparation_2026-08-08/\n?? docs/research/assets/pr_figure6_full_reference_2026-08-06/\n?? docs/research/assets/pr_figure6_full_reference_no_noise_2026-08-06/\n?? docs/research/assets/pr_figure_a5_benchmark_preparation_2026-08-08/\n?? docs/research/assets/pr_interpolated_response_pilot_2026-08-09/\n?? docs/research/assets/pr_transverse_fanning_numpy_feasibility_2026-08-18/\n?? docs/research/assets/pr_transverse_gpu_commissioning_2026-08-18/\n?? docs/research/assets/pr_transverse_static_gpu_commissioning_2026-08-20/\n?? docs/research/assets/pr_transverse_vs_a7_numpy_2026-08-18/\n?? docs/research/literature/\n?? docs/research/pr_biased_full_transverse_linearization_blocker_2026-09-09.md\n?? docs/research/pr_cadence_factorial_diagnostic_preparation_2026-08-09.md\n?? docs/research/pr_fast_static_substepping_preparation_2026-08-08.md\n?? docs/research/pr_figure6_full_reference_2026-08-06.md\n?? docs/research/pr_figure_a5_benchmark_package_2026-08-08.md\n?? docs/research/pr_full_transverse_fanning_numpy_reference_blocked_2026-08-18.md\n?? docs/research/pr_full_transverse_physics_profile_v1.md\n?? docs/research/pr_linearized_models_derivation_and_paper_comparison.md\n?? docs/research/pr_periodic_biased_current_carrying_profile.md\n?? docs/research/pr_transverse_fanning_numpy_feasibility_2026-08-18.md\n?? docs/research/pr_transverse_vs_a7_numpy_2026-08-18.md\n?? experiments/\n?? reference/prprop/photonics-12-00113-v3/\n?? results/pr-marching-stage22-2777521/\n?? results/pr-marching-stage22d-2777976/\n?? results/pr-marching-stage22e-2778546/\n?? results/pr-marching-stage22f-2779854/\n?? results/pr-marching-stage22g-2792200/\n?? results/pr-marching-stage24-2795372/\n?? results/pr-marching-stage24-4um-2795647/\n?? results/pr-marching-stage26-2797919/\n?? results/pr-marching-stage27-2799545/\n?? results/pr-stage29-2x2-single-interval/\n?? results/pr-stage30-lagged-midpoint-accumulation/\n?? results/pr-stage31-exact-propagation-lag/\n?? results/pr-stage32-scattering-spectral-seed/\n?? results/pr_2d_gpu_optimization_stage01/\n?? results/pr_2d_gpu_optimization_stage02/\n?? results/pr_2d_gpu_optimization_stage03/\n?? results/pr_biased_linearized_reference_h200_commissioning_2026-09-09/\n?? results/pr_coherent_grating_diagnosis_2026-08-23/\n?? results/pr_coherent_visibility_continuation_2026-08-23/\n?? results/pr_end_to_end_1024_reprofile/\n?? results/pr_fast_recovery_job_2994555/\n?? results/pr_full_transverse_linearized_ia_h200_commissioning_2026-09-09/\n?? results/pr_full_transverse_linearized_ia_h200_memory_closure_2026-09-10/\n?? results/pr_product_conversion_gpu_validation/\n?? results/pr_reduced_material_harmonic_sweep_2026-09-11.zip\n?? results/pr_reduced_material_kg_m_sweep_2026-09-11.zip\n?? results/pr_static_slurm_commissioning_2026-08-28/\n?? results/pr_zero_flux_stage18_outer5_2760889/\n?? results/pr_zero_flux_static_stage16_gpu_2748421/\n?? results/pr_zero_flux_static_stage16d_2749234/\n?? results/pr_zero_flux_static_stage16e_2750128/\n?? results/pr_zero_flux_static_stage16e_2750494/\n?? results/pr_zero_flux_static_stage18_2751023/\n?? scripts/checks/pr_2d_gpu_optimization_stage01.py\n?? scripts/checks/pr_2d_gpu_optimization_stage01_h200.sbatch\n?? scripts/checks/pr_2d_gpu_optimization_stage01_validation_h200.sbatch\n?? scripts/checks/pr_2d_gpu_optimization_stage02.py\n?? scripts/checks/pr_2d_gpu_optimization_stage02_h200.sbatch\n?? scripts/checks/pr_2d_gpu_optimization_stage02_validation_h200.sbatch\n?? scripts/checks/pr_biased_linearized_reference_h200.sbatch\n?? scripts/checks/pr_cadence_factorial_diagnostic.py\n?? scripts/checks/pr_end_to_end_1024_reprofile.py\n?? scripts/checks/pr_end_to_end_1024_reprofile_h200.sbatch\n?? scripts/checks/pr_fast_static_substepping.py\n?? scripts/checks/pr_figure_a5_benchmark.py\n?? scripts/checks/pr_full_transverse_linearized_td_h200.sbatch\n?? scripts/checks/pr_interpolated_response_pilot.py\n?? scripts/checks/pr_marching_stage22_checksums.sha256\n?? scripts/checks/pr_marching_stage22_commissioning.py\n?? scripts/checks/pr_marching_stage22_h200.sbatch\n?? scripts/checks/pr_marching_stage22_manifest.json\n?? scripts/checks/pr_marching_stage22d_checksums.sha256\n?? scripts/checks/pr_marching_stage22d_diagnostic.py\n?? scripts/checks/pr_marching_stage22d_h200.sbatch\n?? scripts/checks/pr_marching_stage22d_manifest.json\n?? scripts/checks/pr_marching_stage22e_checksums.sha256\n?? scripts/checks/pr_marching_stage22e_h200.sbatch\n?? scripts/checks/pr_marching_stage22e_manifest.json\n?? scripts/checks/pr_marching_stage22e_mixed_precision.py\n?? scripts/checks/pr_marching_stage22f_checksums.sha256\n?? scripts/checks/pr_marching_stage22f_h200.sbatch\n?? scripts/checks/pr_marching_stage22f_manifest.json\n?? scripts/checks/pr_marching_stage22f_precision_boundary.py\n?? scripts/checks/pr_marching_stage22g_checksums.sha256\n?? scripts/checks/pr_marching_stage22g_commissioning.py\n?? scripts/checks/pr_marching_stage22g_h200.sbatch\n?? scripts/checks/pr_marching_stage22g_manifest.json\n?? scripts/checks/pr_marching_stage24_4um_checksums.sha256\n?? scripts/checks/pr_marching_stage24_4um_h200.sbatch\n?? scripts/checks/pr_marching_stage24_checksums.sha256\n?? scripts/checks/pr_marching_stage24_h200.sbatch\n?? scripts/checks/pr_marching_stage24_manifest.json\n?? scripts/checks/pr_marching_stage24_manifest4.json\n?? scripts/checks/pr_marching_stage24_refinement.py\n?? scripts/checks/pr_marching_stage24_refinement4.py\n?? scripts/checks/pr_marching_stage26_broad_ring.py\n?? scripts/checks/pr_marching_stage26_checksums.sha256\n?? scripts/checks/pr_marching_stage26_h200.sbatch\n?? scripts/checks/pr_marching_stage26_manifest.json\n?? scripts/checks/pr_marching_stage27_checksums.sha256\n?? scripts/checks/pr_marching_stage27_h200.sbatch\n?? scripts/checks/pr_marching_stage27_manifest.json\n?? scripts/checks/pr_marching_stage27_ring_resolution.py\n?? scripts/checks/pr_outer2_continuum_state_diagnostic.py\n?? scripts/checks/pr_outer2_zero_flux_stage15r_h200.sbatch\n?? scripts/checks/pr_outer2_zero_flux_stage15r_manifest.json\n?? scripts/checks/pr_recover_job_2994555_fast.py\n?? scripts/checks/pr_retrieve_job_2994555_fast.py\n?? scripts/checks/pr_stage29_formulation_diagnostic.py\n?? scripts/checks/pr_stage30_lagged_midpoint_accumulation.py\n?? scripts/checks/pr_stage31_exact_propagation_lag.py\n?? scripts/checks/pr_stage32_scattering_spectral_seed.py\n?? scripts/checks/pr_transverse_fanning_numpy_feasibility.py\n?? scripts/checks/pr_transverse_static_gpu_commissioning.py\n?? scripts/checks/pr_transverse_static_gpu_h200.sbatch\n?? scripts/checks/pr_transverse_vs_a7_numpy.py\n?? scripts/checks/pr_verify_recovered_job_2994555.py\n?? scripts/checks/pr_zero_flux_stage16_gpu.sbatch\n?? scripts/checks/pr_zero_flux_stage16_gpu_manifest.json\n?? scripts/checks/pr_zero_flux_stage16d_diagnostic.py\n?? scripts/checks/pr_zero_flux_stage16d_h200.sbatch\n?? scripts/checks/pr_zero_flux_stage16d_manifest.json\n?? scripts/checks/pr_zero_flux_stage16e_gpu.sbatch\n?? scripts/checks/pr_zero_flux_stage16e_manifest.json\n?? scripts/checks/pr_zero_flux_stage18_checksums.sha256\n?? scripts/checks/pr_zero_flux_stage18_feasibility.py\n?? scripts/checks/pr_zero_flux_stage18_h200.sbatch\n?? scripts/checks/pr_zero_flux_stage18_manifest.json\n?? scripts/checks/pr_zero_flux_stage18_outer5_changes.py\n?? scripts/checks/pr_zero_flux_stage18_outer5_checksums.sha256\n?? scripts/checks/pr_zero_flux_stage18_outer5_h200.sbatch\n?? tests/test_pr_transverse_scientific_comparison.py\n"
+  },
+  "normal_repository_status_sha256": "58bbe87e37c4a9a5999c6cfec234f5a9314976039e1b4a4649224073520c2065",
+  "numpy_version": "2.5.1",
+  "production_commit": "d21a95e816d6750bab2e7b5e9f18cfc1ece6e5cf",
+  "production_status_porcelain": "",
+  "python_executable": "/Users/mcroning/miniforge3/envs/lcprop/bin/python",
+  "python_version": "3.12.13",
+  "report_path": "/private/tmp/lcprop-kwak-02-34-analysis/pr_kwak_parameter_reduced_material_harmonics.md",
+  "report_sha256": "78bc3cbeef5aadf552e7ce22fab80a56a357733d0290238b2a9f3581f6097fbe",
+  "scipy_version": "1.18.0",
+  "source_clean_before_overlay": true,
+  "superseded_attempts": [
+    "Python 3.9 import failed before solver execution",
+    "initial completed sweep omitted Id from driving intensity and was replaced after source-convention review"
+  ]
+}
