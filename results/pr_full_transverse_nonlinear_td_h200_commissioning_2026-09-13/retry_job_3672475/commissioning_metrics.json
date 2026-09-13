@@ -1,0 +1,393 @@
+{
+  "backend": "cupy",
+  "cancellation_sanity": {
+    "cancellation_stage": "after_material_candidate",
+    "candidate_discarded": true,
+    "completed_steps": 0,
+    "final_optical_replay_preserved_bitwise": true,
+    "grid": [
+      32,
+      32
+    ],
+    "last_accepted_psi_preserved_bitwise": true,
+    "repeated_cancel_harmless": true,
+    "status": "cancelled"
+  },
+  "canonical_scientific_data_sha256": "46dfb4797a0872da9a375589ccd9c63e3e3618e66583e4974151c928b3015738",
+  "cupy_memory_pool": {
+    "after": {
+      "total_bytes": 49299968,
+      "used_bytes": 0
+    },
+    "before": {
+      "total_bytes": 0,
+      "used_bytes": 0
+    }
+  },
+  "environment": {
+    "cuda_driver": 12090,
+    "cuda_runtime": 12090,
+    "cupy": "13.6.0",
+    "gpu_name": "NVIDIA H200",
+    "numpy": "2.1.0",
+    "python": "3.10.4",
+    "slurm_job_id": "3672475",
+    "slurm_node": "pax009"
+  },
+  "fast_package": {
+    "files": {
+      "primary_fast/output/RESULT_READY.json": "96d9b3c7a9d636d68fc94fc2043958765aa2a1169fdcaca377a1f45fd8d31152",
+      "primary_fast/output/checksums.sha256": "886c0197626166481cf14642012eaf1416746eb9500861d21ffe62a16ae6fbad",
+      "primary_fast/output/manifest.json": "5d0dddbff35ed38399612f4f1b92e9052dc41963e05cb26938f6a8b3a7997631",
+      "primary_fast/output/result.json": "c983ebfab2976a77c7299a38a77a0391e3a5e7810c9fdfb5a9b774781a23b579",
+      "primary_fast/output/result_arrays.npz": "886acdde1e900c06a297ccb911e6922c6df4adfb960920b18352a2e8ed7c4283",
+      "primary_fast/request/READY.json": "3411030a896a9c849784cdfde68c1d83d01370290432daea1b649bb34dfd1092",
+      "primary_fast/request/checksums.sha256": "e32d01c64209de6b03d63dac056522f39fe496827aeb0b334aa54d3acb336ebd",
+      "primary_fast/request/manifest.json": "acc831f29cd2789a76f3e86b6364d29df23be1d38c0885429a15b5fd215815e9",
+      "primary_fast/request/request.json": "306f12ffcaab817b339f81544539f56785df20d2abfa48671abf5800ecc5eefc"
+    },
+    "geometry": {
+      "x": 256,
+      "y": 256,
+      "z": 2
+    },
+    "omitted_fields": [
+      "psi_initial",
+      "psi_final"
+    ],
+    "package_bytes": 4207630,
+    "policy": "fast",
+    "product_conversion_seconds": 0.037138288957066834,
+    "product_fields": [
+      "far_field_intensity",
+      "input_intensity",
+      "output_intensity"
+    ],
+    "retained_optical_endpoints": [
+      "A_initial",
+      "A_final"
+    ]
+  },
+  "precision": "float64",
+  "primary": {
+    "backend": {
+      "backend": "cupy",
+      "complex_dtype": "complex128",
+      "is_gpu": true,
+      "real_dtype": "float64"
+    },
+    "comparisons": {
+      "E_active": {
+        "actual_dtype": "float64",
+        "atol": 3e-11,
+        "maximum_absolute": 3.755676325489787e-15,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 2.5031225311598255e-14,
+        "rtol": 3e-10,
+        "shape": [
+          2,
+          256,
+          256
+        ]
+      },
+      "E_x": {
+        "actual_dtype": "float64",
+        "atol": 3e-11,
+        "maximum_absolute": 3.755676325489787e-15,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 2.5031225311598255e-14,
+        "rtol": 3e-10,
+        "shape": [
+          2,
+          256,
+          256
+        ]
+      },
+      "E_y": {
+        "actual_dtype": "float64",
+        "atol": 3e-11,
+        "maximum_absolute": 3.4017927363905187e-15,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 2.3087898613296795e-14,
+        "rtol": 3e-10,
+        "shape": [
+          2,
+          256,
+          256
+        ]
+      },
+      "final_optical_field": {
+        "actual_dtype": "complex128",
+        "atol": 3e-11,
+        "maximum_absolute": 4.654751537338637e-17,
+        "passed": true,
+        "reference_dtype": "complex128",
+        "relative_l2": 8.559603838294974e-16,
+        "rtol": 3e-10,
+        "shape": [
+          2,
+          256,
+          256
+        ]
+      },
+      "final_source_intensity": {
+        "actual_dtype": "float64",
+        "atol": 3e-11,
+        "maximum_absolute": 2.6645352591003757e-15,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 2.353337060546019e-16,
+        "rtol": 3e-10,
+        "shape": [
+          2,
+          256,
+          256
+        ]
+      },
+      "psi": {
+        "actual_dtype": "float64",
+        "atol": 3e-11,
+        "maximum_absolute": 2.7755575615628914e-16,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 2.02427243004672e-15,
+        "rtol": 3e-10,
+        "shape": [
+          2,
+          256,
+          256
+        ]
+      }
+    },
+    "cupy_diagnostics": {
+      "E_x_max_abs": 0.10383375965942124,
+      "E_x_rms": 0.02306476842240965,
+      "E_y_max_abs": 0.10536090842534912,
+      "E_y_rms": 0.023470266667950053,
+      "P_minus_one_max_abs": 0.4745830034645291,
+      "P_minus_one_rms": 0.10291744147931255,
+      "accepted_material_steps": 3,
+      "cancellation_observed_stage": null,
+      "carrier_density_minimum": 0.5760850973270508,
+      "carrier_integrals_per_z": [
+        163.84000000000003,
+        163.84000000000003
+      ],
+      "carrier_relative_drift_max": 2.220446049250313e-16,
+      "complete_final_optical_replay": true,
+      "curl_max": 2.3037127760972e-15,
+      "curl_rms": 3.1279677093711973e-16,
+      "finite_material_state": true,
+      "finite_optical_state": true,
+      "frozen_intensity_material_equation": "full_transverse_nonlinear_potential_rate",
+      "gauss_max": 1.546540673302843e-13,
+      "gauss_rms": 1.77237922125293e-14,
+      "integrator_policy": "production_first_order_spectral_imex",
+      "material_response": "nonlinear",
+      "material_response_calls": 3,
+      "material_response_validation": "validated",
+      "material_time_normalized": 0.15000000000000002,
+      "memory_policy": {
+        "backend_working_set": "accepted material and frozen source volumes with transverse FFT batches",
+        "retained_material_state": "initial_and_final_longitudinal_volumes",
+        "retained_material_time_history": false
+      },
+      "nonlinear_material_iterations": "not_applicable_fixed_step_time_integrator",
+      "nonlinear_td_rhs_max": 0.6710893841846177,
+      "nonlinear_td_rhs_rms": 0.17935435855301135,
+      "optical_passes_completed": 4,
+      "optical_power_relative_drift": 4.440892098500626e-16,
+      "physical_state_valid": true,
+      "potential_mean_max_abs": 3.3881317890172014e-20,
+      "source_cadence": "one_complete_optical_pass_per_material_interval_with_source_frozen_during_each_material_update"
+    },
+    "cupy_timing": {
+      "instrumented_material_calls": 3,
+      "nonlinear_material_seconds": 0.02014520694501698,
+      "optical_pass_calls": 4,
+      "optical_pass_seconds": 0.01533179497346282,
+      "scientific_total_seconds": 0.42976761795580387
+    },
+    "diagnostic_comparisons": {
+      "carrier_density_minimum": {
+        "actual_dtype": "float64",
+        "atol": 3e-11,
+        "maximum_absolute": 5.10702591327572e-14,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 8.865054723637209e-14,
+        "rtol": 3e-10,
+        "shape": []
+      },
+      "carrier_integrals_per_z": {
+        "actual_dtype": "float64",
+        "atol": 3e-11,
+        "maximum_absolute": 0.0,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 0.0,
+        "rtol": 3e-10,
+        "shape": [
+          2
+        ]
+      },
+      "carrier_relative_drift_max": {
+        "actual_dtype": "float64",
+        "atol": 3e-11,
+        "maximum_absolute": 1.1102230246251565e-16,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 1.0,
+        "rtol": 3e-10,
+        "shape": []
+      },
+      "nonlinear_td_rhs_max": {
+        "actual_dtype": "float64",
+        "atol": 3e-11,
+        "maximum_absolute": 1.2634338020234281e-13,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 1.8826609864478105e-13,
+        "rtol": 3e-10,
+        "shape": []
+      },
+      "nonlinear_td_rhs_rms": {
+        "actual_dtype": "float64",
+        "atol": 3e-11,
+        "maximum_absolute": 0.0,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 0.0,
+        "rtol": 3e-10,
+        "shape": []
+      },
+      "optical_power_relative_drift": {
+        "actual_dtype": "float64",
+        "atol": 3e-11,
+        "maximum_absolute": 3.3306690738754696e-16,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 2.9999999999999996,
+        "rtol": 3e-10,
+        "shape": []
+      },
+      "potential_mean_max_abs": {
+        "actual_dtype": "float64",
+        "atol": 3e-11,
+        "maximum_absolute": 3.9979955110402976e-19,
+        "passed": true,
+        "reference_dtype": "float64",
+        "relative_l2": 0.921875,
+        "rtol": 3e-10,
+        "shape": []
+      }
+    },
+    "exact_diagnostic_fields": [
+      "finite_material_state",
+      "finite_optical_state",
+      "physical_state_valid",
+      "integrator_policy",
+      "complete_final_optical_replay",
+      "material_response",
+      "material_response_validation",
+      "material_response_calls",
+      "accepted_material_steps",
+      "optical_passes_completed",
+      "source_cadence",
+      "nonlinear_material_iterations"
+    ],
+    "numpy_diagnostics": {
+      "E_x_max_abs": 0.10383375965942175,
+      "E_x_rms": 0.02306476842240965,
+      "E_y_max_abs": 0.10536090842534937,
+      "E_y_rms": 0.023470266667950053,
+      "P_minus_one_max_abs": 0.47458300346449755,
+      "P_minus_one_rms": 0.10291744147931256,
+      "accepted_material_steps": 3,
+      "cancellation_observed_stage": null,
+      "carrier_density_minimum": 0.5760850973269998,
+      "carrier_integrals_per_z": [
+        163.84000000000003,
+        163.84000000000003
+      ],
+      "carrier_relative_drift_max": 1.1102230246251565e-16,
+      "complete_final_optical_replay": true,
+      "curl_max": 1.8318679906315083e-15,
+      "curl_rms": 3.072878476164972e-16,
+      "finite_material_state": true,
+      "finite_optical_state": true,
+      "frozen_intensity_material_equation": "full_transverse_nonlinear_potential_rate",
+      "gauss_max": 1.149080830487037e-13,
+      "gauss_rms": 1.7203915135175226e-14,
+      "integrator_policy": "production_first_order_spectral_imex",
+      "material_response": "nonlinear",
+      "material_response_calls": 3,
+      "material_response_validation": "validated",
+      "material_time_normalized": 0.15000000000000002,
+      "memory_policy": {
+        "backend_working_set": "accepted material and frozen source volumes with transverse FFT batches",
+        "retained_material_state": "initial_and_final_longitudinal_volumes",
+        "retained_material_time_history": false
+      },
+      "nonlinear_material_iterations": "not_applicable_fixed_step_time_integrator",
+      "nonlinear_td_rhs_max": 0.6710893841844914,
+      "nonlinear_td_rhs_rms": 0.17935435855301135,
+      "optical_passes_completed": 4,
+      "optical_power_relative_drift": 1.1102230246251568e-16,
+      "physical_state_valid": true,
+      "potential_mean_max_abs": 4.336808689942018e-19,
+      "source_cadence": "one_complete_optical_pass_per_material_interval_with_source_frozen_during_each_material_update"
+    },
+    "numpy_timing": {
+      "instrumented_material_calls": 3,
+      "nonlinear_material_seconds": 0.09641207288950682,
+      "optical_pass_calls": 4,
+      "optical_pass_seconds": 0.10742174414917827,
+      "scientific_total_seconds": 0.34523770003579557
+    }
+  },
+  "production_git_sha": "1a129dc3cb93f6c8a005a198f40d86a31792f223",
+  "production_git_status_porcelain": "",
+  "schema_version": 1,
+  "source_clean": true,
+  "static_sanity": {
+    "carrier_density_minimum": 0.9604695395751467,
+    "dt_normalized": 0.01,
+    "final_nonlinear_td_rhs_max": 7.813873732556314e-12,
+    "final_nonlinear_td_rhs_rms": 1.0707303096351462e-12,
+    "grid": [
+      32,
+      32
+    ],
+    "physical_state_valid": true,
+    "relative_psi_change_after_one_td_step": 1.3316381643190637e-13,
+    "static_converged": true
+  },
+  "timestep_sanity": {
+    "accepted_ratio_interval": [
+      1.7,
+      2.3
+    ],
+    "dt_normalized": [
+      0.02,
+      0.01,
+      0.005
+    ],
+    "expected_order": 1,
+    "final_time_normalized": 0.2,
+    "grid": [
+      32,
+      32
+    ],
+    "step_counts": [
+      10,
+      20,
+      40
+    ],
+    "successive_difference_ratio": 1.9715451064890337
+  },
+  "timing_semantics": "Primary CuPy timing is the first scientific CuPy measurement after explicit CUDA/CuPy initialization; synchronized around instrumented optical and nonlinear material calls. It is not process-cold startup."
+}

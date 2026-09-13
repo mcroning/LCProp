@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "commissioning_classification": "Commissioned",
+  "authoritative_job_id": "3672475",
+  "production_git_sha": "1a129dc3cb93f6c8a005a198f40d86a31792f223",
+  "source_clean": true,
+  "production_git_status_porcelain": "",
+  "backend": "cupy",
+  "precision": {
+    "real": "float64",
+    "complex": "complex128"
+  },
+  "harness_sha256": "1e28f04a9891b0852ab2a8dd88ce09a6db18889bcb012811e1f508692460e667",
+  "source_archive_sha256": "fd963b1242e16055b38f5269e508e7bb6484dc532b312e87b13034845f2b68b7",
+  "canonical_scientific_data_sha256": "46dfb4797a0872da9a375589ccd9c63e3e3618e66583e4974151c928b3015738",
+  "numerical_acceptance": {
+    "rtol": 3e-10,
+    "atol": 3e-11,
+    "all_retained_comparisons_passed": true
+  },
+  "scheduler": {
+    "state": "COMPLETED",
+    "exit_code": "0:0",
+    "elapsed": "00:00:13",
+    "node": "pax009",
+    "retry_submissions": 1,
+    "second_retry_submitted": false
+  },
+  "environment": {
+    "gpu": "NVIDIA H200",
+    "python": "3.10.4",
+    "numpy": "2.1.0",
+    "cupy": "13.6.0",
+    "cuda_runtime": 12090,
+    "cuda_driver": 12090,
+    "resolved_is_gpu": true,
+    "cpu_fallback": false
+  },
+  "evidence_verification": {
+    "remote_retrieval_checksums_passed_before_cleanup": true,
+    "retrieval_checksums_sha256": "62df880489de07c70e5de0a2a1768c144c5526e6e6e020f3b300e73489b034ab",
+    "post_retrieval_checksums_passed": true,
+    "post_retrieval_checksums_sha256": "254247a1bcc82b2b58179ec65046e68db59d839173510400c7d2175bc7863c67",
+    "fast_request_checksums_passed": true,
+    "fast_result_checksums_passed": true,
+    "local_reconstruction_passed": true,
+    "canonical_product_conversion_passed": true,
+    "remote_cleanup_verified": true,
+    "transient_remote_run_tree_absent": true,
+    "immutable_remote_launch_inputs_retained": true,
+    "immutable_remote_logs_retained": true
+  },
+  "retained_evidence_coverage": {
+    "cpu_gpu_parity_and_maximum_errors": "commissioning_metrics.json and scientific_rows.json",
+    "runtime_breakdown": "commissioning_metrics.json and scientific_rows.json",
+    "static_timestep_cancellation_sanity": "commissioning_metrics.json and scientific_rows.json",
+    "cupy_memory_pool": "commissioning_metrics.json and scientific_rows.json",
+    "sampled_gpu_memory": [
+      "gpu_memory_baseline.csv",
+      "gpu_process_memory_samples.csv"
+    ],
+    "terminal_scheduler": "SCHEDULER_ACCOUNTING_FINAL.txt",
+    "backend_and_source_provenance": "execution_provenance.json",
+    "fast_reconstruction_and_products": "LOCAL_RECONSTRUCTION.json",
+    "remote_cleanup": "REMOTE_CLEANUP_VERIFIED.txt",
+    "fast_request_and_result": "primary_fast/"
+  },
+  "launch_input_checksums": {
+    "lcprop-1a129dc.bundle": "fd963b1242e16055b38f5269e508e7bb6484dc532b312e87b13034845f2b68b7",
+    "pr_full_transverse_nonlinear_td_h200_commissioning.py": "1e28f04a9891b0852ab2a8dd88ce09a6db18889bcb012811e1f508692460e667",
+    "pr_full_transverse_nonlinear_td_h200.sbatch": "7fd971939d79d36f7eba9fde330b7178d45f647cd58efd5cbb79f6ac6478c091",
+    "launch_manifest.json": "ae833a1683486e0b8a5f35bff5217d74c0f12d3c7c266faba971858f3c5652e4",
+    "launch_checksums.sha256": "fe7847473ed8a84bbda25f29e009e8c332b741ad5a5ef78e8e83905e245eb452"
+  },
+  "failed_attempt": {
+    "job_id": "3662453",
+    "classification": "Not Commissioned",
+    "evidence_manifest_sha256": "cf4035696f276d4ee6eef013f189413d88473cc6db6d44098639a41941ac4c38",
+    "failure": "TypeError: Object of type ndarray is not JSON serializable",
+    "historical_report_snapshot_sha256": "439bbbb302906212fe351633b3ab5eae2629d0741f02266c8f4d58e88cce7e2e",
+    "historical_report_checksum_is_current_report": false
+  },
+  "retained_artifact_checksums": {
+    "docs/development/pr_full_transverse_nonlinear_td_h200_slurm_commissioning.md": "d74aeac3d32861bfee47361dc31383bd474822713a9c1e54ddca7fb0dfbbf4ed",
+    "scripts/checks/pr_full_transverse_nonlinear_td_h200_commissioning.py": "1e28f04a9891b0852ab2a8dd88ce09a6db18889bcb012811e1f508692460e667",
+    "tests/test_pr_full_transverse_nonlinear_td_h200_harness.py": "d3c7c99f6b27661932e0030009ab15221f1c6f8db40309c0b318ba1bc0497c31",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/job_3662453/evidence_manifest.json": "cf4035696f276d4ee6eef013f189413d88473cc6db6d44098639a41941ac4c38",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/job_3662453/execution_provenance.json": "fc4d846ff80abba1d233d0261c7597992b97d7a786adb1327da06a39462ce3da",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/commissioning_metrics.json": "b6a9a297b77784858ede580cb893f012f2f2e8bd9500d15876257f0194d6984c",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/scientific_rows.json": "46dfb4797a0872da9a375589ccd9c63e3e3618e66583e4974151c928b3015738",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/SCHEDULER_ACCOUNTING_FINAL.txt": "2d4cc9b5bc50e8d1d0f25ca752085ea8e038717c24a1066639fbd0e158781060",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/gpu_memory_baseline.csv": "b09ac9762f5c7237a0791ee8513bf4cdfa57b956e9c2fe5d6d0d4c164dc648ff",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/gpu_process_memory_samples.csv": "654319545c69fea9fc5df2c749e1193143b483f2cfea5d75fa94e1baa71789b1",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/execution_provenance.json": "c10b69b792733d96ac3b74ad442c37c70d20d8eca2002b9221fafc344a1e246c",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/LOCAL_RECONSTRUCTION.json": "b15c2645bed47e9118bda1de31d7ebcbd99aba9a144e1b82ed77542720400bc7",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/REMOTE_CLEANUP_VERIFIED.txt": "efcbab61fffbffaad9e34dd1cecd4d766609abf73fbe5a1c116750ee1965a58c",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/primary_fast/request/READY.json": "3411030a896a9c849784cdfde68c1d83d01370290432daea1b649bb34dfd1092",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/primary_fast/request/checksums.sha256": "e32d01c64209de6b03d63dac056522f39fe496827aeb0b334aa54d3acb336ebd",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/primary_fast/request/manifest.json": "acc831f29cd2789a76f3e86b6364d29df23be1d38c0885429a15b5fd215815e9",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/primary_fast/request/request.json": "306f12ffcaab817b339f81544539f56785df20d2abfa48671abf5800ecc5eefc",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/primary_fast/output/RESULT_READY.json": "96d9b3c7a9d636d68fc94fc2043958765aa2a1169fdcaca377a1f45fd8d31152",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/primary_fast/output/checksums.sha256": "886c0197626166481cf14642012eaf1416746eb9500861d21ffe62a16ae6fbad",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/primary_fast/output/manifest.json": "5d0dddbff35ed38399612f4f1b92e9052dc41963e05cb26938f6a8b3a7997631",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/primary_fast/output/result.json": "c983ebfab2976a77c7299a38a77a0391e3a5e7810c9fdfb5a9b774781a23b579",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/primary_fast/output/result_arrays.npz": "886acdde1e900c06a297ccb911e6922c6df4adfb960920b18352a2e8ed7c4283"
+  },
+  "permanent_manifest_file_count_including_this_manifest": 23,
+  "excluded_local_artifacts": [
+    "one-off scheduler scripts",
+    "launch packages and source bundles",
+    "raw stdout and stderr",
+    "preflight and remediation-validation outputs",
+    "superseded in-job, retrieval, and post-retrieval manifests",
+    "redundant per-stage successful-job JSON",
+    "duplicate failed-job Fast, memory, scheduler, reconstruction, cleanup, and raw-log artifacts"
+  ]
+}

@@ -1,0 +1,15 @@
+Remote cleanup verification for nonlinear-TD H200 retry job 3672475
+Verified: 2026-09-13 America/New_York
+
+Removed exactly:
+/cluster/tufts/cglab/mcroning/lcprop_runs/pr-nonlinear-td-1a129dc-retry1/launch/runs/3672475
+
+Post-removal checks:
+- the transient job run tree is absent;
+- immutable launch input launch_checksums.sha256 remains present;
+- immutable log slurm-3672475.out remains present;
+- local retrieved evidence passed retrieval_checksums.sha256 before cleanup;
+- local and remote stdout/stderr SHA-256 values matched before cleanup.
+
+Job 3662453 and its separate failed commissioning record were not accessed or
+modified by this cleanup.
