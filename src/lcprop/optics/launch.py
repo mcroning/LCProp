@@ -45,6 +45,16 @@ class LaunchResult:
     channel_throughput_fractions: Array | None = None
 
     def summary(self) -> dict:
+        # Explicit groups are authoritative for multichannel interference.
+        # Retain the legacy request label for a single channel, where coherent
+        # and incoherent construction are numerically identical.
+        effective_coherence = self.coherence
+        if len(self.coherence_groups) > 1:
+            effective_coherence = (
+                "coherent"
+                if len(set(self.coherence_groups)) < len(self.coherence_groups)
+                else "incoherent"
+            )
         post_element_powers = (
             self.physical_powers_mW
             if self.post_element_physical_powers_mW is None
@@ -62,7 +72,7 @@ class LaunchResult:
         )
         return {
             "Nch": int(self.A0.shape[0]),
-            "coherence": self.coherence,
+            "coherence": effective_coherence,
             "coherence_groups": list(self.coherence_groups),
             "physical_channel_powers_mW": [float(x) for x in np.asarray(_to_numpy(self.physical_powers_mW)).ravel()],
             "physical_total_power_mW": float(self.physical_total_power_mW),

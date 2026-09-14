@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pytest
 
@@ -64,10 +66,38 @@ def test_legacy_incoherent_stack_migrates_to_distinct_groups():
     launch = build_launch(beams, grid)
 
     assert len(set(launch.coherence_groups)) == 2
+    assert launch.summary()["coherence"] == "incoherent"
     assert launch.summary()["coherence_groups"] == list(launch.coherence_groups)
 
 
-def test_explicit_coherence_groups_are_preserved():
+@pytest.mark.parametrize(
+    ("coherence", "expected"),
+    (("incoherent", "incoherent"), ("coherent", "coherent")),
+)
+def test_legacy_coherence_summary_remains_backward_compatible(coherence, expected):
+    grid = make_grid(GridSpec(Nx=32, Ny=32))
+    beams = BeamStack(
+        channels=(BeamChannel(name="a"), BeamChannel(name="b")),
+        coherence=coherence,
+    )
+
+    launch = build_launch(beams, grid)
+
+    assert launch.summary()["coherence"] == expected
+
+
+@pytest.mark.parametrize("coherence", ["incoherent", "coherent"])
+def test_single_channel_summary_preserves_legacy_label(coherence):
+    grid = make_grid(GridSpec(Nx=32, Ny=32))
+    launch = build_launch(
+        BeamStack(channels=(BeamChannel(),), coherence=coherence),
+        grid,
+    )
+
+    assert launch.summary()["coherence"] == coherence
+
+
+def test_partially_coherent_explicit_groups_are_preserved_and_reported():
     grid = make_grid(GridSpec(Nx=32, Ny=32))
     beams = BeamStack(
         channels=(
@@ -80,6 +110,80 @@ def test_explicit_coherence_groups_are_preserved():
     launch = build_launch(beams, grid)
 
     assert launch.coherence_groups == ("A", "A", "B")
+    assert launch.summary()["coherence"] == "coherent"
+
+
+def test_launch_summary_reports_effective_explicit_group_coherence():
+    grid = make_grid(GridSpec(Nx=32, Ny=32))
+    beams = BeamStack(
+        channels=(
+            BeamChannel(name="a", coherence_group="laser"),
+            BeamChannel(name="b", coherence_group="laser"),
+        )
+    )
+
+    launch = build_launch(beams, grid)
+
+    assert launch.coherence == "incoherent"
+    assert launch.coherence_groups == ("laser", "laser")
+    assert launch.summary()["coherence"] == "coherent"
+
+
+def test_distinct_explicit_groups_override_legacy_coherent_summary():
+    grid = make_grid(GridSpec(Nx=32, Ny=32))
+    beams = BeamStack(
+        channels=(
+            BeamChannel(name="a", coherence_group="A"),
+            BeamChannel(name="b", coherence_group="B"),
+        ),
+        coherence="coherent",
+    )
+
+    launch = build_launch(beams, grid)
+
+    assert launch.coherence == "coherent"
+    assert launch.coherence_groups == ("A", "B")
+    assert launch.summary()["coherence"] == "incoherent"
+
+
+def test_launch_summary_is_deterministic_json_safe_and_numerically_non_mutating():
+    grid = make_grid(GridSpec(Nx=32, Ny=24))
+    launch = build_launch(
+        BeamStack(
+            channels=(
+                BeamChannel(name="a", power_mW=1.0, coherence_group="laser"),
+                BeamChannel(name="b", power_mW=2.0, coherence_group="laser"),
+            )
+        ),
+        grid,
+    )
+    numerical_before = {
+        "A0": launch.A0.copy(),
+        "physical_powers_mW": launch.physical_powers_mW.copy(),
+        "power_fractions": launch.power_fractions.copy(),
+        "wavelengths_um": launch.wavelengths_um.copy(),
+        "post_element_physical_powers_mW": (
+            launch.post_element_physical_powers_mW.copy()
+        ),
+        "channel_throughput_fractions": launch.channel_throughput_fractions.copy(),
+    }
+    scalar_before = (
+        launch.physical_total_power_mW,
+        launch.post_element_total_power_mW,
+    )
+
+    first = launch.summary()
+    second = launch.summary()
+    round_tripped = json.loads(json.dumps(first))
+
+    assert first == second
+    assert round_tripped == first
+    for name, before in numerical_before.items():
+        np.testing.assert_array_equal(getattr(launch, name), before)
+    assert (
+        launch.physical_total_power_mW,
+        launch.post_element_total_power_mW,
+    ) == scalar_before
 
 
 def test_partially_migrated_coherence_groups_are_rejected():
