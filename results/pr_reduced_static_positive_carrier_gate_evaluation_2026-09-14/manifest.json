@@ -1,0 +1,63 @@
+{
+  "analysis": "reduced-static positive-carrier candidate-gate A/B evaluation",
+  "artifact_sha256": {
+    "evaluation.json": "3064bc49a507bd0c642c4e5a2e50e88d148ad61bcd340996c6ebb5744b6e368b"
+  },
+  "backend": "numpy",
+  "candidate_policy": {
+    "admissible_exactly_when": "min(1 + centered_difference_x(E_candidate)) > 0",
+    "safety_margin": null
+  },
+  "canonical_scientific_data": {
+    "excluded_fields": [
+      "wall_time_s"
+    ],
+    "json_encoding": "UTF-8 JSON with sort_keys=True, separators=(',', ':'), allow_nan=False",
+    "selection": "evaluation.json after recursively omitting keys named wall_time_s",
+    "sha256": "2821e75e5c3259beb3a0fd5ad932de50fbbcffaa7e99235cccbe14bd9ce8e199"
+  },
+  "conclusion": "KEEP as a defensive physical-admissibility gate; not demonstrated to improve nonlinear root finding",
+  "execution_environment": {
+    "numpy_version": "2.5.1",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "python_version": "3.12.13"
+  },
+  "external_inputs": {
+    "historical_cw_z3720_snapshot": {
+      "bytes": 64521555,
+      "original_repository_relative_path": "outputs/pr_cw_diagnostic_2266990/products/Cw/first_pass_incremental/failure_snapshot.npz",
+      "provenance": "retained fixed-source failure snapshot from the Cw optical-coupled march at z=3720 um",
+      "sha256": "e2dc8c9aede6096e8c01745053c895c5f2e2635f67af8cb18c3d52bcca69b067",
+      "supply_mode": "separately copied into the ignored outputs path of the isolated checkout"
+    },
+    "prior_maximum_residual_evaluation": {
+      "production_commit_path": "results/pr_reduced_static_max_residual_guard_evaluation_2026-09-14/evaluation.json",
+      "provenance": "committed at the production baseline and used only for the difficult-case three-policy comparison",
+      "sha256": "cf4df65bab6e4dcd4e5c2907fbc62c5f9432e2b6add7dc5bbb21473ebf44ea80"
+    }
+  },
+  "fixtures": 7,
+  "harness": {
+    "repository_path": "scripts/checks/pr_reduced_static_positive_carrier_gate_evaluation.py",
+    "sha256": "2e36c4d35f9e7b1d6b242ba5430a40a81d90a40922d197fa3127af45c6f7e9f3",
+    "supply_mode": "separate immutable input outside the isolated production checkout"
+  },
+  "precision": {
+    "complex": "not applicable",
+    "real": "float64"
+  },
+  "production_source": {
+    "clean": true,
+    "commit": "72a4d77cb42cd3d7ee3a3d7fe143f6b5f4a10f7c",
+    "import_verified_path_suffix": "/source/src/lcprop/pr/static.py",
+    "static_py_sha256": "a5f531242edad61b2ecbb3999f6c4633e255fad3b7e6bcceaa011709d23a8881",
+    "status_porcelain_after": "",
+    "status_porcelain_before": ""
+  },
+  "repository_file_sha256": {
+    "docs/development/pr_reduced_static_positive_carrier_gate_evaluation.md": "d9d20b6234e07972f59e508ffc7763bb10fa2f6cacdaaa508595c82509fb8603",
+    "scripts/checks/pr_reduced_static_positive_carrier_gate_evaluation.py": "2e36c4d35f9e7b1d6b242ba5430a40a81d90a40922d197fa3127af45c6f7e9f3",
+    "tests/test_pr_reduced_static_positive_carrier_gate_evaluation.py": "f194a5f84c84a84bdf5a006b32d21e77350bb21a42f47e46f251d448ea3b5a77"
+  },
+  "schema_version": 1
+}
