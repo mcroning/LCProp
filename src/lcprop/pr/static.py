@@ -388,21 +388,37 @@ def _solve_pr_static_intensity_backend(
         accepted = False
         for _ in range(int(options.max_backtracks) + 1):
             candidate = state + step_scale * direction
-            candidate_residual = residual_at(candidate)
-            candidate_rms, candidate_max = _residual_metrics(
-                candidate_residual,
+            candidate_is_finite = not _array_has_true(
+                ~xp.isfinite(candidate),
                 xp=xp,
             )
-            required_rms = (
-                1.0 - float(options.armijo_fraction) * step_scale
-            ) * residual_rms
-            if (
-                not _array_has_true(~xp.isfinite(candidate), xp=xp)
-                and math.isfinite(candidate_rms)
-                and candidate_rms <= required_rms
-            ):
-                accepted = True
-                break
+            if candidate_is_finite:
+                candidate_derivative, _ = periodic_derivatives_x(
+                    candidate,
+                    dx_normalized=dx,
+                    xp=xp,
+                )
+                candidate_carrier_minimum = _backend_scalar(
+                    xp.min(1.0 + candidate_derivative)
+                )
+                if (
+                    math.isfinite(candidate_carrier_minimum)
+                    and candidate_carrier_minimum > 0.0
+                ):
+                    candidate_residual = residual_at(candidate)
+                    candidate_rms, candidate_max = _residual_metrics(
+                        candidate_residual,
+                        xp=xp,
+                    )
+                    required_rms = (
+                        1.0 - float(options.armijo_fraction) * step_scale
+                    ) * residual_rms
+                    if (
+                        math.isfinite(candidate_rms)
+                        and candidate_rms <= required_rms
+                    ):
+                        accepted = True
+                        break
             step_scale *= 0.5
             if step_scale < float(options.minimum_step_scale):
                 break
@@ -416,7 +432,9 @@ def _solve_pr_static_intensity_backend(
                 residual_rms=residual_rms,
                 residual_max=residual_max,
                 records=tuple(records),
-                message="damped Newton step did not reduce residual RMS",
+                message=(
+                    "damped Newton line search failed to find an acceptable candidate"
+                ),
             )
 
         state = candidate

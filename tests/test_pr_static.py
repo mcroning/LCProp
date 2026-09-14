@@ -3,6 +3,7 @@ import pytest
 
 from lcprop.pr.evolution import (
     hopping_rhs,
+    periodic_derivatives_x,
     semi_implicit_trapezoidal_step,
 )
 from lcprop.pr.static import (
@@ -12,9 +13,9 @@ from lcprop.pr.static import (
     solve_pr_static_intensity_batched,
 )
 from scripts.checks.pr_reduced_static_max_residual_guard_evaluation import (
-    evaluate_fixture,
     localized_stress_fixture,
     periodic_fixture,
+    solve_variant as solve_max_residual_variant,
 )
 
 
@@ -157,27 +158,46 @@ def test_batched_static_root_matches_dense_solver_and_iteration_contract():
 
 
 def test_ab_harness_shows_guard_is_inert_on_periodic_material_fixture():
-    comparison = evaluate_fixture(
-        periodic_fixture("moderate_periodic_test", modulation=0.4)
-    )
+    fixture = periodic_fixture("moderate_periodic_test", modulation=0.4)
+    original = solve_max_residual_variant(fixture, enforce_max_guard=False)
+    guarded = solve_max_residual_variant(fixture, enforce_max_guard=True)
 
-    assert comparison["original"]["converged"]
-    assert comparison["guarded"]["converged"]
-    assert comparison["guard_rejection_count"] == 0
-    assert comparison["final_field_bitwise_equal"]
-    assert comparison["original_harness_matches_production_bitwise"]
+    assert original.result.converged
+    assert guarded.result.converged
+    assert np.array_equal(original.result.E, guarded.result.E)
+    assert original.result.records == guarded.result.records
+    assert not any(
+        trial["armijo_accepts"] and not trial["maximum_accepts"]
+        for trial in guarded.trials
+    )
 
 
 def test_ab_harness_reproduces_guarded_nonphysical_root():
-    comparison = evaluate_fixture(localized_stress_fixture())
+    fixture = localized_stress_fixture()
+    original = solve_max_residual_variant(fixture, enforce_max_guard=False)
+    guarded = solve_max_residual_variant(fixture, enforce_max_guard=True)
+    guard_rejections = [
+        trial
+        for trial in guarded.trials
+        if trial["armijo_accepts"] and not trial["maximum_accepts"]
+    ]
+    initial_derivative, _ = periodic_derivatives_x(
+        fixture.initial_E,
+        dx_normalized=fixture.dx_normalized,
+        xp=np,
+    )
+    guarded_derivative, _ = periodic_derivatives_x(
+        guarded.result.E,
+        dx_normalized=fixture.dx_normalized,
+        xp=np,
+    )
 
-    assert comparison["original"]["termination_reason"] == "line_search_failed"
-    assert comparison["guarded"]["termination_reason"] == "converged"
-    assert comparison["guard_rejection_count"] == 3
-    assert comparison["original_harness_matches_production_bitwise"]
-    assert comparison["initial_minimum_carrier_density"] > 0.0
-    assert comparison["guarded"]["minimum_carrier_density"] < 0.0
-    first_rejection = comparison["guard_rejections"][0]
+    assert original.result.status == "line_search_failed"
+    assert guarded.result.status == "converged"
+    assert len(guard_rejections) == 3
+    assert np.min(1.0 + initial_derivative) > 0.0
+    assert np.min(1.0 + guarded_derivative) < 0.0
+    first_rejection = guard_rejections[0]
     assert first_rejection["armijo_accepts"]
     assert not first_rejection["maximum_accepts"]
     assert first_rejection["candidate_residual_rms"] < first_rejection[

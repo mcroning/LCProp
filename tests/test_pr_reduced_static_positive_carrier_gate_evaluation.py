@@ -6,7 +6,7 @@ from scripts.checks.pr_reduced_static_max_residual_guard_evaluation import (
     periodic_fixture,
 )
 from scripts.checks.pr_reduced_static_positive_carrier_gate_evaluation import (
-    evaluate_fixture,
+    solve_variant,
 )
 
 
@@ -24,42 +24,36 @@ def test_positive_carrier_gate_is_bitwise_inert_on_ordinary_fixtures():
     )
 
     for fixture in fixtures:
-        comparison = evaluate_fixture(fixture)
-        original = comparison["original"]
-        gated = comparison["positive_carrier_gate"]
+        original = solve_variant(fixture, enforce_positive_carrier=False)
+        gated = solve_variant(fixture, enforce_positive_carrier=True)
 
-        assert original["converged"]
-        assert gated["converged"]
-        assert gated["carrier_gate_rejection_count"] == 0
-        assert comparison["final_field_bitwise_equal"]
-        assert comparison["final_field_relative_l2"] == 0.0
-        assert comparison["final_field_maximum_absolute_difference"] == 0.0
-        assert original["accepted_step_sizes"] == gated["accepted_step_sizes"]
-        assert original["residual_rms_history"] == gated["residual_rms_history"]
-        assert original["residual_max_history"] == gated["residual_max_history"]
-        assert comparison["original_harness_matches_production_bitwise"]
+        assert original.result.converged
+        assert gated.result.converged
+        assert not any(trial["carrier_gate_rejects"] for trial in gated.trials)
+        assert np.array_equal(original.result.E, gated.result.E)
+        assert original.result.records == gated.result.records
 
 
 def test_positive_carrier_gate_fails_honestly_at_physical_boundary():
-    comparison = evaluate_fixture(localized_stress_fixture())
-    original = comparison["original"]
-    gated = comparison["positive_carrier_gate"]
+    fixture = localized_stress_fixture()
+    original = solve_variant(fixture, enforce_positive_carrier=False)
+    gated = solve_variant(fixture, enforce_positive_carrier=True)
+    rejected = [trial for trial in gated.trials if not trial["accepted"]]
+    events = [trial for trial in gated.trials if trial["carrier_gate_rejects"]]
 
-    assert original["termination_reason"] == "line_search_failed"
-    assert original["final_minimum_carrier_density"] < 0.0
-    assert gated["termination_reason"] == "line_search_failed"
-    assert not gated["converged"]
-    assert gated["newton_iterations"] == 15
-    assert gated["total_line_search_rejects"] == 158
-    assert gated["carrier_gate_rejection_count"] == 158
-    assert gated["production_acceptable_carrier_gate_rejection_count"] == 156
-    assert gated["final_minimum_carrier_density"] > 0.0
-    assert min(gated["accepted_carrier_minimum_history"]) > 0.0
-    assert np.isfinite(gated["final_residual_rms"])
-    assert np.isfinite(gated["final_residual_max"])
-    assert comparison["original_harness_matches_production_bitwise"]
+    assert original.result.status == "line_search_failed"
+    assert original.accepted_carrier_minima[-1] < 0.0
+    assert gated.result.status == "line_search_failed"
+    assert not gated.result.converged
+    assert gated.result.iterations == 15
+    assert len(rejected) == 158
+    assert len(events) == 158
+    assert sum(event["production_accepts"] for event in events) == 156
+    assert gated.accepted_carrier_minima[-1] > 0.0
+    assert min(gated.accepted_carrier_minima) > 0.0
+    assert np.isfinite(gated.result.residual_rms)
+    assert np.isfinite(gated.result.residual_max)
 
-    events = comparison["carrier_gate_rejections"]
     assert any(event["smaller_admissible_candidate_accepted"] for event in events)
     assert not events[-1]["smaller_admissible_candidate_accepted"]
     assert all(event["candidate_carrier_minimum"] <= 0.0 for event in events)
