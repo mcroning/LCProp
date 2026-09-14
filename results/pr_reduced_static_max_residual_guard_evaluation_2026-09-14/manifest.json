@@ -1,0 +1,69 @@
+{
+  "analysis": "reduced-static maximum-residual line-search guard A/B evaluation",
+  "artifact_sha256": {
+    "evaluation.json": "cf4df65bab6e4dcd4e5c2907fbc62c5f9432e2b6add7dc5bbb21473ebf44ea80"
+  },
+  "backend": "numpy",
+  "canonical_scientific_data": {
+    "excluded_fields": [
+      "wall_time_s"
+    ],
+    "json_encoding": "UTF-8 JSON with sort_keys=True, separators=(',', ':'), allow_nan=False",
+    "selection": "evaluation.json after recursively omitting keys named wall_time_s",
+    "sha256": "c2b7929be1a8b0628bff89489abed75b565f7ff0c5769c593536d699b01dfd9e"
+  },
+  "conclusion": "REVERT the candidate maximum-residual guard; production source remains unchanged",
+  "execution_environment": {
+    "numpy_version": "2.5.1",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "python_version": "3.12.13"
+  },
+  "external_inputs": {
+    "historical_cw_z3720_snapshot": {
+      "bytes": 64521555,
+      "original_repository_relative_path": "outputs/pr_cw_diagnostic_2266990/products/Cw/first_pass_incremental/failure_snapshot.npz",
+      "provenance": "retained fixed-source failure snapshot from the Cw optical-coupled march at z=3720 um",
+      "sha256": "e2dc8c9aede6096e8c01745053c895c5f2e2635f67af8cb18c3d52bcca69b067",
+      "supply_mode": "separately copied into the ignored outputs path of the isolated checkout"
+    }
+  },
+  "fixtures": 7,
+  "harness": {
+    "repository_path": "scripts/checks/pr_reduced_static_max_residual_guard_evaluation.py",
+    "sha256": "da6ac0f2717fd7768b2df94d307a3cceeab71181058b75794e5529875ce21cc7",
+    "supply_mode": "separate immutable input outside the isolated production checkout"
+  },
+  "precision": {
+    "complex": "not applicable",
+    "real": "float64"
+  },
+  "production_source": {
+    "clean": true,
+    "commit": "7c936425ac1f77fbfd2634b8daae21a37466ecbd",
+    "import_verified_path_suffix": "/source/src/lcprop/pr/static.py",
+    "status_porcelain_after": "",
+    "status_porcelain_before": ""
+  },
+  "provisional_comparison": {
+    "comparison_basis": "scientific summary values retained in the development record and exploratory session output; no checksum-closed provisional full JSON was retained",
+    "fields_compared": "statuses, iteration/backtrack counts, accepted steps, final residuals, carrier minima, field SHA-256 values, and cited rejection events",
+    "first_six_fixture_clean_minus_provisional_wall_time_range_s": [
+      -0.00119733304018,
+      0.000107416009996
+    ],
+    "historical_cw_z3720_clean_minus_provisional_wall_time_s": {
+      "original": -0.503809124988,
+      "with_maximum_guard": -0.863903875987
+    },
+    "provisional_full_artifact_available": false,
+    "reported_scientific_values_identical": true,
+    "scientific_conclusion_changed": false,
+    "wall_time_is_canonical_scientific_data": false
+  },
+  "repository_file_sha256": {
+    "docs/development/pr_reduced_static_max_residual_guard_evaluation.md": "abbdb89dbb97705a2dacd1fdd083888b4d44d1cb1906105f2a54a6024470a2a9",
+    "scripts/checks/pr_reduced_static_max_residual_guard_evaluation.py": "da6ac0f2717fd7768b2df94d307a3cceeab71181058b75794e5529875ce21cc7",
+    "tests/test_pr_static.py": "f2302c33b88c1827fefc8ecef6b2b88056a59149a89553ad2f540c5340a75c6d"
+  },
+  "schema_version": 1
+}

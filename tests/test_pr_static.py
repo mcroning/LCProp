@@ -11,6 +11,11 @@ from lcprop.pr.static import (
     solve_pr_static_intensity,
     solve_pr_static_intensity_batched,
 )
+from scripts.checks.pr_reduced_static_max_residual_guard_evaluation import (
+    evaluate_fixture,
+    localized_stress_fixture,
+    periodic_fixture,
+)
 
 
 def _metrics(residual):
@@ -149,6 +154,38 @@ def test_batched_static_root_matches_dense_solver_and_iteration_contract():
     assert np.allclose(batched.E, dense.E, rtol=0.0, atol=3e-14)
     assert batched.residual_rms == pytest.approx(dense.residual_rms, abs=2e-15)
     assert batched.residual_max == pytest.approx(dense.residual_max, abs=2e-14)
+
+
+def test_ab_harness_shows_guard_is_inert_on_periodic_material_fixture():
+    comparison = evaluate_fixture(
+        periodic_fixture("moderate_periodic_test", modulation=0.4)
+    )
+
+    assert comparison["original"]["converged"]
+    assert comparison["guarded"]["converged"]
+    assert comparison["guard_rejection_count"] == 0
+    assert comparison["final_field_bitwise_equal"]
+    assert comparison["original_harness_matches_production_bitwise"]
+
+
+def test_ab_harness_reproduces_guarded_nonphysical_root():
+    comparison = evaluate_fixture(localized_stress_fixture())
+
+    assert comparison["original"]["termination_reason"] == "line_search_failed"
+    assert comparison["guarded"]["termination_reason"] == "converged"
+    assert comparison["guard_rejection_count"] == 3
+    assert comparison["original_harness_matches_production_bitwise"]
+    assert comparison["initial_minimum_carrier_density"] > 0.0
+    assert comparison["guarded"]["minimum_carrier_density"] < 0.0
+    first_rejection = comparison["guard_rejections"][0]
+    assert first_rejection["armijo_accepts"]
+    assert not first_rejection["maximum_accepts"]
+    assert first_rejection["candidate_residual_rms"] < first_rejection[
+        "residual_before_rms"
+    ]
+    assert first_rejection["candidate_residual_max"] > first_rejection[
+        "residual_before_max"
+    ]
 
 
 def test_static_solver_does_not_claim_convergence_from_no_update():
