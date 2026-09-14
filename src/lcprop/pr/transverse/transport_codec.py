@@ -19,6 +19,13 @@ from lcprop.pr.portable_launch import (
     decode_launch_elements,
     encode_launch_elements,
 )
+from lcprop.pr.longitudinal_cuts import (
+    extract_longitudinal_optical_intensity_cuts,
+    fast_retention_summary,
+    retained_longitudinal_intensity_cuts,
+    validate_longitudinal_cut_coordinates,
+)
+from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.pr.specs import PRMaterialSpec, PR_MATERIAL_ID
 from lcprop.pr.transport_common import pack_portable, unpack_portable
@@ -178,16 +185,42 @@ def encode_pr_transverse_static_transport_result(
     policy = normalize_result_policy(result_policy)
     arrays: dict[str, np.ndarray] = {}
     omitted = _FAST_OMITTED_FIELDS if policy == FAST_RESULT_POLICY else ()
-    projected = (
-        replace(result, **{name: None for name in omitted})
-        if omitted
-        else result
-    )
+    if omitted:
+        if result.source_intensity_stack is None:
+            try:
+                cuts = retained_longitudinal_intensity_cuts(result)
+            except ValueError:
+                cuts = None
+        else:
+            material = result.resolved_profile["material"]
+            cuts = extract_longitudinal_optical_intensity_cuts(
+                result.source_intensity_stack,
+                grid_summary=result.grid_summary,
+                peak_intensity_reference=channel_peak_intensity_reference(
+                    np.asarray(result.A_initial), xp=np
+                ),
+                background_intensity=(
+                    float(material["dark_intensity"])
+                    + float(material["uniform_background_intensity"])
+                ),
+            )
+        projected = replace(
+            result,
+            **{name: None for name in omitted},
+            longitudinal_intensity_xz=None if cuts is None else cuts.xz,
+            longitudinal_intensity_yz=None if cuts is None else cuts.yz,
+            x_cut_um=None if cuts is None else cuts.x_cut_um,
+            y_cut_um=None if cuts is None else cuts.y_cut_um,
+        )
+    else:
+        cuts = None
+        projected = result
     values = asdict(projected)
-    values["retention_summary"] = {
-        "policy": policy,
-        "omitted_fields": list(omitted),
-    }
+    values["retention_summary"] = (
+        fast_retention_summary(omitted, cuts)
+        if cuts is not None
+        else {"policy": policy, "omitted_fields": list(omitted)}
+    )
     metadata = pack_portable(values, arrays, "result")
     backend = str(result.backend_summary.get("backend", "unknown"))
     device_summary = pack_portable(
@@ -235,6 +268,7 @@ def _validate_result_shapes(values: Mapping[str, Any]) -> None:
     omitted = retention.get("omitted_fields", [])
     if not isinstance(omitted, (tuple, list)) or set(omitted) != expected_omitted:
         raise TransportCodecError("PR result omitted_fields disagree with result policy")
+    cuts_present = validate_longitudinal_cut_coordinates(values, grid)
     expected = {
         "A_initial": (nch, nx, ny),
         "A_final": (nch, nx, ny),
@@ -271,6 +305,24 @@ def _validate_result_shapes(values: Mapping[str, Any]) -> None:
             raise TransportCodecError(
                 f"PR result {name} shape {value.shape} does not match {shape}"
             )
+    for name, shape in (
+        ("longitudinal_intensity_xz", (nz, nx)),
+        ("longitudinal_intensity_yz", (nz, ny)),
+    ):
+        value = values.get(name)
+        if policy == FAST_RESULT_POLICY:
+            if not cuts_present:
+                continue
+            if (
+                not isinstance(value, np.ndarray)
+                or value.dtype.kind != "f"
+                or value.shape != shape
+            ):
+                raise TransportCodecError(
+                    f"Fast PR result {name} must have shape {shape}"
+                )
+        elif value is not None:
+            raise TransportCodecError(f"Full PR result unexpectedly retained {name}")
 
 
 def _same_visibility(left: Any, right: Any) -> bool:
@@ -430,6 +482,9 @@ def decode_pr_transverse_static_transport_result(metadata: Mapping[str, Any], ar
             replay_diagnostics=dict(values["replay_diagnostics"]), diagnostics=diagnostics,
             timing=dict(values["timing"]), status=str(values["status"]),
             retention_summary=dict(values["retention_summary"]),
+            longitudinal_intensity_xz=values.get("longitudinal_intensity_xz"),
+            longitudinal_intensity_yz=values.get("longitudinal_intensity_yz"),
+            x_cut_um=values.get("x_cut_um"), y_cut_um=values.get("y_cut_um"),
         )
     except Exception as exc:
         raise TransportCodecError(f"invalid PR transverse-static result payload: {exc}") from exc

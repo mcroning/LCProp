@@ -16,6 +16,9 @@ from lcprop.optics.launch_configuration import reject_prepared_launch_conflict
 from lcprop.optics.screens import validate_channel_launch_elements
 from lcprop.optics.splitstep import linear_kernel
 from lcprop.pr.source import channel_peak_intensity_reference
+from lcprop.pr.longitudinal_cuts import (
+    extract_backend_longitudinal_optical_intensity_cuts,
+)
 from lcprop.pr.scattering import canonical_scattering_provenance
 from lcprop.pr.transverse.diagnostics import state_diagnostics
 from lcprop.pr.transverse.linearized_reference import (
@@ -642,6 +645,16 @@ def run_pr_transverse_timedependent(
         })
     if scattering_provenance is not None:
         resolved_profile["canonical_scattering"] = scattering_provenance
+    longitudinal_cuts = extract_backend_longitudinal_optical_intensity_cuts(
+        final_source,
+        grid_summary=grid.summary(),
+        peak_intensity_reference=peak_reference,
+        background_intensity=(
+            float(request.material.dark_intensity)
+            + float(request.material.uniform_background_intensity)
+        ),
+        asnumpy=asnumpy,
+    )
     return PRTransverseRunResult(
         A_initial=np.asarray(asnumpy(A0)).copy(),
         A_final=np.asarray(asnumpy(A_final)).copy(),
@@ -658,6 +671,10 @@ def run_pr_transverse_timedependent(
         status="cancelled" if cancelled else "completed",
         requested_steps=int(request.solver.Nt),
         diagnostics=diagnostics,
+        longitudinal_intensity_xz=longitudinal_cuts.xz,
+        longitudinal_intensity_yz=longitudinal_cuts.yz,
+        x_cut_um=longitudinal_cuts.x_cut_um,
+        y_cut_um=longitudinal_cuts.y_cut_um,
     )
 
 

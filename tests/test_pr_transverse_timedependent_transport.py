@@ -206,11 +206,36 @@ def test_transverse_td_fast_projection_retains_optics_and_far_field():
     np.testing.assert_array_equal(decoded.A_final, result.A_final)
     assert decoded.psi_initial is None
     assert decoded.psi_final is None
+    np.testing.assert_array_equal(
+        decoded.longitudinal_intensity_xz, result.longitudinal_intensity_xz
+    )
+    np.testing.assert_array_equal(
+        decoded.longitudinal_intensity_yz, result.longitudinal_intensity_yz
+    )
+    assert decoded.x_cut_um == result.x_cut_um
+    assert decoded.y_cut_um == result.y_cut_um
     products = PR_TRANSVERSE_TIMEDEPENDENT_OPERATION.to_run_data(decoded)
     assert "input_intensity" in products.fields
     assert "output_intensity" in products.fields
     assert "far_field_intensity" in products.fields
-    assert products.longitudinal_enabled is False
+    assert "retained_fast_optical_intensity_xz" in products.fields
+    assert "retained_fast_optical_intensity_yz" in products.fields
+    assert products.longitudinal_enabled is True
+
+    legacy_metadata = dict(encoded.payload.metadata)
+    for name in (
+        "longitudinal_intensity_xz", "longitudinal_intensity_yz",
+        "x_cut_um", "y_cut_um",
+    ):
+        legacy_metadata.pop(name)
+    legacy_metadata["retention_summary"] = {
+        "policy": "fast",
+        "omitted_fields": list(decoded.retention_summary["omitted_fields"]),
+    }
+    legacy_result = decode_pr_transverse_timedependent_transport_result(
+        legacy_metadata, encoded.payload.arrays
+    )
+    assert legacy_result.longitudinal_intensity_xz is None
 
 
 @pytest.mark.parametrize("factory", (_request, _screened_request))

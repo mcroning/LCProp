@@ -480,10 +480,19 @@ def test_experiment_and_transport_round_trip_with_legacy_default():
     _assert_nested_equal(decoded_fast.resolved_profile, decoded_result.resolved_profile)
     assert decoded_fast.psi_initial is None
     assert decoded_fast.psi_final is None
+    np.testing.assert_array_equal(
+        decoded_fast.longitudinal_intensity_xz,
+        result.longitudinal_intensity_xz,
+    )
+    np.testing.assert_array_equal(
+        decoded_fast.longitudinal_intensity_yz,
+        result.longitudinal_intensity_yz,
+    )
     fast_run_data = pr_transverse_result_to_run_data(decoded_fast)
     assert "input_intensity" in fast_run_data.fields
     assert "output_intensity" in fast_run_data.fields
     assert "psi" not in fast_run_data.fields
+    assert fast_run_data.longitudinal_enabled
 
 
 def test_linearized_cost_is_no_higher_than_nonlinear_cost():

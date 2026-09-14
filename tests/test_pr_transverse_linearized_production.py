@@ -314,9 +314,19 @@ def test_linearized_request_persistence_and_transport_are_explicit_and_additive(
         fast.payload.metadata, fast.payload.arrays
     )
     fast_data = pr_transverse_static_result_to_run_data(fast_result)
+    full_data = pr_transverse_static_result_to_run_data(decoded_result)
     assert fast_result.retention_summary["policy"] == FAST_RESULT_POLICY
     assert {"input_intensity", "output_intensity"}.issubset(fast_data.fields)
     assert "psi" not in fast_data.fields
+    np.testing.assert_array_equal(
+        fast_result.longitudinal_intensity_xz,
+        full_data.fields["optical_intensity_xz"].data,
+    )
+    np.testing.assert_array_equal(
+        fast_result.longitudinal_intensity_yz,
+        full_data.fields["optical_intensity_yz"].data,
+    )
+    assert fast_data.longitudinal_enabled
 
 
 def test_linearized_request_requires_explicit_reference_and_single_bias_owner():

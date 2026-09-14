@@ -14,6 +14,8 @@ from lcprop.optics.screens import (
     ScreenPlacement,
 )
 from lcprop.pr.operations import PR_TIMEDEPENDENT_OPERATION
+from lcprop.pr.longitudinal_cuts import extract_longitudinal_optical_intensity_cuts
+from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.pr.specs import PRMaterialSpec, PRRunRequest, PRSolverOptions
 from lcprop.pr.timedependent_transport_codec import (
@@ -243,7 +245,8 @@ def test_reduced_td_transport_preserves_float32_and_backend_provenance():
 
 
 def test_reduced_td_fast_projection_keeps_optics_and_omits_full_volumes():
-    result = PR_TIMEDEPENDENT_OPERATION.run(_request())
+    request = _request()
+    result = PR_TIMEDEPENDENT_OPERATION.run(request)
     encoded = encode_pr_timedependent_transport_result(result, "fast")
     decoded = decode_pr_timedependent_transport_result(
         encoded.payload.metadata, encoded.payload.arrays
@@ -255,15 +258,52 @@ def test_reduced_td_fast_projection_keeps_optics_and_omits_full_volumes():
     assert decoded.E_final is None
     assert decoded.source_intensity_stack is None
     assert decoded.checkpoint is None
+    expected_cuts = extract_longitudinal_optical_intensity_cuts(
+        result.source_intensity_stack,
+        grid_summary=result.grid_summary,
+        peak_intensity_reference=channel_peak_intensity_reference(
+            np.asarray(result.A_initial), xp=np
+        ),
+        background_intensity=request.material.background_intensity,
+    )
+    np.testing.assert_array_equal(
+        decoded.longitudinal_intensity_xz, expected_cuts.xz
+    )
+    np.testing.assert_array_equal(
+        decoded.longitudinal_intensity_yz, expected_cuts.yz
+    )
+    assert decoded.x_cut_um == expected_cuts.x_cut_um
+    assert decoded.y_cut_um == expected_cuts.y_cut_um
     assert set(decoded.retention_summary["omitted_fields"]) == {
         "E_initial", "E_final", "source_intensity_stack", "checkpoint"
     }
     products = PR_TIMEDEPENDENT_OPERATION.to_run_data(decoded)
     assert tuple(products.fields) == (
-        "input_intensity", "output_intensity", "far_field_intensity"
+        "input_intensity", "output_intensity",
+        "retained_fast_optical_intensity_xz",
+        "retained_fast_optical_intensity_yz",
+        "far_field_intensity",
     )
-    assert products.longitudinal_enabled is False
-    assert "Full result retrieval" in products.longitudinal_message
+    assert products.longitudinal_enabled is True
+    assert "only the transverse cuts" in products.longitudinal_message
+
+    legacy_metadata = dict(encoded.payload.metadata)
+    for name in (
+        "longitudinal_intensity_xz", "longitudinal_intensity_yz",
+        "x_cut_um", "y_cut_um",
+    ):
+        legacy_metadata.pop(name)
+    legacy_metadata["retention_summary"] = {
+        "policy": "fast",
+        "omitted_fields": list(decoded.retention_summary["omitted_fields"]),
+    }
+    legacy_result = decode_pr_timedependent_transport_result(
+        legacy_metadata, encoded.payload.arrays
+    )
+    assert legacy_result.longitudinal_intensity_xz is None
+    legacy_products = PR_TIMEDEPENDENT_OPERATION.to_run_data(legacy_result)
+    assert legacy_products.longitudinal_enabled is False
+    assert "Full result retrieval" in legacy_products.longitudinal_message
 
 
 @pytest.mark.parametrize("after_accepted_step", (False, True))

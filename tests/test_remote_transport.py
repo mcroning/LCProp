@@ -23,6 +23,8 @@ from lcprop.lc.workflows import (
 )
 from lcprop.pr.specs import PRMaterialSpec
 from lcprop.pr.operations import PR_STATIC_OPERATION
+from lcprop.pr.longitudinal_cuts import extract_longitudinal_optical_intensity_cuts
+from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.static_workflow import (
     PRStaticRunRequest,
     PRStaticWorkflowOptions,
@@ -330,7 +332,8 @@ def test_pr_static_transport_rejects_malformed_result_shape():
 
 
 def test_pr_static_fast_projection_omits_volumes_and_presents_optics():
-    result = PR_STATIC_OPERATION.run(_pr_static_request())
+    request = _pr_static_request()
+    result = PR_STATIC_OPERATION.run(request)
     encoded = encode_pr_static_transport_result(result, "fast")
     decoded = decode_pr_static_transport_result(
         encoded.payload.metadata, encoded.payload.arrays
@@ -340,11 +343,37 @@ def test_pr_static_fast_projection_omits_volumes_and_presents_optics():
     assert decoded.E_final is None
     assert decoded.source_intensity_stack is None
     assert decoded.residual_stack is None
+    expected_cuts = extract_longitudinal_optical_intensity_cuts(
+        result.source_intensity_stack,
+        grid_summary=result.grid_summary,
+        peak_intensity_reference=channel_peak_intensity_reference(
+            np.asarray(result.A_initial), xp=np
+        ),
+        background_intensity=request.material.background_intensity,
+    )
+    np.testing.assert_array_equal(decoded.longitudinal_intensity_xz, expected_cuts.xz)
+    np.testing.assert_array_equal(decoded.longitudinal_intensity_yz, expected_cuts.yz)
     products = PR_STATIC_OPERATION.to_run_data(decoded)
     assert tuple(products.fields) == (
-        "input_intensity", "output_intensity", "far_field_intensity"
+        "input_intensity", "output_intensity",
+        "retained_fast_optical_intensity_xz",
+        "retained_fast_optical_intensity_yz",
+        "far_field_intensity",
     )
-    assert products.longitudinal_enabled is False
+    assert products.longitudinal_enabled is True
+    legacy_metadata = dict(encoded.payload.metadata)
+    for name in (
+        "longitudinal_intensity_xz", "longitudinal_intensity_yz",
+        "x_cut_um", "y_cut_um",
+    ):
+        legacy_metadata.pop(name)
+    legacy_metadata["retention_summary"] = {
+        "policy": "fast",
+        "omitted_fields": list(decoded.retention_summary["omitted_fields"]),
+    }
+    assert decode_pr_static_transport_result(
+        legacy_metadata, encoded.payload.arrays
+    ).longitudinal_intensity_xz is None
 
 
 def test_fast_policy_is_bound_across_request_and_result_packages(tmp_path):
@@ -368,8 +397,13 @@ def test_fast_policy_is_bound_across_request_and_result_packages(tmp_path):
     decoded_result = read_result_package(run_dir, registry=registry)
     assert decoded_result.envelope.result_policy == "fast"
     assert decoded_result.result.E_final is None
+    retained_cut_bytes = (
+        decoded_result.result.longitudinal_intensity_xz.nbytes
+        + decoded_result.result.longitudinal_intensity_yz.nbytes
+    )
     assert (run_dir / "output" / "result_arrays.npz").stat().st_size < (
-        result.A_initial.nbytes + result.A_final.nbytes + 4096
+        result.A_initial.nbytes + result.A_final.nbytes
+        + retained_cut_bytes + 4096
     )
 
 
@@ -398,9 +432,33 @@ def test_pr_transverse_static_fast_projection_omits_volumes_and_keeps_far_field(
     assert decoded.source_intensity_stack is None
     assert decoded.equilibrium_residual_stack is None
     assert decoded.td_rhs_residual_stack is None
+    full_products = PR_TRANSVERSE_STATIC_OPERATION.to_run_data(result)
+    np.testing.assert_array_equal(
+        decoded.longitudinal_intensity_xz,
+        full_products.fields["optical_intensity_xz"].data,
+    )
+    np.testing.assert_array_equal(
+        decoded.longitudinal_intensity_yz,
+        full_products.fields["optical_intensity_yz"].data,
+    )
     products = PR_TRANSVERSE_STATIC_OPERATION.to_run_data(decoded)
     assert "far_field_intensity" in products.fields
-    assert products.longitudinal_enabled is False
+    assert "retained_fast_optical_intensity_xz" in products.fields
+    assert "retained_fast_optical_intensity_yz" in products.fields
+    assert products.longitudinal_enabled is True
+    legacy_metadata = dict(encoded.payload.metadata)
+    for name in (
+        "longitudinal_intensity_xz", "longitudinal_intensity_yz",
+        "x_cut_um", "y_cut_um",
+    ):
+        legacy_metadata.pop(name)
+    legacy_metadata["retention_summary"] = {
+        "policy": "fast",
+        "omitted_fields": list(decoded.retention_summary["omitted_fields"]),
+    }
+    assert decode_pr_transverse_static_transport_result(
+        legacy_metadata, encoded.payload.arrays
+    ).longitudinal_intensity_xz is None
 
 
 def test_pr_static_cancelled_result_transport_preserves_accepted_boundary():

@@ -18,6 +18,13 @@ from lcprop.pr.portable_launch import (
     decode_launch_elements,
     encode_launch_elements,
 )
+from lcprop.pr.longitudinal_cuts import (
+    extract_longitudinal_optical_intensity_cuts,
+    fast_retention_summary,
+    retained_longitudinal_intensity_cuts,
+    validate_longitudinal_cut_coordinates,
+)
+from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.specs import PRMaterialSpec, PR_MATERIAL_ID
 from lcprop.pr.static import PRStaticSolverOptions
 from lcprop.pr.static_workflow import (
@@ -160,16 +167,44 @@ def encode_pr_static_transport_result(
     policy = normalize_result_policy(result_policy)
     arrays: dict[str, np.ndarray] = {}
     omitted = _FAST_OMITTED_FIELDS if policy == FAST_RESULT_POLICY else ()
-    projected = (
-        replace(result, **{name: None for name in omitted})
-        if omitted
-        else result
-    )
+    if omitted:
+        if result.source_intensity_stack is None:
+            try:
+                cuts = retained_longitudinal_intensity_cuts(result)
+            except ValueError:
+                cuts = None
+        elif np.asarray(result.source_intensity_stack).shape[0] == 0:
+            cuts = None
+        else:
+            cuts = extract_longitudinal_optical_intensity_cuts(
+                result.source_intensity_stack,
+                grid_summary=result.grid_summary,
+                peak_intensity_reference=channel_peak_intensity_reference(
+                    np.asarray(result.A_initial), xp=np
+                ),
+                background_intensity=float(
+                    result.material_response_summary.get(
+                        "background_intensity", 0.0
+                    )
+                ),
+            )
+        projected = replace(
+            result,
+            **{name: None for name in omitted},
+            longitudinal_intensity_xz=None if cuts is None else cuts.xz,
+            longitudinal_intensity_yz=None if cuts is None else cuts.yz,
+            x_cut_um=None if cuts is None else cuts.x_cut_um,
+            y_cut_um=None if cuts is None else cuts.y_cut_um,
+        )
+    else:
+        cuts = None
+        projected = result
     values = asdict(projected)
-    values["retention_summary"] = {
-        "policy": policy,
-        "omitted_fields": list(omitted),
-    }
+    values["retention_summary"] = (
+        fast_retention_summary(omitted, cuts)
+        if cuts is not None
+        else {"policy": policy, "omitted_fields": list(omitted)}
+    )
     metadata = pack_portable(values, arrays, "result")
     backend = str(result.backend_summary.get("backend", "unknown"))
     termination = (
@@ -234,6 +269,7 @@ def _validate_result(values: Mapping[str, Any]) -> None:
     omitted = retention.get("omitted_fields", [])
     if not isinstance(omitted, (tuple, list)) or set(omitted) != expected_omitted:
         raise TransportCodecError("PR static omitted fields disagree with result policy")
+    cuts_present = validate_longitudinal_cut_coordinates(values, grid)
     expected = {
         "A_initial": (nch, nx, ny),
         "A_final": (nch, nx, ny),
@@ -261,6 +297,26 @@ def _validate_result(values: Mapping[str, Any]) -> None:
         if array.shape != shape:
             raise TransportCodecError(
                 f"PR static result {name} shape {array.shape} does not match {shape}"
+            )
+    for name, shape in (
+        ("longitudinal_intensity_xz", (completed, nx)),
+        ("longitudinal_intensity_yz", (completed, ny)),
+    ):
+        array = values.get(name)
+        if policy == FAST_RESULT_POLICY:
+            if not cuts_present:
+                continue
+            if (
+                not isinstance(array, np.ndarray)
+                or array.dtype.kind != "f"
+                or array.shape != shape
+            ):
+                raise TransportCodecError(
+                    f"PR static Fast result {name} must have shape {shape}"
+                )
+        elif array is not None:
+            raise TransportCodecError(
+                f"PR static Full result unexpectedly retained {name}"
             )
     summaries = values.get("slice_summaries")
     if not isinstance(summaries, list) or len(summaries) != completed:
@@ -330,6 +386,10 @@ def decode_pr_static_transport_result(
                     {"model": "nonlinear", "validation_status": "validated"},
                 )
             ),
+            longitudinal_intensity_xz=values.get("longitudinal_intensity_xz"),
+            longitudinal_intensity_yz=values.get("longitudinal_intensity_yz"),
+            x_cut_um=values.get("x_cut_um"),
+            y_cut_um=values.get("y_cut_um"),
         )
         return result
     except TransportCodecError:

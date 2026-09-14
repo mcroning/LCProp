@@ -20,6 +20,13 @@ from lcprop.pr.portable_launch import (
     decode_launch_elements,
     encode_launch_elements,
 )
+from lcprop.pr.longitudinal_cuts import (
+    extract_longitudinal_optical_intensity_cuts,
+    fast_retention_summary,
+    retained_longitudinal_intensity_cuts,
+    validate_longitudinal_cut_coordinates,
+)
+from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.pr.specs import (
     PRMaterialSpec,
@@ -227,12 +234,45 @@ def encode_pr_timedependent_transport_result(
     ):
         raise ValueError("PR time-dependent result must contain a checkpoint")
     arrays: dict[str, np.ndarray] = {}
+    cuts = None
+    if policy == FAST_RESULT_POLICY:
+        if result.source_intensity_stack is None:
+            try:
+                cuts = retained_longitudinal_intensity_cuts(result)
+            except ValueError:
+                cuts = None
+        else:
+            request = getattr(result.checkpoint, "request", None)
+            if request is None:
+                raise ValueError(
+                    "PR time-dependent Fast retention requires checkpoint request provenance"
+                )
+            cuts = extract_longitudinal_optical_intensity_cuts(
+                result.source_intensity_stack,
+                grid_summary=result.grid_summary,
+                peak_intensity_reference=channel_peak_intensity_reference(
+                    np.asarray(result.A_initial), xp=np
+                ),
+                background_intensity=float(request.material.background_intensity),
+            )
     metadata = {
         "A_initial": pack_portable(result.A_initial, arrays, "result.A_initial"),
         "A_final": pack_portable(result.A_final, arrays, "result.A_final"),
         "E_initial": None,
         "E_final": None,
         "source_intensity_stack": None,
+        "longitudinal_intensity_xz": (
+            None if cuts is None else pack_portable(
+                cuts.xz, arrays, "result.longitudinal_intensity_xz"
+            )
+        ),
+        "longitudinal_intensity_yz": (
+            None if cuts is None else pack_portable(
+                cuts.yz, arrays, "result.longitudinal_intensity_yz"
+            )
+        ),
+        "x_cut_um": None if cuts is None else cuts.x_cut_um,
+        "y_cut_um": None if cuts is None else cuts.y_cut_um,
         "power_initial": float(result.power_initial),
         "power_final": float(result.power_final),
         "completed_steps": int(result.completed_steps),
@@ -249,14 +289,17 @@ def encode_pr_timedependent_transport_result(
         "diagnostics": pack_portable(
             result.diagnostics, arrays, "result.diagnostics"
         ),
-        "retention_summary": {
-            "policy": policy,
-            "omitted_fields": (
-                list(_FAST_OMITTED_FIELDS)
-                if policy == FAST_RESULT_POLICY
-                else []
-            ),
-        },
+        "retention_summary": (
+            fast_retention_summary(_FAST_OMITTED_FIELDS, cuts)
+            if cuts is not None
+            else {
+                "policy": policy,
+                "omitted_fields": (
+                    list(_FAST_OMITTED_FIELDS)
+                    if policy == FAST_RESULT_POLICY else []
+                ),
+            }
+        ),
     }
     if policy == FULL_RESULT_POLICY:
         metadata.update({
@@ -354,6 +397,7 @@ def _validate_result(values: Mapping[str, Any]) -> None:
         raise TransportCodecError(
             "PR time-dependent omitted fields disagree with result policy"
         )
+    cuts_present = validate_longitudinal_cut_coordinates(values, grid)
     if policy == FULL_RESULT_POLICY:
         _require_array(values, "E_initial", (nz, nx, ny), "real")
         _require_array(values, "E_final", (nz, nx, ny), "real")
@@ -369,6 +413,18 @@ def _validate_result(values: Mapping[str, Any]) -> None:
             if values.get(name) is not None:
                 raise TransportCodecError(
                     f"PR time-dependent Fast result unexpectedly retained {name}"
+                )
+        if cuts_present:
+            for name, shape in (
+                ("longitudinal_intensity_xz", (nz, nx)),
+                ("longitudinal_intensity_yz", (nz, ny)),
+            ):
+                _require_array(values, name, shape, "real")
+    if policy == FULL_RESULT_POLICY:
+        for name in ("longitudinal_intensity_xz", "longitudinal_intensity_yz"):
+            if values.get(name) is not None:
+                raise TransportCodecError(
+                    f"PR time-dependent Full result unexpectedly retained {name}"
                 )
     status = values.get("status")
     if status not in {"completed", "cancelled"}:
@@ -474,6 +530,10 @@ def decode_pr_timedependent_transport_result(
             checkpoint=checkpoint,
             diagnostics=dict(values["diagnostics"]),
             retention_summary=retention,
+            longitudinal_intensity_xz=values.get("longitudinal_intensity_xz"),
+            longitudinal_intensity_yz=values.get("longitudinal_intensity_yz"),
+            x_cut_um=values.get("x_cut_um"),
+            y_cut_um=values.get("y_cut_um"),
         )
     except TransportCodecError:
         raise

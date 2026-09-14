@@ -80,7 +80,7 @@ def _add_carrier_power_diagnostic(
 
 
 def _fast_optical_run_data(result: Any, *, workflow: str, geometry: Geometry) -> RunData:
-    """Present retained optical endpoints without inventing missing volumes."""
+    """Present retained optical endpoints and compact center cuts."""
 
     A_initial = _copied_array(result.A_initial)
     A_final = _copied_array(result.A_final)
@@ -104,6 +104,37 @@ def _fast_optical_run_data(result: Any, *, workflow: str, geometry: Geometry) ->
             quantity="normalized_intensity",
             value_unit="1/µm²",
         ))
+    has_longitudinal_cuts = (
+        result.longitudinal_intensity_xz is not None
+        and result.longitudinal_intensity_yz is not None
+    )
+    if has_longitudinal_cuts:
+        cut_coordinates = {
+            "retention": "fast_center_nearest",
+            "x_cut_um": float(result.x_cut_um),
+            "y_cut_um": float(result.y_cut_um),
+        }
+        for key, title, value, axes in (
+            (
+                "retained_fast_optical_intensity_xz",
+                "Retained Fast Optical Intensity x-z",
+                result.longitudinal_intensity_xz,
+                ("z", "x"),
+            ),
+            (
+                "retained_fast_optical_intensity_yz",
+                "Retained Fast Optical Intensity y-z",
+                result.longitudinal_intensity_yz,
+                ("z", "y"),
+            ),
+        ):
+            fields.add(key, make_field(
+                key, title, _copied_array(value), axes, "intensity",
+                {"z": "um", "x": "um", "y": "um"}, "longitudinal",
+                quantity="normalized_intensity", value_unit="1/µm²",
+                source_volume_key="retained_fast_optical_intensity",
+                coordinates=cut_coordinates,
+            ))
     wavelengths = launch_summary.get("wavelengths_um", [])
     refractive_index = launch_summary.get("refractive_index")
     if wavelengths and refractive_index is not None:
@@ -189,8 +220,12 @@ def _fast_optical_run_data(result: Any, *, workflow: str, geometry: Geometry) ->
         fields=fields,
         curves=CurveCollection(),
         diagnostics=diagnostics,
-        longitudinal_enabled=False,
-        longitudinal_message=_FAST_VOLUME_MESSAGE,
+        longitudinal_enabled=has_longitudinal_cuts,
+        longitudinal_message=(
+            "Fast retrieval retains only the transverse cuts nearest x=0 and y=0; "
+            "use Full retrieval for selectable longitudinal volumes."
+            if has_longitudinal_cuts else _FAST_VOLUME_MESSAGE
+        ),
     )
 
 

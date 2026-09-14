@@ -27,6 +27,8 @@ class LongitudinalPane(QWidget):
     Assumes fields with axes ("z", "x", "y").
     """
 
+    _RETAINED_FAST_CUTS = "__retained_fast_optical_intensity_cuts__"
+
     def __init__(self):
         super().__init__()
         self.setSizePolicy(
@@ -57,7 +59,8 @@ class LongitudinalPane(QWidget):
         )
         controls = QHBoxLayout(self.controls_widget)
         controls.setContentsMargins(0, 0, 0, 0)
-        controls.addWidget(QLabel("3-D field"))
+        self.field_selector_label = QLabel("3-D field")
+        controls.addWidget(self.field_selector_label)
         self.field_selector = QComboBox()
         self.field_selector.setMinimumWidth(285)
         self.field_selector.setSizeAdjustPolicy(
@@ -120,12 +123,18 @@ class LongitudinalPane(QWidget):
     def _xz_position_selected(self, iz: int, ix: int) -> None:
         """Clicking an x-z view changes the selected x index for the y-z cut."""
         self._iz = int(iz)
+        if self._is_retained_fast_selection():
+            self.zPlaneChanged.emit(self._iz)
+            return
         self.set_cut_indices(ix, self._iy)
         self.zPlaneChanged.emit(self._iz)
 
     def _yz_position_selected(self, iz: int, iy: int) -> None:
         """Clicking a y-z view changes the selected y index for the x-z cut."""
         self._iz = int(iz)
+        if self._is_retained_fast_selection():
+            self.zPlaneChanged.emit(self._iz)
+            return
         self.set_cut_indices(self._ix, iy)
         self.zPlaneChanged.emit(self._iz)
 
@@ -150,6 +159,26 @@ class LongitudinalPane(QWidget):
                         "Snapshot axes: z, x, y; selected TD time is a parameter.",
                         Qt.ItemDataRole.ToolTipRole,
                     )
+            xz = run_data.fields.get("retained_fast_optical_intensity_xz")
+            yz = run_data.fields.get("retained_fast_optical_intensity_yz")
+            if (
+                xz is not None
+                and yz is not None
+                and xz.axes == ("z", "x")
+                and yz.axes == ("z", "y")
+                and xz.source_volume_key == yz.source_volume_key
+                == "retained_fast_optical_intensity"
+            ):
+                self.field_selector.addItem(
+                    "Retained Fast Optical Intensity",
+                    self._RETAINED_FAST_CUTS,
+                )
+                self.field_selector.setItemData(
+                    self.field_selector.count() - 1,
+                    "Fast result: fixed nearest-zero x-z and y-z cuts; no "
+                    "selectable 3-D volume was retained.",
+                    Qt.ItemDataRole.ToolTipRole,
+                )
 
         has_fields = self.field_selector.count() > 0
 
@@ -201,12 +230,20 @@ class LongitudinalPane(QWidget):
         if key is None:
             return
 
+        if key == self._RETAINED_FAST_CUTS:
+            self._configure_retained_fast_cuts()
+            return
         field = self._run_data.fields[key]
         data = np.asarray(field.data)
         if data.ndim != 3:
             return
 
         _, nx, ny = data.shape
+
+        self.field_selector_label.setText("3-D field")
+        self.x_cut_slider.show()
+        self.y_cut_slider.show()
+        self.show_guides.show()
 
         self._iz = data.shape[0] // 2
 
@@ -267,6 +304,10 @@ class LongitudinalPane(QWidget):
         if key is None:
             return
 
+        if key == self._RETAINED_FAST_CUTS:
+            self._update_retained_fast_views()
+            return
+
         field = self._run_data.fields[key]
         data = np.asarray(field.data)
         if data.ndim != 3:
@@ -325,7 +366,59 @@ class LongitudinalPane(QWidget):
         )
         self._apply_guides()
 
+    def _is_retained_fast_selection(self) -> bool:
+        return (
+            self.field_selector.currentData() == self._RETAINED_FAST_CUTS
+        )
+
+    def _configure_retained_fast_cuts(self) -> None:
+        xz_field = self._run_data.fields["retained_fast_optical_intensity_xz"]
+        yz_field = self._run_data.fields["retained_fast_optical_intensity_yz"]
+        xz = np.asarray(xz_field.data)
+        yz = np.asarray(yz_field.data)
+        if xz.ndim != 2 or yz.ndim != 2 or xz.shape[0] != yz.shape[0]:
+            return
+        self._iz = xz.shape[0] // 2
+        self._current_vmin = float(min(np.nanmin(xz), np.nanmin(yz)))
+        self._current_vmax = float(max(np.nanmax(xz), np.nanmax(yz)))
+        coordinates = xz_field.coordinates
+        x_cut_um = float(coordinates["x_cut_um"])
+        y_cut_um = float(coordinates["y_cut_um"])
+        self.field_selector_label.setText("Longitudinal field")
+        self.y_cut_label.setText(
+            f"Retained Fast x-z cut at y = {y_cut_um:.6g} µm"
+        )
+        self.x_cut_label.setText(
+            f"Retained Fast y-z cut at x = {x_cut_um:.6g} µm"
+        )
+        self.x_cut_slider.hide()
+        self.y_cut_slider.hide()
+        self.show_guides.hide()
+        self._update_retained_fast_views()
+
+    def _update_retained_fast_views(self) -> None:
+        xz_field = self._run_data.fields["retained_fast_optical_intensity_xz"]
+        yz_field = self._run_data.fields["retained_fast_optical_intensity_yz"]
+        self.xz_view.set_field(
+            xz_field,
+            extent=self._run_data.geometry.extent_zx(),
+            vmin=self._current_vmin,
+            vmax=self._current_vmax,
+        )
+        self.yz_view.set_field(
+            yz_field,
+            extent=self._run_data.geometry.extent_zy(),
+            vmin=self._current_vmin,
+            vmax=self._current_vmax,
+        )
+        self.xz_view.clear_crosshair()
+        self.yz_view.clear_crosshair()
+
     def _apply_guides(self) -> None:
+        if self._is_retained_fast_selection():
+            self.xz_view.clear_crosshair()
+            self.yz_view.clear_crosshair()
+            return
         if self._show_guides:
             self.xz_view.set_crosshair(self._iz, self._ix)
             self.yz_view.set_crosshair(self._iz, self._iy)

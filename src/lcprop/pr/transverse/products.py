@@ -78,7 +78,7 @@ def _readonly_view(value) -> np.ndarray:
 
 
 def _fast_optical_run_data(result, *, workflow: str, geometry: Geometry) -> RunData:
-    """Present compact optical endpoints and far field for a Fast result."""
+    """Present compact optical endpoints, far field, and center cuts."""
 
     groups = tuple(result.launch_summary["coherence_groups"])
     input_intensity = np.asarray(total_intensity(
@@ -116,6 +116,37 @@ def _fast_optical_run_data(result, *, workflow: str, geometry: Geometry) -> RunD
         value_unit="normalized power / direction-cosine²", colormap="magma",
         coordinates={"s_x": spectrum.s_x, "s_y": spectrum.s_y},
     ))
+    has_longitudinal_cuts = (
+        result.longitudinal_intensity_xz is not None
+        and result.longitudinal_intensity_yz is not None
+    )
+    if has_longitudinal_cuts:
+        cut_coordinates = {
+            "retention": "fast_center_nearest",
+            "x_cut_um": float(result.x_cut_um),
+            "y_cut_um": float(result.y_cut_um),
+        }
+        for key, title, value, axes in (
+            (
+                "retained_fast_optical_intensity_xz",
+                "Retained Fast Optical Intensity x-z",
+                result.longitudinal_intensity_xz,
+                ("z", "x"),
+            ),
+            (
+                "retained_fast_optical_intensity_yz",
+                "Retained Fast Optical Intensity y-z",
+                result.longitudinal_intensity_yz,
+                ("z", "y"),
+            ),
+        ):
+            fields.add(key, make_field(
+                key, title, _readonly_view(value), axes, "intensity",
+                {"z": "um", "x": "um", "y": "um"}, "longitudinal",
+                quantity="normalized_intensity", value_unit="1/µm²",
+                source_volume_key="retained_fast_optical_intensity",
+                coordinates=cut_coordinates,
+            ))
     summary = {
         "material": "photorefractive",
         "workflow": workflow,
@@ -152,7 +183,12 @@ def _fast_optical_run_data(result, *, workflow: str, geometry: Geometry) -> RunD
     return RunData(
         workflow=workflow, geometry=geometry, fields=fields,
         curves=CurveCollection(), diagnostics=diagnostics,
-        longitudinal_enabled=False, longitudinal_message=_FAST_VOLUME_MESSAGE,
+        longitudinal_enabled=has_longitudinal_cuts,
+        longitudinal_message=(
+            "Fast retrieval retains only the transverse cuts nearest x=0 and y=0; "
+            "use Full retrieval for selectable longitudinal volumes."
+            if has_longitudinal_cuts else _FAST_VOLUME_MESSAGE
+        ),
     )
 
 

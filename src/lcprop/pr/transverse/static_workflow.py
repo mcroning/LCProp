@@ -237,6 +237,10 @@ class PRTransverseStaticRunResult:
     retention_summary: dict[str, Any] = field(
         default_factory=lambda: {"policy": "full", "omitted_fields": []}
     )
+    longitudinal_intensity_xz: np.ndarray | None = None
+    longitudinal_intensity_yz: np.ndarray | None = None
+    x_cut_um: float | None = None
+    y_cut_um: float | None = None
 
 
 def _validate_request(request: PRTransverseStaticRunRequest) -> None:

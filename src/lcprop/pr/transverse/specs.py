@@ -251,6 +251,10 @@ class PRTransverseRunResult:
     retention_summary: dict[str, Any] = field(
         default_factory=lambda: {"policy": "full", "omitted_fields": []}
     )
+    longitudinal_intensity_xz: Any | None = None
+    longitudinal_intensity_yz: Any | None = None
+    x_cut_um: float | None = None
+    y_cut_um: float | None = None
 
 
 __all__ = [

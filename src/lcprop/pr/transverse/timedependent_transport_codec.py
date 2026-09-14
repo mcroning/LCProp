@@ -19,6 +19,11 @@ from lcprop.pr.portable_launch import (
     decode_launch_elements,
     encode_launch_elements,
 )
+from lcprop.pr.longitudinal_cuts import (
+    PRLongitudinalIntensityCuts,
+    fast_retention_summary,
+    validate_longitudinal_cut_coordinates,
+)
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.pr.specs import PRMaterialSpec, PR_MATERIAL_ID
 from lcprop.pr.transport_common import pack_portable, unpack_portable
@@ -232,11 +237,34 @@ def encode_pr_transverse_timedependent_transport_result(
         raise TypeError("result must be a PRTransverseRunResult")
     policy = normalize_result_policy(result_policy)
     arrays: dict[str, np.ndarray] = {}
+    cuts = None
+    if policy == FAST_RESULT_POLICY:
+        try:
+            cuts = PRLongitudinalIntensityCuts(
+                xz=np.asarray(result.longitudinal_intensity_xz),
+                yz=np.asarray(result.longitudinal_intensity_yz),
+                x_cut_um=float(result.x_cut_um),
+                y_cut_um=float(result.y_cut_um),
+            )
+        except (TypeError, ValueError):
+            cuts = None
     metadata = {
         "A_initial": pack_portable(result.A_initial, arrays, "result.A_initial"),
         "A_final": pack_portable(result.A_final, arrays, "result.A_final"),
         "psi_initial": None,
         "psi_final": None,
+        "longitudinal_intensity_xz": (
+            None if cuts is None else pack_portable(
+                cuts.xz, arrays, "result.longitudinal_intensity_xz"
+            )
+        ),
+        "longitudinal_intensity_yz": (
+            None if cuts is None else pack_portable(
+                cuts.yz, arrays, "result.longitudinal_intensity_yz"
+            )
+        ),
+        "x_cut_um": None if cuts is None else cuts.x_cut_um,
+        "y_cut_um": None if cuts is None else cuts.y_cut_um,
         "power_initial": float(result.power_initial),
         "power_final": float(result.power_final),
         "completed_steps": int(result.completed_steps),
@@ -258,14 +286,17 @@ def encode_pr_transverse_timedependent_transport_result(
         "diagnostics": pack_portable(
             result.diagnostics, arrays, "result.diagnostics"
         ),
-        "retention_summary": {
-            "policy": policy,
-            "omitted_fields": (
-                list(_FAST_OMITTED_FIELDS)
-                if policy == FAST_RESULT_POLICY
-                else []
-            ),
-        },
+        "retention_summary": (
+            fast_retention_summary(_FAST_OMITTED_FIELDS, cuts)
+            if cuts is not None
+            else {
+                "policy": policy,
+                "omitted_fields": (
+                    list(_FAST_OMITTED_FIELDS)
+                    if policy == FAST_RESULT_POLICY else []
+                ),
+            }
+        ),
     }
     if policy == FULL_RESULT_POLICY:
         metadata.update({
@@ -350,6 +381,10 @@ def _validate_result(values: Mapping[str, Any]) -> None:
         "requested_steps",
         "diagnostics",
         "retention_summary",
+        "longitudinal_intensity_xz",
+        "longitudinal_intensity_yz",
+        "x_cut_um",
+        "y_cut_um",
     }
     _require_exact_keys(values, required, label="PR transverse-TD result")
     grid = values["grid_summary"]
@@ -379,6 +414,7 @@ def _validate_result(values: Mapping[str, Any]) -> None:
         raise TransportCodecError(
             "PR transverse-TD omitted fields disagree with result policy"
         )
+    cuts_present = validate_longitudinal_cut_coordinates(values, grid)
     psi_initial = psi_final = None
     if policy == FULL_RESULT_POLICY:
         psi_initial = _require_array(
@@ -388,6 +424,17 @@ def _validate_result(values: Mapping[str, Any]) -> None:
     elif values["psi_initial"] is not None or values["psi_final"] is not None:
         raise TransportCodecError(
             "PR transverse-TD Fast result unexpectedly retained material volumes"
+        )
+    if policy == FAST_RESULT_POLICY:
+        if cuts_present:
+            _require_array(values, "longitudinal_intensity_xz", (nz, nx), "real")
+            _require_array(values, "longitudinal_intensity_yz", (nz, ny), "real")
+    elif (
+        values["longitudinal_intensity_xz"] is not None
+        or values["longitudinal_intensity_yz"] is not None
+    ):
+        raise TransportCodecError(
+            "PR transverse-TD Full result unexpectedly retained Fast cuts"
         )
     if A_initial.dtype != A_final.dtype:
         raise TransportCodecError(
@@ -496,6 +543,13 @@ def decode_pr_transverse_timedependent_transport_result(
 
     try:
         values = unpack_portable(dict(metadata), arrays)
+        for name in (
+            "longitudinal_intensity_xz",
+            "longitudinal_intensity_yz",
+            "x_cut_um",
+            "y_cut_um",
+        ):
+            values.setdefault(name, None)
         values.setdefault("retention_summary", {
             "policy": FULL_RESULT_POLICY,
             "omitted_fields": [],
@@ -518,6 +572,10 @@ def decode_pr_transverse_timedependent_transport_result(
             requested_steps=values["requested_steps"],
             diagnostics=dict(values["diagnostics"]),
             retention_summary=dict(values["retention_summary"]),
+            longitudinal_intensity_xz=values["longitudinal_intensity_xz"],
+            longitudinal_intensity_yz=values["longitudinal_intensity_yz"],
+            x_cut_um=values["x_cut_um"],
+            y_cut_um=values["y_cut_um"],
         )
     except TransportCodecError:
         raise

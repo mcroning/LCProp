@@ -175,6 +175,10 @@ class PRRunResult:
     retention_summary: dict[str, Any] = field(
         default_factory=lambda: {"policy": "full", "omitted_fields": []}
     )
+    longitudinal_intensity_xz: Any | None = None
+    longitudinal_intensity_yz: Any | None = None
+    x_cut_um: float | None = None
+    y_cut_um: float | None = None
 
     def __post_init__(self) -> None:
         """Retain compact launch directions when checkpoint provenance exists."""

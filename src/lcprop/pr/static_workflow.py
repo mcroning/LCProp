@@ -187,6 +187,10 @@ class PRStaticRunResult:
             "validation_status": "validated",
         }
     )
+    longitudinal_intensity_xz: np.ndarray | None = None
+    longitudinal_intensity_yz: np.ndarray | None = None
+    x_cut_um: float | None = None
+    y_cut_um: float | None = None
 
 
 def _backend_scalar(value) -> float:
@@ -898,6 +902,9 @@ def run_pr_static(
             else {
                 "model": PR_MATERIAL_RESPONSE_NONLINEAR,
                 "validation_status": "validated",
+                "background_intensity": float(
+                    request.material.background_intensity
+                ),
             }
         ),
     )
