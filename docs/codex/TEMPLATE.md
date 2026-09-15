@@ -7,7 +7,7 @@ substantially.
 
 **Status:** Draft
 
-**Version:** 1.1
+**Version:** 1.2
 
 **Last reviewed:** `{{LAST_REVIEWED_DATE}}`
 
@@ -416,6 +416,24 @@ Clearly distinguish:
 
 ---
 
+## Approval Context
+
+Resolve the next lifecycle authorization in the final report.
+
+```text
+Next approval phrase: {{APPROVAL_PHRASE_OR_NA}}
+Authorized target: {{EXACT_TARGET_OR_NA}}
+Immutable identifier: {{SHA_MANIFEST_OR_JOB_ID_OR_NA}}
+Action authorized on approval: {{AUTHORIZED_ACTION_OR_NA}}
+Stopping point: {{STOPPING_POINT_OR_NA}}
+```
+
+Every field must contain a concrete value or `N/A`. A canonical approval
+phrase is invalid while any field is blank, ambiguous, or unresolved.
+Approval is single-use and applies only to this exact context.
+
+---
+
 ## Approval Gate
 
 Stop here and wait for explicit approval before any unauthorized action,
@@ -429,6 +447,10 @@ including:
 - running parameter sweeps;
 - changing architecture;
 - beginning the next implementation or research stage.
+
+When the approval context is fully resolved, the user may authorize its
+exact action with the recorded canonical phrase. The phrase does not
+authorize any adjacent stage or repair state drift.
 
 ---
 

@@ -1,8 +1,8 @@
 # CPU Smoke Test
 
 **Status:** Validated
-**Version:** 1.2
-**Last reviewed:** 2026-08-05
+**Version:** 1.3
+**Last reviewed:** 2026-08-06
 **Prerequisites:** Cluster Checkout Preparation (planned), Scheduler Job Preparation (planned), or equivalent explicitly approved preparation
 **Usual next prompt:** GPU Smoke Test
 
@@ -285,6 +285,9 @@ Summarize:
 ---
 
 ## Approval Gate
+
+Once every required input and launch-manifest field for this prompt is
+resolved, the canonical execution authorization is **Approve submission**.
 
 Wait for explicit approval before:
 

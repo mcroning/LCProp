@@ -1,8 +1,8 @@
 # Cluster Onboarding
 
 **Status:** Validated
-**Version:** 1.2
-**Last reviewed:** 2026-08-05
+**Version:** 1.3
+**Last reviewed:** 2026-08-06
 **Prerequisites:** None
 **Usual next prompt:** Cluster Checkout Preparation (planned)
 
@@ -227,6 +227,10 @@ Clearly distinguish:
 ---
 
 ## Approval Gate
+
+When the report identifies an exact remote target, Git SHA, preparation
+scope, and stopping point, the canonical next authorization is
+**Approve cluster preparation**.
 
 Wait for explicit approval before:
 

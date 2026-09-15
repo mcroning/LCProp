@@ -1,8 +1,8 @@
 # Architecture Review
 
 **Status:** Validated
-**Version:** 1.1
-**Last reviewed:** 2026-08-05
+**Version:** 1.2
+**Last reviewed:** 2026-08-06
 **Prerequisites:** Proposed architectural change
 **Usual next prompt:** Implementation and Local Validation
 
@@ -229,6 +229,9 @@ functions supporting each recommendation.
 ---
 
 ## Approval Gate
+
+When the report identifies an exact approved design and implementation
+scope, the canonical next authorization is **Approve implementation**.
 
 Wait for explicit approval before:
 
