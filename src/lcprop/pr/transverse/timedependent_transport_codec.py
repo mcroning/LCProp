@@ -12,6 +12,7 @@ from lcprop.core.backend import BackendSpec
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import round_nz
 from lcprop.optics.launch_configuration import reject_prepared_launch_conflict
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.optics.screens import validate_channel_launch_elements
 from lcprop.persistence.experiments import decode_beam_stack, encode_beam_stack
 from lcprop.pr.portable_launch import (
@@ -58,7 +59,8 @@ PR_TRANSVERSE_TIMEDEPENDENT_REQUEST_CODEC_ID = (
 PR_TRANSVERSE_TIMEDEPENDENT_RESULT_CODEC_ID = (
     "pr.transverse_timedependent.result"
 )
-PR_TRANSVERSE_TIMEDEPENDENT_TRANSPORT_CODEC_VERSION = 1
+PR_TRANSVERSE_TIMEDEPENDENT_TRANSPORT_CODEC_VERSION = 2
+_PR_TRANSVERSE_TIMEDEPENDENT_PREVIOUS_TRANSPORT_CODEC_VERSION = 1
 _CANCELLATION_OBSERVED_STAGES = {
     "material_step_boundary",
     "material_source_optical_z_march",
@@ -98,6 +100,7 @@ def _validate_request(request: PRTransverseRunRequest) -> None:
         boundary=request.boundary,
         projection=request.projection,
     )
+    request.optical_boundary.validate()
     validate_channel_launch_elements(
         request.launch_elements,
         n_channels=len(request.beams.channels),
@@ -148,6 +151,7 @@ def encode_pr_transverse_timedependent_transport_request(
             None if request.scattering is None else asdict(request.scattering)
         ),
         "launch_elements": encode_launch_elements(request.launch_elements),
+        "optical_boundary": asdict(request.optical_boundary),
     }
     return EncodedRequest(
         PortablePayload(metadata, arrays), request.backend.backend
@@ -175,7 +179,7 @@ def decode_pr_transverse_timedependent_transport_request(
         "launch_elements",
     }
     try:
-        extra = set(metadata) - required - {"material_response"}
+        extra = set(metadata) - required - {"material_response", "optical_boundary"}
         missing = required - set(metadata)
         if missing or extra:
             details = []
@@ -212,6 +216,9 @@ def decode_pr_transverse_timedependent_transport_request(
             launch_elements=decode_launch_elements(
                 values["launch_elements"],
                 n_channels=len(beams.channels),
+            ),
+            optical_boundary=TransverseBoundarySpec(
+                **values.get("optical_boundary", {})
             ),
         )
         _validate_request(request)
@@ -599,6 +606,12 @@ PR_TRANSVERSE_TIMEDEPENDENT_TRANSPORT_CODEC = TransportCodec(
     encode_result=encode_pr_transverse_timedependent_transport_result,
     decode_result=decode_pr_transverse_timedependent_transport_result,
     encode_result_projection=encode_pr_transverse_timedependent_transport_result,
+    compatible_request_codec_versions=(
+        _PR_TRANSVERSE_TIMEDEPENDENT_PREVIOUS_TRANSPORT_CODEC_VERSION,
+    ),
+    compatible_result_codec_versions=(
+        _PR_TRANSVERSE_TIMEDEPENDENT_PREVIOUS_TRANSPORT_CODEC_VERSION,
+    ),
 )
 
 

@@ -5,6 +5,10 @@ from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.optics.launch import build_launch, total_power
+from lcprop.optics.boundaries import (
+    TransverseBoundarySpec,
+    transverse_boundary_mask,
+)
 from lcprop.optics.splitstep import (
     as_channel_stack,
     total_intensity,
@@ -305,3 +309,141 @@ def test_prepared_response_uses_symmetric_strang_splitting(monkeypatch):
         ("linear", None),
         ("apply", None),
     ]
+
+
+@pytest.mark.parametrize("substeps", [2, 3, 5, 7, 16])
+def test_sponge_attenuation_is_invariant_to_optical_subdivision(substeps):
+    grid = make_grid(
+        GridSpec(Nx=48, Ny=40, x_aperture_um=48.0, y_aperture_um=40.0),
+        real_dtype=np.float64,
+    )
+    field = np.ones((1, grid.Nx, grid.Ny), dtype=np.complex128)
+    identity = np.ones((grid.Nx, grid.Ny), dtype=np.complex128)
+    sponge = TransverseBoundarySpec(
+        mode="sponge",
+        width_fraction=0.25,
+        attenuation_per_um=0.08,
+        profile_order=2,
+    )
+
+    one = advance_prepared_response(
+        field.copy(),
+        kernel=identity,
+        half_step_response=identity,
+        Nsub=1,
+        boundary=sponge,
+        boundary_grid=grid,
+        propagation_distance_um=10.0,
+    )
+    subdivided = advance_prepared_response(
+        field.copy(),
+        kernel=identity,
+        half_step_response=identity,
+        Nsub=substeps,
+        boundary=sponge,
+        boundary_grid=grid,
+        propagation_distance_um=10.0,
+    )
+
+    np.testing.assert_allclose(subdivided, one, rtol=5e-15, atol=5e-15)
+    assert abs(one[0, grid.Nx // 2, grid.Ny // 2]) == pytest.approx(1.0)
+    assert abs(one[0, 0, 0]) < 1.0
+
+
+def test_sponge_profile_uses_documented_field_amplitude_rate():
+    grid = make_grid(
+        GridSpec(Nx=48, Ny=40, x_aperture_um=48.0, y_aperture_um=40.0),
+        real_dtype=np.float64,
+    )
+    spec = TransverseBoundarySpec(
+        mode="sponge",
+        width_fraction=0.25,
+        attenuation_per_um=0.08,
+        profile_order=2,
+    )
+    distance = 7.5
+    mask = transverse_boundary_mask(
+        grid,
+        spec,
+        propagation_distance_um=distance,
+    )
+    half_x = 0.5 * grid.spec.x_aperture_um
+    width_x = spec.width_fraction * half_x
+    sx = np.clip((np.abs(grid.x_um) - (half_x - width_x)) / width_x, 0.0, 1.0)
+    half_y = 0.5 * grid.spec.y_aperture_um
+    width_y = spec.width_fraction * half_y
+    sy = np.clip((np.abs(grid.y_um) - (half_y - width_y)) / width_y, 0.0, 1.0)
+    expected = np.exp(
+        -spec.attenuation_per_um
+        * (sx[:, None] ** spec.profile_order + sy[None, :] ** spec.profile_order)
+        * distance
+    )
+
+    np.testing.assert_array_equal(mask, expected)
+
+
+def test_tukey_is_one_discrete_window_independent_of_substeps():
+    grid = make_grid(GridSpec(Nx=48, Ny=40), real_dtype=np.float64)
+    field = np.ones((1, grid.Nx, grid.Ny), dtype=np.complex128)
+    identity = np.ones((grid.Nx, grid.Ny), dtype=np.complex128)
+    tukey = TransverseBoundarySpec(mode="tukey", tukey_alpha=0.4)
+
+    one = advance_prepared_response(
+        field.copy(),
+        kernel=identity,
+        half_step_response=identity,
+        Nsub=1,
+        boundary=tukey,
+        boundary_grid=grid,
+    )
+    five = advance_prepared_response(
+        field.copy(),
+        kernel=identity,
+        half_step_response=identity,
+        Nsub=5,
+        boundary=tukey,
+        boundary_grid=grid,
+    )
+
+    np.testing.assert_array_equal(five, one)
+    assert one[0, 0, 0] == 0.0
+    assert one[0, grid.Nx // 2, grid.Ny // 2] == 1.0
+
+
+def test_sponge_reduces_periodic_wraparound_for_edge_bound_packet():
+    grid = make_grid(
+        GridSpec(Nx=256, Ny=32, x_aperture_um=128.0, y_aperture_um=32.0),
+        real_dtype=np.float64,
+    )
+    X = grid.x_um[:, None]
+    envelope = np.exp(-((X - 42.0) / 5.0) ** 2) * np.ones((1, grid.Ny))
+    field = (envelope * np.exp(1j * 2.0 * X)).astype(np.complex128)[None, :, :]
+    response = np.ones((grid.Nx, grid.Ny), dtype=np.complex128)
+    kernel = linear_kernel(
+        grid.fxy2_um,
+        dz=4.0,
+        wavelength=0.633,
+        n_ref=1.5,
+    )
+    periodic = field.copy()
+    absorbed = field.copy()
+    sponge = TransverseBoundarySpec(
+        mode="sponge", width_fraction=0.25, attenuation_per_um=0.15
+    )
+    for _ in range(30):
+        periodic = advance_prepared_response(
+            periodic, kernel=kernel, half_step_response=response
+        )
+        absorbed = advance_prepared_response(
+            absorbed,
+            kernel=kernel,
+            half_step_response=response,
+            boundary=sponge,
+            boundary_grid=grid,
+            propagation_distance_um=4.0,
+        )
+    wrapped_region = grid.x_um < -40.0
+
+    assert np.sum(np.abs(absorbed[0, wrapped_region]) ** 2) < 0.1 * np.sum(
+        np.abs(periodic[0, wrapped_region]) ** 2
+    )

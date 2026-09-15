@@ -52,6 +52,8 @@ class TransportCodec:
     encode_result: Callable[[Any], EncodedResult]
     decode_result: Callable[[Mapping[str, Any], Mapping[str, np.ndarray]], Any]
     encode_result_projection: Callable[[Any, str], EncodedResult] | None = None
+    compatible_request_codec_versions: tuple[int, ...] = ()
+    compatible_result_codec_versions: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         for name in (
@@ -66,6 +68,17 @@ class TransportCodec:
         for name in ("request_codec_version", "result_codec_version"):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
                 raise ValueError(f"{name} must be a positive integer")
+        for name, current in (
+            ("compatible_request_codec_versions", self.request_codec_version),
+            ("compatible_result_codec_versions", self.result_codec_version),
+        ):
+            versions = getattr(self, name)
+            if not isinstance(versions, tuple) or any(
+                type(version) is not int or version < 1 for version in versions
+            ):
+                raise ValueError(f"{name} must be a tuple of positive integers")
+            if current in versions or len(set(versions)) != len(versions):
+                raise ValueError(f"{name} must contain unique non-current versions")
         for name in (
             "encode_request",
             "decode_request",
@@ -83,6 +96,14 @@ class TransportCodec:
     @property
     def key(self) -> tuple[str, str]:
         return self.material_id, self.workflow_id
+
+    @property
+    def supported_request_codec_versions(self) -> tuple[int, ...]:
+        return (self.request_codec_version, *self.compatible_request_codec_versions)
+
+    @property
+    def supported_result_codec_versions(self) -> tuple[int, ...]:
+        return (self.result_codec_version, *self.compatible_result_codec_versions)
 
     def encode_result_for_policy(self, result: Any, policy: str) -> EncodedResult:
         """Encode one codec-owned projection without material logic in callers."""

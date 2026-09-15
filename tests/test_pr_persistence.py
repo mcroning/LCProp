@@ -6,6 +6,7 @@ import json
 import numpy as np
 import pytest
 
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.pr.checkpoint import validate_pr_checkpoint
 from lcprop.pr.persistence import (
     PR_CHECKPOINT_FORMAT,
@@ -119,6 +120,24 @@ def test_disk_loaded_pr_checkpoint_continues_exactly(tmp_path):
     _assert_same_cumulative_physics(resumed, uninterrupted)
 
 
+def test_pr_checkpoint_round_trip_preserves_nonperiodic_optical_boundary(tmp_path):
+    request = replace(
+        _request_with_initial_state(steps=1),
+        optical_boundary=TransverseBoundarySpec(
+            mode="sponge",
+            width_fraction=0.2,
+            attenuation_per_um=0.04,
+            profile_order=3,
+        ),
+    )
+    checkpoint = run_pr_timedependent(request).checkpoint
+
+    save_pr_checkpoint(checkpoint, tmp_path)
+    loaded = load_pr_checkpoint(tmp_path)
+
+    assert loaded.request.optical_boundary == request.optical_boundary
+
+
 def test_disk_loaded_semi_implicit_checkpoint_continues_exactly(tmp_path):
     request = _request_with_initial_state(
         steps=4,
@@ -164,13 +183,38 @@ def test_schema_version_one_checkpoint_loads_as_explicit_euler(tmp_path):
 def test_schema_version_two_requires_integrator_identity(tmp_path):
     result = run_pr_timedependent(_request_with_initial_state(steps=1))
     save_pr_checkpoint(result.checkpoint, tmp_path)
+    def make_request_v2_without_integrator(document):
+        document["schema_version"] = 2
+        document["request"].pop("optical_boundary")
+        document["request"]["solver"].pop("integrator")
+
+    _rewrite_json(tmp_path / "request.json", make_request_v2_without_integrator)
     _rewrite_json(
-        tmp_path / "request.json",
-        lambda document: document["request"]["solver"].pop("integrator"),
+        tmp_path / "provenance.json",
+        lambda document: document.__setitem__("schema_version", 2),
     )
 
     with pytest.raises(ValueError, match="missing integrator identity"):
         load_pr_checkpoint(tmp_path)
+
+
+def test_schema_version_two_defaults_to_periodic_optical_boundary(tmp_path):
+    result = run_pr_timedependent(_request_with_initial_state(steps=1))
+    save_pr_checkpoint(result.checkpoint, tmp_path)
+
+    def make_request_v2(document):
+        document["schema_version"] = 2
+        document["request"].pop("optical_boundary")
+
+    _rewrite_json(tmp_path / "request.json", make_request_v2)
+    _rewrite_json(
+        tmp_path / "provenance.json",
+        lambda document: document.__setitem__("schema_version", 2),
+    )
+
+    loaded = load_pr_checkpoint(tmp_path)
+
+    assert loaded.request.optical_boundary == TransverseBoundarySpec()
 
 
 def test_schema_version_one_rejects_new_integrator_field(tmp_path):

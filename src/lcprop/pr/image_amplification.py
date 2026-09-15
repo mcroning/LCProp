@@ -14,7 +14,11 @@ from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
-from lcprop.optics.launch import build_launch, channel_power_integrals
+from lcprop.optics.launch import (
+    OpticalLaunchContext,
+    build_launch,
+    channel_power_integrals,
+)
 from lcprop.optics.launch_configuration import LaunchConfiguration
 from lcprop.optics.screens import (
     ChannelLaunchElements,
@@ -664,6 +668,11 @@ def prepare_image_amplification_base_request(
             grid,
             complex_dtype=np.complex128,
             launch_elements=request.launch_configuration.channel_elements,
+            context=OpticalLaunchContext(
+                grid=grid,
+                n_ref=float(base.material.refractive_index),
+                interaction_length_um=float(base.grid.z_length_um),
+            ),
         )
         replacement["initial_A"] = np.asarray(prepared.A0).copy()
     return replace(base, **replacement), transmission, normalized_grating
@@ -881,6 +890,11 @@ def prepare_image_amplification_workflow_request(
             grid,
             complex_dtype=np.complex128,
             launch_elements=launch.channel_elements,
+            context=OpticalLaunchContext(
+                grid=grid,
+                n_ref=float(request.material.refractive_index),
+                interaction_length_um=float(request.grid.z_length_um),
+            ),
         )
         assignments = {
             assignment.channel_index: assignment.elements
@@ -982,6 +996,11 @@ def prepare_image_amplification_workflow_request(
         complex_dtype=np.complex128,
         launch_elements=(
             ChannelLaunchElements(channel_index=1, elements=(screen,)),
+        ),
+        context=OpticalLaunchContext(
+            grid=grid,
+            n_ref=float(request.material.refractive_index),
+            interaction_length_um=float(request.grid.z_length_um),
         ),
     )
     A0 = np.asarray(preliminary.A0).copy()

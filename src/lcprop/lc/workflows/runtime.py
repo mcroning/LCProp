@@ -31,7 +31,7 @@ from lcprop.lc.source import (
     advance_slice_with_midpoint_source,
     director_driving_intensity,
 )
-from lcprop.optics.launch import LaunchResult, build_launch
+from lcprop.optics.launch import LaunchResult, OpticalLaunchContext, build_launch
 from lcprop.optics.substeps import (
     OpticalSubstepPlan,
     build_optical_substep_kernel,
@@ -118,11 +118,23 @@ def build_runtime_components(
     request.bias.validate()
     request.beams.validate()
     request.runtime.validate()
+    request.optical_boundary.validate()
 
     grid = make_grid(request.grid, real_dtype=np.float64 if request.runtime.precision == "float64" else np.float32)
     normalization = make_lc_spatial_normalization(grid)
     bias = build_bias(request.bias, grid, request.material)
-    launch = build_launch(request.beams, grid, complex_dtype=np.complex128 if request.runtime.precision == "float64" else np.complex64)
+    launch = build_launch(
+        request.beams,
+        grid,
+        complex_dtype=(
+            np.complex128 if request.runtime.precision == "float64" else np.complex64
+        ),
+        context=OpticalLaunchContext(
+            grid=grid,
+            n_ref=float(request.material.no),
+            interaction_length_um=float(request.grid.z_length_um),
+        ),
+    )
 
     wavelength_um = float(request.beams.channels[0].wavelength_um)
     n_ref = float(request.material.no)
@@ -256,6 +268,8 @@ def make_global_uniform_theta_iteration(components: RuntimeComponents):
                 coherent=components.coherent,
                 coherence_groups=components.coherence_groups,
                 Nsub=components.optical_substeps.Nsub,
+                boundary=components.request.optical_boundary,
+                boundary_grid=grid,
                 xp=xp,
             )
 
@@ -283,6 +297,8 @@ def make_td_optics_step(components: RuntimeComponents):
             coherent=components.coherent,
             coherence_groups=components.coherence_groups,
             Nsub=components.optical_substeps.Nsub,
+            boundary=components.request.optical_boundary,
+            boundary_grid=grid,
             xp=xp,
         )
         return A, I_mid

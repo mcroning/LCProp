@@ -17,6 +17,7 @@ from lcprop.persistence import (
     load_timedependent_checkpoint,
     save_timedependent_checkpoint,
 )
+from lcprop.lc.persistence.timedependent import TD_CHECKPOINT_SCHEMA_VERSION
 from lcprop.runners.local import LocalRunner
 from lcprop.workflows.timedependent import (
     continue_timedependent,
@@ -126,7 +127,7 @@ def test_checkpoint_save_load_preserves_minimal_state(tmp_path):
         "checkpoint.npz",
         "provenance.json",
     }
-    assert loaded.schema_version == 1
+    assert loaded.schema_version == TD_CHECKPOINT_SCHEMA_VERSION == 2
     assert loaded.request == result.checkpoint.request
     loaded_channel = loaded.request.beams.channels[0]
     assert loaded_channel.tilt_x_rad_per_um == 0.037

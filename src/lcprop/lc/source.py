@@ -42,6 +42,8 @@ def advance_slice_with_midpoint_source(
     ne: float,
     no: float,
     Nsub: int = 1,
+    boundary=None,
+    boundary_grid=None,
     coherent: bool = False,
     coherence_groups: tuple[str, ...] | list[str] | None = None,
     xp: Any | None = None,
@@ -64,6 +66,8 @@ def advance_slice_with_midpoint_source(
         ne=ne,
         no=no,
         Nsub=Nsub,
+        boundary=boundary,
+        boundary_grid=boundary_grid,
         xp=xp,
     )
     I_after = director_driving_intensity(

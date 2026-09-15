@@ -17,7 +17,7 @@ from lcprop.adapters import (
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
-from lcprop.optics.launch import build_launch
+from lcprop.optics.launch import OpticalLaunchContext, build_launch
 from lcprop.optics.splitstep import hop_linear, linear_kernel, total_intensity
 
 
@@ -110,6 +110,67 @@ def test_lcprop_round_trip_preserves_wavevector_without_air_provenance():
     assert beam.launch_medium_index is None
     assert rebuilt.channels[0].tilt_x_rad_per_um == 0.73
     assert rebuilt.channels[0].tilt_y_rad_per_um == -0.41
+
+
+def test_focused_launch_intent_round_trips_through_launchplane():
+    channel = BeamChannel(
+        name="focused",
+        profile="focused_gaussian",
+        waist_x_at_focus_um=4.0,
+        waist_y_at_focus_um=7.0,
+        focus_at_interaction_midpoint=True,
+        coherence_group="laser",
+    )
+
+    rebuilt = beam_stack_definition_to_lcprop(
+        beam_stack_to_launchplane(BeamStack(channels=(channel,)))
+    ).channels[0]
+
+    assert rebuilt == channel
+
+
+def test_launchplane_focus_geometry_matches_lcprop_realized_entrance_field(
+    launchplane_model,
+):
+    serialization = pytest.importorskip("launchplane.serialization")
+    assert serialization.SCHEMA_VERSION == 3
+    definition = launchplane_model.BeamDefinition(
+        name="focused",
+        profile="focused_gaussian",
+        waist_x_at_focus_um=5.0,
+        waist_y_at_focus_um=8.0,
+        focus_z_um=-35.0,
+    )
+    channel = beam_definition_to_channel(definition)
+    grid = make_grid(
+        GridSpec(Nx=384, Ny=384, x_aperture_um=192.0, y_aperture_um=192.0),
+        real_dtype=np.float64,
+    )
+    context = OpticalLaunchContext(grid=grid, n_ref=2.1, interaction_length_um=80.0)
+    field = build_launch(
+        BeamStack(channels=(channel,)),
+        grid,
+        complex_dtype=np.complex128,
+        context=context,
+    ).A0[0]
+    _, expected_x, expected_y, _, _ = (
+        launchplane_model.focused_gaussian_entrance_geometry(
+            definition,
+            n_ref=2.1,
+            interaction_length_um=80.0,
+        )
+    )
+    intensity = np.abs(field) ** 2
+    measured_x = 2.0 * np.sqrt(
+        np.sum(np.sum(intensity, axis=1) * grid.x_um**2) / np.sum(intensity)
+    )
+    measured_y = 2.0 * np.sqrt(
+        np.sum(np.sum(intensity, axis=0) * grid.y_um**2) / np.sum(intensity)
+    )
+
+    assert (measured_x, measured_y) == pytest.approx(
+        (expected_x, expected_y), abs=3e-9
+    )
 
 
 @pytest.mark.parametrize(

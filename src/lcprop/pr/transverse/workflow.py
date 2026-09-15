@@ -11,7 +11,7 @@ import numpy as np
 from lcprop.core.backend import asnumpy, get_backend, scalar_float
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
-from lcprop.optics.launch import build_launch, normalized_power
+from lcprop.optics.launch import OpticalLaunchContext, build_launch, normalized_power
 from lcprop.optics.launch_configuration import reject_prepared_launch_conflict
 from lcprop.optics.screens import validate_channel_launch_elements
 from lcprop.optics.splitstep import linear_kernel
@@ -95,6 +95,7 @@ def _validate_request(request: PRTransverseRunRequest) -> None:
     )
     request.solver.validate()
     request.backend.validate()
+    request.optical_boundary.validate()
     if request.scattering is not None:
         request.scattering.validate()
     validate_channel_launch_elements(
@@ -222,6 +223,8 @@ def _optical_pass(
             background_intensity=request.material.background_intensity,
             coherence_groups=request.beams.coherence_groups,
             xp=xp,
+            optical_boundary=request.optical_boundary,
+            boundary_grid=grid,
             _intensity_before=intensity_before,
             _return_exit_intensity=True,
         )
@@ -271,6 +274,11 @@ def run_pr_transverse_timedependent(
         grid,
         complex_dtype=complex_dtype,
         launch_elements=request.launch_elements,
+        context=OpticalLaunchContext(
+            grid=grid,
+            n_ref=float(request.material.refractive_index),
+            interaction_length_um=float(request.grid.z_length_um),
+        ),
     )
     A0, psi = _initial_fields(
         request,

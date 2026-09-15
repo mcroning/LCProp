@@ -23,9 +23,14 @@ from lcprop.lc.requests import (
 )
 from lcprop.lc.results import StaticIterationRecord, StaticSliceSummary
 from lcprop.lc.specs import BiasSpec, LCMaterial
+from lcprop.optics.boundaries import TransverseBoundarySpec
 
 
-STATIC_CHECKPOINT_SCHEMA_VERSION = 1
+STATIC_CHECKPOINT_SCHEMA_VERSION = 2
+STATIC_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS = (
+    1,
+    STATIC_CHECKPOINT_SCHEMA_VERSION,
+)
 StaticCheckpointStatus = Literal["stopped", "completed"]
 
 
@@ -76,6 +81,7 @@ def _request_to_dict(request: StaticRunRequest) -> dict[str, Any]:
             "save_full": bool(request.output.save_full),
         },
         "runtime": asdict(request.runtime),
+        "optical_boundary": asdict(request.optical_boundary),
         "initial_conditions": {
             "A": "replaced by checkpoint.npz:A_next",
             "theta": "replaced by checkpoint.npz:theta_seed",
@@ -103,6 +109,9 @@ def _request_from_dict(values: dict[str, Any]) -> StaticRunRequest:
         solver=StaticSolverOptions(workflow=workflow, **solver_values),
         output=OutputOptions(**output_values),
         runtime=RuntimeOptions(**values["runtime"]),
+        optical_boundary=TransverseBoundarySpec(
+            **values.get("optical_boundary", {})
+        ),
     )
 
 
@@ -233,6 +242,14 @@ def load_static_checkpoint(run_dir) -> StaticCheckpoint:
     )
     if request_document.get("workflow") != "static" or provenance.get("workflow") != "static":
         raise ValueError("checkpoint directory does not contain a static workflow")
+    request_version = int(request_document["schema_version"])
+    provenance_version = int(provenance["schema_version"])
+    if request_version != provenance_version:
+        raise ValueError("static checkpoint schema versions do not agree")
+    if request_version not in STATIC_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS:
+        raise ValueError(
+            f"unsupported static checkpoint schema version: {request_version}"
+        )
     request_values = request_document["request"]
     recorded_fingerprint = str(provenance["request_fingerprint"])
     if _request_values_fingerprint(request_values) != recorded_fingerprint:
@@ -275,7 +292,7 @@ def load_static_checkpoint(run_dir) -> StaticCheckpoint:
             theta_dtype=str(provenance["theta_dtype"]),
             status=str(provenance["status"]),
             request_fingerprint=static_request_fingerprint(canonical_request),
-            schema_version=int(provenance["schema_version"]),
+            schema_version=STATIC_CHECKPOINT_SCHEMA_VERSION,
         )
     validate_static_checkpoint(checkpoint)
     return checkpoint
@@ -283,6 +300,7 @@ def load_static_checkpoint(run_dir) -> StaticCheckpoint:
 
 __all__ = [
     "STATIC_CHECKPOINT_SCHEMA_VERSION",
+    "STATIC_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS",
     "StaticCheckpoint",
     "load_static_checkpoint",
     "save_static_checkpoint",

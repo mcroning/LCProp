@@ -10,6 +10,7 @@ from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.optics.screens import ChannelLaunchElements
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.pr.carrier_power import carrier_channels_from_beams
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 
@@ -147,6 +148,7 @@ class PRRunRequest:
     initial_A: Any | None = None
     initial_E: Any | None = None
     scattering: PRCanonicalScatteringSpec | None = None
+    optical_boundary: TransverseBoundarySpec = TransverseBoundarySpec()
 
 
 @dataclass(frozen=True)

@@ -45,6 +45,7 @@ def validate_lc_gui_request_representable(request) -> None:
     request.material.validate()
     request.bias.validate()
     request.beams.validate()
+    request.optical_boundary.validate()
     if request.material.name != LCMaterial().name:
         raise ValueError("LC GUI cannot represent a non-default material name")
     default_bias = BiasSpec()
@@ -140,6 +141,11 @@ def apply_lc_request(
         beam_stack_to_launchplane(request.beams)
         if beam_stack_definition is None
         else beam_stack_definition
+    )
+    beam_panel.set_optical_boundary(request.optical_boundary)
+    beam_panel.set_optical_context(
+        n_ref=float(request.material.no),
+        interaction_length_um=float(request.grid.z_length_um),
     )
     experiment_panel.set_current_experiment(
         experiment_name_for_workflow(workflow_id)

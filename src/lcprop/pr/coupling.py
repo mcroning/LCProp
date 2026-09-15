@@ -12,7 +12,7 @@ from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
-from lcprop.optics.launch import build_launch
+from lcprop.optics.launch import OpticalLaunchContext, build_launch
 from lcprop.optics.splitstep import (
     advance_prepared_response,
     hop_linear_inplace,
@@ -280,13 +280,23 @@ def trace_frozen_pr_state(request: PRRunRequest, E) -> PRPropagationTrace:
         raise ValueError("diagnostic trace currently requires the NumPy backend")
     request.grid.validate()
     grid = make_grid(request.grid, real_dtype=np.float64)
-    launch = build_launch(request.beams, grid, complex_dtype=np.complex128)
+    launch = build_launch(
+        request.beams,
+        grid,
+        complex_dtype=np.complex128,
+        context=OpticalLaunchContext(
+            grid=grid,
+            n_ref=float(request.material.refractive_index),
+            interaction_length_um=float(request.grid.z_length_um),
+        ),
+    )
     A = (
         launch.A0.copy()
         if request.initial_A is None
         else np.asarray(request.initial_A, dtype=np.complex128).copy()
     )
     references = A.copy()
+    reference_response = np.ones((grid.Nx, grid.Ny), dtype=A.dtype)
     state = np.asarray(E, dtype=float)
     if state.shape != (grid.Nz, grid.Nx, grid.Ny):
         raise ValueError("E must have shape (Nz, Nx, Ny)")
@@ -348,10 +358,25 @@ def trace_frozen_pr_state(request: PRRunRequest, E) -> PRPropagationTrace:
             kernel=kernel,
             half_step_response=response,
             Nsub=Nsub,
+            boundary=request.optical_boundary,
+            boundary_grid=grid,
+            propagation_distance_um=grid.dz_um,
             xp=np,
         )
-        for _ in range(Nsub):
-            hop_linear_inplace(references, kernel, xp=np)
+        if request.optical_boundary.mode == "periodic":
+            for _ in range(Nsub):
+                hop_linear_inplace(references, kernel, xp=np)
+        else:
+            advance_prepared_response(
+                references,
+                kernel=kernel,
+                half_step_response=reference_response,
+                Nsub=Nsub,
+                boundary=request.optical_boundary,
+                boundary_grid=grid,
+                propagation_distance_um=grid.dz_um,
+                xp=np,
+            )
         record(slice_index + 1)
     return PRPropagationTrace(
         z_um=z_values,

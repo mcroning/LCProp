@@ -17,6 +17,7 @@ from lcprop.lc.requests import (
     TimeDependentSolverOptions,
 )
 from lcprop.lc.specs import BiasSpec, LCMaterial
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.persistence.experiments import (
     ExperimentPayloadError,
     ExperimentRequestCodec,
@@ -30,7 +31,8 @@ from lcprop.persistence.experiments import (
 )
 
 
-LC_EXPERIMENT_REQUEST_SCHEMA_VERSION = 1
+LC_EXPERIMENT_REQUEST_SCHEMA_VERSION = 2
+_LC_PREVIOUS_EXPERIMENT_REQUEST_SCHEMA_VERSION = 1
 
 
 def _reject_runtime_state(request: Any) -> None:
@@ -118,6 +120,7 @@ def _encode_common(request: StaticRunRequest | TimeDependentRunRequest) -> dict:
             "save_full": request.output.save_full,
         },
         "runtime": asdict(request.runtime),
+        "optical_boundary": asdict(request.optical_boundary),
     }
 
 
@@ -137,25 +140,35 @@ def encode_lc_timedependent_request(request: TimeDependentRunRequest) -> dict:
 
 def _payload(value: Any) -> dict[str, Any]:
     payload = require_mapping(value, name="LC request_payload")
-    require_exact_keys(
-        payload,
-        required={
-            "schema_version",
-            "grid",
-            "material",
-            "bias",
-            "beams",
-            "solver",
-            "output",
-            "runtime",
-        },
-        name="LC request_payload",
-    )
-    version = payload["schema_version"]
-    if type(version) is not int or version != LC_EXPERIMENT_REQUEST_SCHEMA_VERSION:
+    version = payload.get("schema_version")
+    if type(version) is not int or version not in (
+        _LC_PREVIOUS_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+        LC_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+    ):
         raise ExperimentSchemaError(
             f"unsupported LC experiment request schema version: {version!r}"
         )
+    require_exact_keys(
+        payload,
+        required=(
+            {
+                "schema_version",
+                "grid",
+                "material",
+                "bias",
+                "beams",
+                "solver",
+                "output",
+                "runtime",
+            }
+            | (
+                {"optical_boundary"}
+                if version == LC_EXPERIMENT_REQUEST_SCHEMA_VERSION
+                else set()
+            )
+        ),
+        name="LC request_payload",
+    )
     return payload
 
 
@@ -199,6 +212,9 @@ def _decode_common(payload: dict[str, Any]) -> dict[str, Any]:
                 payload["runtime"],
                 name="LC request_payload.runtime",
             )
+        ),
+        "optical_boundary": TransverseBoundarySpec(
+            **payload.get("optical_boundary", {})
         ),
     }
 

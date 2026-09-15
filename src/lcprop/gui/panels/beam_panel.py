@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import QAbstractSpinBox, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QAbstractSpinBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
+    QSpinBox,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
 
 from lcprop.adapters.launchplane import beam_stack_definition_to_lcprop
 from lcprop.core.beams import BeamStack
@@ -10,6 +20,8 @@ from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
 from lcprop.gui.panels.input_screen_editor import InputScreenEditor
 from lcprop.optics.launch_configuration import LaunchConfiguration
+from lcprop.optics.boundaries import TransverseBoundarySpec
+from lcprop.optics.launch import OpticalLaunchContext
 from lcprop.optics.screens import ChannelLaunchElements
 
 try:
@@ -19,6 +31,9 @@ try:
         BeamStackDefinition,
         LaunchPlaneDefinition,
     )
+    from launchplane.serialization import SCHEMA_VERSION as LAUNCHPANE_SCHEMA_VERSION
+    if LAUNCHPANE_SCHEMA_VERSION < 3:
+        raise ImportError("LaunchPane schema 3 or newer is required")
 except ImportError as exc:
     raise ImportError(
         "The LCProp Beam tab requires the separate 'launchplane' package. "
@@ -49,6 +64,9 @@ class BeamPanel(QWidget):
         super().__init__(parent)
         self._preview_Nx = int(preview_Nx)
         self._preview_Ny = int(preview_Ny)
+        self._preview_n_ref = 1.0
+        self._interaction_length_um = 1.0
+        self._propagation_sign = 1
 
         launch_plane = LaunchPlaneDefinition(
             x_aperture_um=x_aperture_um,
@@ -83,6 +101,7 @@ class BeamPanel(QWidget):
             beam_definitions=lambda: self.beam_stack_definition,
             beams=self.beams,
             runtime_grid=self._screen_preview_grid,
+            launch_context=self._preview_launch_context,
             enabled=input_screens_enabled,
             disabled_reason=input_screens_disabled_reason,
             parent=self,
@@ -97,12 +116,107 @@ class BeamPanel(QWidget):
         self.splitter.addWidget(self.input_screen_editor)
         self.splitter.setStretchFactor(0, 3)
         self.splitter.setStretchFactor(1, 1)
+        boundary_box = QGroupBox("Transverse optical boundary", self)
+        boundary_form = QFormLayout(boundary_box)
+        self.boundary_mode = QComboBox(boundary_box)
+        self.boundary_mode.addItem("Periodic / no absorber", "periodic")
+        self.boundary_mode.addItem("Sponge absorber", "sponge")
+        self.boundary_mode.addItem("Tukey window", "tukey")
+        self.boundary_width = QDoubleSpinBox(boundary_box)
+        self.boundary_width.setRange(0.001, 1.0)
+        self.boundary_width.setDecimals(4)
+        self.boundary_width.setValue(0.15)
+        self.boundary_attenuation = QDoubleSpinBox(boundary_box)
+        self.boundary_attenuation.setRange(1.0e-6, 1.0e3)
+        self.boundary_attenuation.setDecimals(6)
+        self.boundary_attenuation.setSuffix(" µm⁻¹")
+        self.boundary_attenuation.setValue(0.05)
+        self.boundary_order = QSpinBox(boundary_box)
+        self.boundary_order.setRange(1, 16)
+        self.boundary_order.setValue(2)
+        self.boundary_tukey_alpha = QDoubleSpinBox(boundary_box)
+        self.boundary_tukey_alpha.setRange(0.0, 1.0)
+        self.boundary_tukey_alpha.setDecimals(4)
+        self.boundary_tukey_alpha.setValue(0.1)
+        boundary_form.addRow("Policy", self.boundary_mode)
+        boundary_form.addRow("Sponge width / half-aperture", self.boundary_width)
+        boundary_form.addRow("Sponge amplitude rate", self.boundary_attenuation)
+        boundary_form.addRow("Sponge profile order", self.boundary_order)
+        boundary_form.addRow("Tukey alpha", self.boundary_tukey_alpha)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(boundary_box)
         layout.addWidget(self.splitter)
         self.setMinimumSize(1000, 650)
         self._initial_aperture_fit_queued = False
         self._initial_aperture_fit_done = False
+        for control in (
+            self.boundary_mode,
+            self.boundary_width,
+            self.boundary_attenuation,
+            self.boundary_order,
+            self.boundary_tukey_alpha,
+        ):
+            signal = (
+                control.currentIndexChanged
+                if isinstance(control, QComboBox)
+                else control.valueChanged
+            )
+            signal.connect(self._boundary_changed)
+        self._boundary_changed()
+
+    def optical_boundary(self) -> TransverseBoundarySpec:
+        return TransverseBoundarySpec(
+            mode=str(self.boundary_mode.currentData()),
+            width_fraction=self.boundary_width.value(),
+            attenuation_per_um=self.boundary_attenuation.value(),
+            profile_order=self.boundary_order.value(),
+            tukey_alpha=self.boundary_tukey_alpha.value(),
+        )
+
+    def set_optical_boundary(self, spec: TransverseBoundarySpec) -> None:
+        spec.validate()
+        controls = (
+            (self.boundary_mode, self.boundary_mode.findData(spec.mode)),
+            (self.boundary_width, spec.width_fraction),
+            (self.boundary_attenuation, spec.attenuation_per_um),
+            (self.boundary_order, spec.profile_order),
+            (self.boundary_tukey_alpha, spec.tukey_alpha),
+        )
+        for control, value in controls:
+            control.blockSignals(True)
+            if isinstance(control, QComboBox):
+                control.setCurrentIndex(int(value))
+            else:
+                control.setValue(value)
+            control.blockSignals(False)
+        self._boundary_changed()
+
+    def set_optical_context(
+        self, *, n_ref: float, interaction_length_um: float, propagation_sign: int = 1
+    ) -> None:
+        self._preview_n_ref = float(n_ref)
+        self._interaction_length_um = float(interaction_length_um)
+        self._propagation_sign = int(propagation_sign)
+        self._boundary_changed()
+        self.input_screen_editor.refresh_preview()
+
+    def _preview_launch_context(self, grid) -> OpticalLaunchContext:
+        return OpticalLaunchContext(
+            grid=grid,
+            n_ref=self._preview_n_ref,
+            interaction_length_um=self._interaction_length_um,
+            propagation_sign=self._propagation_sign,
+        )
+
+    def _boundary_changed(self, _value=None) -> None:
+        mode = str(self.boundary_mode.currentData())
+        self.launch_plane_widget.set_optical_context(
+            n_ref=self._preview_n_ref,
+            interaction_length_um=self._interaction_length_um,
+            propagation_sign=self._propagation_sign,
+            boundary_mode=mode,
+        )
 
     def showEvent(self, event) -> None:
         """Fit once after Qt has assigned the embedded view its real size."""

@@ -771,24 +771,40 @@ class LCPropMainWindow(QWidget):
         self._configuration_changed()
 
     def build_request(self, *, allow_last_soliton: bool = True) -> StaticRunRequest:
+        grid = self.grid_panel.grid()
+        material = self.physics_panel.material()
+        beams = self.beam_panel.beams()
+        self.beam_panel.set_optical_context(
+            n_ref=float(material.no),
+            interaction_length_um=float(grid.z_length_um),
+        )
         return StaticRunRequest(
-            grid=self.grid_panel.grid(),
-            material=self.physics_panel.material(),
+            grid=grid,
+            material=material,
             bias=self.physics_panel.bias(),
-            beams=self.beam_panel.beams(),
+            beams=beams,
             solver=self.solver_panel.solver(),
             output=OutputOptions(),
+            optical_boundary=self.beam_panel.optical_boundary(),
         )
 
     def _build_timedependent_base_request(self) -> TimeDependentRunRequest:
+        grid = self.grid_panel.grid()
+        material = self.physics_panel.material()
+        beams = self.beam_panel.beams()
+        self.beam_panel.set_optical_context(
+            n_ref=float(material.no),
+            interaction_length_um=float(grid.z_length_um),
+        )
         return TimeDependentRunRequest(
-            grid=self.grid_panel.grid(),
-            material=self.physics_panel.material(),
+            grid=grid,
+            material=material,
             bias=self.physics_panel.bias(),
-            beams=self.beam_panel.beams(),
+            beams=beams,
             solver=self.solver_panel.td_solver(),
             output=OutputOptions(),
             runtime=RuntimeOptions(precision="float64"),
+            optical_boundary=self.beam_panel.optical_boundary(),
         )
 
     def build_timedependent_request(self) -> TimeDependentRunRequest:

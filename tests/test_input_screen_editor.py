@@ -253,7 +253,9 @@ def test_preview_uses_optical_launch_only_and_never_material_propagation(
     original = editor_module.build_launch
 
     def observed(*args, **kwargs):
-        calls.append(kwargs.get("launch_elements", ()))
+        calls.append(
+            (kwargs.get("launch_elements", ()), kwargs.get("context"))
+        )
         return original(*args, **kwargs)
 
     monkeypatch.setattr(editor_module, "build_launch", observed)
@@ -262,7 +264,35 @@ def test_preview_uses_optical_launch_only_and_never_material_propagation(
     panel.input_screen_editor.refresh_preview()
 
     assert calls
-    assert all(isinstance(assignments, tuple) for assignments in calls)
+    assert all(isinstance(assignments, tuple) for assignments, _ in calls)
+    assert all(context is not None for _, context in calls)
+    panel.close()
+
+
+def test_focused_beam_input_screen_preview_uses_material_neutral_context(app):
+    panel = _enabled_panel()
+    panel.set_optical_context(n_ref=2.3, interaction_length_um=80.0)
+    panel.set_beam_stack_definition(
+        BeamStackDefinition(
+            beams=(
+                BeamDefinition(
+                    name="focused",
+                    profile="focused_gaussian",
+                    waist_x_at_focus_um=4.0,
+                    waist_y_at_focus_um=7.0,
+                    focus_z_um=-20.0,
+                ),
+            )
+        )
+    )
+    editor = panel.input_screen_editor
+    editor.set_source(_source(np.eye(4)))
+
+    editor.refresh_preview()
+
+    assert editor.status.text() == ""
+    assert not editor.transmission_preview.pixmap().isNull()
+    assert not editor.transformed_preview.pixmap().isNull()
     panel.close()
 
 

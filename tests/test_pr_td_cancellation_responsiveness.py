@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 _ACTIVE_CANCELLATION_SCRIPT = r"""
 import json
-from threading import Thread
+from threading import Event, Thread
 from time import perf_counter, sleep
 
 from lcprop.core.backend import BackendSpec
@@ -25,7 +25,7 @@ from lcprop.pr.specs import (
     PRSolverOptions,
     PR_SEMI_IMPLICIT_INTEGRATOR,
 )
-from lcprop.pr.workflow import run_pr_timedependent
+import lcprop.pr.workflow as workflow
 
 
 grid = GridSpec(
@@ -63,17 +63,30 @@ request = PRRunRequest(
 )
 token = CancellationToken()
 timing = {}
+entered_optical_slice = Event()
+original_slice = workflow.advance_pr_slice_with_midpoint_source
+
+
+def observed_slice(*args, **kwargs):
+    entered_optical_slice.set()
+    while not token.is_cancelled():
+        sleep(0.001)
+    return original_slice(*args, **kwargs)
+
+
+workflow.advance_pr_slice_with_midpoint_source = observed_slice
 
 
 def request_stop():
-    sleep(0.2)
+    if not entered_optical_slice.wait(timeout=5.0):
+        raise RuntimeError("optical slice was not entered")
     timing["requested_at"] = perf_counter()
     token.cancel()
 
 
 Thread(target=request_stop, daemon=True).start()
 started_at = perf_counter()
-result = run_pr_timedependent(request, cancellation_token=token)
+result = workflow.run_pr_timedependent(request, cancellation_token=token)
 finished_at = perf_counter()
 payload = {
     "status": result.status,

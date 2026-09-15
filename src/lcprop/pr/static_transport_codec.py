@@ -11,6 +11,7 @@ from lcprop.core.backend import BackendSpec
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import round_nz
 from lcprop.optics.launch_configuration import reject_prepared_launch_conflict
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.persistence.experiments import decode_beam_stack, encode_beam_stack
 from lcprop.optics.screens import validate_channel_launch_elements
 from lcprop.pr.portable_launch import (
@@ -53,7 +54,8 @@ from lcprop.transport.result_policy import (
 
 PR_STATIC_REQUEST_CODEC_ID = "pr.static.request"
 PR_STATIC_RESULT_CODEC_ID = "pr.static.result"
-PR_STATIC_TRANSPORT_CODEC_VERSION = 1
+PR_STATIC_TRANSPORT_CODEC_VERSION = 2
+_PR_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION = 1
 
 
 def _validate_request(request: PRStaticRunRequest) -> None:
@@ -63,6 +65,7 @@ def _validate_request(request: PRStaticRunRequest) -> None:
     request.solver.validate()
     request.backend.validate()
     request.material_response.validate()
+    request.optical_boundary.validate()
     validate_channel_launch_elements(
         request.launch_elements, n_channels=len(request.beams.channels)
     )
@@ -98,6 +101,7 @@ def encode_pr_static_transport_request(
         "launch_elements": encode_launch_elements(request.launch_elements),
         "initial_A": pack_portable(request.initial_A, arrays, "initial_A"),
         "initial_E": pack_portable(request.initial_E, arrays, "initial_E"),
+        "optical_boundary": asdict(request.optical_boundary),
     }
     return EncodedRequest(
         PortablePayload(metadata, arrays), request.backend.backend
@@ -136,6 +140,9 @@ def decode_pr_static_transport_request(
             initial_E=values["initial_E"],
             material_response=PRTransverseMaterialResponseSpec(
                 **values.get("material_response", {})
+            ),
+            optical_boundary=TransverseBoundarySpec(
+                **values.get("optical_boundary", {})
             ),
         )
         _validate_request(request)
@@ -414,6 +421,12 @@ PR_STATIC_TRANSPORT_CODEC = TransportCodec(
     encode_result=encode_pr_static_transport_result,
     decode_result=decode_pr_static_transport_result,
     encode_result_projection=encode_pr_static_transport_result,
+    compatible_request_codec_versions=(
+        _PR_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION,
+    ),
+    compatible_result_codec_versions=(
+        _PR_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION,
+    ),
 )
 
 

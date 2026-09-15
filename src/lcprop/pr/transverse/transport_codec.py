@@ -12,6 +12,7 @@ from lcprop.core.backend import BackendSpec
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import round_nz
 from lcprop.optics.launch_configuration import reject_prepared_launch_conflict
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.persistence.experiments import decode_beam_stack, encode_beam_stack
 from lcprop.optics.screens import validate_channel_launch_elements
 from lcprop.pr.portable_launch import (
@@ -62,7 +63,8 @@ from lcprop.transport.result_policy import (
 
 PR_TRANSVERSE_STATIC_REQUEST_CODEC_ID = "pr.transverse_static.request"
 PR_TRANSVERSE_STATIC_RESULT_CODEC_ID = "pr.transverse_static.result"
-PR_TRANSVERSE_STATIC_TRANSPORT_CODEC_VERSION = 2
+PR_TRANSVERSE_STATIC_TRANSPORT_CODEC_VERSION = 3
+_PR_TRANSVERSE_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION = 2
 _FAST_OMITTED_FIELDS = (
     "psi_initial",
     "psi_final",
@@ -87,6 +89,7 @@ def _validate_request(request: PRTransverseStaticRunRequest) -> None:
         boundary=request.boundary,
         projection=request.projection,
     )
+    request.optical_boundary.validate()
     request.solver.validate()
     request.backend.validate()
     validate_channel_launch_elements(
@@ -127,6 +130,7 @@ def encode_pr_transverse_static_transport_request(request: PRTransverseStaticRun
         "initial_A": pack_portable(request.initial_A, arrays, "initial_A"),
         "initial_psi": pack_portable(request.initial_psi, arrays, "initial_psi"),
         "scattering": None if request.scattering is None else asdict(request.scattering),
+        "optical_boundary": asdict(request.optical_boundary),
     }
     return EncodedRequest(PortablePayload(metadata, arrays), request.backend.backend)
 
@@ -163,6 +167,9 @@ def decode_pr_transverse_static_transport_request(metadata: Mapping[str, Any], a
             initial_A=values["initial_A"],
             initial_psi=values["initial_psi"],
             scattering=None if scattering is None else PRCanonicalScatteringSpec(**scattering),
+            optical_boundary=TransverseBoundarySpec(
+                **values.get("optical_boundary", {})
+            ),
         )
         _validate_request(request)
         return request
@@ -523,6 +530,12 @@ PR_TRANSVERSE_STATIC_TRANSPORT_CODEC = TransportCodec(
     encode_result=encode_pr_transverse_static_transport_result,
     encode_result_projection=encode_pr_transverse_static_transport_result,
     decode_result=decode_pr_transverse_static_transport_result,
+    compatible_request_codec_versions=(
+        _PR_TRANSVERSE_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION,
+    ),
+    compatible_result_codec_versions=(
+        _PR_TRANSVERSE_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION,
+    ),
 )
 
 

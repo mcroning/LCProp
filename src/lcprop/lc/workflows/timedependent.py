@@ -82,6 +82,7 @@ def run_timedependent(
         runtime=request.runtime,
         initial_A=request.initial_A,
         initial_theta=request.initial_theta,
+        optical_boundary=request.optical_boundary,
     )
 
     runtime = build_runtime_components(

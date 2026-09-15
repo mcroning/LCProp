@@ -14,7 +14,8 @@ from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
-from lcprop.optics.launch import build_launch, normalized_power
+from lcprop.optics.launch import OpticalLaunchContext, build_launch, normalized_power
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.optics.launch_configuration import (
     LaunchConfiguration,
     reject_prepared_launch_conflict,
@@ -122,6 +123,7 @@ class PRStaticRunRequest:
     material_response: PRTransverseMaterialResponseSpec = field(
         default_factory=PRTransverseMaterialResponseSpec
     )
+    optical_boundary: TransverseBoundarySpec = TransverseBoundarySpec()
 
 
 @dataclass(frozen=True)
@@ -366,6 +368,7 @@ def run_pr_static(
     request.material_response.validate()
     request.solver.validate()
     request.backend.validate()
+    request.optical_boundary.validate()
     LaunchConfiguration(request.beams, request.launch_elements)
     reject_prepared_launch_conflict(request.initial_A, request.launch_elements)
     wavelengths = tuple(
@@ -390,6 +393,11 @@ def run_pr_static(
         grid,
         complex_dtype=backend.complex_dtype,
         launch_elements=request.launch_elements,
+        context=OpticalLaunchContext(
+            grid=grid,
+            n_ref=float(request.material.refractive_index),
+            interaction_length_um=float(request.grid.z_length_um),
+        ),
     )
     dx_normalized = (
         request.material.characteristic_wavenumber_per_um * grid.dx_um
@@ -465,6 +473,8 @@ def run_pr_static(
             background_intensity=request.material.background_intensity,
             coherence_groups=groups,
             xp=xp,
+            optical_boundary=request.optical_boundary,
+            boundary_grid=grid,
         )
 
     def residual_at(state, intensity):

@@ -27,7 +27,7 @@ from lcprop.core.backend import BackendSpec, asnumpy, get_backend
 from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid, round_nz
-from lcprop.optics.launch import build_launch, normalized_power
+from lcprop.optics.launch import OpticalLaunchContext, build_launch, normalized_power
 from lcprop.optics.splitstep import linear_kernel
 from lcprop.pr.evolution import hopping_rhs
 from lcprop.pr.optical_response import half_step_response_from_E
@@ -811,7 +811,16 @@ def run_pr_static_streaming(
     backend = get_backend(request.backend)
     xp = backend.xp
     grid = make_grid(request.grid, xp=xp, real_dtype=backend.real_dtype)
-    launch = build_launch(request.beams, grid, complex_dtype=backend.complex_dtype)
+    launch = build_launch(
+        request.beams,
+        grid,
+        complex_dtype=backend.complex_dtype,
+        context=OpticalLaunchContext(
+            grid=grid,
+            n_ref=float(request.material.refractive_index),
+            interaction_length_um=float(request.grid.z_length_um),
+        ),
+    )
     if request.initial_A is None:
         A0 = launch.A0.copy()
     else:

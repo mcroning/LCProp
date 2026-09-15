@@ -30,6 +30,34 @@ Array = Any
 
 
 @dataclass(frozen=True)
+class OpticalLaunchContext:
+    """Material-neutral geometry needed to construct an entrance field."""
+
+    grid: RuntimeGrid
+    n_ref: float
+    interaction_length_um: float
+    propagation_sign: int = 1
+    propagation_convention: str = "angular_spectrum_forward_z"
+
+    def validate(self) -> None:
+        if not np.isfinite(float(self.n_ref)) or float(self.n_ref) <= 0.0:
+            raise ValueError("n_ref must be finite and positive")
+        if not np.isfinite(float(self.interaction_length_um)) or float(
+            self.interaction_length_um
+        ) <= 0.0:
+            raise ValueError("interaction_length_um must be finite and positive")
+        if self.propagation_sign not in (-1, 1):
+            raise ValueError("propagation_sign must be -1 or 1")
+        if self.propagation_convention != "angular_spectrum_forward_z":
+            raise ValueError("unsupported propagation convention")
+
+    def resolved_focus_z_um(self, channel) -> float:
+        if channel.focus_at_interaction_midpoint:
+            return 0.5 * float(self.interaction_length_um)
+        return float(channel.focus_z_um)
+
+
+@dataclass(frozen=True)
 class LaunchResult:
     """Prepared multichannel optical launch."""
 
@@ -106,6 +134,7 @@ def gaussian_channel(
     *,
     power_fraction: float,
     complex_dtype: Any,
+    context: OpticalLaunchContext | None = None,
 ) -> Array:
     """Return a Gaussian whose intensity integral is ``power_fraction``.
 
@@ -121,10 +150,56 @@ def gaussian_channel(
     X = grid.x_um[:, None]
     Y = grid.y_um[None, :]
 
-    amp = xp.exp(
-        -(((X - float(ch.x0_um)) / float(ch.waist_x_um)) ** 2)
-        -(((Y - float(ch.y0_um)) / float(ch.waist_y_um)) ** 2)
-    )
+    profile = ch.profile
+    if profile == "uniform":
+        for gradient, aperture, axis in (
+            (ch.tilt_x_rad_per_um, grid.spec.x_aperture_um, "x"),
+            (ch.tilt_y_rad_per_um, grid.spec.y_aperture_um, "y"),
+        ):
+            cycles = float(gradient) * float(aperture) / (2.0 * np.pi)
+            if not np.isclose(cycles, round(cycles), rtol=0.0, atol=1.0e-12):
+                raise ValueError(
+                    f"uniform profile {axis} phase gradient must be an exact "
+                    "periodic Fourier mode"
+                )
+        amp = xp.ones((grid.Nx, grid.Ny), dtype=grid.real_dtype)
+    elif profile in ("legacy_gaussian", "collimated_gaussian"):
+        amp = xp.exp(
+            -(((X - float(ch.x0_um)) / float(ch.waist_x_um)) ** 2)
+            -(((Y - float(ch.y0_um)) / float(ch.waist_y_um)) ** 2)
+        )
+    else:
+        if context is None:
+            raise ValueError("focused_gaussian requires an OpticalLaunchContext")
+        context.validate()
+        if context.grid is not grid:
+            raise ValueError("OpticalLaunchContext grid must be the launch grid")
+        focus_z = context.resolved_focus_z_um(ch)
+        k_ref = 2.0 * np.pi * float(context.n_ref) / float(ch.wavelength_um)
+        distance = -int(context.propagation_sign) * focus_z
+
+        def entrance_axis(waist_at_focus):
+            waist = float(waist_at_focus)
+            rayleigh = 0.5 * k_ref * waist * waist
+            radius = waist * np.sqrt(1.0 + (distance / rayleigh) ** 2)
+            curvature = (
+                np.inf
+                if distance == 0.0
+                else distance * (1.0 + (rayleigh / distance) ** 2)
+            )
+            return radius, curvature
+
+        radius_x, curvature_x = entrance_axis(ch.waist_x_at_focus_um)
+        radius_y, curvature_y = entrance_axis(ch.waist_y_at_focus_um)
+        x_offset = X - float(ch.x0_um)
+        y_offset = Y - float(ch.y0_um)
+        amp = xp.exp(-(x_offset / radius_x) ** 2 - (y_offset / radius_y) ** 2)
+        quadratic_phase = xp.zeros_like(amp)
+        if np.isfinite(curvature_x):
+            quadratic_phase = quadratic_phase + 0.5 * k_ref * x_offset**2 / curvature_x
+        if np.isfinite(curvature_y):
+            quadratic_phase = quadratic_phase + 0.5 * k_ref * y_offset**2 / curvature_y
+        amp = amp * xp.exp(1j * quadratic_phase)
 
     phase = float(ch.phase_rad)
     if ch.tilt_x_rad_per_um or ch.tilt_y_rad_per_um or phase:
@@ -157,6 +232,7 @@ def build_launch(
     *,
     complex_dtype: Any = np.complex64,
     launch_elements: tuple[ChannelLaunchElements, ...] = (),
+    context: OpticalLaunchContext | None = None,
 ) -> LaunchResult:
     """Build and optionally transform ``A0`` from an incident ``BeamStack``.
 
@@ -166,6 +242,10 @@ def build_launch(
     """
 
     beams.validate()
+    if context is not None:
+        context.validate()
+        if context.grid is not grid:
+            raise ValueError("OpticalLaunchContext grid must be the launch grid")
     xp = grid.xp
 
     physical_powers_mW = xp.asarray(
@@ -183,6 +263,7 @@ def build_launch(
             grid,
             power_fraction=float(power_fractions[index]),
             complex_dtype=complex_dtype,
+            context=context,
         )
         for index, ch in enumerate(beams.channels)
     ]
@@ -265,6 +346,7 @@ def total_power(A0: Array, grid: RuntimeGrid) -> float:
 __all__ = [
     "Array",
     "LaunchResult",
+    "OpticalLaunchContext",
     "gaussian_channel",
     "build_launch",
     "channel_power_integrals",

@@ -21,7 +21,8 @@ from lcprop.core.backend import (
 from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
-from lcprop.optics.launch import build_launch, normalized_power
+from lcprop.optics.launch import OpticalLaunchContext, build_launch, normalized_power
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.optics.splitstep import advance_prepared_response, linear_kernel
 from lcprop.pr.optical_response import half_step_response_from_E
 from lcprop.pr.scattering import (
@@ -154,6 +155,7 @@ class PRTransverseMarchingStaticRunRequest:
     initial_A: Any | None = None
     initial_psi: Any | None = None
     scattering: PRCanonicalScatteringSpec | None = None
+    optical_boundary: TransverseBoundarySpec = TransverseBoundarySpec()
 
 
 @dataclass(frozen=True)
@@ -366,6 +368,7 @@ def _validate_request(request: PRTransverseMarchingStaticRunRequest) -> None:
     request.projection.validate()
     request.solver.validate()
     request.backend.validate()
+    request.optical_boundary.validate()
     if request.scattering is not None:
         request.scattering.validate()
     if request.backend.backend not in ("numpy", "cupy"):
@@ -412,6 +415,9 @@ def _advance_mixed_precision_slice(
         kernel=kernel,
         half_step_response=half_response,
         Nsub=resolved_substeps,
+        boundary=request.optical_boundary,
+        boundary_grid=grid,
+        propagation_distance_um=grid.dz_um,
         xp=xp,
     )
     exit_intensity = pr_driving_intensity(
@@ -527,7 +533,14 @@ def run_pr_transverse_static_marching(
         request.scattering, grid=grid, z_length_um=request.grid.z_length_um
     )
     launch = build_launch(
-        request.beams, grid, complex_dtype=precision.optical_complex_dtype
+        request.beams,
+        grid,
+        complex_dtype=precision.optical_complex_dtype,
+        context=OpticalLaunchContext(
+            grid=grid,
+            n_ref=float(request.material.refractive_index),
+            interaction_length_um=float(request.grid.z_length_um),
+        ),
     )
     if request.initial_A is None:
         A0 = launch.A0.copy()

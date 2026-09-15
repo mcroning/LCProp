@@ -16,6 +16,7 @@ from lcprop.adapters import (
 from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.pr.gui.beam_panel import make_pr_beam_panel
 from lcprop.pr.gui.evolution_panel import PREvolutionPanel
 from lcprop.pr.gui.grid_panel import PR_DEFAULT_GRID, PRGridPanel
@@ -113,6 +114,24 @@ def test_pr_gui_defaults_are_pr_owned_valid_and_well_sampled(app):
             for beam_margins in plane_margins
             for margin in beam_margins.values()
         ) > 0.0
+
+
+def test_pr_gui_build_and_apply_preserve_selected_optical_boundary(app):
+    source = _controls(app)
+    sponge = TransverseBoundarySpec(
+        mode="sponge",
+        width_fraction=0.2,
+        attenuation_per_um=0.075,
+        profile_order=3,
+    )
+    source[1].set_optical_boundary(sponge)
+
+    request = _build(source)
+    restored = _controls(app)
+    _apply(request, restored)
+
+    assert request.optical_boundary == sponge
+    assert restored[1].optical_boundary() == sponge
 
 
 def test_static_selection_builds_only_static_semantics_and_auto_tolerances(app):
@@ -347,6 +366,50 @@ def test_pr_gui_preflight_reports_sampling_boundary_and_grating_risks(app):
     assert "beam waist is inadequately sampled" in warnings
     assert "coherent-beam grating period is inadequately sampled" in warnings
     assert any("periodic boundary" in warning for warning in warnings)
+
+
+def test_pr_gui_preflight_uses_focus_defined_waists_and_midpoint_geometry(app):
+    request = _build(_controls(app))
+    focused = replace(
+        request.beams.channels[0],
+        profile="focused_gaussian",
+        waist_x_at_focus_um=6.0,
+        waist_y_at_focus_um=9.0,
+        focus_at_interaction_midpoint=True,
+    )
+    request = replace(request, beams=BeamStack(channels=(focused,)))
+
+    aperture = validate_pr_gui_request(request).aperture
+
+    assert aperture.samples_per_waist[0] == pytest.approx(
+        (
+            6.0 * request.grid.Nx / request.grid.x_aperture_um,
+            9.0 * request.grid.Ny / request.grid.y_aperture_um,
+        )
+    )
+    assert aperture.radii_um["entrance"][0] == pytest.approx(
+        aperture.radii_um["output"][0]
+    )
+
+
+def test_pr_gui_preflight_accepts_periodic_uniform_profile_without_edge_warning(app):
+    request = _build(_controls(app))
+    uniform = replace(
+        request.beams.channels[0],
+        profile="uniform",
+        waist_x_at_focus_um=None,
+        waist_y_at_focus_um=None,
+        focus_z_um=None,
+        focus_at_interaction_midpoint=False,
+        tilt_x_rad_per_um=0.0,
+        tilt_y_rad_per_um=0.0,
+    )
+    request = replace(request, beams=BeamStack(channels=(uniform,)))
+
+    aperture = validate_pr_gui_request(request).aperture
+
+    assert aperture.samples_per_waist[0] == (np.inf, np.inf)
+    assert not any("periodic boundary" in item for item in aperture.warnings)
 
 
 def test_pr_gui_preflight_uses_implemented_timestep_guard(app):

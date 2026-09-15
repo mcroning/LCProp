@@ -20,7 +20,8 @@ from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
-from lcprop.optics.launch import build_launch, normalized_power
+from lcprop.optics.launch import OpticalLaunchContext, build_launch, normalized_power
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.optics.launch_configuration import (
     LaunchConfiguration,
     reject_prepared_launch_conflict,
@@ -159,6 +160,7 @@ class PRTransverseStaticRunRequest:
     material_response: PRTransverseMaterialResponseSpec = field(
         default_factory=PRTransverseMaterialResponseSpec
     )
+    optical_boundary: TransverseBoundarySpec = TransverseBoundarySpec()
 
 
 @dataclass(frozen=True)
@@ -260,6 +262,7 @@ def _validate_request(request: PRTransverseStaticRunRequest) -> None:
     )
     request.solver.validate()
     request.backend.validate()
+    request.optical_boundary.validate()
     LaunchConfiguration(request.beams, request.launch_elements)
     reject_prepared_launch_conflict(request.initial_A, request.launch_elements)
     if request.scattering is not None:
@@ -755,6 +758,8 @@ def _optical_pass_host_volume(
             background_intensity=request.material.background_intensity,
             coherence_groups=request.beams.coherence_groups,
             xp=xp,
+            optical_boundary=request.optical_boundary,
+            boundary_grid=grid,
             _intensity_before=intensity_before,
             _return_exit_intensity=True,
         )
@@ -879,6 +884,11 @@ def _run_pr_transverse_static_at_visibility(
         grid,
         complex_dtype=backend.complex_dtype,
         launch_elements=request.launch_elements,
+        context=OpticalLaunchContext(
+            grid=grid,
+            n_ref=float(request.material.refractive_index),
+            interaction_length_um=float(request.grid.z_length_um),
+        ),
     )
     if request.initial_A is None:
         A0 = launch.A0.copy()

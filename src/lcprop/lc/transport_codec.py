@@ -10,7 +10,13 @@ import numpy as np
 from lcprop.core.backend import asnumpy
 from lcprop.core.context import GridSpec
 from lcprop.lc import LC_MATERIAL_ID
-from lcprop.lc.persistence.static import StaticCheckpoint, validate_static_checkpoint
+from lcprop.lc.persistence.static import (
+    STATIC_CHECKPOINT_SCHEMA_VERSION,
+    STATIC_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS,
+    StaticCheckpoint,
+    static_request_fingerprint,
+    validate_static_checkpoint,
+)
 from lcprop.lc.requests import (
     OutputOptions,
     RuntimeOptions,
@@ -21,6 +27,7 @@ from lcprop.lc.requests import (
 from lcprop.lc.results import StaticIterationRecord, StaticRunResult, StaticSliceSummary
 from lcprop.lc.specs import BiasSpec, LCMaterial
 from lcprop.persistence.experiments import decode_beam_stack, encode_beam_stack
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.transport.codecs import (
     EncodedRequest,
     EncodedResult,
@@ -32,7 +39,8 @@ from lcprop.transport.envelopes import TransportCodecError
 
 LC_STATIC_REQUEST_CODEC_ID = "lc.static.request"
 LC_STATIC_RESULT_CODEC_ID = "lc.static.result"
-LC_STATIC_TRANSPORT_CODEC_VERSION = 1
+LC_STATIC_TRANSPORT_CODEC_VERSION = 2
+_LC_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION = 1
 
 
 def _portable(value: Any) -> Any:
@@ -53,6 +61,7 @@ def _validate_request(request: StaticRunRequest) -> None:
     request.bias.validate()
     request.beams.validate()
     request.runtime.validate()
+    request.optical_boundary.validate()
     if request.output.run_dir is not None:
         raise TransportCodecError(
             "remote LC static transport requires output.run_dir=None"
@@ -91,6 +100,7 @@ def _encode_request_parts(
         },
         "runtime": asdict(request.runtime),
         "initial_arrays": refs,
+        "optical_boundary": asdict(request.optical_boundary),
     }
     return PortablePayload(_portable(metadata), arrays)
 
@@ -138,6 +148,9 @@ def _decode_request_parts(
             runtime=RuntimeOptions(**metadata["runtime"]),
             initial_A=optional_array("initial_A"),
             initial_theta=optional_array("initial_theta"),
+            optical_boundary=TransverseBoundarySpec(
+                **metadata.get("optical_boundary", {})
+            ),
         )
         _validate_request(request)
     except TransportCodecError:
@@ -307,6 +320,15 @@ def decode_lc_static_transport_result(
         if result_request is None:
             raise TransportCodecError("LC checkpoint requires a canonical result request")
         checkpoint_refs = dict(checkpoint_values["array_refs"])
+        checkpoint_schema_version = int(checkpoint_values["schema_version"])
+        if (
+            checkpoint_schema_version
+            not in STATIC_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS
+        ):
+            raise TransportCodecError(
+                "unsupported transported LC static checkpoint schema version: "
+                f"{checkpoint_schema_version}"
+            )
 
         def checkpoint_array(name: str, *, optional: bool = False):
             key = checkpoint_refs.get(name)
@@ -350,8 +372,12 @@ def decode_lc_static_transport_result(
             A_dtype=str(checkpoint_values["A_dtype"]),
             theta_dtype=str(checkpoint_values["theta_dtype"]),
             status=str(checkpoint_values["status"]),
-            request_fingerprint=str(checkpoint_values["request_fingerprint"]),
-            schema_version=int(checkpoint_values["schema_version"]),
+            request_fingerprint=(
+                static_request_fingerprint(result_request)
+                if checkpoint_schema_version < STATIC_CHECKPOINT_SCHEMA_VERSION
+                else str(checkpoint_values["request_fingerprint"])
+            ),
+            schema_version=STATIC_CHECKPOINT_SCHEMA_VERSION,
             workflow=str(checkpoint_values["workflow"]),
         )
         validate_static_checkpoint(checkpoint)
@@ -413,6 +439,12 @@ LC_STATIC_TRANSPORT_CODEC = TransportCodec(
     result_type=StaticRunResult,
     encode_result=encode_lc_static_transport_result,
     decode_result=decode_lc_static_transport_result,
+    compatible_request_codec_versions=(
+        _LC_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION,
+    ),
+    compatible_result_codec_versions=(
+        _LC_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION,
+    ),
 )
 
 

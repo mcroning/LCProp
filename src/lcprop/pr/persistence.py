@@ -14,6 +14,7 @@ from lcprop.core.backend import BackendSpec, asnumpy
 from lcprop.core.beams import BeamStack
 from lcprop.adapters.legacy_beams import beam_channel_from_mapping
 from lcprop.core.context import GridSpec
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.pr.checkpoint import (
     PRTimeDependentCheckpoint,
     validate_pr_checkpoint,
@@ -28,8 +29,8 @@ from lcprop.pr.specs import (
 )
 
 
-PR_CHECKPOINT_SCHEMA_VERSION = 2
-PR_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS = (1, PR_CHECKPOINT_SCHEMA_VERSION)
+PR_CHECKPOINT_SCHEMA_VERSION = 3
+PR_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS = (1, 2, PR_CHECKPOINT_SCHEMA_VERSION)
 PR_CHECKPOINT_MATERIAL = PR_MATERIAL_ID
 PR_CHECKPOINT_FORMAT = "lcprop-checkpoint"
 
@@ -44,6 +45,7 @@ def _request_to_dict(request: PRRunRequest) -> dict[str, Any]:
         },
         "solver": asdict(request.solver),
         "backend": asdict(request.backend),
+        "optical_boundary": asdict(request.optical_boundary),
         "initial_conditions": {
             "A0": "checkpoint.npz:A0",
             "E_initial": "checkpoint.npz:E_initial",
@@ -79,6 +81,9 @@ def _request_from_dict(
         ),
         solver=PRSolverOptions(**solver_values),
         backend=BackendSpec(**values["backend"]),
+        optical_boundary=TransverseBoundarySpec(
+            **values.get("optical_boundary", {})
+        ),
     )
     request.grid.validate()
     request.material.validate()

@@ -34,6 +34,11 @@ from typing import Any
 import numpy as np
 
 from lcprop.core.beams import normalize_coherence_groups
+from lcprop.optics.boundaries import (
+    TransverseBoundarySpec,
+    apply_transverse_boundary_inplace,
+    transverse_boundary_mask,
+)
 
 Array = Any
 
@@ -218,6 +223,9 @@ def advance_prepared_response(
     kernel: Array,
     half_step_response: Array,
     Nsub: int = 1,
+    boundary: TransverseBoundarySpec | None = None,
+    boundary_grid: Any | None = None,
+    propagation_distance_um: float | None = None,
     xp: Any | None = None,
 ) -> Array:
     """Advance a channel stack using a prepared material response.
@@ -226,6 +234,12 @@ def advance_prepared_response(
     ``half_step_response`` is the multiplicative material-response screen for
     one half substep. It may have shape ``(Nx, Ny)`` for a response shared by
     all channels or ``(Nch, Nx, Ny)`` for per-channel responses.
+
+    A sponge is a propagation boundary: its amplitude attenuation is applied
+    after every complete Strang substep with a rate scaled by that substep's
+    physical distance. A fixed total distance therefore has the same sponge
+    strength for any ``Nsub``. Tukey remains a single discrete window applied
+    after the complete call and is not interpreted as a per-distance rate.
 
     The field is updated in place using symmetric Strang ordering and returned.
     """
@@ -256,10 +270,29 @@ def advance_prepared_response(
             "response_screen must have shape (Nx, Ny) or (Nch, Nx, Ny)"
         )
 
+    boundary = TransverseBoundarySpec() if boundary is None else boundary
+    boundary.validate()
+    if boundary.mode != "periodic" and boundary_grid is None:
+        raise ValueError("nonperiodic boundary requires boundary_grid")
+    sponge_mask = None
+    tukey_mask = None
+    if boundary.mode == "sponge":
+        if propagation_distance_um is None:
+            raise ValueError("sponge boundary requires propagation_distance_um")
+        sponge_mask = transverse_boundary_mask(
+            boundary_grid,
+            boundary,
+            propagation_distance_um=float(propagation_distance_um) / int(Nsub),
+        )
+    elif boundary.mode == "tukey":
+        tukey_mask = transverse_boundary_mask(boundary_grid, boundary)
+
     for _ in range(int(Nsub)):
         apply_response_screen_inplace(A, response, xp=xp)
         hop_linear_inplace(A, kernel, xp=xp)
         apply_response_screen_inplace(A, response, xp=xp)
+        apply_transverse_boundary_inplace(A, sponge_mask)
+    apply_transverse_boundary_inplace(A, tukey_mask)
 
     return A
 

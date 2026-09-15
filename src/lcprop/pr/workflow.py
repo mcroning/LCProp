@@ -11,7 +11,7 @@ import numpy as np
 from lcprop.core.backend import asnumpy, get_backend
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
-from lcprop.optics.launch import build_launch, normalized_power
+from lcprop.optics.launch import OpticalLaunchContext, build_launch, normalized_power
 from lcprop.optics.splitstep import advance_prepared_response, linear_kernel
 from lcprop.pr.checkpoint import (
     PRTimeDependentCheckpoint,
@@ -188,6 +188,8 @@ def advance_pr_slice_with_midpoint_source(
     background_intensity: float,
     coherence_groups,
     xp,
+    optical_boundary=None,
+    boundary_grid=None,
     _intensity_before=None,
     _return_exit_intensity: bool = False,
 ):
@@ -213,6 +215,8 @@ def advance_pr_slice_with_midpoint_source(
             background_intensity=background_intensity,
             coherence_groups=coherence_groups,
             xp=xp,
+            optical_boundary=optical_boundary,
+            boundary_grid=boundary_grid,
             intensity_before=_intensity_before,
         )
     )
@@ -235,6 +239,8 @@ def _advance_pr_slice_with_midpoint_source_and_exit_intensity(
     background_intensity: float,
     coherence_groups,
     xp,
+    optical_boundary=None,
+    boundary_grid=None,
     intensity_before=None,
 ):
     """Advance one frozen-E slice and also return its exit intensity."""
@@ -266,6 +272,9 @@ def _advance_pr_slice_with_midpoint_source_and_exit_intensity(
         kernel=kernel,
         half_step_response=half_response,
         Nsub=resolved_substeps,
+        boundary=optical_boundary,
+        boundary_grid=boundary_grid,
+        propagation_distance_um=dz_um,
         xp=xp,
     )
     I_after = pr_driving_intensity(
@@ -315,6 +324,8 @@ def _optical_pass(
                 background_intensity=request.material.background_intensity,
                 coherence_groups=groups,
                 xp=xp,
+                optical_boundary=request.optical_boundary,
+                boundary_grid=grid,
                 _intensity_before=intensity_before,
                 _return_exit_intensity=True,
             )
@@ -358,6 +369,7 @@ def run_pr_timedependent(
     request.material.validate()
     request.solver.validate()
     request.backend.validate()
+    request.optical_boundary.validate()
     LaunchConfiguration(request.beams, request.launch_elements)
     if _checkpoint_request is None:
         reject_prepared_launch_conflict(
@@ -389,6 +401,11 @@ def run_pr_timedependent(
         grid,
         complex_dtype=backend.complex_dtype,
         launch_elements=request.launch_elements,
+        context=OpticalLaunchContext(
+            grid=grid,
+            n_ref=float(request.material.refractive_index),
+            interaction_length_um=float(request.grid.z_length_um),
+        ),
     )
     A0, E = _initial_fields(
         request,

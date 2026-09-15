@@ -1,8 +1,10 @@
 import numpy as np
 
 from lcprop.core.context import GridSpec, LCMaterial, BiasSpec
+from lcprop.core.grid import make_grid
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.requests import StaticRunRequest, StaticSolverOptions, OutputOptions
+from lcprop.optics.launch import OpticalLaunchContext, build_launch
 from lcprop.workflows.static import run_static
 
 
@@ -45,3 +47,44 @@ def test_run_static_fixed_theta_workflow():
     assert result.grid_summary["du"] == 2.0 / 63.0
     assert result.grid_summary["dv"] == (2.0 / 63.0) * (1.0 / 0.75)
     assert "fixed prepared theta" in result.warnings[0]
+
+
+def test_lc_workflow_supplies_material_neutral_focus_context():
+    request = StaticRunRequest(
+        grid=GridSpec(
+            Nx=96,
+            Ny=80,
+            dz_um=10.0,
+            x_aperture_um=96.0,
+            y_aperture_um=80.0,
+            z_length_um=20.0,
+        ),
+        material=LCMaterial(ne=1.7, no=1.5, K=7e-12, delta_epsilon=13.0),
+        bias=BiasSpec(theta_bc=0.0),
+        beams=BeamStack(
+            channels=(
+                BeamChannel(
+                    profile="focused_gaussian",
+                    waist_x_at_focus_um=8.0,
+                    waist_y_at_focus_um=10.0,
+                    focus_at_interaction_midpoint=True,
+                ),
+            )
+        ),
+        solver=StaticSolverOptions(),
+        output=OutputOptions(),
+    )
+    result = run_static(request)
+    grid = make_grid(request.grid, real_dtype=np.float64)
+    expected = build_launch(
+        request.beams,
+        grid,
+        complex_dtype=np.complex128,
+        context=OpticalLaunchContext(
+            grid=grid,
+            n_ref=request.material.no,
+            interaction_length_um=request.grid.z_length_um,
+        ),
+    )
+
+    np.testing.assert_array_equal(result.A_initial, expected.A0)

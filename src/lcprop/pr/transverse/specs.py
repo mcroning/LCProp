@@ -10,6 +10,7 @@ from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.optics.screens import ChannelLaunchElements
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.pr.specs import PRMaterialSpec
 
@@ -227,6 +228,7 @@ class PRTransverseRunRequest:
     material_response: PRTransverseMaterialResponseSpec = field(
         default_factory=PRTransverseMaterialResponseSpec
     )
+    optical_boundary: TransverseBoundarySpec = TransverseBoundarySpec()
 
 
 @dataclass(frozen=True)

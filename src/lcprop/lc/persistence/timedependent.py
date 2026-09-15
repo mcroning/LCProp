@@ -21,9 +21,11 @@ from lcprop.lc.requests import (
     TimeDependentSolverOptions,
 )
 from lcprop.lc.specs import BiasSpec, LCMaterial
+from lcprop.optics.boundaries import TransverseBoundarySpec
 
 
-TD_CHECKPOINT_SCHEMA_VERSION = 1
+TD_CHECKPOINT_SCHEMA_VERSION = 2
+TD_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS = (1, TD_CHECKPOINT_SCHEMA_VERSION)
 CheckpointStatus = Literal["completed", "cancelled"]
 
 
@@ -68,6 +70,7 @@ def _request_to_dict(request: TimeDependentRunRequest) -> dict[str, Any]:
             "save_full": bool(request.output.save_full),
         },
         "runtime": asdict(request.runtime),
+        "optical_boundary": asdict(request.optical_boundary),
         "initial_conditions": {
             "A0": "checkpoint.npz:A0",
             "theta": "checkpoint.npz:theta",
@@ -95,6 +98,9 @@ def _request_from_dict(values: dict[str, Any]) -> TimeDependentRunRequest:
         solver=TimeDependentSolverOptions(workflow=workflow, **solver_values),
         output=OutputOptions(**output_values),
         runtime=RuntimeOptions(**values["runtime"]),
+        optical_boundary=TransverseBoundarySpec(
+            **values.get("optical_boundary", {})
+        ),
     )
 
 
@@ -201,6 +207,10 @@ def load_timedependent_checkpoint(run_dir) -> TimeDependentCheckpoint:
     schema_version = int(provenance["schema_version"])
     if int(request_document["schema_version"]) != schema_version:
         raise ValueError("TD checkpoint schema versions do not agree")
+    if schema_version not in TD_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS:
+        raise ValueError(
+            f"unsupported TD checkpoint schema version: {schema_version}"
+        )
 
     with np.load(directory / "checkpoint.npz", allow_pickle=False) as arrays:
         theta = np.asarray(arrays["theta"]).copy()
@@ -217,7 +227,7 @@ def load_timedependent_checkpoint(run_dir) -> TimeDependentCheckpoint:
         theta_dtype=str(provenance["theta_dtype"]),
         A0_dtype=str(provenance["A0_dtype"]),
         status=str(provenance["status"]),
-        schema_version=schema_version,
+        schema_version=TD_CHECKPOINT_SCHEMA_VERSION,
     )
     _validate_checkpoint(checkpoint)
     return checkpoint
@@ -226,6 +236,7 @@ def load_timedependent_checkpoint(run_dir) -> TimeDependentCheckpoint:
 __all__ = [
     "CheckpointStatus",
     "TD_CHECKPOINT_SCHEMA_VERSION",
+    "TD_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS",
     "TimeDependentCheckpoint",
     "load_timedependent_checkpoint",
     "save_timedependent_checkpoint",

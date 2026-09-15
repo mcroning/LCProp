@@ -98,7 +98,7 @@ def read_request_package(
     codec = registry.codec(envelope.material_id, envelope.workflow_id)
     if (
         envelope.codec_id != codec.request_codec_id
-        or envelope.codec_version != codec.request_codec_version
+        or envelope.codec_version not in codec.supported_request_codec_versions
     ):
         raise TransportCodecError(
             "unsupported request codec "
@@ -194,7 +194,7 @@ def read_result_package(
     codec = registry.codec(envelope.material_id, envelope.workflow_id)
     if (
         envelope.codec_id != codec.result_codec_id
-        or envelope.codec_version != codec.result_codec_version
+        or envelope.codec_version not in codec.supported_result_codec_versions
     ):
         raise TransportCodecError(
             "unsupported result codec "

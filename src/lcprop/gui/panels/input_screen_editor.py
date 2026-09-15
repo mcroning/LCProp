@@ -32,6 +32,7 @@ from lcprop.gui.image_sources import (
     supported_user_image_formats,
 )
 from lcprop.optics.launch import build_launch
+from lcprop.optics.launch import OpticalLaunchContext
 from lcprop.optics.screens import (
     ChannelLaunchElements,
     EVEN_SQUARE_NEAREST_TRANSPARENT_V1,
@@ -95,6 +96,7 @@ class InputScreenEditor(QGroupBox):
         beam_definitions: Callable[[], object],
         beams: Callable[[], BeamStack],
         runtime_grid: Callable[[], RuntimeGrid],
+        launch_context: Callable[[RuntimeGrid], OpticalLaunchContext] | None = None,
         enabled: bool,
         disabled_reason: str,
         standard_sources: tuple[RasterSource, ...] = (),
@@ -104,6 +106,7 @@ class InputScreenEditor(QGroupBox):
         self._beam_definitions = beam_definitions
         self._beams = beams
         self._runtime_grid = runtime_grid
+        self._launch_context = launch_context
         self._editor_enabled = bool(enabled)
         self._disabled_reason = str(disabled_reason)
         self._standard_sources = tuple(standard_sources)
@@ -700,6 +703,9 @@ class InputScreenEditor(QGroupBox):
                 grid,
                 complex_dtype=np.complex128,
                 launch_elements=assignments,
+                context=(
+                    None if self._launch_context is None else self._launch_context(grid)
+                ),
             )
             index = self.channel.currentData()
             if not isinstance(index, int) or not 0 <= index < len(beams.channels):

@@ -13,6 +13,7 @@ from launchplane.model import BeamDefinition, BeamStackDefinition
 
 from lcprop.gui.main_window import LCPropMainWindow
 from lcprop.gui.panels.beam_panel import BeamPanel
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.pr.gui.beam_panel import pr_default_beam_stack_definition
 
 
@@ -25,7 +26,7 @@ def test_beam_panel_embeds_launchplane_with_lcprop_defaults(app):
     panel = BeamPanel()
 
     assert isinstance(panel.launch_plane_widget, LaunchPlaneWidget)
-    assert panel.layout().count() == 1
+    assert panel.layout().count() == 2
     beam = panel.beam_stack_definition.beams[0]
     assert beam.name == "beam"
     assert beam.wavelength_um == 0.633
@@ -41,7 +42,24 @@ def test_beam_panel_embeds_launchplane_with_lcprop_defaults(app):
     assert panel.launch_plane_widget.launch_input_mode_combo.currentData() == "angle"
     assert not panel.launch_plane_widget.angle_x_spin.isHidden()
     assert panel.launch_plane_widget.tilt_x_spin.isHidden()
+    assert panel.optical_boundary() == TransverseBoundarySpec()
     panel.close()
+
+
+def test_lc_request_captures_selected_optical_boundary(app):
+    window = LCPropMainWindow()
+    sponge = TransverseBoundarySpec(
+        mode="sponge",
+        width_fraction=0.2,
+        attenuation_per_um=0.075,
+        profile_order=3,
+    )
+    window.beam_panel.set_optical_boundary(sponge)
+
+    request = window.build_request()
+
+    assert request.optical_boundary == sponge
+    window.close()
 
 
 def test_pr_default_beam_uses_same_external_angle_editor_semantics():
@@ -115,6 +133,33 @@ def test_beam_panel_beams_adapts_fields_without_axis_swap(app):
     assert (channel.x0_um, channel.y0_um) == (7.0, -11.0)
     assert (channel.waist_x_um, channel.waist_y_um) == (4.0, 6.0)
     assert channel.coherence_group == "probe-laser"
+    panel.close()
+
+
+def test_beam_panel_adapts_focus_defined_profile_intent(app):
+    panel = BeamPanel()
+    panel.set_beam_stack_definition(
+        BeamStackDefinition(
+            beams=(
+                BeamDefinition(
+                    name="focused",
+                    profile="focused_gaussian",
+                    waist_x_at_focus_um=4.0,
+                    waist_y_at_focus_um=6.0,
+                    focus_at_interaction_midpoint=True,
+                    coherence_group="laser",
+                ),
+            )
+        )
+    )
+
+    channel = panel.beams().channels[0]
+
+    assert channel.profile == "focused_gaussian"
+    assert channel.waist_x_at_focus_um == 4.0
+    assert channel.waist_y_at_focus_um == 6.0
+    assert channel.focus_z_um is None
+    assert channel.focus_at_interaction_midpoint is True
     panel.close()
 
 

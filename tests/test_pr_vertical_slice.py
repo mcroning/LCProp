@@ -5,6 +5,8 @@ from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
+from lcprop.optics.boundaries import TransverseBoundarySpec
+from lcprop.optics.launch import OpticalLaunchContext, build_launch
 from lcprop.optics.splitstep import (
     advance_prepared_response,
     hop_linear,
@@ -581,6 +583,80 @@ def test_small_plane_wave_workflow_matches_analytic_uniform_prediction():
     assert np.allclose(result.source_intensity_stack, intensity, atol=1e-13)
     assert np.allclose(result.A_final, phase_expected, rtol=1e-12, atol=1e-12)
     assert result.power_final == pytest.approx(result.power_initial, rel=2e-14)
+
+
+def test_pr_workflow_supplies_material_neutral_focus_context():
+    request = _plane_wave_request()
+    channel = BeamChannel(
+        profile="focused_gaussian",
+        waist_x_at_focus_um=18.0,
+        waist_y_at_focus_um=16.0,
+        focus_at_interaction_midpoint=True,
+    )
+    request = PRRunRequest(
+        grid=request.grid,
+        beams=BeamStack(channels=(channel,)),
+        material=request.material,
+        solver=PRSolverOptions(
+            Nt=0,
+            dt_normalized=request.solver.dt_normalized,
+            optical_substeps=request.solver.optical_substeps,
+            integrator=request.solver.integrator,
+        ),
+        backend=request.backend,
+    )
+    result = run_pr_timedependent(request)
+    grid = make_grid(request.grid, real_dtype=np.float64)
+    expected = build_launch(
+        request.beams,
+        grid,
+        complex_dtype=np.complex128,
+        context=OpticalLaunchContext(
+            grid=grid,
+            n_ref=request.material.refractive_index,
+            interaction_length_um=request.grid.z_length_um,
+        ),
+    )
+
+    np.testing.assert_array_equal(result.A_initial, expected.A0)
+
+
+def test_pr_workflow_periodic_default_is_exact_and_sponge_reaches_propagation():
+    base = _plane_wave_request()
+    solver = PRSolverOptions(
+        Nt=0,
+        dt_normalized=base.solver.dt_normalized,
+        optical_substeps=base.solver.optical_substeps,
+        integrator=base.solver.integrator,
+    )
+    common = dict(
+        grid=base.grid,
+        beams=base.beams,
+        material=base.material,
+        solver=solver,
+        backend=base.backend,
+    )
+    implicit_periodic = run_pr_timedependent(PRRunRequest(**common))
+    explicit_periodic = run_pr_timedependent(
+        PRRunRequest(
+            **common,
+            optical_boundary=TransverseBoundarySpec(mode="periodic"),
+        )
+    )
+    sponge = run_pr_timedependent(
+        PRRunRequest(
+            **common,
+            optical_boundary=TransverseBoundarySpec(
+                mode="sponge",
+                width_fraction=0.25,
+                attenuation_per_um=0.1,
+            ),
+        )
+    )
+
+    np.testing.assert_array_equal(explicit_periodic.A_final, implicit_periodic.A_final)
+    assert not np.array_equal(sponge.A_final, implicit_periodic.A_final)
+    assert np.linalg.norm(sponge.A_final) < np.linalg.norm(implicit_periodic.A_final)
 
 
 def test_semi_implicit_plane_wave_workflow_matches_heun_prediction():

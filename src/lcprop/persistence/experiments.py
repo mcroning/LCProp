@@ -148,9 +148,24 @@ def decode_beam_stack(value: Any) -> BeamStack:
         raise ExperimentPayloadError("beams.channels must be a JSON array")
     channels = []
     for index, item in enumerate(channel_items):
-        channel_values = dataclass_values(
-            BeamChannel,
+        channel_values = require_mapping(
             item,
+            name=f"beams.channels[{index}]",
+        )
+        legacy_optional = {
+            "profile",
+            "waist_x_at_focus_um",
+            "waist_y_at_focus_um",
+            "focus_z_um",
+            "focus_at_interaction_midpoint",
+        }
+        require_exact_keys(
+            channel_values,
+            required={
+                item.name for item in fields(BeamChannel)
+            }
+            - legacy_optional,
+            optional=legacy_optional,
             name=f"beams.channels[{index}]",
         )
         try:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import hashlib
 import json
 import math
 
@@ -10,6 +11,7 @@ import pytest
 from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.lc import LC_MATERIAL_ID
 from lcprop.lc.requests import (
     OutputOptions,
@@ -19,6 +21,24 @@ from lcprop.lc.requests import (
     StaticWorkflowOptions,
     TimeDependentRunRequest,
     TimeDependentSolverOptions,
+)
+from lcprop.lc.transport_codec import (
+    LC_STATIC_TRANSPORT_CODEC,
+    decode_lc_static_transport_request,
+    encode_lc_static_transport_request,
+)
+from lcprop.lc.persistence.static import (
+    STATIC_CHECKPOINT_SCHEMA_VERSION,
+    StaticCheckpoint,
+    load_static_checkpoint,
+    save_static_checkpoint,
+    static_request_fingerprint,
+)
+from lcprop.lc.persistence.timedependent import (
+    TD_CHECKPOINT_SCHEMA_VERSION,
+    TimeDependentCheckpoint,
+    load_timedependent_checkpoint,
+    save_timedependent_checkpoint,
 )
 from lcprop.lc.specs import BiasSpec, LCMaterial
 from lcprop.persistence import (
@@ -37,6 +57,8 @@ from lcprop.persistence import (
 from lcprop.persistence.experiments import (
     ExperimentCodecRegistry,
     ExperimentRequestCodec,
+    decode_beam_stack,
+    encode_beam_stack,
     read_experiment_file,
     write_experiment_file,
 )
@@ -53,6 +75,16 @@ from lcprop.pr.static_workflow import (
     PRStaticRunRequest,
     PRStaticWorkflowOptions,
     PR_STATIC_WORKFLOW,
+)
+from lcprop.pr.static_transport_codec import (
+    PR_STATIC_TRANSPORT_CODEC,
+    decode_pr_static_transport_request,
+    encode_pr_static_transport_request,
+)
+from lcprop.pr.timedependent_transport_codec import (
+    PR_TIMEDEPENDENT_TRANSPORT_CODEC,
+    decode_pr_timedependent_transport_request,
+    encode_pr_timedependent_transport_request,
 )
 from lcprop.pr.scattering import (
     PR_CANONICAL_SCATTERING_V2,
@@ -72,6 +104,20 @@ from lcprop.pr.transverse.specs import (
     PRTransverseSolverOptions,
     PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
 )
+from lcprop.pr.transverse.timedependent_transport_codec import (
+    PR_TRANSVERSE_TIMEDEPENDENT_TRANSPORT_CODEC,
+    decode_pr_transverse_timedependent_transport_request,
+    encode_pr_transverse_timedependent_transport_request,
+)
+from lcprop.pr.transverse.transport_codec import (
+    PR_TRANSVERSE_STATIC_TRANSPORT_CODEC,
+    decode_pr_transverse_static_transport_request,
+    encode_pr_transverse_static_transport_request,
+)
+from lcprop.transport.codecs import PortablePayload, TransportCodecRegistry
+from lcprop.transport.defaults import default_transport_registry
+from lcprop.transport.envelopes import TransportCodecError
+from lcprop.transport.io import read_request_package, write_request_package
 
 
 def _angle_q() -> tuple[float, float]:
@@ -159,6 +205,24 @@ def _beams():
             ),
         )
     )
+
+
+def test_legacy_canonical_beam_payload_defaults_to_entrance_gaussian():
+    payload = encode_beam_stack(_beams())
+    new_fields = (
+        "profile",
+        "waist_x_at_focus_um",
+        "waist_y_at_focus_um",
+        "focus_z_um",
+        "focus_at_interaction_midpoint",
+    )
+    for channel in payload["channels"]:
+        for name in new_fields:
+            del channel[name]
+
+    restored = decode_beam_stack(payload)
+
+    assert restored == _beams()
 
 
 def _presentation() -> dict:
@@ -433,7 +497,15 @@ def test_initial_request_codecs_round_trip_exactly(
     workflow_id,
     request_factory,
 ):
-    request = request_factory()
+    request = replace(
+        request_factory(),
+        optical_boundary=TransverseBoundarySpec(
+            mode="sponge",
+            width_fraction=0.2,
+            attenuation_per_um=0.075,
+            profile_order=3,
+        ),
+    )
     path = tmp_path / f"{workflow_id}.lcprop.json"
 
     assert save_experiment(
@@ -459,6 +531,386 @@ def test_initial_request_codecs_round_trip_exactly(
     ] == 0.712345678901234
     assert path.read_text(encoding="utf-8").endswith("\n")
     assert not (tmp_path / f"{workflow_id}.lcprop.json.tmp").exists()
+
+
+@pytest.mark.parametrize(
+    ("material_id", "workflow_id", "request_factory"),
+    (
+        (LC_MATERIAL_ID, "static", _lc_static_request),
+        (LC_MATERIAL_ID, "timedependent", _lc_timedependent_request),
+        (PR_MATERIAL_ID, PR_STATIC_WORKFLOW, _pr_static_request),
+        (PR_MATERIAL_ID, PR_TIMEDEPENDENT_WORKFLOW, _pr_timedependent_request),
+        (
+            PR_MATERIAL_ID,
+            PR_TRANSVERSE_STATIC_WORKFLOW,
+            _pr_transverse_static_request,
+        ),
+        (
+            PR_MATERIAL_ID,
+            PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+            _pr_transverse_timedependent_request,
+        ),
+    ),
+)
+def test_previous_experiment_schema_without_optical_boundary_defaults_to_periodic(
+    tmp_path,
+    material_id,
+    workflow_id,
+    request_factory,
+):
+    path = tmp_path / f"legacy-{workflow_id}-boundary.lcprop.json"
+    save_experiment(
+        request_factory(),
+        path,
+        material_id=material_id,
+        workflow_id=workflow_id,
+    )
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["request_payload"]["schema_version"] -= 1
+    del document["request_payload"]["optical_boundary"]
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    loaded = load_experiment(path, expected_material_id=material_id)
+
+    assert loaded.request.optical_boundary == TransverseBoundarySpec()
+
+
+@pytest.mark.parametrize(
+    ("material_id", "workflow_id", "request_factory"),
+    (
+        (LC_MATERIAL_ID, "static", _lc_static_request),
+        (PR_MATERIAL_ID, PR_STATIC_WORKFLOW, _pr_static_request),
+    ),
+)
+def test_current_experiment_schema_requires_optical_boundary(
+    tmp_path,
+    material_id,
+    workflow_id,
+    request_factory,
+):
+    path = tmp_path / f"current-{workflow_id}-missing-boundary.lcprop.json"
+    save_experiment(
+        request_factory(),
+        path,
+        material_id=material_id,
+        workflow_id=workflow_id,
+    )
+    document = json.loads(path.read_text(encoding="utf-8"))
+    del document["request_payload"]["optical_boundary"]
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ExperimentPayloadError, match="missing.*optical_boundary"):
+        load_experiment(path, expected_material_id=material_id)
+
+
+@pytest.mark.parametrize(
+    ("request_factory", "encode", "decode"),
+    (
+        (
+            _lc_static_request,
+            encode_lc_static_transport_request,
+            decode_lc_static_transport_request,
+        ),
+        (
+            _pr_static_request,
+            encode_pr_static_transport_request,
+            decode_pr_static_transport_request,
+        ),
+        (
+            _pr_timedependent_request,
+            encode_pr_timedependent_transport_request,
+            decode_pr_timedependent_transport_request,
+        ),
+        (
+            _pr_transverse_static_request,
+            encode_pr_transverse_static_transport_request,
+            decode_pr_transverse_static_transport_request,
+        ),
+        (
+            _pr_transverse_timedependent_request,
+            encode_pr_transverse_timedependent_transport_request,
+            decode_pr_transverse_timedependent_transport_request,
+        ),
+    ),
+)
+@pytest.mark.parametrize(
+    "optical_boundary",
+    (
+        TransverseBoundarySpec(mode="tukey", tukey_alpha=0.35),
+        TransverseBoundarySpec(
+            mode="sponge",
+            width_fraction=0.2,
+            attenuation_per_um=0.075,
+            profile_order=3,
+        ),
+    ),
+)
+def test_nonperiodic_optical_boundary_round_trips_through_transport(
+    request_factory,
+    encode,
+    decode,
+    optical_boundary,
+):
+    request = replace(
+        request_factory(),
+        optical_boundary=optical_boundary,
+    )
+
+    encoded = encode(request)
+    restored = decode(encoded.payload.metadata, encoded.payload.arrays)
+
+    assert restored == request
+
+
+@pytest.mark.parametrize(
+    ("request_factory", "codec"),
+    (
+        (_lc_static_request, LC_STATIC_TRANSPORT_CODEC),
+        (_pr_static_request, PR_STATIC_TRANSPORT_CODEC),
+        (_pr_timedependent_request, PR_TIMEDEPENDENT_TRANSPORT_CODEC),
+        (_pr_transverse_static_request, PR_TRANSVERSE_STATIC_TRANSPORT_CODEC),
+        (
+            _pr_transverse_timedependent_request,
+            PR_TRANSVERSE_TIMEDEPENDENT_TRANSPORT_CODEC,
+        ),
+    ),
+)
+def test_previous_transport_codec_without_optical_boundary_migrates_to_periodic(
+    tmp_path,
+    request_factory,
+    codec,
+):
+    request = request_factory()
+    current_registry = default_transport_registry()
+    current_codec = current_registry.codec(*codec.key)
+
+    def encode_previous(value):
+        encoded = current_codec.encode_request(value)
+        metadata = dict(encoded.payload.metadata)
+        del metadata["optical_boundary"]
+        return replace(
+            encoded,
+            payload=PortablePayload(metadata, encoded.payload.arrays),
+        )
+
+    previous_registry = TransportCodecRegistry()
+    previous_registry.register(
+        replace(
+            current_codec,
+            request_codec_version=current_codec.request_codec_version - 1,
+            encode_request=encode_previous,
+            compatible_request_codec_versions=(),
+        )
+    )
+    write_request_package(
+        tmp_path,
+        registry=previous_registry,
+        material_id=current_codec.material_id,
+        workflow_id=current_codec.workflow_id,
+        request=request,
+        run_id="previous-codec",
+        execution_target="local",
+    )
+
+    restored = read_request_package(
+        tmp_path,
+        registry=current_registry,
+    ).request
+
+    assert restored.optical_boundary == TransverseBoundarySpec()
+
+
+@pytest.mark.parametrize(
+    ("request_factory", "codec"),
+    (
+        (_lc_static_request, LC_STATIC_TRANSPORT_CODEC),
+        (_pr_static_request, PR_STATIC_TRANSPORT_CODEC),
+        (_pr_timedependent_request, PR_TIMEDEPENDENT_TRANSPORT_CODEC),
+        (_pr_transverse_static_request, PR_TRANSVERSE_STATIC_TRANSPORT_CODEC),
+        (
+            _pr_transverse_timedependent_request,
+            PR_TRANSVERSE_TIMEDEPENDENT_TRANSPORT_CODEC,
+        ),
+    ),
+)
+def test_future_transport_codec_version_is_rejected(
+    tmp_path,
+    request_factory,
+    codec,
+):
+    future_registry = TransportCodecRegistry()
+    future_registry.register(
+        replace(
+            codec,
+            request_codec_version=codec.request_codec_version + 1,
+            compatible_request_codec_versions=(),
+        )
+    )
+    write_request_package(
+        tmp_path,
+        registry=future_registry,
+        material_id=codec.material_id,
+        workflow_id=codec.workflow_id,
+        request=request_factory(),
+        run_id="future-codec",
+        execution_target="local",
+    )
+
+    with pytest.raises(TransportCodecError, match="unsupported request codec"):
+        read_request_package(tmp_path, registry=default_transport_registry())
+
+
+def _lc_static_checkpoint(boundary: TransverseBoundarySpec) -> StaticCheckpoint:
+    request = replace(_lc_static_request(), optical_boundary=boundary)
+    spatial = (request.grid.Nx, request.grid.Ny)
+    return StaticCheckpoint(
+        request=request,
+        next_slice_index=0,
+        completed_slices=0,
+        z_reached_um=0.0,
+        A_next=np.zeros((len(request.beams.channels), *spatial), np.complex128),
+        theta_seed=np.zeros(spatial, np.float64),
+        theta_stack=np.zeros((0, *spatial), np.float64),
+        intensity_stack=np.zeros((0, *spatial), np.float64),
+        theta_intensity_stack=None,
+        slice_summaries=(),
+        iteration_records=(),
+        relax_steps=0,
+        grid_summary={},
+        launch_summary={},
+        normalized_power_initial=0.0,
+        physical_power_initial_mW=0.0,
+        A_dtype="complex128",
+        theta_dtype="float64",
+        status="stopped",
+        request_fingerprint=static_request_fingerprint(request),
+    )
+
+
+def _lc_timedependent_checkpoint(
+    boundary: TransverseBoundarySpec,
+) -> TimeDependentCheckpoint:
+    request = replace(_lc_timedependent_request(), optical_boundary=boundary)
+    spatial = (request.grid.Nx, request.grid.Ny)
+    return TimeDependentCheckpoint(
+        request=request,
+        theta=np.zeros((1, *spatial), np.float64),
+        A0=np.zeros((len(request.beams.channels), *spatial), np.complex128),
+        completed_steps=0,
+        requested_steps=0,
+        current_time=0.0,
+        grid_summary={},
+        theta_dtype="float64",
+        A0_dtype="complex128",
+        status="completed",
+    )
+
+
+@pytest.mark.parametrize(
+    ("checkpoint_factory", "save", "load", "schema_version"),
+    (
+        (
+            _lc_static_checkpoint,
+            save_static_checkpoint,
+            load_static_checkpoint,
+            STATIC_CHECKPOINT_SCHEMA_VERSION,
+        ),
+        (
+            _lc_timedependent_checkpoint,
+            save_timedependent_checkpoint,
+            load_timedependent_checkpoint,
+            TD_CHECKPOINT_SCHEMA_VERSION,
+        ),
+    ),
+)
+def test_current_lc_checkpoint_preserves_nonperiodic_boundary(
+    tmp_path,
+    checkpoint_factory,
+    save,
+    load,
+    schema_version,
+):
+    boundary = TransverseBoundarySpec(
+        mode="sponge",
+        width_fraction=0.2,
+        attenuation_per_um=0.075,
+        profile_order=3,
+    )
+    save(checkpoint_factory(boundary), tmp_path)
+
+    restored = load(tmp_path)
+
+    assert restored.schema_version == schema_version == 2
+    assert restored.request.optical_boundary == boundary
+
+
+@pytest.mark.parametrize(
+    ("checkpoint_factory", "save", "load"),
+    (
+        (_lc_static_checkpoint, save_static_checkpoint, load_static_checkpoint),
+        (
+            _lc_timedependent_checkpoint,
+            save_timedependent_checkpoint,
+            load_timedependent_checkpoint,
+        ),
+    ),
+)
+def test_previous_lc_checkpoint_migrates_missing_boundary_to_periodic(
+    tmp_path,
+    checkpoint_factory,
+    save,
+    load,
+):
+    save(checkpoint_factory(TransverseBoundarySpec()), tmp_path)
+    request_path = tmp_path / "request.json"
+    provenance_path = tmp_path / "provenance.json"
+    request_document = json.loads(request_path.read_text(encoding="utf-8"))
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    request_document["schema_version"] = 1
+    provenance["schema_version"] = 1
+    del request_document["request"]["optical_boundary"]
+    if "request_fingerprint" in provenance:
+        canonical = json.dumps(
+            request_document["request"],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        provenance["request_fingerprint"] = hashlib.sha256(canonical).hexdigest()
+    request_path.write_text(json.dumps(request_document), encoding="utf-8")
+    provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+
+    restored = load(tmp_path)
+
+    assert restored.schema_version == 2
+    assert restored.request.optical_boundary == TransverseBoundarySpec()
+
+
+@pytest.mark.parametrize(
+    ("checkpoint_factory", "save", "load"),
+    (
+        (_lc_static_checkpoint, save_static_checkpoint, load_static_checkpoint),
+        (
+            _lc_timedependent_checkpoint,
+            save_timedependent_checkpoint,
+            load_timedependent_checkpoint,
+        ),
+    ),
+)
+def test_future_lc_checkpoint_schema_is_rejected(
+    tmp_path,
+    checkpoint_factory,
+    save,
+    load,
+):
+    save(checkpoint_factory(TransverseBoundarySpec()), tmp_path)
+    for filename in ("request.json", "provenance.json"):
+        path = tmp_path / filename
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["schema_version"] = 999
+        path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unsupported .* checkpoint schema version"):
+        load(tmp_path)
 
 
 def test_pr_static_auto_tolerance_policy_round_trips_as_none(tmp_path):

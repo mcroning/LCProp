@@ -79,6 +79,8 @@ def advance_slice(
     ne: float,
     no: float,
     Nsub: int = 1,
+    boundary=None,
+    boundary_grid=None,
     xp: Any | None = None,
 ) -> Array:
     """Advance a channel stack through one LC director slice."""
@@ -102,6 +104,9 @@ def advance_slice(
         kernel=kernel,
         half_step_response=half_phase,
         Nsub=Nsub,
+        boundary=boundary,
+        boundary_grid=boundary_grid,
+        propagation_distance_um=dz,
         xp=xp,
     )
 

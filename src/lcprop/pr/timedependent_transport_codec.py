@@ -12,6 +12,7 @@ from lcprop.core.backend import BackendSpec
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import round_nz
 from lcprop.optics.launch_configuration import reject_prepared_launch_conflict
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.optics.screens import validate_channel_launch_elements
 from lcprop.persistence.experiments import decode_beam_stack, encode_beam_stack
 from lcprop.pr.checkpoint import PRTimeDependentCheckpoint, validate_pr_checkpoint
@@ -53,7 +54,8 @@ from lcprop.transport.result_policy import (
 
 PR_TIMEDEPENDENT_REQUEST_CODEC_ID = "pr.timedependent.request"
 PR_TIMEDEPENDENT_RESULT_CODEC_ID = "pr.timedependent.result"
-PR_TIMEDEPENDENT_TRANSPORT_CODEC_VERSION = 1
+PR_TIMEDEPENDENT_TRANSPORT_CODEC_VERSION = 2
+_PR_TIMEDEPENDENT_PREVIOUS_TRANSPORT_CODEC_VERSION = 1
 
 
 def _validate_request(request: PRRunRequest) -> None:
@@ -62,6 +64,7 @@ def _validate_request(request: PRRunRequest) -> None:
     request.material.validate()
     request.solver.validate()
     request.backend.validate()
+    request.optical_boundary.validate()
     validate_channel_launch_elements(
         request.launch_elements, n_channels=len(request.beams.channels)
     )
@@ -103,6 +106,7 @@ def _encode_request_metadata(
         "scattering": (
             None if request.scattering is None else asdict(request.scattering)
         ),
+        "optical_boundary": asdict(request.optical_boundary),
     }
 
 
@@ -128,6 +132,9 @@ def _decode_request_metadata(
             None
             if scattering is None
             else PRCanonicalScatteringSpec(**scattering)
+        ),
+        optical_boundary=TransverseBoundarySpec(
+            **values.get("optical_boundary", {})
         ),
     )
     _validate_request(request)
@@ -557,6 +564,12 @@ PR_TIMEDEPENDENT_TRANSPORT_CODEC = TransportCodec(
     encode_result=encode_pr_timedependent_transport_result,
     decode_result=decode_pr_timedependent_transport_result,
     encode_result_projection=encode_pr_timedependent_transport_result,
+    compatible_request_codec_versions=(
+        _PR_TIMEDEPENDENT_PREVIOUS_TRANSPORT_CODEC_VERSION,
+    ),
+    compatible_result_codec_versions=(
+        _PR_TIMEDEPENDENT_PREVIOUS_TRANSPORT_CODEC_VERSION,
+    ),
 )
 
 

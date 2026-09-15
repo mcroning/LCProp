@@ -27,6 +27,7 @@ from lcprop.lc.normalization import (
 from lcprop.lc.propagation import advance_slice
 from lcprop.lc.source import advance_slice_with_midpoint_source
 from lcprop.optics.launch import (
+    OpticalLaunchContext,
     build_launch,
     normalized_power,
     reconstructed_physical_powers_mW,
@@ -72,7 +73,18 @@ def run_static(
     normalization = make_lc_spatial_normalization(grid)
     grid_summary = lc_grid_summary(grid, normalization)
     bias = build_bias(request.bias, grid, request.material)
-    launch = build_launch(request.beams, grid, complex_dtype=np.complex128 if request.runtime.precision == "float64" else np.complex64)
+    launch = build_launch(
+        request.beams,
+        grid,
+        complex_dtype=(
+            np.complex128 if request.runtime.precision == "float64" else np.complex64
+        ),
+        context=OpticalLaunchContext(
+            grid=grid,
+            n_ref=float(request.material.no),
+            interaction_length_um=float(request.grid.z_length_um),
+        ),
+    )
 
     A0 = launch.A0.copy() if request.initial_A is None else grid.xp.asarray(request.initial_A, dtype=launch.A0.dtype).copy()
     if A0.shape != launch.A0.shape:
@@ -221,6 +233,8 @@ def run_static(
                 ne=request.material.ne,
                 no=request.material.no,
                 Nsub=optical_substeps.Nsub,
+                boundary=request.optical_boundary,
+                boundary_grid=grid,
                 xp=grid.xp,
             )
             intensity_after = total_intensity(

@@ -64,6 +64,7 @@ def _validate_pr_gui_common(request) -> PRBeamStackApertureReport:
     request.material.validate()
     request.solver.validate()
     request.backend.validate()
+    request.optical_boundary.validate()
     wavelengths = tuple(
         float(channel.wavelength_um) for channel in request.beams.channels
     )
@@ -80,6 +81,7 @@ def _validate_pr_gui_common(request) -> PRBeamStackApertureReport:
         grid,
         request.beams,
         refractive_index=request.material.refractive_index,
+        boundary_mode=request.optical_boundary.mode,
         strict=False,
     )
 
@@ -216,15 +218,22 @@ def build_pr_request(
     """Take one immutable, validated request snapshot from PR controls."""
 
     workflow_id = evolution_panel.workflow_id()
+    grid = grid_panel.grid()
+    material = material_panel.material()
     launch = beam_panel.launch_configuration()
+    beam_panel.set_optical_context(
+        n_ref=float(material.refractive_index),
+        interaction_length_um=float(grid.z_length_um),
+    )
     common = {
-        "grid": grid_panel.grid(),
+        "grid": grid,
         "beams": launch.beams,
         "launch_elements": launch.channel_elements,
-        "material": material_panel.material(),
+        "material": material,
         "backend": evolution_panel.backend_spec(),
         "initial_A": None,
         "initial_E": None,
+        "optical_boundary": beam_panel.optical_boundary(),
     }
     if workflow_id == PR_TIMEDEPENDENT_WORKFLOW:
         request = PRRunRequest(
@@ -402,6 +411,11 @@ def apply_pr_request(
         beam_stack_to_launchplane(request.beams)
         if beam_stack_definition is None
         else beam_stack_definition
+    )
+    beam_panel.set_optical_boundary(request.optical_boundary)
+    beam_panel.set_optical_context(
+        n_ref=float(request.material.refractive_index),
+        interaction_length_um=float(request.grid.z_length_um),
     )
     beam_panel.clear_launch_elements()
 

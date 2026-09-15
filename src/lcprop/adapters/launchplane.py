@@ -41,6 +41,11 @@ def _beam_definition_to_channel(beam: BeamDefinition) -> BeamChannel:
         tilt_y_rad_per_um=beam.transverse_wavevector_y_rad_per_um,
         phase_rad=beam.phase_rad,
         coherence_group=beam.coherence_group,
+        profile=beam.profile,
+        waist_x_at_focus_um=beam.waist_x_at_focus_um,
+        waist_y_at_focus_um=beam.waist_y_at_focus_um,
+        focus_z_um=beam.focus_z_um,
+        focus_at_interaction_midpoint=beam.focus_at_interaction_midpoint,
     )
 
 
@@ -115,6 +120,13 @@ def beam_stack_to_launchplane(stack: BeamStack):
                 phase_rad=channel.phase_rad,
                 coherence_group=group,
                 enabled=True,
+                profile=channel.profile,
+                waist_x_at_focus_um=channel.waist_x_at_focus_um,
+                waist_y_at_focus_um=channel.waist_y_at_focus_um,
+                focus_z_um=channel.focus_z_um,
+                focus_at_interaction_midpoint=(
+                    channel.focus_at_interaction_midpoint
+                ),
             )
             for channel, group in zip(
                 stack.channels,
