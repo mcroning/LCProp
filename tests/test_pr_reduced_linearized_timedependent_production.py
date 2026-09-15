@@ -313,13 +313,14 @@ def test_experiment_transport_fast_full_products_and_legacy_migration(monkeypatc
     experiment = encode_pr_timedependent_request(request)
     assert experiment["schema_version"] == (
         PR_EXPERIMENT_REQUEST_SCHEMA_VERSION
-    ) == 5
+    ) == 6
     assert decode_pr_timedependent_request(experiment) == request
 
     legacy_request = _request(linearized=False, steps=1)
     legacy = encode_pr_timedependent_request(legacy_request)
     legacy["schema_version"] = 4
     legacy.pop("material_response")
+    legacy.pop("scattering")
     assert (
         decode_pr_timedependent_request(legacy).material_response.model
         == "nonlinear"

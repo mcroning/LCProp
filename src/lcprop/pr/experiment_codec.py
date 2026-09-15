@@ -67,11 +67,13 @@ from lcprop.pr.transverse.static_workflow import (
 )
 
 
-PR_EXPERIMENT_REQUEST_SCHEMA_VERSION = 5
+PR_EXPERIMENT_REQUEST_SCHEMA_VERSION = 6
 _PR_LEGACY_EXPERIMENT_REQUEST_SCHEMA_VERSION = 1
 _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION = 2
 _PR_MATERIAL_RESPONSE_EXPERIMENT_REQUEST_SCHEMA_VERSION = 3
 _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION = 4
+_PR_REDUCED_TD_MATERIAL_RESPONSE_SCHEMA_VERSION = 5
+_PR_REDUCED_TD_SCATTERING_SCHEMA_VERSION = 6
 
 
 def _encode_launch_elements(
@@ -119,6 +121,8 @@ def _validate_common(request: PRRunRequest | PRStaticRunRequest) -> None:
         request.material_response.validate()
     elif isinstance(request, PRRunRequest):
         validate_pr_timedependent_configuration(request)
+        if request.scattering is not None:
+            request.scattering.validate()
 
 
 def _encode_common(request: PRRunRequest | PRStaticRunRequest) -> dict:
@@ -141,6 +145,9 @@ def encode_pr_timedependent_request(request: PRRunRequest) -> dict:
         raise TypeError("request must be a PRRunRequest")
     payload = _encode_common(request)
     payload["material_response"] = asdict(request.material_response)
+    payload["scattering"] = (
+        None if request.scattering is None else asdict(request.scattering)
+    )
     return payload
 
 
@@ -267,6 +274,7 @@ def _payload(
         _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         _PR_MATERIAL_RESPONSE_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+        _PR_REDUCED_TD_MATERIAL_RESPONSE_SCHEMA_VERSION,
         PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
     ):
         raise ExperimentSchemaError(
@@ -290,7 +298,13 @@ def _payload(
         | (
             {"material_response"}
             if reduced_timedependent
-            and version == PR_EXPERIMENT_REQUEST_SCHEMA_VERSION
+            and version >= _PR_REDUCED_TD_MATERIAL_RESPONSE_SCHEMA_VERSION
+            else set()
+        )
+        | (
+            {"scattering"}
+            if reduced_timedependent
+            and version >= _PR_REDUCED_TD_SCATTERING_SCHEMA_VERSION
             else set()
         ),
         optional=(
@@ -377,6 +391,17 @@ def decode_pr_timedependent_request(value: Any) -> PRRunRequest:
                     else {}
                 )
             ),
+            scattering=(
+                None
+                if payload.get("scattering") is None
+                else PRCanonicalScatteringSpec(
+                    **dataclass_values(
+                        PRCanonicalScatteringSpec,
+                        payload["scattering"],
+                        name="PR request_payload.scattering",
+                    )
+                )
+            ),
         )
         _validate_common(request)
     except ExperimentPayloadError:
@@ -442,6 +467,7 @@ def decode_pr_transverse_static_request(
         _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         _PR_MATERIAL_RESPONSE_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+        _PR_REDUCED_TD_MATERIAL_RESPONSE_SCHEMA_VERSION,
         PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
     ):
         raise ExperimentSchemaError(
@@ -629,6 +655,7 @@ def decode_pr_transverse_timedependent_request(
             _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION,
             _PR_MATERIAL_RESPONSE_EXPERIMENT_REQUEST_SCHEMA_VERSION,
             _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+            _PR_REDUCED_TD_MATERIAL_RESPONSE_SCHEMA_VERSION,
             PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         )
     ):
@@ -850,6 +877,7 @@ def decode_pr_image_amplification_request(
     if type(version) is not int or version not in (
         _PR_MATERIAL_RESPONSE_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+        _PR_REDUCED_TD_MATERIAL_RESPONSE_SCHEMA_VERSION,
         PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
     ):
         raise ExperimentSchemaError(

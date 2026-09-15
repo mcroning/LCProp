@@ -382,6 +382,13 @@ def _pr_timedependent_request() -> PRRunRequest:
             integrator=PR_SEMI_IMPLICIT_INTEGRATOR,
         ),
         backend=BackendSpec(backend="auto", precision="float64", verbose=True),
+        scattering=PRCanonicalScatteringSpec(
+            epsilon=0.015,
+            transverse_correlation_um=0.8,
+            realization_seed=98765,
+            canonical_dz_um=3.25,
+            algorithm_version=PR_CANONICAL_SCATTERING_V2,
+        ),
     )
 
 
@@ -572,6 +579,7 @@ def test_previous_experiment_schema_without_optical_boundary_defaults_to_periodi
         document["request_payload"]["schema_version"] = 3
         if workflow_id == PR_TIMEDEPENDENT_WORKFLOW:
             del document["request_payload"]["material_response"]
+            del document["request_payload"]["scattering"]
     else:
         document["request_payload"]["schema_version"] -= 1
     del document["request_payload"]["optical_boundary"]
@@ -580,6 +588,25 @@ def test_previous_experiment_schema_without_optical_boundary_defaults_to_periodi
     loaded = load_experiment(path, expected_material_id=material_id)
 
     assert loaded.request.optical_boundary == TransverseBoundarySpec()
+
+
+def test_reduced_td_schema_five_without_scattering_migrates_to_none(tmp_path):
+    path = tmp_path / "legacy-reduced-td-scattering.lcprop.json"
+    request = _pr_timedependent_request()
+    save_experiment(
+        request,
+        path,
+        material_id=PR_MATERIAL_ID,
+        workflow_id=PR_TIMEDEPENDENT_WORKFLOW,
+    )
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["request_payload"]["schema_version"] = 5
+    del document["request_payload"]["scattering"]
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    loaded = load_experiment(path, expected_material_id=PR_MATERIAL_ID)
+
+    assert loaded.request.scattering is None
 
 
 @pytest.mark.parametrize(

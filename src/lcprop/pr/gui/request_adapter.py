@@ -245,10 +245,13 @@ def build_pr_request(
         "initial_E": None,
         "optical_boundary": beam_panel.optical_boundary(),
     }
+    scattering = evolution_panel.scattering_spec()
     if workflow_id == PR_TIMEDEPENDENT_WORKFLOW:
         request = PRRunRequest(
             **common,
             solver=evolution_panel.solver(),
+            scattering=scattering,
+            material_response=evolution_panel.transverse_material_response(),
         )
     elif workflow_id == PR_STATIC_WORKFLOW:
         request = PRStaticRunRequest(
@@ -279,6 +282,7 @@ def build_pr_request(
             ),
             projection=PRTransverseProjectionProfile(),
             material_response=material_response,
+            scattering=scattering,
             initial_psi=None,
             solver=evolution_panel.transverse_static_solver(),
         )
@@ -305,6 +309,7 @@ def build_pr_request(
             ),
             projection=PRTransverseProjectionProfile(),
             material_response=material_response,
+            scattering=scattering,
             initial_psi=None,
             solver=evolution_panel.transverse_solver(),
         )
@@ -344,10 +349,6 @@ def validate_pr_gui_request_representable(request) -> None:
             raise ValueError(
                 "PR GUI cannot represent these transverse TD solver options"
             )
-        if request.scattering is not None:
-            raise ValueError(
-                "PR GUI cannot represent transverse TD scattering settings"
-            )
     elif isinstance(request, PRTransverseStaticRunRequest):
         represented = PRTransverseStaticWorkflowOptions(
             max_coupled_iterations=request.solver.max_coupled_iterations,
@@ -367,12 +368,6 @@ def validate_pr_gui_request_representable(request) -> None:
             raise ValueError(
                 "PR GUI cannot represent these static solver options"
             )
-    elif isinstance(request, PRRunRequest) and (
-        request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
-    ):
-        raise ValueError(
-            "PR GUI does not yet represent reduced linearized TD requests"
-        )
 
 
 def apply_pr_request(
@@ -417,7 +412,12 @@ def apply_pr_request(
         evolution_panel.set_static_solver(request.solver)
     else:
         evolution_panel.set_workflow_id(PR_TIMEDEPENDENT_WORKFLOW)
+        evolution_panel.set_transverse_material_response(
+            request.material_response,
+            applied_field_x=request.material.applied_field,
+        )
         evolution_panel.set_solver(request.solver)
+    evolution_panel.set_scattering_spec(getattr(request, "scattering", None))
     evolution_panel.set_backend_spec(request.backend)
     beam_panel.set_aperture(
         request.grid.x_aperture_um,

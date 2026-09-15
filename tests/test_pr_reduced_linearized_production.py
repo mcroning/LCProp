@@ -393,7 +393,8 @@ def test_reduced_linearized_gui_selection_and_experimental_status(app):
     assert panel.material_response.isEnabled()
     assert not panel.reference_intensity.isHidden()
     assert panel.transverse_applied_field.isHidden()
-    assert "Experimental" in panel.material_response.currentText()
+    assert panel.material_response.currentText() == "Linearized"
+    assert "Production model selection" in panel.algorithm_status.text()
     assert panel.transverse_material_response() == PRTransverseMaterialResponseSpec(
         model=PR_MATERIAL_RESPONSE_LINEARIZED,
         reference_intensity=3.25,
@@ -416,7 +417,8 @@ def test_reduced_linearized_gui_selection_and_experimental_status(app):
     assert request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
     assert request.material_response.reference_intensity == 3.25
     assert "Reduced x-only PR transport" in summary
-    assert "Linearized material response [Experimental]" in summary
+    assert "Static material model: Linearized material response" in summary
+    assert "Software status: Production model selection" in summary
     window.close()
 
 

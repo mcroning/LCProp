@@ -429,15 +429,14 @@ class PRMainWindow(QWidget):
             "solver": solver,
             "material_response": (
                 self.evolution_panel.transverse_material_response()
-                if workflow_id in (
-                    PR_STATIC_WORKFLOW,
-                    PR_TRANSVERSE_STATIC_WORKFLOW,
-                )
-                else None
             ),
+            "scattering": self.evolution_panel.scattering_spec(),
             "transverse_applied_field": (
                 self.evolution_panel.transverse_applied_field.value()
-                if workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW
+                if workflow_id in (
+                    PR_TRANSVERSE_STATIC_WORKFLOW,
+                    PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+                )
                 else 0.0
             ),
             "backend": self.evolution_panel.backend_spec(),
@@ -454,22 +453,19 @@ class PRMainWindow(QWidget):
         self.material_panel.set_material(state["material"])
         workflow_id = state["workflow_id"]
         self.evolution_panel.set_workflow_id(workflow_id)
+        self.evolution_panel.set_transverse_material_response(
+            state["material_response"],
+            applied_field_x=state["transverse_applied_field"],
+        )
         if workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
             self.evolution_panel.set_transverse_solver(state["solver"])
         elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
-            self.evolution_panel.set_transverse_material_response(
-                state["material_response"],
-                applied_field_x=state["transverse_applied_field"],
-            )
             self.evolution_panel.set_transverse_static_solver(state["solver"])
         elif workflow_id == PR_STATIC_WORKFLOW:
-            self.evolution_panel.set_transverse_material_response(
-                state["material_response"],
-                applied_field_x=state["material"].applied_field,
-            )
             self.evolution_panel.set_static_solver(state["solver"])
         else:
             self.evolution_panel.set_solver(state["solver"])
+        self.evolution_panel.set_scattering_spec(state["scattering"])
         self.evolution_panel.set_backend_spec(state["backend"])
         self.beam_panel.set_aperture(
             state["grid"].x_aperture_um,
@@ -825,6 +821,46 @@ class PRMainWindow(QWidget):
                 f"{channel.tilt_y_rad_per_um:g}) rad/µm; "
                 f"phase={channel.phase_rad:g} rad; group={group}"
             )
+        transverse = isinstance(
+            request,
+            (PRTransverseRunRequest, PRTransverseStaticRunRequest),
+        )
+        timedependent = isinstance(
+            request,
+            (PRRunRequest, PRTransverseRunRequest),
+        )
+        linearized = (
+            request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+        )
+        lines.extend([
+            f"Evolution: {'Time dependent' if timedependent else 'Static'}",
+            (
+                "Transport model: Full transverse (x-y drift/diffusion)"
+                if transverse
+                else "Transport model: Reduced x-only (x drift/diffusion)"
+            ),
+            (
+                "Material response: Linearized"
+                if linearized
+                else "Material response: Fully nonlinear"
+            ),
+            "Software status: Production model selection",
+        ])
+        scattering = getattr(request, "scattering", None)
+        if scattering is None:
+            lines.append("Canonical volume scattering: disabled")
+        else:
+            lines.extend([
+                "Canonical volume scattering: enabled",
+                f"Scattering strength ε: {scattering.epsilon:g}",
+                (
+                    "Scattering correlation length: "
+                    f"{scattering.transverse_correlation_um:g} µm"
+                ),
+                f"Scattering seed: {scattering.realization_seed}",
+                f"Scattering canonical slab Δz: {scattering.canonical_dz_um:g} µm",
+                f"Scattering model: {scattering.algorithm_version}",
+            ])
         if workflow_id == PR_TIMEDEPENDENT_WORKFLOW:
             lines.extend([
                 f"Material steps: {request.solver.Nt}",
@@ -835,15 +871,16 @@ class PRMainWindow(QWidget):
                     f"{preflight.conservative_dt_limit:.8g}"
                 ),
             ])
+            if linearized:
+                lines.append(
+                    "Linearization intensity I₀: "
+                    f"{request.material_response.reference_intensity:g} "
+                    "normalized total transport intensity"
+                )
         elif workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
-            linearized = (
-                request.material_response.model
-                == PR_MATERIAL_RESPONSE_LINEARIZED
-            )
             lines.extend([
                 (
-                    "Time-dependent material model: Linearized full transverse "
-                    "[Experimental]"
+                    "Time-dependent material model: Linearized full transverse"
                     if linearized
                     else "Time-dependent material model: full 2D transverse zero-flux"
                 ),
@@ -872,14 +909,9 @@ class PRMainWindow(QWidget):
                     "Electrical ensemble: fixed harmonic mean field",
                 ])
         elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
-            linearized = (
-                request.material_response.model
-                == PR_MATERIAL_RESPONSE_LINEARIZED
-            )
             lines.extend([
                 (
-                    "Static material model: Linearized material response "
-                    "[Experimental]"
+                    "Static material model: Linearized material response"
                     if linearized
                     else "Static material model: Fully nonlinear"
                 ),
@@ -906,14 +938,9 @@ class PRMainWindow(QWidget):
                     "Electrical ensemble: fixed harmonic mean field",
                 ])
         else:
-            linearized = (
-                request.material_response.model
-                == PR_MATERIAL_RESPONSE_LINEARIZED
-            )
             lines.extend([
                 (
-                    "Static material model: Linearized material response "
-                    "[Experimental]"
+                    "Static material model: Linearized material response"
                     if linearized
                     else "Static material model: Fully nonlinear"
                 ),
@@ -1005,6 +1032,18 @@ class PRMainWindow(QWidget):
             self.execution_target_selector.setCurrentIndex(0)
         self.runner_label.setText(f"Runner: {self.runner.name}")
         self.result_policy_selector.setEnabled(target == "slurm")
+        if target != "slurm":
+            self.evolution_panel.apply_execution_backend_context(target="local")
+            return
+        cluster = self.remote_execution_controls.selected_cluster()
+        resource = self.remote_execution_controls.selected_resource_name()
+        if cluster is None or resource is None:
+            return
+        profile = cluster.profile(resource)
+        self.evolution_panel.apply_execution_backend_context(
+            target="slurm",
+            gpu_capable=profile.gpus > 0 or profile.require_cupy,
+        )
 
     def _remote_runner_kwargs(self) -> dict[str, str]:
         values = self.remote_execution_controls.runner_kwargs()

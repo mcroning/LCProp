@@ -132,7 +132,8 @@ def test_gui_builds_linearized_transverse_td_as_experimental(app):
         PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1
     )
     assert request.boundary.applied_field_x == 0.3
-    assert "Linearized full transverse [Experimental]" in summary
+    assert "Time-dependent material model: Linearized full transverse" in summary
+    assert "Software status: Production model selection" in summary
     assert "exact frozen-source modal update" in summary
     assert not panel.material_response.isHidden()
     assert not panel.reference_intensity.isHidden()

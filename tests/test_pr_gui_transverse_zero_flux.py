@@ -156,7 +156,8 @@ def test_gui_preserves_response_control_when_switching_to_transverse_td(app):
         PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1
     )
     assert request.boundary.applied_field_x == 0.25
-    assert "Linearized material response [Experimental]" in summary
+    assert "Static material model: Linearized material response" in summary
+    assert "Software status: Production model selection" in summary
     assert "Linearization intensity I₀: 1.5" in summary
     assert "fixed harmonic mean field" in summary
     assert not panel.reference_intensity.isHidden()
