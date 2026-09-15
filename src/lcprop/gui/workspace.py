@@ -1,7 +1,19 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QTextEdit, QSplitter, QTabWidget, QVBoxLayout, QWidget
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+import numpy as np
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import (
+    QPushButton,
+    QTextEdit,
+    QSplitter,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from lcprop.gui.views import ImagePane, LongitudinalPane, CurvePane
 
@@ -39,6 +51,12 @@ class Workspace(QWidget):
         self.longitudinal_pane.zPlaneChanged.connect(
             self.image_pane.set_z_index
         )
+        self.image_pane.sourceVolumeSelected.connect(
+            self.longitudinal_pane.select_volume
+        )
+        self.longitudinal_pane.volumeSelectionChanged.connect(
+            self.image_pane.select_source_volume
+        )
 
         self.curve_pane = CurvePane()
         self.tabs.addTab(self.curve_pane, "Curves")
@@ -54,6 +72,16 @@ class Workspace(QWidget):
         self.console = QTextEdit()
         self.console.setReadOnly(True)
         self.tabs.addTab(self.console, "Console")
+
+        self.open_td_preview = QPushButton("Open downsampled TD preview")
+        self.open_td_preview.setToolTip(
+            "Open the visualization-only material-time MP4 preview"
+        )
+        self.open_td_preview.clicked.connect(self._open_td_preview)
+        self.open_td_preview.hide()
+        layout.addWidget(self.open_td_preview)
+        self._td_preview_artifact = None
+        self._artifact_directory = None
 
     def set_request_summary(self, text: str) -> None:
         self.request_summary.setPlainText(text)
@@ -83,6 +111,13 @@ class Workspace(QWidget):
             self.image_pane.clear_crosshair()
 
     def set_run_data(self, run_data) -> None:
+        if self._artifact_directory is not None:
+            self._artifact_directory.cleanup()
+            self._artifact_directory = None
+        self._td_preview_artifact = getattr(run_data, "artifacts", {}).get(
+            "td_preview_movie"
+        )
+        self.open_td_preview.setVisible(self._td_preview_artifact is not None)
         if run_data.workflow == "timedependent":
             summary = run_data.diagnostics.get("summary")
             values = {} if summary is None else summary.values
@@ -129,6 +164,17 @@ class Workspace(QWidget):
             self.tabs.setCurrentWidget(self.curve_pane)
 
         self.diagnostics_view.setPlainText(self._format_diagnostics(run_data))
+
+    def _open_td_preview(self) -> None:
+        artifact = self._td_preview_artifact
+        if artifact is None:
+            return
+        self._artifact_directory = TemporaryDirectory(
+            prefix="lcprop-pr-td-preview-"
+        )
+        path = Path(self._artifact_directory.name) / artifact.filename
+        path.write_bytes(np.asarray(artifact.data, dtype=np.uint8).tobytes())
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _format_diagnostics(self, run_data) -> str:
         lines: list[str] = [f"Workflow: {run_data.workflow}"]

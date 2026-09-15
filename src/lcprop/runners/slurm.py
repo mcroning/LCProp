@@ -625,6 +625,44 @@ class SlurmRunner:
                 )
                 if progress_callback:
                     progress_callback(status)
+            if mapped == RemoteRunState.RUNNING:
+                try:
+                    progress_text = self._transport.ssh(
+                        self.config.host, "cat", f"{remote_run}/progress.json"
+                    )
+                    remote_progress = json.loads(progress_text)
+                    if (
+                        not isinstance(remote_progress, dict)
+                        or remote_progress.get("schema_version") != 1
+                    ):
+                        raise ValueError("unsupported progress payload")
+                except (
+                    OSError,
+                    RuntimeError,
+                    subprocess.CalledProcessError,
+                    TypeError,
+                    ValueError,
+                ):
+                    remote_progress = None
+                if remote_progress is not None:
+                    state_message = str(
+                        remote_progress.get("message") or "Running"
+                    )
+                    progress_metadata = {
+                        "structured_progress": remote_progress,
+                    }
+                    if (
+                        status.state_message != state_message
+                        or status.progress_metadata != progress_metadata
+                    ):
+                        status = transition_remote_status(
+                            status,
+                            RemoteRunState.RUNNING,
+                            state_message=state_message,
+                            progress_metadata=progress_metadata,
+                        )
+                        if progress_callback:
+                            progress_callback(status)
             if mapped == RemoteRunState.SCIENTIFICALLY_FINISHED:
                 break
             if mapped == RemoteRunState.CANCELLED:

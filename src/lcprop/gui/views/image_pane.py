@@ -25,7 +25,10 @@ def display_limits(field) -> tuple[float, float]:
 
     data = np.asarray(field.data)
     finite = data[np.isfinite(data)]
-    if str(getattr(field, "kind", "field")) == "intensity":
+    if str(getattr(field, "kind", "field")) in {
+        "intensity",
+        "intensity_preview",
+    }:
         positive = finite[finite > 0.0]
         if positive.size == 0:
             return 0.0, 1.0
@@ -52,6 +55,7 @@ class ImagePane(QWidget):
     """Field browser for 2-D image fields."""
 
     positionSelected = Signal(int, int)
+    sourceVolumeSelected = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -98,8 +102,7 @@ class ImagePane(QWidget):
 
     def set_run_data(self, run_data) -> None:
         self._run_data = run_data
-        z = getattr(run_data.geometry, "z", None)
-        self._z_index = None if z is None else len(z) // 2
+        self._z_index = None
         self.field_selector.blockSignals(True)
         self.field_selector.clear()
 
@@ -117,7 +120,6 @@ class ImagePane(QWidget):
                 if bool(getattr(run_data.fields[key], "initially_selected", False)):
                     default_index = index
                     preferred_found = True
-                    break
             if (
                 not preferred_found
                 and run_data.workflow in {"static", "timedependent"}
@@ -152,6 +154,9 @@ class ImagePane(QWidget):
             vmin=vmin,
             vmax=vmax,
         )
+        source_key = getattr(self._run_data.fields[key], "source_volume_key", None)
+        if source_key is not None:
+            self.sourceVolumeSelected.emit(str(source_key))
 
     def _field_extent(self, field):
         if len(field.axes) != 2:
@@ -187,12 +192,24 @@ class ImagePane(QWidget):
 
     def _field_at_selected_z(self, field):
         source_key = getattr(field, "source_volume_key", None)
-        if source_key is None or self._z_index is None:
+        if source_key is None:
             return field
         source = self._run_data.fields[source_key]
         volume = np.asarray(source.data)
+        if self._z_index is None:
+            self._z_index = volume.shape[0] // 2
         iz = min(max(self._z_index, 0), volume.shape[0] - 1)
         return replace(field, data=volume[iz])
+
+    def select_source_volume(self, source_key: str) -> None:
+        """Select the x-y field linked to a chosen MPR source volume."""
+        for index in range(self.field_selector.count()):
+            key = self.field_selector.itemData(index)
+            field = self._run_data.fields[key]
+            if getattr(field, "source_volume_key", None) == source_key:
+                if index != self.field_selector.currentIndex():
+                    self.field_selector.setCurrentIndex(index)
+                return
 
     def set_crosshair(self, ix: int, iy: int) -> None:
         """Move the image crosshair to LCProp (x,y) indices."""

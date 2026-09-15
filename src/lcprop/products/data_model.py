@@ -117,6 +117,16 @@ class DiagnosticData:
     values: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class ArtifactData:
+    key: str
+    display_name: str
+    data: Any
+    media_type: str
+    filename: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 
 
 def make_field(
@@ -271,6 +281,7 @@ class RunData:
     diagnostics: DiagnosticCollection = field(default_factory=DiagnosticCollection)
     longitudinal_enabled: bool = True
     longitudinal_message: str | None = None
+    artifacts: dict[str, ArtifactData] = field(default_factory=dict)
 
 
 _LC_COMPAT_EXPORTS = (
@@ -298,6 +309,7 @@ __all__ = [
     "FieldData",
     "CurveData",
     "DiagnosticData",
+    "ArtifactData",
     "FieldCollection",
     "CurveCollection",
     "DiagnosticCollection",

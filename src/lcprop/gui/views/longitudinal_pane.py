@@ -21,6 +21,7 @@ from lcprop.gui.views.image_view import ImageView
 class LongitudinalPane(QWidget):
     cutChanged = Signal(int, int)
     zPlaneChanged = Signal(int)
+    volumeSelectionChanged = Signal(str)
     guidesVisibilityChanged = Signal(bool)
     """Viewer for longitudinal x-z and y-z cuts from 3-D fields.
 
@@ -69,12 +70,22 @@ class LongitudinalPane(QWidget):
         self.field_selector.setMinimumContentsLength(32)
         self.field_selector.currentIndexChanged.connect(self._field_changed)
         controls.addWidget(self.field_selector)
+        self.position_label = QLabel("x=—, y=—, z=—")
+        controls.addWidget(self.position_label)
         self.show_guides = QCheckBox("Show selection guides")
         self.show_guides.setChecked(True)
         self.show_guides.toggled.connect(self._show_guides_changed)
         controls.addWidget(self.show_guides)
         controls.addStretch(1)
         layout.addWidget(self.controls_widget)
+
+        z_controls = QHBoxLayout()
+        self.z_plane_label = QLabel("z plane")
+        self.z_plane_slider = QSlider(Qt.Orientation.Horizontal)
+        self.z_plane_slider.valueChanged.connect(self._z_changed)
+        z_controls.addWidget(self.z_plane_label)
+        z_controls.addWidget(self.z_plane_slider, 1)
+        layout.addLayout(z_controls)
 
         self.xz_row = QWidget()
         self.xz_row.setSizePolicy(
@@ -123,6 +134,7 @@ class LongitudinalPane(QWidget):
     def _xz_position_selected(self, iz: int, ix: int) -> None:
         """Clicking an x-z view changes the selected x index for the y-z cut."""
         self._iz = int(iz)
+        self._set_z_slider(self._iz)
         if self._is_retained_fast_selection():
             self.zPlaneChanged.emit(self._iz)
             return
@@ -132,6 +144,7 @@ class LongitudinalPane(QWidget):
     def _yz_position_selected(self, iz: int, iy: int) -> None:
         """Clicking a y-z view changes the selected y index for the x-z cut."""
         self._iz = int(iz)
+        self._set_z_slider(self._iz)
         if self._is_retained_fast_selection():
             self.zPlaneChanged.emit(self._iz)
             return
@@ -175,8 +188,8 @@ class LongitudinalPane(QWidget):
                 )
                 self.field_selector.setItemData(
                     self.field_selector.count() - 1,
-                    "Fast result: fixed nearest-zero x-z and y-z cuts; no "
-                    "selectable 3-D volume was retained.",
+                    "Fast result: exact full-resolution fixed nearest-zero "
+                    "x-z and y-z cuts, separate from any downsampled MPR preview.",
                     Qt.ItemDataRole.ToolTipRole,
                 )
 
@@ -186,6 +199,8 @@ class LongitudinalPane(QWidget):
         for widget in (
             self.xz_row,
             self.yz_row,
+            self.z_plane_label,
+            self.z_plane_slider,
         ):
             widget.setVisible(has_fields)
 
@@ -204,7 +219,17 @@ class LongitudinalPane(QWidget):
 
         self.field_selector.blockSignals(False)
         default_index = 0
-        if run_data.workflow == "timedependent":
+        preferred_volume_found = False
+        for preferred_key in (
+            "fast_optical_intensity_preview",
+            "optical_intensity_stack",
+        ):
+            preferred_index = self.field_selector.findData(preferred_key)
+            if preferred_index >= 0:
+                default_index = preferred_index
+                preferred_volume_found = True
+                break
+        if run_data.workflow == "timedependent" and not preferred_volume_found:
             final_index = -1
             if previous_key in {
                 "final_intensity_stack",
@@ -258,12 +283,23 @@ class LongitudinalPane(QWidget):
 
         self.x_cut_slider.blockSignals(True)
         self.y_cut_slider.blockSignals(True)
+        self.z_plane_slider.blockSignals(True)
         self.x_cut_slider.setRange(0, nx - 1)
         self.y_cut_slider.setRange(0, ny - 1)
+        self.z_plane_slider.setRange(0, data.shape[0] - 1)
+        self.z_plane_slider.setValue(self._iz)
         self.x_cut_slider.blockSignals(False)
         self.y_cut_slider.blockSignals(False)
+        self.z_plane_slider.blockSignals(False)
 
-        self.set_cut_indices(nx // 2, ny // 2, emit=False)
+        self.set_cut_indices(
+            self._nearest_index(field, "x", 0.0, nx),
+            self._nearest_index(field, "y", 0.0, ny),
+            emit=False,
+        )
+        self.volumeSelectionChanged.emit(str(key))
+        self.cutChanged.emit(self._ix, self._iy)
+        self.zPlaneChanged.emit(self._iz)
 
     def _cut_changed(self, _value: int) -> None:
         if self._updating_cuts:
@@ -272,6 +308,18 @@ class LongitudinalPane(QWidget):
         self._iy = self.y_cut_slider.value()
         self._update_views()
         self.cutChanged.emit(self._ix, self._iy)
+
+    def _z_changed(self, value: int) -> None:
+        if self._updating_cuts:
+            return
+        self._iz = int(value)
+        self._update_views()
+        self.zPlaneChanged.emit(self._iz)
+
+    def _set_z_slider(self, value: int) -> None:
+        self.z_plane_slider.blockSignals(True)
+        self.z_plane_slider.setValue(int(value))
+        self.z_plane_slider.blockSignals(False)
 
     def set_cut_indices(self, ix: int, iy: int, *, emit: bool = True) -> None:
         """Set longitudinal cut indices in LCProp field order: x index, y index."""
@@ -316,12 +364,18 @@ class LongitudinalPane(QWidget):
         _, nx, ny = data.shape
         ix = min(max(int(self._ix), 0), nx - 1)
         iy = min(max(int(self._iy), 0), ny - 1)
+        self._iz = min(max(int(self._iz), 0), data.shape[0] - 1)
 
-        x_value = self._coord_value("x", ix)
-        y_value = self._coord_value("y", iy)
+        x_value = self._coord_value(field, "x", ix)
+        y_value = self._coord_value(field, "y", iy)
+        z_value = self._coord_value(field, "z", self._iz)
 
         self.y_cut_label.setText(f"x-z cut at y = {y_value:.6g} µm")
         self.x_cut_label.setText(f"y-z cut at x = {x_value:.6g} µm")
+        self.z_plane_label.setText(f"z = {z_value:.6g} µm")
+        self.position_label.setText(
+            f"x={x_value:.6g}, y={y_value:.6g}, z={z_value:.6g} µm"
+        )
 
         xz = data[:, :, iy]   # (z, x)
         yz = data[:, ix, :]   # (z, y)
@@ -337,6 +391,10 @@ class LongitudinalPane(QWidget):
             quantity=field.quantity,
             value_unit=field.value_unit,
             colormap=field.colormap,
+            coordinates={
+                "z": self._coordinate_array(field, "z", data.shape[0]),
+                "x": self._coordinate_array(field, "x", nx),
+            },
         )
 
         yz_field = FieldData(
@@ -350,17 +408,21 @@ class LongitudinalPane(QWidget):
             quantity=field.quantity,
             value_unit=field.value_unit,
             colormap=field.colormap,
+            coordinates={
+                "z": self._coordinate_array(field, "z", data.shape[0]),
+                "y": self._coordinate_array(field, "y", ny),
+            },
         )
 
         self.xz_view.set_field(
             xz_field,
-            extent=self._run_data.geometry.extent_zx(),
+            extent=self._field_extent(field, "z", "x"),
             vmin=self._current_vmin,
             vmax=self._current_vmax,
         )
         self.yz_view.set_field(
             yz_field,
-            extent=self._run_data.geometry.extent_zy(),
+            extent=self._field_extent(field, "z", "y"),
             vmin=self._current_vmin,
             vmax=self._current_vmax,
         )
@@ -379,6 +441,10 @@ class LongitudinalPane(QWidget):
         if xz.ndim != 2 or yz.ndim != 2 or xz.shape[0] != yz.shape[0]:
             return
         self._iz = xz.shape[0] // 2
+        self.z_plane_slider.blockSignals(True)
+        self.z_plane_slider.setRange(0, xz.shape[0] - 1)
+        self.z_plane_slider.setValue(self._iz)
+        self.z_plane_slider.blockSignals(False)
         self._current_vmin = float(min(np.nanmin(xz), np.nanmin(yz)))
         self._current_vmax = float(max(np.nanmax(xz), np.nanmax(yz)))
         coordinates = xz_field.coordinates
@@ -394,6 +460,9 @@ class LongitudinalPane(QWidget):
         self.x_cut_slider.hide()
         self.y_cut_slider.hide()
         self.show_guides.hide()
+        self.position_label.setText(
+            f"exact fixed cuts: x={x_cut_um:.6g}, y={y_cut_um:.6g} µm"
+        )
         self._update_retained_fast_views()
 
     def _update_retained_fast_views(self) -> None:
@@ -426,7 +495,48 @@ class LongitudinalPane(QWidget):
             self.xz_view.clear_crosshair()
             self.yz_view.clear_crosshair()
 
-    def _coord_value(self, axis: str, index: int) -> float:
+    def select_volume(self, key: str) -> None:
+        index = self.field_selector.findData(key)
+        if index >= 0 and index != self.field_selector.currentIndex():
+            self.field_selector.setCurrentIndex(index)
+
+    def _coord_value(self, field, axis: str, index: int) -> float:
         if self._run_data is None:
             return float(index)
+        coordinates = getattr(field, "coordinates", {}) or {}
+        values = coordinates.get(axis)
+        if values is not None:
+            values = np.asarray(values)
+            if 0 <= index < values.size:
+                return float(values[index])
         return self._run_data.geometry.value(axis, index)
+
+    def _field_extent(self, field, horizontal: str, vertical: str):
+        h = np.asarray((getattr(field, "coordinates", {}) or {}).get(
+            horizontal, []
+        ))
+        v = np.asarray((getattr(field, "coordinates", {}) or {}).get(
+            vertical, []
+        ))
+        if h.size and v.size:
+            return [float(h[0]), float(h[-1]), float(v[0]), float(v[-1])]
+        return self._run_data.geometry.extent(horizontal, vertical)
+
+    def _nearest_index(self, field, axis: str, value: float, size: int) -> int:
+        coordinates = (getattr(field, "coordinates", {}) or {}).get(axis)
+        if coordinates is not None:
+            values = np.asarray(coordinates)
+            if values.size == size:
+                return int(np.argmin(np.abs(values - value)))
+        return min(max(self._run_data.geometry.nearest_index(axis, value), 0), size - 1)
+
+    def _coordinate_array(self, field, axis: str, size: int) -> np.ndarray:
+        coordinates = (getattr(field, "coordinates", {}) or {}).get(axis)
+        if coordinates is not None:
+            values = np.asarray(coordinates)
+            if values.shape == (size,):
+                return values
+        values = self._run_data.geometry.coord(axis)
+        if values is not None and values.shape == (size,):
+            return values
+        return np.arange(size, dtype=float)

@@ -26,6 +26,10 @@ from lcprop.pr.longitudinal_cuts import (
     validate_longitudinal_cut_coordinates,
 )
 from lcprop.pr.source import channel_peak_intensity_reference
+from lcprop.pr.visualization import (
+    make_fast_intensity_preview,
+    validate_fast_intensity_preview,
+)
 from lcprop.pr.specs import PRMaterialSpec, PR_MATERIAL_ID
 from lcprop.pr.static import PRStaticSolverOptions
 from lcprop.pr.static_workflow import (
@@ -56,6 +60,7 @@ PR_STATIC_REQUEST_CODEC_ID = "pr.static.request"
 PR_STATIC_RESULT_CODEC_ID = "pr.static.result"
 PR_STATIC_TRANSPORT_CODEC_VERSION = 2
 _PR_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION = 1
+PR_STATIC_RESULT_CODEC_VERSION = 3
 
 
 def _validate_request(request: PRStaticRunRequest) -> None:
@@ -195,6 +200,26 @@ def encode_pr_static_transport_result(
                     )
                 ),
             )
+        preview_data = result.intensity_preview
+        preview_metadata = result.intensity_preview_metadata
+        if (
+            result.source_intensity_stack is not None
+            and np.asarray(result.source_intensity_stack).shape[0] > 0
+        ):
+            preview = make_fast_intensity_preview(
+                result.source_intensity_stack,
+                grid_summary=result.grid_summary,
+                peak_intensity_reference=channel_peak_intensity_reference(
+                    np.asarray(result.A_initial), xp=np
+                ),
+                background_intensity=float(
+                    result.material_response_summary.get(
+                        "background_intensity", 0.0
+                    )
+                ),
+            )
+            preview_data = preview.intensity
+            preview_metadata = preview.metadata
         projected = replace(
             result,
             **{name: None for name in omitted},
@@ -202,14 +227,20 @@ def encode_pr_static_transport_result(
             longitudinal_intensity_yz=None if cuts is None else cuts.yz,
             x_cut_um=None if cuts is None else cuts.x_cut_um,
             y_cut_um=None if cuts is None else cuts.y_cut_um,
+            intensity_preview=preview_data,
+            intensity_preview_metadata=preview_metadata,
         )
     else:
         cuts = None
         projected = result
     values = asdict(projected)
     values["retention_summary"] = (
-        fast_retention_summary(omitted, cuts)
-        if cuts is not None
+        fast_retention_summary(
+            omitted,
+            cuts,
+            intensity_preview_metadata=projected.intensity_preview_metadata,
+        )
+        if policy == FAST_RESULT_POLICY
         else {"policy": policy, "omitted_fields": list(omitted)}
     )
     metadata = pack_portable(values, arrays, "result")
@@ -277,6 +308,15 @@ def _validate_result(values: Mapping[str, Any]) -> None:
     if not isinstance(omitted, (tuple, list)) or set(omitted) != expected_omitted:
         raise TransportCodecError("PR static omitted fields disagree with result policy")
     cuts_present = validate_longitudinal_cut_coordinates(values, grid)
+    try:
+        preview_present = validate_fast_intensity_preview(
+            values.get("intensity_preview"),
+            values.get("intensity_preview_metadata"),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TransportCodecError(str(exc)) from exc
+    if policy == FULL_RESULT_POLICY and preview_present:
+        raise TransportCodecError("Full PR static result retained a Fast preview")
     expected = {
         "A_initial": (nch, nx, ny),
         "A_final": (nch, nx, ny),
@@ -397,6 +437,8 @@ def decode_pr_static_transport_result(
             longitudinal_intensity_yz=values.get("longitudinal_intensity_yz"),
             x_cut_um=values.get("x_cut_um"),
             y_cut_um=values.get("y_cut_um"),
+            intensity_preview=values.get("intensity_preview"),
+            intensity_preview_metadata=values.get("intensity_preview_metadata"),
         )
         return result
     except TransportCodecError:
@@ -416,7 +458,7 @@ PR_STATIC_TRANSPORT_CODEC = TransportCodec(
     encode_request=encode_pr_static_transport_request,
     decode_request=decode_pr_static_transport_request,
     result_codec_id=PR_STATIC_RESULT_CODEC_ID,
-    result_codec_version=PR_STATIC_TRANSPORT_CODEC_VERSION,
+    result_codec_version=PR_STATIC_RESULT_CODEC_VERSION,
     result_type=PRStaticRunResult,
     encode_result=encode_pr_static_transport_result,
     decode_result=decode_pr_static_transport_result,
@@ -426,6 +468,7 @@ PR_STATIC_TRANSPORT_CODEC = TransportCodec(
     ),
     compatible_result_codec_versions=(
         _PR_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION,
+        PR_STATIC_TRANSPORT_CODEC_VERSION,
     ),
 )
 

@@ -7,6 +7,7 @@ import sys
 import numpy as np
 import pytest
 
+import lcprop.transport.executor as executor_module
 from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
@@ -50,7 +51,7 @@ from lcprop.transport.envelopes import (
     RequestEnvelope, TransportCodecError, TransportFormatError, TransportSchemaError,
     TransportVerificationError,
 )
-from lcprop.transport.executor import execute_run_directory
+from lcprop.transport.executor import _write_progress, execute_run_directory
 from lcprop.transport.io import (
     read_failure_package,
     read_request_package,
@@ -356,6 +357,8 @@ def test_pr_static_fast_projection_omits_volumes_and_presents_optics():
     products = PR_STATIC_OPERATION.to_run_data(decoded)
     assert tuple(products.fields) == (
         "input_intensity", "output_intensity",
+        "fast_optical_intensity_preview",
+        "fast_optical_intensity_preview_xy",
         "retained_fast_optical_intensity_xz",
         "retained_fast_optical_intensity_yz",
         "far_field_intensity",
@@ -365,6 +368,7 @@ def test_pr_static_fast_projection_omits_volumes_and_presents_optics():
     for name in (
         "longitudinal_intensity_xz", "longitudinal_intensity_yz",
         "x_cut_um", "y_cut_um",
+        "intensity_preview", "intensity_preview_metadata",
     ):
         legacy_metadata.pop(name)
     legacy_metadata["retention_summary"] = {
@@ -443,6 +447,7 @@ def test_pr_transverse_static_fast_projection_omits_volumes_and_keeps_far_field(
     )
     products = PR_TRANSVERSE_STATIC_OPERATION.to_run_data(decoded)
     assert "far_field_intensity" in products.fields
+    assert "fast_optical_intensity_preview" in products.fields
     assert "retained_fast_optical_intensity_xz" in products.fields
     assert "retained_fast_optical_intensity_yz" in products.fields
     assert products.longitudinal_enabled is True
@@ -450,6 +455,7 @@ def test_pr_transverse_static_fast_projection_omits_volumes_and_keeps_far_field(
     for name in (
         "longitudinal_intensity_xz", "longitudinal_intensity_yz",
         "x_cut_um", "y_cut_um",
+        "intensity_preview", "intensity_preview_metadata",
     ):
         legacy_metadata.pop(name)
     legacy_metadata["retention_summary"] = {
@@ -810,6 +816,94 @@ def test_headless_executor_uses_registered_operation_and_writes_verified_result(
     decoded = read_result_package(run_dir, registry=registry)
     assert decoded.result.status == "completed"
     assert (run_dir / "output" / "RESULT_READY.json").is_file()
+
+
+@pytest.mark.parametrize("failure_kind", ("write_text", "replace"))
+def test_progress_artifact_write_failures_are_nonfatal_and_clean_temporary_files(
+    tmp_path, monkeypatch, failure_kind
+):
+    def fail_progress_io(*_args, **_kwargs):
+        raise OSError(f"synthetic progress {failure_kind} failure")
+
+    if failure_kind == "write_text":
+        monkeypatch.setattr(Path, "write_text", fail_progress_io)
+    else:
+        monkeypatch.setattr(executor_module.os, "replace", fail_progress_io)
+
+    assert _write_progress(tmp_path, {"phase": "test"}) is False
+    assert not (tmp_path / "progress.json").exists()
+    assert not list(tmp_path.glob("progress.*.tmp"))
+
+
+@pytest.mark.parametrize(
+    "failing_phase",
+    ("initialization", "callback", "packaging", "completed"),
+)
+def test_progress_write_failure_never_changes_successful_execution(
+    tmp_path, monkeypatch, failing_phase
+):
+    registry = default_transport_registry()
+    run_dir = tmp_path / failing_phase
+    write_request_package(
+        run_dir,
+        registry=registry,
+        material_id="lc",
+        workflow_id="static",
+        request=_lc_request(),
+        run_id=f"progress-{failing_phase}",
+        execution_target="local",
+    )
+    original_write_text = Path.write_text
+
+    def injected_write_failure(path, data, *args, **kwargs):
+        if path.name.startswith("progress."):
+            payload = json.loads(data)
+            is_target = (
+                (failing_phase == "callback" and "workflow" in payload)
+                or payload.get("phase") == failing_phase
+            )
+            if is_target:
+                raise OSError(f"synthetic {failing_phase} progress failure")
+        return original_write_text(path, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", injected_write_failure)
+    assert executor_module.execute_run_directory(run_dir) == 0
+    decoded = read_result_package(run_dir, registry=registry)
+    assert decoded.result.status == "completed"
+    assert (run_dir / "output" / "RESULT_READY.json").is_file()
+    assert not list(run_dir.glob("progress.*.tmp"))
+
+
+def test_failure_progress_write_does_not_mask_original_exception(
+    tmp_path, monkeypatch
+):
+    registry = default_transport_registry()
+    run_dir = tmp_path / "failed-progress"
+    write_request_package(
+        run_dir,
+        registry=registry,
+        material_id="lc",
+        workflow_id="static",
+        request=_lc_request(),
+        run_id="failed-progress",
+        execution_target="local",
+    )
+    original_write_text = Path.write_text
+
+    def fail_failure_progress(path, data, *args, **kwargs):
+        is_progress = path.name.startswith("progress.")
+        if is_progress and json.loads(data).get("phase") == "failed":
+            raise OSError("synthetic failure-progress write failure")
+        return original_write_text(path, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_failure_progress)
+    assert executor_module.execute_run_directory(
+        run_dir, registry=registry, operations=()
+    ) == 1
+    failure = read_failure_package(run_dir)
+    assert failure.exception_type == "KeyError"
+    assert "KeyError" in failure.traceback
+    assert "OSError" not in failure.traceback
 
 
 def test_headless_module_entrypoint_runs_without_qt_or_scheduler(tmp_path):

@@ -710,6 +710,8 @@ class RemoteExecutionControls(QWidget):
 
 def remote_status_text(status: RemoteRunStatus) -> str:
     parts = ["Runner: Slurm", f"State: {status.state.value.replace('_', ' ').title()}"]
+    if status.state_message:
+        parts.append(status.state_message)
     if status.remote_job_id:
         parts.append(f"Job ID: {status.remote_job_id}")
     parts.append(f"Backend requested: {status.scientific_backend_requested}")

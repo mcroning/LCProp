@@ -28,6 +28,10 @@ from lcprop.pr.longitudinal_cuts import (
     validate_longitudinal_cut_coordinates,
 )
 from lcprop.pr.source import channel_peak_intensity_reference
+from lcprop.pr.visualization import (
+    make_fast_intensity_preview,
+    validate_fast_intensity_preview,
+)
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.pr.specs import (
     PRMaterialSpec,
@@ -59,6 +63,7 @@ PR_TIMEDEPENDENT_RESULT_CODEC_ID = "pr.timedependent.result"
 PR_TIMEDEPENDENT_TRANSPORT_CODEC_VERSION = 3
 _PR_TIMEDEPENDENT_PREVIOUS_TRANSPORT_CODEC_VERSION = 2
 _PR_TIMEDEPENDENT_LEGACY_TRANSPORT_CODEC_VERSION = 1
+PR_TIMEDEPENDENT_RESULT_CODEC_VERSION = 4
 
 
 def _validate_request(request: PRRunRequest) -> None:
@@ -250,6 +255,8 @@ def encode_pr_timedependent_transport_result(
         raise ValueError("PR time-dependent result must contain a checkpoint")
     arrays: dict[str, np.ndarray] = {}
     cuts = None
+    preview_data = result.intensity_preview
+    preview_metadata = result.intensity_preview_metadata
     if policy == FAST_RESULT_POLICY:
         if result.source_intensity_stack is None:
             try:
@@ -270,6 +277,16 @@ def encode_pr_timedependent_transport_result(
                 ),
                 background_intensity=float(request.material.background_intensity),
             )
+            preview = make_fast_intensity_preview(
+                result.source_intensity_stack,
+                grid_summary=result.grid_summary,
+                peak_intensity_reference=channel_peak_intensity_reference(
+                    np.asarray(result.A_initial), xp=np
+                ),
+                background_intensity=float(request.material.background_intensity),
+            )
+            preview_data = preview.intensity
+            preview_metadata = preview.metadata
     metadata = {
         "A_initial": pack_portable(result.A_initial, arrays, "result.A_initial"),
         "A_final": pack_portable(result.A_final, arrays, "result.A_final"),
@@ -288,6 +305,22 @@ def encode_pr_timedependent_transport_result(
         ),
         "x_cut_um": None if cuts is None else cuts.x_cut_um,
         "y_cut_um": None if cuts is None else cuts.y_cut_um,
+        "intensity_preview": (
+            None if policy != FAST_RESULT_POLICY or preview_data is None
+            else pack_portable(preview_data, arrays, "result.intensity_preview")
+        ),
+        "intensity_preview_metadata": (
+            preview_metadata if policy == FAST_RESULT_POLICY else None
+        ),
+        "td_scalar_history": pack_portable(
+            result.td_scalar_history, arrays, "result.td_scalar_history"
+        ),
+        "td_preview_movie": (
+            None if result.td_preview_movie is None else pack_portable(
+                result.td_preview_movie, arrays, "result.td_preview_movie"
+            )
+        ),
+        "td_preview_movie_metadata": result.td_preview_movie_metadata,
         "power_initial": float(result.power_initial),
         "power_final": float(result.power_final),
         "completed_steps": int(result.completed_steps),
@@ -305,8 +338,18 @@ def encode_pr_timedependent_transport_result(
             result.diagnostics, arrays, "result.diagnostics"
         ),
         "retention_summary": (
-            fast_retention_summary(_FAST_OMITTED_FIELDS, cuts)
-            if cuts is not None
+            fast_retention_summary(
+                _FAST_OMITTED_FIELDS,
+                cuts,
+                intensity_preview_metadata=preview_metadata,
+                additional_retained_fields=("td_scalar_history",) + (
+                    ("td_preview_movie", "td_preview_movie_metadata")
+                    if result.td_preview_movie is not None
+                    else (("td_preview_movie_metadata",)
+                          if result.td_preview_movie_metadata is not None else ())
+                ),
+            )
+            if policy == FAST_RESULT_POLICY
             else {
                 "policy": policy,
                 "omitted_fields": (
@@ -418,6 +461,32 @@ def _validate_result(values: Mapping[str, Any]) -> None:
             "PR time-dependent omitted fields disagree with result policy"
         )
     cuts_present = validate_longitudinal_cut_coordinates(values, grid)
+    try:
+        preview_present = validate_fast_intensity_preview(
+            values.get("intensity_preview"),
+            values.get("intensity_preview_metadata"),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TransportCodecError(str(exc)) from exc
+    if policy == FULL_RESULT_POLICY and preview_present:
+        raise TransportCodecError("Full TD result retained a Fast MPR preview")
+    history = values.get("td_scalar_history", ())
+    if not isinstance(history, (tuple, list)) or any(
+        not isinstance(row, Mapping) for row in history
+    ):
+        raise TransportCodecError("TD scalar history must contain mapping rows")
+    movie = values.get("td_preview_movie")
+    movie_metadata = values.get("td_preview_movie_metadata")
+    if movie is not None and (
+        not isinstance(movie, np.ndarray) or movie.dtype != np.uint8
+    ):
+        raise TransportCodecError("TD preview movie must be a uint8 artifact")
+    if movie is not None and not isinstance(movie_metadata, Mapping):
+        raise TransportCodecError("TD preview movie lacks metadata")
+    if movie is None and movie_metadata is not None and not isinstance(
+        movie_metadata, Mapping
+    ):
+        raise TransportCodecError("TD preview movie metadata is invalid")
     if policy == FULL_RESULT_POLICY:
         _require_array(values, "E_initial", (nz, nx, ny), "real")
         _require_array(values, "E_final", (nz, nx, ny), "real")
@@ -528,6 +597,14 @@ def decode_pr_timedependent_transport_result(
 
     try:
         values = unpack_portable(dict(metadata), arrays)
+        for name, default in (
+            ("intensity_preview", None),
+            ("intensity_preview_metadata", None),
+            ("td_scalar_history", ()),
+            ("td_preview_movie", None),
+            ("td_preview_movie_metadata", None),
+        ):
+            values.setdefault(name, default)
         _validate_result(values)
         retention = dict(values.get("retention_summary", {
             "policy": FULL_RESULT_POLICY,
@@ -558,6 +635,11 @@ def decode_pr_timedependent_transport_result(
             longitudinal_intensity_yz=values.get("longitudinal_intensity_yz"),
             x_cut_um=values.get("x_cut_um"),
             y_cut_um=values.get("y_cut_um"),
+            intensity_preview=values.get("intensity_preview"),
+            intensity_preview_metadata=values.get("intensity_preview_metadata"),
+            td_scalar_history=tuple(values.get("td_scalar_history", ())),
+            td_preview_movie=values.get("td_preview_movie"),
+            td_preview_movie_metadata=values.get("td_preview_movie_metadata"),
             material_response_summary=dict(
                 values.get(
                     "material_response_summary",
@@ -586,7 +668,7 @@ PR_TIMEDEPENDENT_TRANSPORT_CODEC = TransportCodec(
     encode_request=encode_pr_timedependent_transport_request,
     decode_request=decode_pr_timedependent_transport_request,
     result_codec_id=PR_TIMEDEPENDENT_RESULT_CODEC_ID,
-    result_codec_version=PR_TIMEDEPENDENT_TRANSPORT_CODEC_VERSION,
+    result_codec_version=PR_TIMEDEPENDENT_RESULT_CODEC_VERSION,
     result_type=PRRunResult,
     encode_result=encode_pr_timedependent_transport_result,
     decode_result=decode_pr_timedependent_transport_result,
@@ -598,6 +680,7 @@ PR_TIMEDEPENDENT_TRANSPORT_CODEC = TransportCodec(
     compatible_result_codec_versions=(
         _PR_TIMEDEPENDENT_LEGACY_TRANSPORT_CODEC_VERSION,
         _PR_TIMEDEPENDENT_PREVIOUS_TRANSPORT_CODEC_VERSION,
+        PR_TIMEDEPENDENT_TRANSPORT_CODEC_VERSION,
     ),
 )
 

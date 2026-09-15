@@ -12,7 +12,11 @@ from lcprop.core.backend import asnumpy, get_backend
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch import OpticalLaunchContext, build_launch, normalized_power
-from lcprop.optics.splitstep import advance_prepared_response, linear_kernel
+from lcprop.optics.splitstep import (
+    advance_prepared_response,
+    linear_kernel,
+    total_intensity,
+)
 from lcprop.pr.checkpoint import (
     PRTimeDependentCheckpoint,
     validate_pr_checkpoint,
@@ -51,6 +55,11 @@ from lcprop.pr.specs import (
     validate_pr_timedependent_configuration,
 )
 from lcprop.pr.transverse.specs import PR_MATERIAL_RESPONSE_LINEARIZED
+from lcprop.pr.visualization import (
+    TD_MOVIE_MAX_FRAMES,
+    downsample_td_movie_frame,
+    encode_td_preview_movie,
+)
 from lcprop.optics.launch_configuration import (
     LaunchConfiguration,
     reject_prepared_launch_conflict,
@@ -490,6 +499,35 @@ def run_pr_timedependent(
     cancellation_observed_at: float | None = None
     source_stack = grid.xp.empty(E.shape, dtype=grid.real_dtype)
     accepted_observation: tuple[int, Any, Any] | None = None
+    td_scalar_history: list[dict[str, float]] = []
+    movie_indices = set(np.unique(np.rint(np.linspace(
+        completed_steps,
+        requested_steps,
+        min(segment_total_steps + 1, TD_MOVIE_MAX_FRAMES),
+    )).astype(int)).tolist())
+    movie_frames: list[np.ndarray] = []
+    movie_frame_indices: list[int] = []
+    movie_times: list[float] = []
+
+    def retain_movie_frame(index: int, optical_field) -> None:
+        if progress_callback is None or index not in movie_indices:
+            return
+        if movie_frame_indices and movie_frame_indices[-1] == int(index):
+            return
+        intensity = total_intensity(
+            optical_field,
+            coherence_groups=launch.coherence_groups,
+            xp=grid.xp,
+        )
+        movie_frames.append(
+            downsample_td_movie_frame(np.asarray(asnumpy(intensity)))
+        )
+        movie_frame_indices.append(int(index))
+        movie_times.append(
+            float(_cumulative_start_time)
+            + (int(index) - int(_completed_steps_offset))
+            * float(request.solver.dt_normalized)
+        )
 
     def source_intensity_for_state(candidate_E):
         nonlocal accepted_observation
@@ -510,6 +548,7 @@ def run_pr_timedependent(
                 candidate_A,
                 candidate_source,
             )
+            retain_movie_frame(completed_steps, candidate_A)
         return candidate_source
 
     for step_index in range(segment_total_steps):
@@ -604,6 +643,9 @@ def run_pr_timedependent(
             cancellation_observed_at = perf_counter()
             break
 
+        material_change_rms = float(asnumpy(grid.xp.sqrt(
+            grid.xp.mean((candidate_E - E) * (candidate_E - E))
+        )))
         E = candidate_E
         if request.solver.integrator in (
             PR_EULER_INTEGRATOR,
@@ -614,6 +656,26 @@ def run_pr_timedependent(
         completed_steps = (
             int(_completed_steps_offset) + segment_completed_steps
         )
+        scalar_row = {
+            "material_time_normalized": (
+                float(_cumulative_start_time)
+                + segment_completed_steps * float(request.solver.dt_normalized)
+            ),
+            "material_state_change_rms": material_change_rms,
+        }
+        if not linearized:
+            carrier = 1.0 + (
+                grid.xp.roll(E, -1, axis=-2)
+                - grid.xp.roll(E, 1, axis=-2)
+            ) / (
+                2.0
+                * request.material.characteristic_wavenumber_per_um
+                * grid.dx_um
+            )
+            scalar_row["minimum_carrier_density"] = float(
+                asnumpy(grid.xp.min(carrier))
+            )
+        td_scalar_history.append(scalar_row)
 
         if progress_callback is not None:
             assert candidate_observation is not None
@@ -703,6 +765,8 @@ def run_pr_timedependent(
             peak_reference=peak_reference,
             wavelength_um=wavelength_um,
         )
+    if optical_observation != "unpropagated_launch_fallback":
+        retain_movie_frame(completed_steps, A_final)
 
     status = "cancelled" if cancelled else "completed"
     A0_host = np.asarray(asnumpy(A0)).copy()
@@ -812,6 +876,16 @@ def run_pr_timedependent(
             xp=grid.xp,
         )
 
+    movie = encode_td_preview_movie(
+        movie_frames,
+        frame_indices=movie_frame_indices,
+        material_times=movie_times,
+        original_grid=grid.summary(),
+        original_cadence=float(request.solver.dt_normalized),
+    )
+    if movie.warning is not None:
+        diagnostics["td_preview_warning"] = movie.warning
+
     return PRRunResult(
         A_initial=A0_host,
         A_final=np.asarray(asnumpy(A_final)).copy(),
@@ -841,6 +915,9 @@ def run_pr_timedependent(
                 "exact_modal" if linearized else request.solver.integrator
             ),
         },
+        td_scalar_history=tuple(td_scalar_history),
+        td_preview_movie=movie.data,
+        td_preview_movie_metadata=movie.metadata,
     )
 
 

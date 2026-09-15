@@ -205,6 +205,7 @@ class PRMainWindow(QWidget):
         self._hydrating_checkpoint = False
         self._hydrating_experiment = False
         self.checkpoint_compatibility_reason: str | None = None
+        self._progress_console_state: dict[str, tuple[str, int]] = {}
 
         self.setWindowTitle("LCProp PR")
         self.setMinimumSize(1200, 760)
@@ -1465,6 +1466,7 @@ class PRMainWindow(QWidget):
         self._thread_done = False
         self.run_status = "running"
         self.last_progress = None
+        self._progress_console_state.clear()
         self.status_label.setText("Running…")
         self.tabs.setCurrentWidget(self.results_panel)
         self._set_configuration_enabled(False)
@@ -1570,17 +1572,33 @@ class PRMainWindow(QWidget):
                 progress.state.value.replace("_", " ").title()
             )
             self.results_panel.set_td_time_indicator(message)
-            self.results_panel.append_console(message)
+            structured = (progress.progress_metadata or {}).get(
+                "structured_progress", {}
+            )
+            phase = str(structured.get("phase", progress.state.value))
+            if self._progress_console_due(
+                "remote",
+                int(structured.get("completed_units", 0)),
+                int(structured.get("total_units", 0)),
+                phase,
+            ):
+                self.results_panel.append_console(message)
             return
         if progress.workflow == PR_TRANSVERSE_STATIC_WORKFLOW:
             diagnostics = progress.diagnostics or {}
             if diagnostics.get("phase") == "gui_products":
                 self.status_label.setText(progress.message)
                 self.results_panel.set_td_time_indicator(progress.message)
-                self.results_panel.append_console(
-                    f"{progress.message}; "
-                    f"elapsed={progress.elapsed_wall_time:.3f} s"
-                )
+                if self._progress_console_due(
+                    progress.workflow,
+                    progress.completed_units,
+                    progress.total_units,
+                    str(diagnostics.get("phase", "products")),
+                ):
+                    self.results_panel.append_console(
+                        f"{progress.message}; "
+                        f"elapsed={progress.elapsed_wall_time:.3f} s"
+                    )
                 return
             linearized = diagnostics.get("material_response") == "linearized"
             self.status_label.setText(
@@ -1592,7 +1610,13 @@ class PRMainWindow(QWidget):
                 "PR transverse static coupled iteration: "
                 f"{progress.completed_units}/{progress.total_units}"
             )
-            self.results_panel.append_console(
+            if self._progress_console_due(
+                progress.workflow,
+                progress.completed_units,
+                progress.total_units,
+                "solve",
+            ):
+                self.results_panel.append_console(
                 "PR transverse static progress: "
                 f"iteration {progress.completed_units}/"
                 f"{progress.total_units}; "
@@ -1602,12 +1626,18 @@ class PRMainWindow(QWidget):
                 f"{diagnostics.get('material_response_rms', float('nan')):.6g}; "
                 f"max={diagnostics.get('material_response_max', float('nan')):.6g}; "
                 f"elapsed={progress.elapsed_wall_time:.3f} s"
-            )
+                )
             return
         if progress.workflow == PR_IMAGE_AMPLIFICATION_WORKFLOW:
             self.status_label.setText(progress.message)
             self.results_panel.set_td_time_indicator(progress.message)
-            self.results_panel.append_console(progress.message)
+            if self._progress_console_due(
+                progress.workflow,
+                progress.completed_units,
+                progress.total_units,
+                "image_amplification",
+            ):
+                self.results_panel.append_console(progress.message)
             return
         if progress.workflow == PR_STATIC_WORKFLOW:
             diagnostics = progress.diagnostics or {}
@@ -1621,10 +1651,16 @@ class PRMainWindow(QWidget):
                     )
                 else:
                     self.results_panel.set_td_time_indicator(progress.message)
-                self.results_panel.append_console(
-                    f"{progress.message}; "
-                    f"elapsed={progress.elapsed_wall_time:.3f} s"
-                )
+                if self._progress_console_due(
+                    progress.workflow,
+                    progress.completed_units,
+                    progress.total_units,
+                    str(phase),
+                ):
+                    self.results_panel.append_console(
+                        f"{progress.message}; "
+                        f"elapsed={progress.elapsed_wall_time:.3f} s"
+                    )
                 return
             self.status_label.setText(
                 f"Slice {progress.completed_units}/{progress.total_units}"
@@ -1634,12 +1670,18 @@ class PRMainWindow(QWidget):
                 f"{float(progress.current_coordinate):.6g} µm; "
                 f"slices: {progress.completed_units}/{progress.total_units}"
             )
-            self.results_panel.append_console(
+            if self._progress_console_due(
+                progress.workflow,
+                progress.completed_units,
+                progress.total_units,
+                "solve",
+            ):
+                self.results_panel.append_console(
                 "PR static progress: "
                 f"slice {progress.completed_units}/{progress.total_units}; "
                 f"z={float(progress.current_coordinate):.6g} µm; "
                 f"elapsed={progress.elapsed_wall_time:.3f} s"
-            )
+                )
             return
         self.status_label.setText(
             f"Step {progress.completed_units}/{progress.total_units}"
@@ -1649,12 +1691,37 @@ class PRMainWindow(QWidget):
             f"{float(progress.current_coordinate):.6g} normalized; "
             f"step {progress.completed_units}/{progress.total_units}"
         )
-        self.results_panel.append_console(
-            "PR progress: "
-            f"step {progress.completed_units}/{progress.total_units}; "
-            f"normalized time={float(progress.current_coordinate):.6g}; "
-            f"elapsed={progress.elapsed_wall_time:.3f} s"
+        if self._progress_console_due(
+            progress.workflow,
+            progress.completed_units,
+            progress.total_units,
+            "material_time",
+        ):
+            self.results_panel.append_console(
+                "PR progress: "
+                f"step {progress.completed_units}/{progress.total_units}; "
+                f"normalized time={float(progress.current_coordinate):.6g}; "
+                f"elapsed={progress.elapsed_wall_time:.3f} s"
+            )
+
+    def _progress_console_due(
+        self,
+        key: str,
+        completed: int,
+        total: int,
+        phase: str,
+    ) -> bool:
+        """Keep normal progress bounded while status widgets remain live."""
+
+        bucket = (
+            min(10, int(10 * max(completed, 0) / total))
+            if total > 0 else 0
         )
+        state = (str(phase), bucket)
+        if self._progress_console_state.get(key) == state:
+            return False
+        self._progress_console_state[key] = state
+        return True
 
     @Slot(object)
     def _on_finished(self, runner_result) -> None:

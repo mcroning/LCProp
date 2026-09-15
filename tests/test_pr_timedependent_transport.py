@@ -280,17 +280,20 @@ def test_reduced_td_fast_projection_keeps_optics_and_omits_full_volumes():
     products = PR_TIMEDEPENDENT_OPERATION.to_run_data(decoded)
     assert tuple(products.fields) == (
         "input_intensity", "output_intensity",
+        "fast_optical_intensity_preview",
+        "fast_optical_intensity_preview_xy",
         "retained_fast_optical_intensity_xz",
         "retained_fast_optical_intensity_yz",
         "far_field_intensity",
     )
     assert products.longitudinal_enabled is True
-    assert "only the transverse cuts" in products.longitudinal_message
+    assert "downsampled preview" in products.longitudinal_message
 
     legacy_metadata = dict(encoded.payload.metadata)
     for name in (
         "longitudinal_intensity_xz", "longitudinal_intensity_yz",
         "x_cut_um", "y_cut_um",
+        "intensity_preview", "intensity_preview_metadata",
     ):
         legacy_metadata.pop(name)
     legacy_metadata["retention_summary"] = {
@@ -304,6 +307,54 @@ def test_reduced_td_fast_projection_keeps_optics_and_omits_full_volumes():
     legacy_products = PR_TIMEDEPENDENT_OPERATION.to_run_data(legacy_result)
     assert legacy_products.longitudinal_enabled is False
     assert "Full result retrieval" in legacy_products.longitudinal_message
+
+    cuts_only_metadata = dict(encoded.payload.metadata)
+    cuts_only_metadata.pop("intensity_preview")
+    cuts_only_metadata.pop("intensity_preview_metadata")
+    cuts_only_result = decode_pr_timedependent_transport_result(
+        cuts_only_metadata, encoded.payload.arrays
+    )
+    cuts_only_products = PR_TIMEDEPENDENT_OPERATION.to_run_data(
+        cuts_only_result
+    )
+    assert cuts_only_products.longitudinal_enabled is True
+    assert "only the transverse cuts" in cuts_only_products.longitudinal_message
+
+
+def test_reduced_td_visualization_observation_does_not_change_science():
+    request = _request()
+    reference = PR_TIMEDEPENDENT_OPERATION.run(request)
+    progress = []
+    observed = PR_TIMEDEPENDENT_OPERATION.run(
+        request, progress_callback=progress.append
+    )
+    for name in ("A_final", "E_final", "source_intensity_stack"):
+        np.testing.assert_array_equal(
+            getattr(observed, name), getattr(reference, name)
+        )
+    assert len(observed.td_scalar_history) == request.solver.Nt
+    assert all(
+        "material_state_change_rms" in row
+        for row in observed.td_scalar_history
+    )
+    assert observed.td_preview_movie_metadata["visualization_only"] is True
+    encoded = encode_pr_timedependent_transport_result(observed, "fast")
+    assert not any(
+        np.asarray(value).ndim == 4 for value in encoded.payload.arrays.values()
+    )
+    decoded = decode_pr_timedependent_transport_result(
+        encoded.payload.metadata, encoded.payload.arrays
+    )
+    assert decoded.td_scalar_history == observed.td_scalar_history
+    if observed.td_preview_movie is not None:
+        np.testing.assert_array_equal(
+            decoded.td_preview_movie, observed.td_preview_movie
+        )
+    products = PR_TIMEDEPENDENT_OPERATION.to_run_data(observed)
+    assert "material_state_change_rms" in products.curves
+    assert "minimum_carrier_density" in products.curves
+    if observed.td_preview_movie is not None:
+        assert products.artifacts["td_preview_movie"].media_type == "video/mp4"
 
 
 @pytest.mark.parametrize("after_accepted_step", (False, True))

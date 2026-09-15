@@ -207,6 +207,22 @@ class FakeTransport:
         raise AssertionError(f"unexpected download {remote}")
 
 
+class StructuredProgressTransport(FakeTransport):
+    def ssh(self, host, *arguments):
+        if arguments[0] == "cat" and str(arguments[1]).endswith(
+            "/progress.json"
+        ):
+            return json.dumps({
+                "schema_version": 1,
+                "status": "running",
+                "phase": "solve",
+                "message": "Running — slice 2/10",
+                "completed_units": 2,
+                "total_units": 10,
+            })
+        return super().ssh(host, *arguments)
+
+
 def _cleanup_commands(transport):
     return [
         arguments
@@ -496,6 +512,62 @@ def test_slurm_runner_submits_exactly_once_and_completes_only_after_reconstructi
     assert states[-1].remote_artifacts_retained is False
     assert states[-1].remote_cleanup_error is None
     assert (Path(states[-1].local_artifact_location) / "output").is_dir()
+
+
+def test_slurm_runner_surfaces_structured_progress_at_existing_poll_cadence(
+    tmp_path,
+):
+    transport = StructuredProgressTransport()
+    states = []
+    runner = SlurmRunner(
+        _config(tmp_path),
+        (LC_STATIC_OPERATION,),
+        transport=transport,
+        registry=default_transport_registry(),
+        sleep=lambda _seconds: None,
+    )
+    runner.run_registered(
+        "lc", "static", _request(), progress_callback=states.append
+    )
+    progress = next(
+        state for state in states
+        if state.state_message == "Running — slice 2/10"
+    )
+    assert progress.progress_metadata["structured_progress"][
+        "completed_units"
+    ] == 2
+
+
+@pytest.mark.parametrize("progress_response", (None, "", "{", "[]"))
+def test_slurm_runner_ignores_missing_partial_or_malformed_progress(
+    tmp_path, progress_response
+):
+    class UnavailableProgressTransport(FakeTransport):
+        def ssh(self, host, *arguments):
+            if arguments[0] == "cat" and str(arguments[1]).endswith(
+                "/progress.json"
+            ):
+                if progress_response is None:
+                    raise OSError("synthetic missing progress artifact")
+                return progress_response
+            return super().ssh(host, *arguments)
+
+    transport = UnavailableProgressTransport()
+    states = []
+    runner = SlurmRunner(
+        _config(tmp_path),
+        (LC_STATIC_OPERATION,),
+        transport=transport,
+        registry=default_transport_registry(),
+        sleep=lambda _seconds: None,
+    )
+
+    completed = runner.run_registered(
+        "lc", "static", _request(), progress_callback=states.append
+    )
+
+    assert completed.run_data is not None
+    assert states[-1].state == RemoteRunState.COMPLETED
 
 
 @pytest.mark.parametrize(

@@ -218,6 +218,7 @@ def test_transverse_td_fast_projection_retains_optics_and_far_field():
     assert "input_intensity" in products.fields
     assert "output_intensity" in products.fields
     assert "far_field_intensity" in products.fields
+    assert "fast_optical_intensity_preview" in products.fields
     assert "retained_fast_optical_intensity_xz" in products.fields
     assert "retained_fast_optical_intensity_yz" in products.fields
     assert products.longitudinal_enabled is True
@@ -226,6 +227,7 @@ def test_transverse_td_fast_projection_retains_optics_and_far_field():
     for name in (
         "longitudinal_intensity_xz", "longitudinal_intensity_yz",
         "x_cut_um", "y_cut_um",
+        "intensity_preview", "intensity_preview_metadata",
     ):
         legacy_metadata.pop(name)
     legacy_metadata["retention_summary"] = {
@@ -551,7 +553,8 @@ def test_transverse_td_result_size_is_canonical_state_plus_diagnostics():
     }
     assert state_keys.issubset(arrays)
     assert set(arrays) - state_keys == {
-        "result__diagnostics__carrier_integrals_per_z"
+        "result__diagnostics__carrier_integrals_per_z",
+        "result__source_intensity_stack",
     }
     optical_bytes = arrays["result__A_initial"].nbytes + arrays[
         "result__A_final"
@@ -564,6 +567,34 @@ def test_transverse_td_result_size_is_canonical_state_plus_diagnostics():
     diagnostic_bytes = arrays[
         "result__diagnostics__carrier_integrals_per_z"
     ].nbytes
+    source_bytes = arrays["result__source_intensity_stack"].nbytes
     assert sum(value.nbytes for value in arrays.values()) == (
-        optical_bytes + material_bytes + diagnostic_bytes
+        optical_bytes + material_bytes + diagnostic_bytes + source_bytes
     )
+
+
+def test_transverse_td_visualization_observation_does_not_change_science():
+    request = _request()
+    reference = PR_TRANSVERSE_TIMEDEPENDENT_OPERATION.run(request)
+    progress = []
+    observed = PR_TRANSVERSE_TIMEDEPENDENT_OPERATION.run(
+        request, progress_callback=progress.append
+    )
+    for name in ("A_final", "psi_final", "source_intensity_stack"):
+        np.testing.assert_array_equal(
+            getattr(observed, name), getattr(reference, name)
+        )
+    assert len(observed.td_scalar_history) == request.solver.Nt
+    encoded = encode_pr_transverse_timedependent_transport_result(
+        observed, "fast"
+    )
+    assert not any(
+        np.asarray(value).ndim == 4 for value in encoded.payload.arrays.values()
+    )
+    decoded = decode_pr_transverse_timedependent_transport_result(
+        encoded.payload.metadata, encoded.payload.arrays
+    )
+    assert decoded.td_scalar_history == observed.td_scalar_history
+    products = PR_TRANSVERSE_TIMEDEPENDENT_OPERATION.to_run_data(observed)
+    assert "material_state_change_rms" in products.curves
+    assert "minimum_carrier_density" in products.curves

@@ -193,6 +193,8 @@ class PRStaticRunResult:
     longitudinal_intensity_yz: np.ndarray | None = None
     x_cut_um: float | None = None
     y_cut_um: float | None = None
+    intensity_preview: np.ndarray | None = None
+    intensity_preview_metadata: dict[str, Any] | None = None
 
 
 def _backend_scalar(value) -> float:

@@ -116,23 +116,38 @@ def extract_backend_longitudinal_optical_intensity_cuts(
 
 def fast_retention_summary(
     omitted_fields: tuple[str, ...],
-    cuts: PRLongitudinalIntensityCuts,
+    cuts: PRLongitudinalIntensityCuts | None,
+    *,
+    intensity_preview_metadata: Mapping[str, Any] | None = None,
+    additional_retained_fields: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Describe the compact retained Fast longitudinal products."""
 
-    return {
-        "policy": "fast",
-        "omitted_fields": list(omitted_fields),
-        "retained_fields": [
+    retained = []
+    if cuts is not None:
+        retained.extend([
             "longitudinal_intensity_xz",
             "longitudinal_intensity_yz",
             "x_cut_um",
             "y_cut_um",
-        ],
-        "longitudinal_cut_selection": "nearest_transverse_sample_to_zero",
-        "x_cut_um": cuts.x_cut_um,
-        "y_cut_um": cuts.y_cut_um,
+        ])
+    if intensity_preview_metadata is not None:
+        retained.extend(["intensity_preview", "intensity_preview_metadata"])
+    retained.extend(additional_retained_fields)
+    summary = {
+        "policy": "fast",
+        "omitted_fields": list(omitted_fields),
+        "retained_fields": retained,
     }
+    if cuts is not None:
+        summary.update({
+            "longitudinal_cut_selection": "nearest_transverse_sample_to_zero",
+            "x_cut_um": cuts.x_cut_um,
+            "y_cut_um": cuts.y_cut_um,
+        })
+    if intensity_preview_metadata is not None:
+        summary["intensity_preview"] = dict(intensity_preview_metadata)
+    return summary
 
 
 def retained_longitudinal_intensity_cuts(result: Any) -> PRLongitudinalIntensityCuts:

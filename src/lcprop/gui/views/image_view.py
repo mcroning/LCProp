@@ -30,6 +30,7 @@ class ImageView(FigureCanvasQTAgg):
         self._field = None
         self._raw_shape = None
         self._extent = None
+        self._axis_coordinates = (None, None)
         self._full_display_extent = None
         self._default_display_extent = None
         self._pan_anchor = None
@@ -92,6 +93,15 @@ class ImageView(FigureCanvasQTAgg):
         self._field = field
         self._raw_shape = raw.shape
         self._extent = extent
+        coordinates = getattr(field, "coordinates", {}) or {}
+        resolved_coordinates = []
+        for axis, size in zip(field.axes, raw.shape):
+            values = coordinates.get(axis)
+            array = None if values is None else np.asarray(values)
+            resolved_coordinates.append(
+                array if array is not None and array.shape == (size,) else None
+            )
+        self._axis_coordinates = tuple(resolved_coordinates)
 
         # Figure, axes, image, and colorbar are created once. Live updates only
         # replace artist data and text, preserving the fixed axes rectangles.
@@ -302,6 +312,9 @@ class ImageView(FigureCanvasQTAgg):
         return lower, upper
 
     def _index_to_display_coordinates(self, ix: int, iy: int) -> tuple[float, float]:
+        x_coordinates, y_coordinates = self._axis_coordinates
+        if x_coordinates is not None and y_coordinates is not None:
+            return float(x_coordinates[ix]), float(y_coordinates[iy])
         nx, ny = self._raw_shape
         if self._extent is None:
             return float(ix), float(iy)
@@ -313,7 +326,11 @@ class ImageView(FigureCanvasQTAgg):
 
     def _display_coordinates_to_index(self, x_value: float, y_value: float) -> tuple[int, int]:
         nx, ny = self._raw_shape
-        if self._extent is None:
+        x_coordinates, y_coordinates = self._axis_coordinates
+        if x_coordinates is not None and y_coordinates is not None:
+            ix = int(np.argmin(np.abs(x_coordinates - x_value)))
+            iy = int(np.argmin(np.abs(y_coordinates - y_value)))
+        elif self._extent is None:
             ix = int(round(x_value))
             iy = int(round(y_value))
         else:

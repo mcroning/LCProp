@@ -257,6 +257,12 @@ class PRTransverseRunResult:
     longitudinal_intensity_yz: Any | None = None
     x_cut_um: float | None = None
     y_cut_um: float | None = None
+    intensity_preview: Any | None = None
+    intensity_preview_metadata: dict[str, Any] | None = None
+    source_intensity_stack: Any | None = None
+    td_scalar_history: tuple[dict[str, Any], ...] = ()
+    td_preview_movie: Any | None = None
+    td_preview_movie_metadata: dict[str, Any] | None = None
 
 
 __all__ = [

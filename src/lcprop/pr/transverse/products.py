@@ -22,6 +22,7 @@ from lcprop.pr.transverse.static_workflow import (
 )
 from lcprop.pr.transverse.transport import PRTransverseState, state_from_potential
 from lcprop.products.data_model import (
+    ArtifactData,
     CurveCollection,
     CurveData,
     DiagnosticCollection,
@@ -77,6 +78,64 @@ def _readonly_view(value) -> np.ndarray:
     return view
 
 
+def _physical_intensity_volume(result, source) -> np.ndarray:
+    profile = result.resolved_profile
+    material = profile["material"]
+    background = float(material["dark_intensity"]) + float(
+        material["uniform_background_intensity"]
+    )
+    reference = channel_peak_intensity_reference(result.A_initial, xp=np)
+    return (np.asarray(source) - background) * float(reference)
+
+
+def _td_scalar_curves(result) -> CurveCollection:
+    rows = tuple(getattr(result, "td_scalar_history", ()))
+    curves = CurveCollection()
+    if not rows:
+        return curves
+    time = np.asarray([row["material_time_normalized"] for row in rows])
+    for key, title, y_label in (
+        (
+            "material_state_change_rms",
+            "Material-State Change RMS vs Material Time",
+            "Material-state change RMS",
+        ),
+        (
+            "minimum_carrier_density",
+            "Minimum Carrier Density vs Material Time",
+            "Minimum normalized carrier density",
+        ),
+    ):
+        if all(key in row for row in rows):
+            curves.add(key, CurveData(
+                key=key,
+                display_name=title,
+                x=time,
+                y=np.asarray([row[key] for row in rows]),
+                x_label="Material time",
+                y_label=y_label,
+                units={"x": "normalized", "y": "1"},
+            ))
+    return curves
+
+
+def _td_preview_artifacts(result) -> dict[str, ArtifactData]:
+    movie = getattr(result, "td_preview_movie", None)
+    metadata = getattr(result, "td_preview_movie_metadata", None)
+    if movie is None or not isinstance(metadata, dict):
+        return {}
+    return {
+        "td_preview_movie": ArtifactData(
+            key="td_preview_movie",
+            display_name="Downsampled TD Preview (MP4)",
+            data=np.asarray(movie, dtype=np.uint8),
+            media_type="video/mp4",
+            filename="pr_td_preview.mp4",
+            metadata=deepcopy(metadata),
+        )
+    }
+
+
 def _fast_optical_run_data(result, *, workflow: str, geometry: Geometry) -> RunData:
     """Present compact optical endpoints, far field, and center cuts."""
 
@@ -120,6 +179,45 @@ def _fast_optical_run_data(result, *, workflow: str, geometry: Geometry) -> RunD
         result.longitudinal_intensity_xz is not None
         and result.longitudinal_intensity_yz is not None
     )
+    has_preview = (
+        getattr(result, "intensity_preview", None) is not None
+        and isinstance(getattr(result, "intensity_preview_metadata", None), dict)
+    )
+    if has_preview:
+        preview = _readonly_view(result.intensity_preview)
+        coordinates = result.intensity_preview_metadata["preview_coordinates_um"]
+        field_coordinates = {
+            axis: np.asarray(coordinates[axis], dtype=np.float64)
+            for axis in ("z", "x", "y")
+        }
+        field_coordinates["preview_metadata"] = deepcopy(
+            result.intensity_preview_metadata
+        )
+        fields.add("fast_optical_intensity_preview", make_field(
+            "fast_optical_intensity_preview",
+            "Fast Optical Intensity MPR Preview (Downsampled)",
+            preview,
+            ("z", "x", "y"),
+            "intensity_preview",
+            {"z": "um", "x": "um", "y": "um"},
+            "longitudinal",
+            quantity="physical_optical_intensity_preview",
+            value_unit="1/µm²",
+            coordinates=field_coordinates,
+        ))
+        fields.add("fast_optical_intensity_preview_xy", make_field(
+            "fast_optical_intensity_preview_xy",
+            "Fast Optical Intensity MPR x-y (Downsampled)",
+            preview[preview.shape[0] // 2],
+            ("x", "y"),
+            "intensity_preview",
+            {"x": "um", "y": "um"},
+            quantity="physical_optical_intensity_preview",
+            value_unit="1/µm²",
+            source_volume_key="fast_optical_intensity_preview",
+            coordinates=field_coordinates,
+            initially_selected=True,
+        ))
     if has_longitudinal_cuts:
         cut_coordinates = {
             "retention": "fast_center_nearest",
@@ -182,12 +280,25 @@ def _fast_optical_run_data(result, *, workflow: str, geometry: Geometry) -> RunD
     _add_carrier_power_diagnostic(diagnostics, result)
     return RunData(
         workflow=workflow, geometry=geometry, fields=fields,
-        curves=CurveCollection(), diagnostics=diagnostics,
-        longitudinal_enabled=has_longitudinal_cuts,
+        curves=(
+            _td_scalar_curves(result)
+            if workflow == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
+            else CurveCollection()
+        ),
+        diagnostics=diagnostics,
+        longitudinal_enabled=has_longitudinal_cuts or has_preview,
         longitudinal_message=(
-            "Fast retrieval retains only the transverse cuts nearest x=0 and y=0; "
-            "use Full retrieval for selectable longitudinal volumes."
-            if has_longitudinal_cuts else _FAST_VOLUME_MESSAGE
+            "Fast MPR uses a labeled downsampled preview; exact full-resolution "
+            "nearest-zero x-z/y-z cuts remain separate quantitative products."
+            if has_preview else (
+                "Fast retrieval retains only the transverse cuts nearest x=0 "
+                "and y=0; use Full retrieval for selectable volumes."
+                if has_longitudinal_cuts else _FAST_VOLUME_MESSAGE
+            )
+        ),
+        artifacts=(
+            _td_preview_artifacts(result)
+            if workflow == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW else {}
         ),
     )
 
@@ -608,6 +719,33 @@ def pr_transverse_result_to_run_data(result: PRTransverseRunResult) -> RunData:
         ("x", "y"), "intensity", spatial_units,
         quantity="normalized_intensity", value_unit="1/µm²",
     ))
+    if result.source_intensity_stack is not None:
+        source = np.asarray(result.source_intensity_stack)
+        optical_volume = _physical_intensity_volume(result, source)
+        selected_z = optical_volume.shape[0] // 2
+        fields.add("optical_intensity_stack", make_field(
+            "optical_intensity_stack",
+            "Final Authoritative Optical Intensity Volume",
+            optical_volume,
+            ("z", "x", "y"),
+            "intensity",
+            volume_units,
+            "longitudinal",
+            quantity="physical_optical_intensity",
+            value_unit="1/µm²",
+        ))
+        fields.add("optical_intensity_xy", make_field(
+            "optical_intensity_xy",
+            "Final Authoritative Optical Intensity x-y",
+            optical_volume[selected_z],
+            ("x", "y"),
+            "intensity",
+            spatial_units,
+            quantity="physical_optical_intensity",
+            value_unit="1/µm²",
+            source_volume_key="optical_intensity_stack",
+            initially_selected=True,
+        ))
     diagnostics = DiagnosticCollection([
         ("summary", DiagnosticData("summary", "Summary", {
             "material": "photorefractive",
@@ -628,8 +766,9 @@ def pr_transverse_result_to_run_data(result: PRTransverseRunResult) -> RunData:
         workflow=PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
         geometry=geometry,
         fields=fields,
-        curves=CurveCollection(),
+        curves=_td_scalar_curves(result),
         diagnostics=diagnostics,
+        artifacts=_td_preview_artifacts(result),
     )
 
 
@@ -715,6 +854,32 @@ def pr_transverse_static_result_to_run_data(
             key, name, value, ("z", "x", "y"), kind, volume_units,
             "longitudinal", quantity=key, value_unit="1", colormap=cmap,
         ))
+    optical_volume = _physical_intensity_volume(
+        result, result.source_intensity_stack
+    )
+    fields.add("optical_intensity_stack", make_field(
+        "optical_intensity_stack",
+        "Authoritative Optical Intensity Volume",
+        optical_volume,
+        ("z", "x", "y"),
+        "intensity",
+        volume_units,
+        "longitudinal",
+        quantity="physical_optical_intensity",
+        value_unit="1/µm²",
+    ))
+    fields.add("optical_intensity_xy", make_field(
+        "optical_intensity_xy",
+        "Authoritative Optical Intensity x-y",
+        optical_volume[optical_volume.shape[0] // 2],
+        ("x", "y"),
+        "intensity",
+        spatial_units,
+        quantity="physical_optical_intensity",
+        value_unit="1/µm²",
+        source_volume_key="optical_intensity_stack",
+        initially_selected=True,
+    ))
     fields.add("input_intensity", make_field(
         "input_intensity", "Input Plane Intensity", input_intensity,
         ("x", "y"), "intensity", spatial_units,

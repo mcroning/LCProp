@@ -220,6 +220,11 @@ class PRRunResult:
             "software_evidence": "validated",
         }
     )
+    intensity_preview: Any | None = None
+    intensity_preview_metadata: dict[str, Any] | None = None
+    td_scalar_history: tuple[dict[str, Any], ...] = ()
+    td_preview_movie: Any | None = None
+    td_preview_movie_metadata: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         """Retain compact launch directions when checkpoint provenance exists."""

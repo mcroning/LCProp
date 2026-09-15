@@ -14,10 +14,15 @@ from lcprop.core.grid import make_grid
 from lcprop.optics.launch import OpticalLaunchContext, build_launch, normalized_power
 from lcprop.optics.launch_configuration import reject_prepared_launch_conflict
 from lcprop.optics.screens import validate_channel_launch_elements
-from lcprop.optics.splitstep import linear_kernel
+from lcprop.optics.splitstep import linear_kernel, total_intensity
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.longitudinal_cuts import (
     extract_backend_longitudinal_optical_intensity_cuts,
+)
+from lcprop.pr.visualization import (
+    downsample_td_movie_frame,
+    encode_td_preview_movie,
+    td_movie_frame_indices,
 )
 from lcprop.pr.scattering import canonical_scattering_provenance
 from lcprop.pr.transverse.diagnostics import state_diagnostics
@@ -336,6 +341,27 @@ def run_pr_transverse_timedependent(
     cancellation_stage = None
     material_response_calls = [0]
     optical_passes_completed = 0
+    td_scalar_history: list[dict[str, float]] = []
+    movie_indices = set(td_movie_frame_indices(int(request.solver.Nt)).tolist())
+    movie_frames: list[np.ndarray] = []
+    movie_frame_indices: list[int] = []
+    movie_times: list[float] = []
+
+    def retain_movie_frame(index: int, optical_field) -> None:
+        if progress_callback is None or index not in movie_indices:
+            return
+        if movie_frame_indices and movie_frame_indices[-1] == int(index):
+            return
+        intensity = total_intensity(
+            optical_field,
+            coherence_groups=launch.coherence_groups,
+            xp=xp,
+        )
+        movie_frames.append(
+            downsample_td_movie_frame(np.asarray(asnumpy(intensity)))
+        )
+        movie_frame_indices.append(int(index))
+        movie_times.append(int(index) * float(request.solver.dt_normalized))
     linearized_spec = (
         _linearized_reference_spec(
             request,
@@ -349,7 +375,7 @@ def run_pr_transverse_timedependent(
     for step_index in range(int(request.solver.Nt)):
         try:
             _check_cancel(cancellation_token, "material_step_boundary")
-            _, source = _optical_pass(
+            observed_A, source = _optical_pass(
                 A0,
                 psi,
                 request=request,
@@ -363,6 +389,7 @@ def run_pr_transverse_timedependent(
                 scattering_phase_stack=scattering_phase_stack,
             )
             optical_passes_completed += 1
+            retain_movie_frame(completed_steps, observed_A)
             if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
                 candidate = _linearized_material_step(
                     psi,
@@ -421,6 +448,9 @@ def run_pr_transverse_timedependent(
                     "nonlinear transverse TD candidate is nonfinite or has "
                     "nonpositive carrier density"
                 )
+        material_change_rms = scalar_float(
+            xp.sqrt(xp.mean((candidate - psi) * (candidate - psi)))
+        )
         psi = candidate
         completed_steps = step_index + 1
         current_carrier = xp.sum(accepted_state.carrier_density, axis=(-2, -1))
@@ -431,6 +461,17 @@ def run_pr_transverse_timedependent(
                 / xp.abs(initial_carrier)
             ),
         )
+        scalar_row = {
+            "material_time_normalized": (
+                completed_steps * float(request.solver.dt_normalized)
+            ),
+            "material_state_change_rms": material_change_rms,
+        }
+        if request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR:
+            scalar_row["minimum_carrier_density"] = scalar_float(
+                xp.min(accepted_state.carrier_density)
+            )
+        td_scalar_history.append(scalar_row)
         if progress_callback is not None:
             material_time = completed_steps * float(request.solver.dt_normalized)
             progress_callback(
@@ -481,6 +522,7 @@ def run_pr_transverse_timedependent(
         scattering_phase_stack=scattering_phase_stack,
     )
     optical_passes_completed += 1
+    retain_movie_frame(completed_steps, A_final)
     final_state = state_from_potential(
         psi,
         dx_normalized=dx_normalized,
@@ -663,6 +705,15 @@ def run_pr_transverse_timedependent(
         ),
         asnumpy=asnumpy,
     )
+    movie = encode_td_preview_movie(
+        movie_frames,
+        frame_indices=movie_frame_indices,
+        material_times=movie_times,
+        original_grid=grid.summary(),
+        original_cadence=float(request.solver.dt_normalized),
+    )
+    if movie.warning is not None:
+        diagnostics["td_preview_warning"] = movie.warning
     return PRTransverseRunResult(
         A_initial=np.asarray(asnumpy(A0)).copy(),
         A_final=np.asarray(asnumpy(A_final)).copy(),
@@ -683,6 +734,10 @@ def run_pr_transverse_timedependent(
         longitudinal_intensity_yz=longitudinal_cuts.yz,
         x_cut_um=longitudinal_cuts.x_cut_um,
         y_cut_um=longitudinal_cuts.y_cut_um,
+        source_intensity_stack=np.asarray(asnumpy(final_source)).copy(),
+        td_scalar_history=tuple(td_scalar_history),
+        td_preview_movie=movie.data,
+        td_preview_movie_metadata=movie.metadata,
     )
 
 

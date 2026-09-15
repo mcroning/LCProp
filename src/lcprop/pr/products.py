@@ -27,12 +27,14 @@ from lcprop.pr.image_amplification import (
     PRImageAmplificationResult,
     PRImageAmplificationRunRequest,
 )
+from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.specs import PRRunResult, PR_TIMEDEPENDENT_WORKFLOW
 from lcprop.pr.static_workflow import (
     PRStaticRunResult,
     PR_STATIC_WORKFLOW,
 )
 from lcprop.products.data_model import (
+    ArtifactData,
     CurveCollection,
     CurveData,
     DiagnosticCollection,
@@ -52,6 +54,54 @@ _FAST_VOLUME_MESSAGE = (
 
 def _is_fast_result(result: Any) -> bool:
     return result.retention_summary.get("policy", "full") == "fast"
+
+
+def _td_scalar_curves(result: Any) -> CurveCollection:
+    rows = tuple(getattr(result, "td_scalar_history", ()))
+    curves = CurveCollection()
+    if not rows:
+        return curves
+    time = np.asarray([row["material_time_normalized"] for row in rows])
+    for key, title, y_label in (
+        (
+            "material_state_change_rms",
+            "Material-State Change RMS vs Material Time",
+            "Material-state change RMS",
+        ),
+        (
+            "minimum_carrier_density",
+            "Minimum Carrier Density vs Material Time",
+            "Minimum normalized carrier density",
+        ),
+    ):
+        if all(key in row for row in rows):
+            curves.add(key, CurveData(
+                key=key,
+                display_name=title,
+                x=time,
+                y=np.asarray([row[key] for row in rows]),
+                x_label="Material time",
+                y_label=y_label,
+                units={"x": "normalized", "y": "1"},
+            ))
+    return curves
+
+
+def _td_preview_artifacts(result: Any) -> dict[str, ArtifactData]:
+    movie = getattr(result, "td_preview_movie", None)
+    metadata = getattr(result, "td_preview_movie_metadata", None)
+    if movie is None or not isinstance(metadata, dict):
+        return {}
+    return {
+        "td_preview_movie": ArtifactData(
+            key="td_preview_movie",
+            display_name="Downsampled TD Preview (MP4)",
+            data=np.asarray(movie, dtype=np.uint8),
+            media_type="video/mp4",
+            filename="pr_td_preview.mp4",
+            metadata=deepcopy(metadata),
+        )
+    }
 
 
 def _add_carrier_power_diagnostic(
@@ -108,6 +158,45 @@ def _fast_optical_run_data(result: Any, *, workflow: str, geometry: Geometry) ->
         result.longitudinal_intensity_xz is not None
         and result.longitudinal_intensity_yz is not None
     )
+    has_preview = (
+        getattr(result, "intensity_preview", None) is not None
+        and isinstance(getattr(result, "intensity_preview_metadata", None), dict)
+    )
+    if has_preview:
+        preview = _copied_array(result.intensity_preview)
+        coordinates = result.intensity_preview_metadata["preview_coordinates_um"]
+        field_coordinates = {
+            axis: np.asarray(coordinates[axis], dtype=np.float64)
+            for axis in ("z", "x", "y")
+        }
+        field_coordinates["preview_metadata"] = deepcopy(
+            result.intensity_preview_metadata
+        )
+        fields.add("fast_optical_intensity_preview", make_field(
+            "fast_optical_intensity_preview",
+            "Fast Optical Intensity MPR Preview (Downsampled)",
+            preview,
+            ("z", "x", "y"),
+            "intensity_preview",
+            {"z": "um", "x": "um", "y": "um"},
+            "longitudinal",
+            quantity="physical_optical_intensity_preview",
+            value_unit="1/µm²",
+            coordinates=field_coordinates,
+        ))
+        fields.add("fast_optical_intensity_preview_xy", make_field(
+            "fast_optical_intensity_preview_xy",
+            "Fast Optical Intensity MPR x-y (Downsampled)",
+            preview[preview.shape[0] // 2],
+            ("x", "y"),
+            "intensity_preview",
+            {"x": "um", "y": "um"},
+            quantity="physical_optical_intensity_preview",
+            value_unit="1/µm²",
+            source_volume_key="fast_optical_intensity_preview",
+            coordinates=field_coordinates,
+            initially_selected=True,
+        ))
     if has_longitudinal_cuts:
         cut_coordinates = {
             "retention": "fast_center_nearest",
@@ -219,13 +308,24 @@ def _fast_optical_run_data(result: Any, *, workflow: str, geometry: Geometry) ->
         workflow=workflow,
         geometry=geometry,
         fields=fields,
-        curves=CurveCollection(),
+        curves=(
+            _td_scalar_curves(result)
+            if workflow == PR_TIMEDEPENDENT_WORKFLOW else CurveCollection()
+        ),
         diagnostics=diagnostics,
-        longitudinal_enabled=has_longitudinal_cuts,
+        artifacts=(
+            _td_preview_artifacts(result)
+            if workflow == PR_TIMEDEPENDENT_WORKFLOW else {}
+        ),
+        longitudinal_enabled=has_longitudinal_cuts or has_preview,
         longitudinal_message=(
-            "Fast retrieval retains only the transverse cuts nearest x=0 and y=0; "
-            "use Full retrieval for selectable longitudinal volumes."
-            if has_longitudinal_cuts else _FAST_VOLUME_MESSAGE
+            "Fast MPR uses a labeled downsampled preview; exact full-resolution "
+            "nearest-zero x-z/y-z cuts remain separate quantitative products."
+            if has_preview else (
+                "Fast retrieval retains only the transverse cuts nearest x=0 "
+                "and y=0; use Full retrieval for selectable volumes."
+                if has_longitudinal_cuts else _FAST_VOLUME_MESSAGE
+            )
         ),
     )
 
@@ -234,6 +334,25 @@ def _copied_array(value: Any) -> np.ndarray:
     """Return a detached host copy suitable for presentation ownership."""
 
     return np.asarray(asnumpy(value)).copy()
+
+
+def _physical_optical_intensity_volume(
+    source: Any, result: Any, *, background: float
+) -> np.ndarray:
+    reference = channel_peak_intensity_reference(
+        np.asarray(result.A_initial), xp=np
+    )
+    return (np.asarray(source) - float(background)) * float(reference)
+
+
+def _material_background(result: Any) -> float | None:
+    checkpoint = getattr(result, "checkpoint", None)
+    if checkpoint is not None:
+        return float(checkpoint.request.material.background_intensity)
+    value = getattr(result, "material_response_summary", {}).get(
+        "background_intensity"
+    )
+    return None if value is None else float(value)
 
 
 def _readonly_shared_numpy_array(value: Any) -> np.ndarray:
@@ -563,6 +682,40 @@ def pr_result_to_run_data(result: PRRunResult) -> RunData:
             ),
         ),
     ])
+    background = _material_background(result)
+    if background is not None:
+        optical_volume = _physical_optical_intensity_volume(
+            source_intensity, result, background=background
+        )
+        fields.add(
+            "optical_intensity_stack",
+            make_field(
+                "optical_intensity_stack",
+                "Final Authoritative Optical Intensity Volume",
+                optical_volume,
+                ("z", "x", "y"),
+                "intensity",
+                volume_units,
+                "longitudinal",
+                quantity="physical_optical_intensity",
+                value_unit="1/µm²",
+            ),
+        )
+        fields.add(
+            "optical_intensity_xy",
+            make_field(
+                "optical_intensity_xy",
+                "Final Authoritative Optical Intensity x-y",
+                optical_volume[selected_z_index],
+                ("x", "y"),
+                "intensity",
+                spatial_units,
+                quantity="physical_optical_intensity",
+                value_unit="1/µm²",
+                source_volume_key="optical_intensity_stack",
+                initially_selected=True,
+            ),
+        )
 
     diagnostics = DiagnosticCollection([
         (
@@ -603,8 +756,9 @@ def pr_result_to_run_data(result: PRRunResult) -> RunData:
         workflow=PR_TIMEDEPENDENT_WORKFLOW,
         geometry=geometry,
         fields=fields,
-        curves=CurveCollection(),
+        curves=_td_scalar_curves(result),
         diagnostics=diagnostics,
+        artifacts=_td_preview_artifacts(result),
     )
 
 
@@ -917,6 +1071,7 @@ def augment_pr_image_amplification_run_data(
         diagnostics=diagnostics,
         longitudinal_enabled=base.longitudinal_enabled,
         longitudinal_message=base.longitudinal_message,
+        artifacts=base.artifacts,
     )
 
 
@@ -1141,6 +1296,44 @@ def pr_static_result_to_run_data(result: PRStaticRunResult) -> RunData:
             ),
         ),
     ])
+    background = _material_background(result)
+    if completed and background is not None:
+        optical_volume = _physical_optical_intensity_volume(
+            source_intensity,
+            result,
+            background=background,
+        )
+        field_items.extend([
+            (
+                "optical_intensity_stack",
+                make_field(
+                    "optical_intensity_stack",
+                    "Authoritative Optical Intensity Volume",
+                    optical_volume,
+                    ("z", "x", "y"),
+                    "intensity",
+                    volume_units,
+                    "longitudinal",
+                    quantity="physical_optical_intensity",
+                    value_unit="1/µm²",
+                ),
+            ),
+            (
+                "optical_intensity_xy",
+                make_field(
+                    "optical_intensity_xy",
+                    "Authoritative Optical Intensity x-y",
+                    optical_volume[completed // 2],
+                    ("x", "y"),
+                    "intensity",
+                    spatial_units,
+                    quantity="physical_optical_intensity",
+                    value_unit="1/µm²",
+                    source_volume_key="optical_intensity_stack",
+                    initially_selected=True,
+                ),
+            ),
+        ])
 
     curves = CurveCollection()
     if result.slice_summaries:
