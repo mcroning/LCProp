@@ -439,7 +439,9 @@ def test_experiment_and_transport_round_trip_with_legacy_default():
     legacy_experiment = dict(encode_pr_transverse_timedependent_request(
         _request(linearized=False)
     ))
+    legacy_experiment["schema_version"] = 2
     legacy_experiment.pop("material_response")
+    legacy_experiment.pop("optical_boundary")
     assert decode_pr_transverse_timedependent_request(
         legacy_experiment
     ).material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR

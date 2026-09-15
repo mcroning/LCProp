@@ -12,6 +12,7 @@ from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken
 from lcprop.pr.experiment_codec import (
+    PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
     decode_pr_transverse_static_request,
     encode_pr_transverse_static_request,
 )
@@ -276,7 +277,7 @@ def test_linearized_and_nonlinear_agree_perturbatively_but_diverge_strongly():
 def test_linearized_request_persistence_and_transport_are_explicit_and_additive():
     request = _request(linearized=True, applied_field=-0.25)
     encoded = encode_pr_transverse_static_request(request)
-    assert encoded["schema_version"] == 3
+    assert encoded["schema_version"] == PR_EXPERIMENT_REQUEST_SCHEMA_VERSION
     assert encoded["material_response"] == {
         "model": "linearized",
         "reference_intensity": 1.5,
@@ -286,6 +287,7 @@ def test_linearized_request_persistence_and_transport_are_explicit_and_additive(
     legacy = encode_pr_transverse_static_request(_request(linearized=False))
     legacy["schema_version"] = 2
     legacy.pop("material_response")
+    legacy.pop("optical_boundary")
     decoded_legacy = decode_pr_transverse_static_request(legacy)
     assert decoded_legacy.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR
     assert decoded_legacy.material_response.reference_intensity is None

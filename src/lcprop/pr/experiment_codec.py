@@ -27,6 +27,7 @@ from lcprop.pr.specs import (
     PRSolverOptions,
     PR_MATERIAL_ID,
     PR_TIMEDEPENDENT_WORKFLOW,
+    validate_pr_timedependent_configuration,
 )
 from lcprop.pr.image_amplification import (
     PR_IMAGE_AMPLIFICATION_WORKFLOW,
@@ -66,10 +67,11 @@ from lcprop.pr.transverse.static_workflow import (
 )
 
 
-PR_EXPERIMENT_REQUEST_SCHEMA_VERSION = 4
+PR_EXPERIMENT_REQUEST_SCHEMA_VERSION = 5
 _PR_LEGACY_EXPERIMENT_REQUEST_SCHEMA_VERSION = 1
 _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION = 2
 _PR_MATERIAL_RESPONSE_EXPERIMENT_REQUEST_SCHEMA_VERSION = 3
+_PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION = 4
 
 
 def _encode_launch_elements(
@@ -115,6 +117,8 @@ def _validate_common(request: PRRunRequest | PRStaticRunRequest) -> None:
     request.optical_boundary.validate()
     if isinstance(request, PRStaticRunRequest):
         request.material_response.validate()
+    elif isinstance(request, PRRunRequest):
+        validate_pr_timedependent_configuration(request)
 
 
 def _encode_common(request: PRRunRequest | PRStaticRunRequest) -> dict:
@@ -135,7 +139,9 @@ def _encode_common(request: PRRunRequest | PRStaticRunRequest) -> dict:
 def encode_pr_timedependent_request(request: PRRunRequest) -> dict:
     if not isinstance(request, PRRunRequest):
         raise TypeError("request must be a PRRunRequest")
-    return _encode_common(request)
+    payload = _encode_common(request)
+    payload["material_response"] = asdict(request.material_response)
+    return payload
 
 
 def encode_pr_static_request(request: PRStaticRunRequest) -> dict:
@@ -248,13 +254,19 @@ def encode_pr_transverse_timedependent_request(
     }
 
 
-def _payload(value: Any, *, reduced_static: bool = False) -> dict[str, Any]:
+def _payload(
+    value: Any,
+    *,
+    reduced_static: bool = False,
+    reduced_timedependent: bool = False,
+) -> dict[str, Any]:
     payload = require_mapping(value, name="PR request_payload")
     version = payload.get("schema_version")
     if type(version) is not int or version not in (
         _PR_LEGACY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         _PR_MATERIAL_RESPONSE_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+        _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
     ):
         raise ExperimentSchemaError(
@@ -272,7 +284,13 @@ def _payload(value: Any, *, reduced_static: bool = False) -> dict[str, Any]:
         }
         | (
             {"optical_boundary"}
-            if version == PR_EXPERIMENT_REQUEST_SCHEMA_VERSION
+            if version >= _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION
+            else set()
+        )
+        | (
+            {"material_response"}
+            if reduced_timedependent
+            and version == PR_EXPERIMENT_REQUEST_SCHEMA_VERSION
             else set()
         ),
         optional=(
@@ -337,7 +355,7 @@ def _decode_common(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def decode_pr_timedependent_request(value: Any) -> PRRunRequest:
-    payload = _payload(value)
+    payload = _payload(value, reduced_timedependent=True)
     try:
         request = PRRunRequest(
             **_decode_common(payload),
@@ -346,6 +364,17 @@ def decode_pr_timedependent_request(value: Any) -> PRRunRequest:
                     PRSolverOptions,
                     payload["solver"],
                     name="PR request_payload.solver",
+                )
+            ),
+            material_response=PRTransverseMaterialResponseSpec(
+                **(
+                    dataclass_values(
+                        PRTransverseMaterialResponseSpec,
+                        payload["material_response"],
+                        name="PR request_payload.material_response",
+                    )
+                    if "material_response" in payload
+                    else {}
                 )
             ),
         )
@@ -412,6 +441,7 @@ def decode_pr_transverse_static_request(
         _PR_LEGACY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         _PR_MATERIAL_RESPONSE_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+        _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
     ):
         raise ExperimentSchemaError(
@@ -445,7 +475,7 @@ def decode_pr_transverse_static_request(
         )
         | (
             {"optical_boundary"}
-            if version == PR_EXPERIMENT_REQUEST_SCHEMA_VERSION
+            if version >= _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION
             else set()
         ),
         name="PR transverse-static request_payload",
@@ -598,6 +628,7 @@ def decode_pr_transverse_timedependent_request(
         or version not in (
             _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION,
             _PR_MATERIAL_RESPONSE_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+            _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
             PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         )
     ):
@@ -628,7 +659,7 @@ def decode_pr_transverse_timedependent_request(
         )
         | (
             {"optical_boundary"}
-            if version == PR_EXPERIMENT_REQUEST_SCHEMA_VERSION
+            if version >= _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION
             else set()
         ),
         name="PR transverse-TD request_payload",
@@ -818,6 +849,7 @@ def decode_pr_image_amplification_request(
     version = payload["schema_version"]
     if type(version) is not int or version not in (
         _PR_MATERIAL_RESPONSE_EXPERIMENT_REQUEST_SCHEMA_VERSION,
+        _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
     ):
         raise ExperimentSchemaError(

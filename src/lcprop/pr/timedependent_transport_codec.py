@@ -36,7 +36,9 @@ from lcprop.pr.specs import (
     PRSolverOptions,
     PR_MATERIAL_ID,
     PR_TIMEDEPENDENT_WORKFLOW,
+    validate_pr_timedependent_configuration,
 )
+from lcprop.pr.transverse.specs import PRTransverseMaterialResponseSpec
 from lcprop.pr.transport_common import pack_portable, unpack_portable
 from lcprop.transport.codecs import (
     EncodedRequest,
@@ -54,8 +56,9 @@ from lcprop.transport.result_policy import (
 
 PR_TIMEDEPENDENT_REQUEST_CODEC_ID = "pr.timedependent.request"
 PR_TIMEDEPENDENT_RESULT_CODEC_ID = "pr.timedependent.result"
-PR_TIMEDEPENDENT_TRANSPORT_CODEC_VERSION = 2
-_PR_TIMEDEPENDENT_PREVIOUS_TRANSPORT_CODEC_VERSION = 1
+PR_TIMEDEPENDENT_TRANSPORT_CODEC_VERSION = 3
+_PR_TIMEDEPENDENT_PREVIOUS_TRANSPORT_CODEC_VERSION = 2
+_PR_TIMEDEPENDENT_LEGACY_TRANSPORT_CODEC_VERSION = 1
 
 
 def _validate_request(request: PRRunRequest) -> None:
@@ -65,6 +68,7 @@ def _validate_request(request: PRRunRequest) -> None:
     request.solver.validate()
     request.backend.validate()
     request.optical_boundary.validate()
+    validate_pr_timedependent_configuration(request)
     validate_channel_launch_elements(
         request.launch_elements, n_channels=len(request.beams.channels)
     )
@@ -107,6 +111,7 @@ def _encode_request_metadata(
             None if request.scattering is None else asdict(request.scattering)
         ),
         "optical_boundary": asdict(request.optical_boundary),
+        "material_response": asdict(request.material_response),
     }
 
 
@@ -135,6 +140,9 @@ def _decode_request_metadata(
         ),
         optical_boundary=TransverseBoundarySpec(
             **values.get("optical_boundary", {})
+        ),
+        material_response=PRTransverseMaterialResponseSpec(
+            **values.get("material_response", {})
         ),
     )
     _validate_request(request)
@@ -307,6 +315,11 @@ def encode_pr_timedependent_transport_result(
                 ),
             }
         ),
+        "material_response_summary": pack_portable(
+            result.material_response_summary,
+            arrays,
+            "result.material_response_summary",
+        ),
     }
     if policy == FULL_RESULT_POLICY:
         metadata.update({
@@ -465,6 +478,10 @@ def _validate_result(values: Mapping[str, Any]) -> None:
         raise TransportCodecError(
             "PR time-dependent result diagnostics must be a mapping"
         )
+    if not isinstance(values.get("material_response_summary", {}), Mapping):
+        raise TransportCodecError(
+            "PR time-dependent material_response_summary must be a mapping"
+        )
     backend = values["diagnostics"].get("backend")
     if not isinstance(backend, Mapping) or backend.get("backend") not in {
         "numpy",
@@ -541,6 +558,16 @@ def decode_pr_timedependent_transport_result(
             longitudinal_intensity_yz=values.get("longitudinal_intensity_yz"),
             x_cut_um=values.get("x_cut_um"),
             y_cut_um=values.get("y_cut_um"),
+            material_response_summary=dict(
+                values.get(
+                    "material_response_summary",
+                    {
+                        "model": "nonlinear",
+                        "reference_intensity": None,
+                        "software_evidence": "validated",
+                    },
+                )
+            ),
         )
     except TransportCodecError:
         raise
@@ -565,9 +592,11 @@ PR_TIMEDEPENDENT_TRANSPORT_CODEC = TransportCodec(
     decode_result=decode_pr_timedependent_transport_result,
     encode_result_projection=encode_pr_timedependent_transport_result,
     compatible_request_codec_versions=(
+        _PR_TIMEDEPENDENT_LEGACY_TRANSPORT_CODEC_VERSION,
         _PR_TIMEDEPENDENT_PREVIOUS_TRANSPORT_CODEC_VERSION,
     ),
     compatible_result_codec_versions=(
+        _PR_TIMEDEPENDENT_LEGACY_TRANSPORT_CODEC_VERSION,
         _PR_TIMEDEPENDENT_PREVIOUS_TRANSPORT_CODEC_VERSION,
     ),
 )

@@ -566,7 +566,14 @@ def test_previous_experiment_schema_without_optical_boundary_defaults_to_periodi
         workflow_id=workflow_id,
     )
     document = json.loads(path.read_text(encoding="utf-8"))
-    document["request_payload"]["schema_version"] -= 1
+    if material_id == PR_MATERIAL_ID:
+        # PR schema 4 introduced optical_boundary; schema 5 subsequently
+        # introduced the reduced-TD material-response axis.
+        document["request_payload"]["schema_version"] = 3
+        if workflow_id == PR_TIMEDEPENDENT_WORKFLOW:
+            del document["request_payload"]["material_response"]
+    else:
+        document["request_payload"]["schema_version"] -= 1
     del document["request_payload"]["optical_boundary"]
     path.write_text(json.dumps(document), encoding="utf-8")
 

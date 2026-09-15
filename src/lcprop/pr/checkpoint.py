@@ -110,6 +110,11 @@ def validate_pr_continuation(
         (request.scattering, original.scattering, "scattering"),
         (request.optical_boundary, original.optical_boundary, "optical_boundary"),
         (
+            request.material_response,
+            original.material_response,
+            "material_response",
+        ),
+        (
             replace(request.solver, Nt=0),
             replace(original.solver, Nt=0),
             "solver",

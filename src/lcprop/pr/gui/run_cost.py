@@ -135,11 +135,27 @@ def classify_pr_run_cost(
         potential_threshold = 2.0e10
         very_threshold = 2.0e11
     elif isinstance(request, PRRunRequest):
-        model = "Reduced x-only PR transport — Fully nonlinear time dependent"
-        score = points * int(request.solver.Nt) * factor
+        linearized = (
+            request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+        )
+        model = (
+            "Reduced x-only PR transport — Linearized time dependent"
+            if linearized
+            else "Reduced x-only PR transport — Fully nonlinear time dependent"
+        )
+        score = (
+            points
+            * int(request.solver.Nt)
+            * (4.0 if linearized else 1.0)
+            * factor
+        )
         potential_threshold = 2.0e10
         very_threshold = 2.0e11
-        rationale = "reduced material steps and optical z marches"
+        rationale = (
+            "exact one-dimensional modal material updates and optical z marches"
+            if linearized
+            else "reduced material steps and optical z marches"
+        )
     else:
         raise TypeError(f"unsupported PR run-cost request: {type(request).__name__}")
 

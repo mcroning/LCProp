@@ -14,7 +14,11 @@ from lcprop.pr.geometry import (
     PRBeamStackApertureReport,
     analyze_beam_stack_aperture,
 )
-from lcprop.pr.specs import PRRunRequest, PR_TIMEDEPENDENT_WORKFLOW
+from lcprop.pr.specs import (
+    PRRunRequest,
+    PR_TIMEDEPENDENT_WORKFLOW,
+    validate_pr_timedependent_configuration,
+)
 from lcprop.pr.static_workflow import (
     PRStaticRunRequest,
     PR_STATIC_WORKFLOW,
@@ -65,6 +69,8 @@ def _validate_pr_gui_common(request) -> PRBeamStackApertureReport:
     request.solver.validate()
     request.backend.validate()
     request.optical_boundary.validate()
+    if isinstance(request, PRRunRequest):
+        validate_pr_timedependent_configuration(request)
     wavelengths = tuple(
         float(channel.wavelength_um) for channel in request.beams.channels
     )
@@ -98,11 +104,15 @@ def validate_pr_gui_request(request: PRRunRequest) -> PRRequestPreflight:
         xp=np,
         real_dtype=real_dtype,
     )
-    dt_limit = validate_timestep(
-        request.solver.dt_normalized,
-        grid,
-        request.material,
-        integrator=request.solver.integrator,
+    dt_limit = (
+        float("nan")
+        if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+        else validate_timestep(
+            request.solver.dt_normalized,
+            grid,
+            request.material,
+            integrator=request.solver.integrator,
+        )
     )
     return PRRequestPreflight(
         conservative_dt_limit=dt_limit,
@@ -357,6 +367,12 @@ def validate_pr_gui_request_representable(request) -> None:
             raise ValueError(
                 "PR GUI cannot represent these static solver options"
             )
+    elif isinstance(request, PRRunRequest) and (
+        request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+    ):
+        raise ValueError(
+            "PR GUI does not yet represent reduced linearized TD requests"
+        )
 
 
 def apply_pr_request(

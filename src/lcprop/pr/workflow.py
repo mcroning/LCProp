@@ -31,6 +31,12 @@ from lcprop.pr.scattering import (
     canonical_scattering_provenance,
     canonical_slab_range,
 )
+from lcprop.pr.reduced_linearized import PRReducedLinearizedSpec
+from lcprop.pr.reduced_linearized_timedependent import (
+    PR_REDUCED_LINEARIZED_TIMEDEPENDENT_V1,
+    reduced_linearized_timedependent_rhs,
+    solve_pr_reduced_linearized_timedependent,
+)
 from lcprop.pr.source import (
     channel_peak_intensity_reference,
     pr_driving_intensity,
@@ -39,9 +45,12 @@ from lcprop.pr.specs import (
     PRRunRequest,
     PRRunResult,
     PR_EULER_INTEGRATOR,
+    PR_EXACT_MODAL_INTEGRATOR,
     PR_SEMI_IMPLICIT_INTEGRATOR,
     PR_TIMEDEPENDENT_WORKFLOW,
+    validate_pr_timedependent_configuration,
 )
+from lcprop.pr.transverse.specs import PR_MATERIAL_RESPONSE_LINEARIZED
 from lcprop.optics.launch_configuration import (
     LaunchConfiguration,
     reject_prepared_launch_conflict,
@@ -369,6 +378,7 @@ def run_pr_timedependent(
     request.material.validate()
     request.solver.validate()
     request.backend.validate()
+    validate_pr_timedependent_configuration(request)
     request.optical_boundary.validate()
     LaunchConfiguration(request.beams, request.launch_elements)
     if _checkpoint_request is None:
@@ -378,6 +388,7 @@ def run_pr_timedependent(
         )
     if request.scattering is not None:
         request.scattering.validate()
+    linearized = request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
 
     wavelengths = tuple(
         float(channel.wavelength_um) for channel in request.beams.channels
@@ -414,6 +425,21 @@ def run_pr_timedependent(
         complex_dtype=backend.complex_dtype,
         real_dtype=backend.real_dtype,
     )
+    linearized_spec = None
+    if linearized:
+        linearized_spec = PRReducedLinearizedSpec(
+            reference_intensity=float(
+                request.material_response.reference_intensity
+            ),
+            applied_field=float(request.material.applied_field),
+            background_intensity=float(request.material.background_intensity),
+            dx_normalized=(
+                request.material.characteristic_wavenumber_per_um * grid.dx_um
+            ),
+        )
+        linearized_spec.validate()
+        if request.initial_E is None and _checkpoint_request is None:
+            E.fill(linearized_spec.equilibrium_field)
     if _origin_E is None:
         E_initial = E.copy()
     else:
@@ -426,11 +452,15 @@ def run_pr_timedependent(
                 "origin E shape does not match continuation state shape"
             )
     peak_reference = channel_peak_intensity_reference(A0, xp=grid.xp)
-    timestep_limit = validate_timestep(
-        request.solver.dt_normalized,
-        grid,
-        request.material,
-        integrator=request.solver.integrator,
+    timestep_limit = (
+        None
+        if linearized
+        else validate_timestep(
+            request.solver.dt_normalized,
+            grid,
+            request.material,
+            integrator=request.solver.integrator,
+        )
     )
 
     wavelength_um = wavelengths[0]
@@ -529,6 +559,23 @@ def run_pr_timedependent(
                         stage="semi_implicit_predictor_corrector",
                     ),
                 )
+            elif request.solver.integrator == PR_EXACT_MODAL_INTEGRATOR:
+                candidate_source_stack = source_intensity_for_state(E)
+                _raise_if_cancelled(
+                    cancellation_token,
+                    stage="exact_modal_after_source",
+                )
+                candidate_E = solve_pr_reduced_linearized_timedependent(
+                    E,
+                    candidate_source_stack,
+                    dt_normalized=request.solver.dt_normalized,
+                    spec=linearized_spec,
+                    backend=request.backend,
+                ).E
+                _raise_if_cancelled(
+                    cancellation_token,
+                    stage="exact_modal_after_material_update",
+                )
             else:  # guarded by PRSolverOptions.validate()
                 raise ValueError(
                     f"unknown PR integrator: {request.solver.integrator}"
@@ -558,7 +605,10 @@ def run_pr_timedependent(
             break
 
         E = candidate_E
-        if request.solver.integrator == PR_EULER_INTEGRATOR:
+        if request.solver.integrator in (
+            PR_EULER_INTEGRATOR,
+            PR_EXACT_MODAL_INTEGRATOR,
+        ):
             source_stack = candidate_source_stack
         segment_completed_steps = step_index + 1
         completed_steps = (
@@ -705,23 +755,51 @@ def run_pr_timedependent(
         "run_status": status,
         "completed_material_steps": completed_steps,
         "conservative_dt_limit": timestep_limit,
-        "paper_equation_15_dt_limit": paper_conservative_timestep_limit(
-            grid,
-            request.material,
+        "paper_equation_15_dt_limit": (
+            None if linearized else paper_conservative_timestep_limit(
+                grid, request.material
+            )
         ),
-        "legacy_prprop3d_dt_limit": legacy_conservative_timestep_limit(
-            grid,
-            request.material,
+        "legacy_prprop3d_dt_limit": (
+            None if linearized else legacy_conservative_timestep_limit(
+                grid, request.material
+            )
         ),
         "stepping_order": (
             "frozen-E optical Strang pass, then synchronous E Euler update"
             if request.solver.integrator == PR_EULER_INTEGRATOR
             else (
+                "one complete frozen-E optical pass followed by an exact "
+                "frozen-source modal E update"
+                if request.solver.integrator == PR_EXACT_MODAL_INTEGRATOR
+                else
                 "accepted/predicted frozen-E optical Strang passes with "
                 "synchronous linearly implicit trapezoidal E update"
             )
         ),
+        "material_response": request.material_response.model,
+        "material_response_validation": (
+            "locally_validated" if linearized else "validated"
+        ),
     }
+    if linearized:
+        final_rhs = reduced_linearized_timedependent_rhs(
+            E,
+            source_stack,
+            spec=linearized_spec,
+            xp=grid.xp,
+        )
+        diagnostics.update({
+            "linearized_model_id": PR_REDUCED_LINEARIZED_TIMEDEPENDENT_V1,
+            "integrator_policy": "exact_frozen_source_modal_update",
+            "source_cadence": "one_complete_optical_pass_per_material_interval",
+            "reference_intensity": float(linearized_spec.reference_intensity),
+            "equilibrium_field": float(linearized_spec.equilibrium_field),
+            "linearized_rhs_rms": float(
+                asnumpy(grid.xp.sqrt(grid.xp.mean(final_rhs * final_rhs)))
+            ),
+            "linearized_rhs_max": float(asnumpy(grid.xp.max(grid.xp.abs(final_rhs)))),
+        })
     if request.scattering is not None:
         diagnostics["canonical_scattering"] = canonical_scattering_provenance(
             request.scattering,
@@ -753,6 +831,16 @@ def run_pr_timedependent(
         requested_steps=requested_steps,
         checkpoint=checkpoint,
         diagnostics=diagnostics,
+        material_response_summary={
+            "model": request.material_response.model,
+            "reference_intensity": request.material_response.reference_intensity,
+            "software_evidence": (
+                "locally_validated" if linearized else "validated"
+            ),
+            "integrator": (
+                "exact_modal" if linearized else request.solver.integrator
+            ),
+        },
     )
 
 

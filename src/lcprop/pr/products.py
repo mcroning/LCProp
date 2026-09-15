@@ -207,6 +207,7 @@ def _fast_optical_run_data(result: Any, *, workflow: str, geometry: Geometry) ->
                 "grid": deepcopy(result.grid_summary),
                 "launch": launch_summary,
                 "result_retention": deepcopy(result.retention_summary),
+                "material_response": deepcopy(result.material_response_summary),
             })),
             ("pr_workflow", DiagnosticData(
                 "pr_workflow", "PR Workflow Diagnostics",
@@ -581,6 +582,9 @@ def pr_result_to_run_data(result: PRRunResult) -> RunData:
                     "status": result.status,
                     "grid": deepcopy(result.grid_summary),
                     "launch": launch_summary,
+                    "material_response": deepcopy(
+                        result.material_response_summary
+                    ),
                 },
             ),
         ),

@@ -432,7 +432,9 @@ def test_slurm_runner_passes_fast_policy_to_material_owned_codec(tmp_path):
     )
     assert completed.result.retention_summary["policy"] == "fast"
     assert completed.result.E_final is None
-    assert completed.run_data.longitudinal_enabled is False
+    assert completed.run_data.longitudinal_enabled is True
+    assert "retained_fast_optical_intensity_xz" in completed.run_data.fields
+    assert "retained_fast_optical_intensity_yz" in completed.run_data.fields
     assert len(_cleanup_commands(transport)) == 1
 
 

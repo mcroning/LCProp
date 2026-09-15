@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamStack
@@ -23,10 +23,24 @@ PR_MATERIAL_ID = "pr"
 PR_TIMEDEPENDENT_WORKFLOW = "pr_timedependent"
 PR_EULER_INTEGRATOR = "euler"
 PR_SEMI_IMPLICIT_INTEGRATOR = "semi_implicit_trapezoidal"
+PR_EXACT_MODAL_INTEGRATOR = "exact_modal"
 PR_INTEGRATORS = (
     PR_EULER_INTEGRATOR,
     PR_SEMI_IMPLICIT_INTEGRATOR,
+    PR_EXACT_MODAL_INTEGRATOR,
 )
+
+if TYPE_CHECKING:
+    from lcprop.pr.transverse.specs import PRTransverseMaterialResponseSpec
+
+
+def _default_material_response() -> "PRTransverseMaterialResponseSpec":
+    # The response axis historically lives in transverse.specs, which imports
+    # PRMaterialSpec from this module.  Resolve the nonlinear default lazily to
+    # preserve that public module layout without an import cycle.
+    from lcprop.pr.transverse.specs import PRTransverseMaterialResponseSpec
+
+    return PRTransverseMaterialResponseSpec()
 
 
 @dataclass(frozen=True)
@@ -128,7 +142,9 @@ class PRRunRequest:
 
     ``initial_A``, when supplied, has shape ``(Nch, Nx, Ny)``. ``initial_E``
     is the normalized physical space-charge state with shape
-    ``(Nz, Nx, Ny)``; omitting it selects the paper/reference zero state.
+    ``(Nz, Nx, Ny)``.  Omitting it selects the paper/reference zero state for
+    nonlinear evolution and the uniform equilibrium ``E0`` for linearized
+    evolution.
     ``launch_elements`` are applied to the normalized incident beams before
     propagation and cannot be combined with an explicit ``initial_A``.
     ``scattering`` is an optional canonical physical-z phase realization;
@@ -149,6 +165,22 @@ class PRRunRequest:
     initial_E: Any | None = None
     scattering: PRCanonicalScatteringSpec | None = None
     optical_boundary: TransverseBoundarySpec = TransverseBoundarySpec()
+    material_response: "PRTransverseMaterialResponseSpec" = field(
+        default_factory=_default_material_response
+    )
+
+
+def validate_pr_timedependent_configuration(request: PRRunRequest) -> None:
+    """Validate the reduced TD response/integrator pairing."""
+
+    request.material_response.validate()
+    linearized = request.material_response.model == "linearized"
+    if linearized and request.solver.integrator != PR_EXACT_MODAL_INTEGRATOR:
+        raise ValueError(
+            "reduced linearized TD requires integrator='exact_modal'"
+        )
+    if not linearized and request.solver.integrator == PR_EXACT_MODAL_INTEGRATOR:
+        raise ValueError("reduced nonlinear TD does not support integrator='exact_modal'")
 
 
 @dataclass(frozen=True)
@@ -181,6 +213,13 @@ class PRRunResult:
     longitudinal_intensity_yz: Any | None = None
     x_cut_um: float | None = None
     y_cut_um: float | None = None
+    material_response_summary: dict[str, Any] = field(
+        default_factory=lambda: {
+            "model": "nonlinear",
+            "reference_intensity": None,
+            "software_evidence": "validated",
+        }
+    )
 
     def __post_init__(self) -> None:
         """Retain compact launch directions when checkpoint provenance exists."""
@@ -204,6 +243,7 @@ class PRRunResult:
 __all__ = [
     "PRMaterialSpec",
     "PR_EULER_INTEGRATOR",
+    "PR_EXACT_MODAL_INTEGRATOR",
     "PR_INTEGRATORS",
     "PR_MATERIAL_ID",
     "PR_SEMI_IMPLICIT_INTEGRATOR",
@@ -211,4 +251,5 @@ __all__ = [
     "PRSolverOptions",
     "PRRunRequest",
     "PRRunResult",
+    "validate_pr_timedependent_configuration",
 ]

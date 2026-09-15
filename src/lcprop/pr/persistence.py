@@ -27,10 +27,11 @@ from lcprop.pr.specs import (
     PR_MATERIAL_ID,
     PR_TIMEDEPENDENT_WORKFLOW,
 )
+from lcprop.pr.transverse.specs import PRTransverseMaterialResponseSpec
 
 
-PR_CHECKPOINT_SCHEMA_VERSION = 3
-PR_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS = (1, 2, PR_CHECKPOINT_SCHEMA_VERSION)
+PR_CHECKPOINT_SCHEMA_VERSION = 4
+PR_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3, PR_CHECKPOINT_SCHEMA_VERSION)
 PR_CHECKPOINT_MATERIAL = PR_MATERIAL_ID
 PR_CHECKPOINT_FORMAT = "lcprop-checkpoint"
 
@@ -46,6 +47,7 @@ def _request_to_dict(request: PRRunRequest) -> dict[str, Any]:
         "solver": asdict(request.solver),
         "backend": asdict(request.backend),
         "optical_boundary": asdict(request.optical_boundary),
+        "material_response": asdict(request.material_response),
         "initial_conditions": {
             "A0": "checkpoint.npz:A0",
             "E_initial": "checkpoint.npz:E_initial",
@@ -83,6 +85,9 @@ def _request_from_dict(
         backend=BackendSpec(**values["backend"]),
         optical_boundary=TransverseBoundarySpec(
             **values.get("optical_boundary", {})
+        ),
+        material_response=PRTransverseMaterialResponseSpec(
+            **values.get("material_response", {})
         ),
     )
     request.grid.validate()
