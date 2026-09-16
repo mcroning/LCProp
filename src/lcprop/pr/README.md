@@ -15,6 +15,10 @@ Package-level installation and application instructions are in the
 [repository README](../../../README.md). The peer-material ownership contract
 is defined by the
 [canonical architecture decision record](../../../docs/architecture/LCProp_Target_Architecture.md).
+The concise current equations and profile boundaries are collected in the
+[PR model contracts](../../../docs/science/pr_model_contracts.md), while the
+[User Guide](../../../docs/user/user_guide.md) explains the eight production
+model choices and GUI behavior.
 
 ## State, normalization, and boundaries
 

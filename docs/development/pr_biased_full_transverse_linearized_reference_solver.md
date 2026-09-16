@@ -16,11 +16,10 @@ full-transverse PR profile. It does not register a workflow or connect the
 solver to optics, GUI, persistence, transport, Image Amplification, soliton
 machinery, GPU execution, Slurm, or the cluster.
 
-Scientific sources:
-
-- `docs/research/pr_biased_full_transverse_linearization_blocker_2026-09-09.md`
-- `docs/research/pr_periodic_biased_current_carrying_profile.md`
-- `docs/research/pr_linearized_models_derivation_and_paper_comparison.md`
+The current Product-level scientific contract is
+`docs/science/pr_model_contracts.md`. Historical derivations, the superseded
+blocker analysis, and paper-specific comparisons are retained in Research and
+are not Product documentation dependencies.
 
 ## Implementation
 

@@ -323,6 +323,8 @@ def test_legacy_pr_schema_one_empty_launch_plan_still_loads(app, tmp_path):
     document["request_payload"]["schema_version"] = 1
     document["request_payload"].pop("launch_elements")
     document["request_payload"].pop("optical_boundary")
+    document["request_payload"].pop("material_response")
+    document["request_payload"].pop("scattering")
     path.write_text(json.dumps(document), encoding="utf-8")
 
     loaded = load_experiment(path, expected_material_id=PR_MATERIAL_ID)

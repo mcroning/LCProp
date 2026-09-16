@@ -1,6 +1,6 @@
 # LCProp Status
 
-**Checkpoint:** August 2026
+**Checkpoint:** September 2026
 
 **Architecture source of truth:**
 [`architecture/LCProp_Target_Architecture.md`](architecture/LCProp_Target_Architecture.md)
@@ -31,8 +31,10 @@ their state to that optical response.
 
 - physical runtime grids and Fourier coordinates;
 - multichannel Gaussian launch and grouped coherence;
+- focus-defined, collimated, and uniform launch intent through LaunchPane;
 - NumPy/CuPy backend and precision selection;
 - angular-spectrum propagation with explicit optical substepping;
+- periodic, distance-scaled sponge, and discrete Tukey optical boundaries;
 - shared execution, cancellation, progress, and presentation products;
 - explicit workflow-operation and checkpoint-codec composition;
 - reusable GUI workers, workspace, beam editing, and result views.
@@ -44,21 +46,29 @@ their state to that optical response.
 - stationary soliton and soliton-existence workflows;
 - sequential and parallel parameter sweeps;
 - LC checkpoint persistence and continuation;
-- standalone LC PySide6 application.
+- standalone LC PySide6 application;
+- in-application Help plus current Quick Start and User Guide.
 
 ### Photorefractive
 
-- time-dependent normalized hopping-model workflow;
-- fixed-intensity and coupled-static solvers;
-- memory-bounded streaming static propagation;
-- partition-independent scattering representation;
-- image-amplification and coherent two-beam validation helpers;
-- PR checkpoint persistence and continuation;
-- standalone PR PySide6 application;
-- isolated transverse-reference model for multidimensional transport studies.
+- all eight production choices formed by static/time-dependent evolution,
+  reduced x-only/full-transverse transport, and fully nonlinear/linearized
+  material response;
+- exact-modal time evolution for both linearized transport models;
+- coupled nonlinear and analytic linearized static solvers;
+- canonical partition-independent scattering where request schemas support it;
+- Image Amplification and carrier-resolved two-beam diagnostics;
+- PR experiment/checkpoint persistence and continuation;
+- Local and Slurm execution with explicit NumPy/CuPy semantics;
+- Fast/Full remote retention, exact Fast longitudinal cuts, bounded MPR
+  previews, TD accepted-state curves, and compact preview movies;
+- structured progress and advisory runtime/resource planning;
+- standalone PR PySide6 application with in-application Help.
 
-The transverse-reference model is deliberately separate from the production
-scalar PR workflows. Its presence does not change the production PR equation.
+Physical model choice is independent of validation and hardware commissioning
+status. The [User Guide](user/user_guide.md) records those distinctions and
+the [PR model contracts](science/pr_model_contracts.md) define the current
+equations and profile boundaries.
 
 ## Validation policy
 
@@ -76,8 +86,9 @@ exact command and result for each milestone.
 
 ## Current boundaries
 
-- Execution is local and explicitly composed; LC compatibility methods remain
-  available.
+- LC supports Local execution for displayed workflows; LC Slurm execution is
+  currently limited to canonical static propagation. PR exposes Local and
+  Slurm execution for its registered production operations.
 - LC and PR have separate user applications rather than one material-selector
   window.
 - Prepared responses currently cover the supported scalar multiplicative

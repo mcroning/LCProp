@@ -3,6 +3,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
+import numpy as np
 
 from lcprop.core.requests import TimeDependentRunRequest, TimeDependentSolverOptions
 from lcprop.products.data_model import to_run_data
@@ -29,10 +30,15 @@ def _td_run_data():
 def test_longitudinal_sliders_initialize_to_center():
     app = QApplication.instance() or QApplication([])
     pane = LongitudinalPane()
-    pane.set_run_data(_td_run_data())
+    run_data = _td_run_data()
+    pane.set_run_data(run_data)
 
-    assert pane.x_cut_slider.value() == (pane.x_cut_slider.maximum() + 1) // 2
-    assert pane.y_cut_slider.value() == (pane.y_cut_slider.maximum() + 1) // 2
+    assert pane.x_cut_slider.value() == int(
+        np.argmin(np.abs(run_data.geometry.x))
+    )
+    assert pane.y_cut_slider.value() == int(
+        np.argmin(np.abs(run_data.geometry.y))
+    )
     assert "µm" in pane.x_cut_label.text()
     assert "µm" in pane.y_cut_label.text()
 

@@ -34,6 +34,7 @@ from lcprop.gui.experiment_files import (
     show_experiment_open_warning,
 )
 from lcprop.gui.workers import WorkflowWorker
+from lcprop.gui.help import ProductHelpButton
 from lcprop.gui.remote_execution import (
     RemoteExecutionControls,
     execution_target_selector,
@@ -264,6 +265,8 @@ class PRMainWindow(QWidget):
         self.stop_button.setVisible(False)
         self.stop_button.clicked.connect(self.stop_clicked)
         header.addWidget(self.stop_button)
+        self.help_button = ProductHelpButton(application="pr", parent=self)
+        header.addWidget(self.help_button)
         self.experiment_file_buttons = ExperimentFileButtons(self)
         self.experiment_file_buttons.saveRequested.connect(
             self.save_experiment_clicked

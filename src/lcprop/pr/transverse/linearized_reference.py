@@ -3,7 +3,7 @@
 This module is intentionally isolated from workflow registration.  It solves
 the frozen-intensity material tangent problem for the fixed-mean-field,
 current-carrying periodic bulk profile documented in
-``docs/research/pr_periodic_biased_current_carrying_profile.md``.
+``docs/science/pr_model_contracts.md``.
 """
 
 from __future__ import annotations

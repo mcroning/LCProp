@@ -43,8 +43,8 @@ class ImageView(FigureCanvasQTAgg):
             # The transverse pane is narrower than the longitudinal pane.
             # Reserve a wider right gutter so colorbar ticks and units are not
             # clipped at the minimum application width.
-            self._axes_rect = (0.13, 0.14, 0.63, 0.76)
-            self._colorbar_rect = (0.81, 0.14, 0.035, 0.76)
+            self._axes_rect = (0.14, 0.14, 0.62, 0.76)
+            self._colorbar_rect = (0.79, 0.14, 0.035, 0.76)
         self.ax = self.figure.add_axes(self._axes_rect)
         colorbar_ax = self.figure.add_axes(self._colorbar_rect)
         self.image = self.ax.imshow(

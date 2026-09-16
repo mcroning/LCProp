@@ -7,6 +7,10 @@ references, and event-specific prompts are maintained outside this repository.
 
 ## Start here
 
+- [`user/quick_start.md`](user/quick_start.md) — shortest path to a small LC
+  or PR run.
+- [`user/user_guide.md`](user/user_guide.md) — controls, workflows, execution,
+  retention, results, warnings, and limitations.
 - [`../README.md`](../README.md) — package overview, installation, examples,
   testing, and contribution guidance.
 - [`STATUS.md`](STATUS.md) — current implementation status and supported
@@ -35,6 +39,8 @@ context.
 
 ## Material documentation
 
+- [`science/pr_model_contracts.md`](science/pr_model_contracts.md) — canonical
+  current PR equations, profiles, approximation boundaries, and ownership.
 - [`../src/lcprop/pr/README.md`](../src/lcprop/pr/README.md) — PR state,
   normalization, boundary conditions, numerical methods, and workflows.
 - [`architecture/pr_gui_vertical_slice_design.md`](architecture/pr_gui_vertical_slice_design.md)

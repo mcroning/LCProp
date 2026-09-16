@@ -39,6 +39,8 @@ def test_image_pane_lists_2d_fields():
         "Output Plane Intensity",
         "Input Plane Δθ",
         "Output Plane Δθ",
+        "Output Far-Field Intensity",
+        "Output Far Field (dB relative to peak)",
     ]
     assert pane.image_view.image is not None
 
@@ -83,6 +85,8 @@ def test_timedependent_image_pane_lists_only_initial_and_final_fields():
         "Final Intensity",
         "Initial Δθ",
         "Final Δθ",
+        "Output Far-Field Intensity",
+        "Output Far Field (dB relative to peak)",
     ]
     assert pane.field_selector.currentText() == "Final Intensity"
 

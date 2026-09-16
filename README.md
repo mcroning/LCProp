@@ -91,6 +91,17 @@ python -m pip install -e '.[gpu]'
 python -m pip install -e '.[gui,gpu]'
 ```
 
+The graphical beam editor is provided by the separate LaunchPane Product.
+Install it independently before starting either GUI; for adjacent development
+checkouts:
+
+```bash
+python -m pip install -e /path/to/LaunchPane
+```
+
+LCProp consumes LaunchPane through the material-neutral beam-definition
+interface and does not make LaunchPane depend on LCProp.
+
 The `gpu` extra installs the CUDA 12 CuPy distribution. The host CUDA runtime
 and driver must also be compatible with that package.
 
@@ -116,6 +127,11 @@ python -m lcprop.pr.gui.app
 
 The applications share framework components where useful but retain separate
 material controls and workflows.
+
+Start with the [Quick Start](docs/user/quick_start.md), then use the
+[User Guide](docs/user/user_guide.md) for model choices, execution, result
+retention, visualization, and current limitations. Both applications also
+provide a **Help** menu with concise topic guidance.
 
 The LC application supports one- and multichannel propagation, including
 angled or colliding coherent beams, through the shared launch editor. It also
@@ -195,6 +211,9 @@ commissioning is maintained as a separate, explicitly approved workflow.
 - [Development plan](docs/development_plan.md)
 - [Codex operational prompt library](docs/codex/README.md)
 - [PR package reference](src/lcprop/pr/README.md)
+- [Quick Start](docs/user/quick_start.md)
+- [User Guide](docs/user/user_guide.md)
+- [PR model contracts](docs/science/pr_model_contracts.md)
 
 ## Contributing
 

@@ -39,6 +39,7 @@ from lcprop.lc.operations import (
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.runners.local import LocalRunner
 from lcprop.gui.workers import WorkflowWorker
+from lcprop.gui.help import ProductHelpButton
 from lcprop.gui.remote_execution import (
     RemoteExecutionControls,
     execution_target_selector,
@@ -214,6 +215,9 @@ class LCPropMainWindow(QWidget):
         self.stop_button.setVisible(False)
         self.stop_button.clicked.connect(self.stop_workflow_clicked)
         header.addWidget(self.stop_button)
+
+        self.help_button = ProductHelpButton(application="lc", parent=self)
+        header.addWidget(self.help_button)
 
         self.experiment_file_buttons = ExperimentFileButtons(self)
         self.experiment_file_buttons.saveRequested.connect(
