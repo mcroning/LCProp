@@ -55,6 +55,7 @@ from lcprop.gui.experiment_files import (
     show_experiment_open_warning,
 )
 from lcprop.persistence import load_experiment, save_experiment
+from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.lc.gui.request_adapter import (
     LC_STATIC_EXPERIMENT,
     LC_STATIC_WORKFLOW_ID,
@@ -140,6 +141,7 @@ class LCPropMainWindow(QWidget):
         self._td_outcome_received = False
         self._td_thread_done = False
         self._hydrating_experiment = False
+        self._propagation_optical_boundary = None
         self.setWindowTitle("LCProp")
         # Default to a wide scientific-visualization layout.
         self.setMinimumSize(1200, 760)
@@ -318,6 +320,22 @@ class LCPropMainWindow(QWidget):
             self.run_button.setText("Running…")
             return
         experiment = self.experiment_panel.current_experiment()
+        self._update_boundary_applicability(experiment)
+        experiment_files_supported = experiment in {
+            "Static propagation",
+            "Time-dependent propagation",
+        }
+        for button in (
+            self.experiment_file_buttons.save_button,
+            self.experiment_file_buttons.open_button,
+        ):
+            button.setEnabled(experiment_files_supported)
+            button.setToolTip(
+                ""
+                if experiment_files_supported
+                else "Experiment files currently support LC static and "
+                "time-dependent propagation only."
+            )
         self.run_button.setText(f"Run {experiment}")
         is_continuable = experiment in {
             "Static propagation", "Time-dependent propagation"
@@ -341,7 +359,11 @@ class LCPropMainWindow(QWidget):
         self.solver_panel.set_experiment_mode(experiment)
         self._update_sweep_tab(experiment)
         self._update_initial_condition_controls(experiment)
-        if self.runner is self.slurm_runner and experiment != "Static propagation":
+        resource_error = self._lc_slurm_resource_error()
+        if self.runner is self.slurm_runner and resource_error is not None:
+            self.run_button.setEnabled(False)
+            self.run_button.setToolTip(resource_error)
+        elif self.runner is self.slurm_runner and experiment != "Static propagation":
             self.run_button.setEnabled(False)
             self.run_button.setToolTip(
                 "Slurm commissioning currently supports canonical LC static only"
@@ -353,6 +375,62 @@ class LCPropMainWindow(QWidget):
         else:
             self.run_button.setEnabled(True)
             self.run_button.setToolTip("")
+
+    def _update_boundary_applicability(self, experiment: str) -> None:
+        """Expose the periodic-only stationary contract without losing state."""
+
+        controls = (
+            self.beam_panel.boundary_mode,
+            self.beam_panel.boundary_width,
+            self.beam_panel.boundary_attenuation,
+            self.beam_panel.boundary_order,
+            self.beam_panel.boundary_tukey_alpha,
+        )
+        stationary = experiment in {"Soliton", "Soliton existence curve"}
+        if stationary:
+            if self.beam_panel.boundary_mode.isEnabled():
+                self._propagation_optical_boundary = (
+                    self.beam_panel.optical_boundary()
+                )
+            self.beam_panel.set_optical_boundary(TransverseBoundarySpec())
+            tooltip = (
+                "LC stationary soliton and existence workflows use the "
+                "periodic transverse optical boundary."
+            )
+            for control in controls:
+                control.setEnabled(False)
+                control.setToolTip(tooltip)
+            return
+
+        for control in controls:
+            control.setEnabled(True)
+            control.setToolTip("")
+        if self._propagation_optical_boundary is not None:
+            self.beam_panel.set_optical_boundary(
+                self._propagation_optical_boundary
+            )
+            self._propagation_optical_boundary = None
+
+    def _lc_slurm_resource_error(self) -> str | None:
+        """Return a truthful LC error for a selected GPU-only Slurm profile."""
+
+        if self.runner is not self.slurm_runner:
+            return None
+        if self._explicit_slurm_runner is not None:
+            # An injected runner owns its resource policy; the profile editor
+            # selection is not provenance for that runner.
+            return None
+        cluster = self.remote_execution_controls.selected_cluster()
+        resource = self.remote_execution_controls.selected_resource_name()
+        if cluster is None or resource is None:
+            return None
+        profile = cluster.profile(resource)
+        if profile.gpus > 0 or profile.require_cupy:
+            return (
+                "LC production workflows currently execute with NumPy. "
+                "Select a CPU Slurm resource profile."
+            )
+        return None
 
     def _connect_continuation_invalidation_signals(self) -> None:
         """Invalidate a retained TD checkpoint as soon as its request changes."""
@@ -1463,7 +1541,11 @@ class LCPropMainWindow(QWidget):
                     )
                 )
                 self.run_status = (
-                    "stopped" if result.status == "stopped" else "completed"
+                    "stopped"
+                    if result.status == "stopped"
+                    else "nonconverged"
+                    if result.all_slices_converged is False
+                    else "completed"
                 )
             elif runner_result.kind == "timedependent":
                 self.last_timedependent_result = result
@@ -1514,9 +1596,21 @@ class LCPropMainWindow(QWidget):
                     f"{prefix}: {self._format_coordinate(result.z_reached_um)} um; "
                     f"slices: {result.completed_slices}/{result.total_slices}"
                 )
-                self.results_panel.append_console(
-                    "Run stopped" if result.status == "stopped" else "Run complete"
-                )
+                if result.status == "stopped":
+                    message = "Run stopped"
+                elif result.all_slices_converged is False:
+                    message = (
+                        "Execution complete; static solution did not satisfy "
+                        "the convergence qualifications"
+                    )
+                elif result.all_slices_converged is None:
+                    message = (
+                        "Run complete; fixed director propagation requested "
+                        "no static self-consistency solve"
+                    )
+                else:
+                    message = "Run complete; static solution converged"
+                self.results_panel.append_console(message)
             elif runner_result.kind == "timedependent" and result.status == "cancelled":
                 self.results_panel.set_td_time_indicator(
                     "TD time at stop: "

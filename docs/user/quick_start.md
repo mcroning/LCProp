@@ -105,8 +105,9 @@ For PR Slurm retrieval:
 - **Full** retains the supported complete scientific volumes and costs more to
   package, transfer, and hold in memory.
 
-LC Slurm execution is currently limited to canonical static propagation. The
-LC GUI does not expose the PR Fast/Full retrieval selector.
+LC Slurm execution is currently limited to canonical NumPy static propagation
+on a CPU resource profile. The LC GUI does not expose the PR Fast/Full
+retrieval selector.
 
 ## Save and reproduce
 

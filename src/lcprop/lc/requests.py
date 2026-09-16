@@ -22,6 +22,30 @@ SweepExecution = Literal["sequential", "parallel"]
 SweepMemberStatus = Literal["not_started", "completed", "failed", "cancelled"]
 
 
+def validate_single_wavelength_lc_beams(beams: BeamStack) -> None:
+    """Require the single optical wavelength implemented by LC workflows."""
+
+    wavelengths = tuple(float(channel.wavelength_um) for channel in beams.channels)
+    if wavelengths and any(value != wavelengths[0] for value in wavelengths[1:]):
+        raise ValueError(
+            "LC propagation currently requires all enabled optical channels "
+            "to use the same wavelength"
+        )
+
+
+def validate_periodic_stationary_boundary(
+    boundary: TransverseBoundarySpec,
+) -> None:
+    """Require the periodic transverse contract of stationary LC solvers."""
+
+    boundary.validate()
+    if boundary.mode != "periodic":
+        raise ValueError(
+            "LC stationary soliton and existence workflows support only the "
+            "periodic transverse optical boundary"
+        )
+
+
 def _canonical_soliton_mode(mode: str) -> str:
     normalized = str(mode).upper()
     aliases = {
@@ -177,6 +201,9 @@ class SolitonRequest:
         self.base.material.validate()
         self.base.bias.validate()
         self.base.beams.validate()
+        self.base.runtime.validate()
+        validate_single_wavelength_lc_beams(self.base.beams)
+        validate_periodic_stationary_boundary(self.base.optical_boundary)
         canonical = _canonical_soliton_mode(self.mode)
         allowed_modes = {"00", "10", "01", "11", "custom"}
         if canonical not in allowed_modes:
@@ -223,6 +250,9 @@ class SolitonExistenceRequest:
         self.base.material.validate()
         self.base.bias.validate()
         self.base.beams.validate()
+        self.base.runtime.validate()
+        validate_single_wavelength_lc_beams(self.base.beams)
+        validate_periodic_stationary_boundary(self.base.optical_boundary)
         allowed_modes = {"00", "10", "01", "11", "custom"}
         if self.mode not in allowed_modes:
             raise ValueError(

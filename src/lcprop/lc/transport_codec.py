@@ -23,6 +23,7 @@ from lcprop.lc.requests import (
     StaticRunRequest,
     StaticSolverOptions,
     StaticWorkflowOptions,
+    validate_single_wavelength_lc_beams,
 )
 from lcprop.lc.results import StaticIterationRecord, StaticRunResult, StaticSliceSummary
 from lcprop.lc.specs import BiasSpec, LCMaterial
@@ -60,6 +61,7 @@ def _validate_request(request: StaticRunRequest) -> None:
     request.material.validate()
     request.bias.validate()
     request.beams.validate()
+    validate_single_wavelength_lc_beams(request.beams)
     request.runtime.validate()
     request.optical_boundary.validate()
     if request.output.run_dir is not None:

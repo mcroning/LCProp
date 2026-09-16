@@ -42,9 +42,12 @@ class SolverPanel(QWidget):
 
     def set_experiment_mode(self, experiment: str) -> None:
         """Show only controls relevant to the selected experiment."""
+        is_static = experiment == "Static propagation"
         is_td = experiment == "Time-dependent propagation"
-        self.workflow.setEnabled(not is_td)
-        self.max_iterations.setEnabled(not is_td)
+        self.workflow.setEnabled(is_static)
+        self.max_iterations.setEnabled(is_static)
+        self.Nt.setEnabled(is_td)
+        self.dt.setEnabled(is_td)
         is_soliton = experiment in {"Soliton", "Soliton existence curve"}
         self.soliton_mode_selector.setEnabled(is_soliton)
         self.refine_transverse_checkbox.setEnabled(experiment == "Soliton")

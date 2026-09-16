@@ -1,6 +1,7 @@
 from dataclasses import replace
 
 import numpy as np
+import pytest
 
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import BiasSpec, GridSpec, LCMaterial
@@ -302,7 +303,7 @@ def test_static_td_and_soliton_resolve_same_plan_and_kernel_spacing():
     np.testing.assert_array_equal(components.kernel, expected_kernel)
 
 
-def test_multichannel_uses_shortest_active_wavelength():
+def test_substep_planner_uses_shortest_wavelength_but_lc_rejects_mixed_stack():
     plan = resolve_optical_substeps(
         dz_um=10.0,
         wavelengths_um=(1.064, 0.532, 0.633),
@@ -341,21 +342,8 @@ def test_multichannel_uses_shortest_active_wavelength():
             ),
         )
     )
-    components = build_runtime_components(
-        _request(beams=beams)
-    )
-    integrated = resolve_optical_substeps(
-        dz_um=components.grid.dz_um,
-        wavelengths_um=(1.064, 0.532),
-        enabled=components.request.runtime.optical_substeps_enabled,
-        dn_max_est=components.request.runtime.optical_dn_max_est,
-        max_phase_per_substep_rad=(
-            components.request.runtime.optical_max_phase_per_substep_rad
-        ),
-        max_substeps=components.request.runtime.optical_max_substeps,
-    )
-    assert components.optical_substeps.Nsub == integrated.Nsub
-    assert components.optical_substeps.shortest_wavelength_um == 0.532
+    with pytest.raises(ValueError, match="same wavelength"):
+        build_runtime_components(_request(beams=beams))
 
 
 def test_cap_reached_is_explicit_in_plan_and_workflow_diagnostics():

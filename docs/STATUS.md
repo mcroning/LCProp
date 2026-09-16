@@ -46,6 +46,8 @@ their state to that optical response.
 - stationary soliton and soliton-existence workflows;
 - sequential and parallel parameter sweeps;
 - LC checkpoint persistence and continuation;
+- canonical LC model contract and explicit single-wavelength, periodic-only
+  stationary, NumPy backend, and precision boundaries;
 - standalone LC PySide6 application;
 - in-application Help plus current Quick Start and User Guide.
 

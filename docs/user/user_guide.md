@@ -4,6 +4,8 @@ LCProp provides separate LC and PR applications over shared beam launch,
 optical propagation, execution, progress, and result-presentation services.
 This guide describes current Product behavior. Equations and immutable PR
 model contracts are in [PR Model Contracts](../science/pr_model_contracts.md).
+The corresponding LC equations and numerical semantics are in
+[LC Model Contracts](../science/lc_model_contracts.md).
 
 ## Beam and input controls
 
@@ -62,15 +64,29 @@ The LC application supports:
 - local execution of all displayed workflows;
 - Slurm execution of canonical static propagation only.
 
+LC propagation currently uses one optical wavelength kernel. All enabled LC
+channels must therefore use the same wavelength; unequal-wavelength requests
+are rejected rather than approximated. Stationary soliton and existence
+workflows are periodic-only. Propagation workflows apply their selected
+Periodic, Sponge, or Tukey boundary to the actual optical march.
+
 **Physics** controls ordinary/extraordinary indices, elastic constant,
 dielectric anisotropy, bias voltage, and x-boundary director angle. **Solver**
 shows the static strategy, coupled-pass limit, TD step count/timestep, and
 soliton controls applicable to the selected experiment.
 
-The LC GUI currently fixes represented runtime precision according to its
-request adapter and does not expose PR's backend, Fast/Full, or quantitative
-runtime-estimator controls. These are explicit Product limitations, not hidden
-automatic settings.
+LC production workflows currently execute with NumPy. Headless static and TD
+requests support NumPy float64/complex128 and float32/complex64; the LC GUI
+represents the conservative float64 choice. The GUI does not expose PR's
+backend, Fast/Full, or quantitative runtime-estimator controls. GPU Slurm
+profiles are disabled for LC execution because selecting a GPU resource does
+not change the NumPy scientific backend. These are explicit Product
+limitations, not hidden automatic settings.
+
+Static execution completion and scientific convergence are separate. If any
+slice fails the configured residual qualifications, the retained result and
+GUI report the static solution as nonconverged even though execution and
+result construction completed.
 
 ## PR model matrix
 
@@ -139,6 +155,10 @@ implementation* performs the scientific calculation.
 - `float64` is the conservative default for reference and publication-facing
   work. `float32` is supported only where the selected workflow validates it;
   users must still perform problem-specific convergence comparisons.
+
+Those automatic backend rules apply to the PR application. LC does not expose
+an automatic or CuPy production backend: it is NumPy-based, as described in
+the LC section above.
 
 Slurm configuration uses system SSH/agent authentication. Test a profile
 before submission. Structured `progress.json` telemetry is atomically replaced

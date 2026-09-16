@@ -207,6 +207,20 @@ def _beams():
     )
 
 
+def _lc_beams():
+    """Return the equal-wavelength stack supported by LC propagation."""
+
+    beams = _beams()
+    reference = beams.channels[0].wavelength_um
+    return replace(
+        beams,
+        channels=tuple(
+            replace(channel, wavelength_um=reference)
+            for channel in beams.channels
+        ),
+    )
+
+
 def test_legacy_canonical_beam_payload_defaults_to_entrance_gaussian():
     payload = encode_beam_stack(_beams())
     new_fields = (
@@ -267,7 +281,7 @@ def _lc_static_request() -> StaticRunRequest:
             theta_center=0.7,
             b_override=2.3,
         ),
-        beams=_beams(),
+        beams=_lc_beams(),
         solver=StaticSolverOptions(
             workflow=StaticWorkflowOptions(
                 strategy="local_self_consistent",
@@ -302,7 +316,7 @@ def _lc_timedependent_request() -> TimeDependentRunRequest:
         grid=_grid(),
         material=_lc_static_request().material,
         bias=_lc_static_request().bias,
-        beams=_beams(),
+        beams=_lc_beams(),
         solver=TimeDependentSolverOptions(
             workflow=StaticWorkflowOptions(
                 strategy="local_self_consistent",

@@ -53,7 +53,8 @@ def _geometry_from_grid_summary(grid_summary: dict) -> Geometry:
 
     x = (np.arange(nx) - 0.5 * (nx - 1)) * dx
     y = (np.arange(ny) - 0.5 * (ny - 1)) * dy
-    z = np.arange(nz) * dz
+    # Retained LC z stacks contain slice-midpoint material/intensity values.
+    z = (np.arange(nz) + 0.5) * dz
 
     return Geometry(x=x, y=y, z=z, units="um")
 
@@ -327,6 +328,13 @@ def from_static_result(result) -> RunData:
         "method": result.method,
         "n_steps": result.n_steps,
         "status": getattr(result, "status", "completed"),
+        "scientific_status": (
+            "not_converged"
+            if getattr(result, "all_slices_converged", None) is False
+            else "converged"
+            if getattr(result, "all_slices_converged", None) is True
+            else "not_applicable"
+        ),
         "completed_slices": getattr(result, "completed_slices", theta_stack.shape[0]),
         "total_slices": getattr(result, "total_slices", result.grid_summary.get("Nz")),
         "z_reached_um": getattr(result, "z_reached_um", None),

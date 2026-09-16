@@ -139,6 +139,10 @@ provides single-power eigensoliton and bounded power-sweep workflows. LC result
 products include transverse and longitudinal optical/director views,
 convergence diagnostics, output far fields on in-medium direction-cosine axes,
 and selectable optical/director profiles for completed sweep members.
+Enabled LC channels currently share one wavelength. LC production workflows
+execute with NumPy; the GUI uses float64, while headless static and TD requests
+also support bounded NumPy float32 execution. See the canonical
+[LC model contracts](docs/science/lc_model_contracts.md) for the exact scope.
 
 ## Headless example
 
@@ -214,6 +218,7 @@ commissioning is maintained as a separate, explicitly approved workflow.
 - [Quick Start](docs/user/quick_start.md)
 - [User Guide](docs/user/user_guide.md)
 - [PR model contracts](docs/science/pr_model_contracts.md)
+- [LC model contracts](docs/science/lc_model_contracts.md)
 
 ## Contributing
 

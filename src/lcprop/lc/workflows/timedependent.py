@@ -377,6 +377,11 @@ def _validate_continuation_request(
         (request.beams, original.beams, "beams"),
         (request.runtime, original.runtime, "runtime"),
         (
+            request.optical_boundary,
+            original.optical_boundary,
+            "optical boundary",
+        ),
+        (
             replace(request.solver, Nt=0),
             replace(original.solver, Nt=0),
             "TD solver",

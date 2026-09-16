@@ -39,6 +39,9 @@ context.
 
 ## Material documentation
 
+- [`science/lc_model_contracts.md`](science/lc_model_contracts.md) — canonical
+  current LC equations, normalization, boundaries, workflow semantics, and
+  supported scope.
 - [`science/pr_model_contracts.md`](science/pr_model_contracts.md) — canonical
   current PR equations, profiles, approximation boundaries, and ownership.
 - [`../src/lcprop/pr/README.md`](../src/lcprop/pr/README.md) — PR state,

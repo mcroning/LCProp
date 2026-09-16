@@ -103,7 +103,10 @@ def test_gui_static_worker_stop_continue_and_live_latest_fields():
 
     window.continue_button.click()
     _wait_for(app, lambda: not window._background_running)
-    assert window.run_status == "completed"
+    assert window.run_status == "nonconverged"
+    assert "did not satisfy the convergence qualifications" in (
+        window.results_panel.workspace.console.toPlainText()
+    )
     assert window.last_static_result.completed_slices == 4
     assert window.last_static_checkpoint is None
     assert window.results_panel.workspace.image_pane.td_time_label.text() == (

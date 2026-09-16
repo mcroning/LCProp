@@ -8,7 +8,7 @@ from typing import Callable
 
 import numpy as np
 
-from lcprop.lc.requests import StaticRunRequest
+from lcprop.lc.requests import StaticRunRequest, validate_single_wavelength_lc_beams
 from lcprop.core.backend import asnumpy
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.lc.results import (
@@ -63,6 +63,8 @@ def run_static(
     request.bias.validate()
     request.beams.validate()
     request.runtime.validate()
+    request.optical_boundary.validate()
+    validate_single_wavelength_lc_beams(request.beams)
     if request.solver.workflow.strategy == "local_self_consistent":
         if request.solver.static_max_relax_iterations < 1:
             raise ValueError("static_max_relax_iterations must be >= 1")
@@ -582,6 +584,8 @@ def _run_local_self_consistent_zmarch(
                 no=request.material.no,
                 coherence_groups=launch.coherence_groups,
                 Nsub=optical_Nsub,
+                boundary=request.optical_boundary,
+                boundary_grid=grid,
                 xp=xp,
             )
             return A_trial, I_mid
@@ -675,7 +679,7 @@ def _run_local_self_consistent_zmarch(
                     iteration_records.append(
                         StaticIterationRecord(
                             z_index=k,
-                            z_um=float(k * grid.dz_um),
+                            z_um=float((k + 0.5) * grid.dz_um),
                             optical_pass=coupled_pass,
                             coupled_pass=coupled_pass,
                             relax_iteration=relax_iteration,
@@ -770,7 +774,7 @@ def _run_local_self_consistent_zmarch(
         slice_summaries.append(
             StaticSliceSummary(
                 z_index=k,
-                z_um=float(k * grid.dz_um),
+                z_um=float((k + 0.5) * grid.dz_um),
                 optical_passes=coupled_passes,
                 relaxation_iterations=total_relax_iterations,
                 final_residual_rms=float(final_residual["residual_rms"]),

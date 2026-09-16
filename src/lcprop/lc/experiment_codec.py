@@ -15,6 +15,7 @@ from lcprop.lc.requests import (
     StaticWorkflowOptions,
     TimeDependentRunRequest,
     TimeDependentSolverOptions,
+    validate_single_wavelength_lc_beams,
 )
 from lcprop.lc.specs import BiasSpec, LCMaterial
 from lcprop.optics.boundaries import TransverseBoundarySpec
@@ -58,6 +59,7 @@ def _validate_common(request: StaticRunRequest | TimeDependentRunRequest) -> Non
     request.material.validate()
     request.bias.validate()
     request.beams.validate()
+    validate_single_wavelength_lc_beams(request.beams)
     request.runtime.validate()
     if type(request.output.save_slices) is not bool:
         raise ExperimentPayloadError("output.save_slices must be a boolean")

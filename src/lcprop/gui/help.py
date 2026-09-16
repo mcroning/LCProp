@@ -40,7 +40,8 @@ large runs. The complete walkthrough is `docs/user/quick_start.md`.
 workflows. PR model choice has three independent axes: evolution, transverse
 transport, and material response. All eight PR combinations are production
 choices; validation and hardware commissioning are separate evidence. See
-`docs/user/user_guide.md` and `docs/science/pr_model_contracts.md`.
+`docs/user/user_guide.md`, `docs/science/lc_model_contracts.md`, and
+`docs/science/pr_model_contracts.md`.
 """,
     ),
     HelpTopic(
@@ -60,7 +61,8 @@ selected grid.
 amplitude-absorption rate accumulated with propagation distance and is
 invariant to subdivision into optical substeps. **Tukey** is a discrete
 apodization window, not a rate. Boundaries do not replace aperture and grid
-convergence checks.
+convergence checks. LC stationary soliton and existence workflows are
+periodic-only.
 """,
     ),
     HelpTopic(
@@ -78,8 +80,9 @@ Reduced static requests do not carry the canonical scattering specification.
         """Execution target and scientific backend are distinct. Configure and
 test a remote profile, select Slurm, then review the immutable request summary.
 An automatically chosen GPU backend is reversible; an explicit or
-experiment-loaded backend is preserved. LC Slurm support is currently limited
-to canonical static propagation.
+experiment-loaded backend is preserved. LC production workflows are
+NumPy-based; LC Slurm support is currently limited to canonical static
+propagation on a CPU resource profile.
 """,
     ),
     HelpTopic(

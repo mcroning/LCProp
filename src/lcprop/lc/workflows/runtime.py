@@ -18,7 +18,7 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Any
 
-from lcprop.lc.requests import StaticRunRequest
+from lcprop.lc.requests import StaticRunRequest, validate_single_wavelength_lc_beams
 from lcprop.core.grid import RuntimeGrid, make_grid
 from lcprop.lc.coupling import resolved_bi
 from lcprop.lc.bias import BiasResult, build_bias, resolved_b
@@ -119,6 +119,7 @@ def build_runtime_components(
     request.beams.validate()
     request.runtime.validate()
     request.optical_boundary.validate()
+    validate_single_wavelength_lc_beams(request.beams)
 
     grid = make_grid(request.grid, real_dtype=np.float64 if request.runtime.precision == "float64" else np.float32)
     normalization = make_lc_spatial_normalization(grid)

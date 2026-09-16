@@ -11,6 +11,7 @@ from lcprop.lc.requests import (
     StaticWorkflowOptions,
     TimeDependentRunRequest,
     TimeDependentSolverOptions,
+    validate_single_wavelength_lc_beams,
 )
 from lcprop.lc.specs import BiasSpec, LCMaterial
 
@@ -45,6 +46,7 @@ def validate_lc_gui_request_representable(request) -> None:
     request.material.validate()
     request.bias.validate()
     request.beams.validate()
+    validate_single_wavelength_lc_beams(request.beams)
     request.optical_boundary.validate()
     if request.material.name != LCMaterial().name:
         raise ValueError("LC GUI cannot represent a non-default material name")
