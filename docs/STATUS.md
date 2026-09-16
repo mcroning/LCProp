@@ -75,7 +75,15 @@ equations and profile boundaries.
 ## Validation policy
 
 The repository contains focused tests for shared boundaries and both material
-packages. Run the complete local suite with:
+packages. Use Python 3.11 or newer for the GUI and normal Product-test
+environment, install the separate LaunchPlane Product, then install LCProp
+with its GUI and test extras:
+
+```bash
+python -m pip install -e '.[gui,test]'
+```
+
+Run the complete local suite with:
 
 ```bash
 python -m pytest -q
@@ -88,9 +96,11 @@ exact command and result for each milestone.
 
 ## Current boundaries
 
-- LC supports Local execution for displayed workflows; LC Slurm execution is
-  currently limited to canonical static propagation. PR exposes Local and
-  Slurm execution for its registered production operations.
+- LC supports Local execution for displayed workflows. LC Slurm execution is
+  implemented only for canonical NumPy static propagation on CPU, with real
+  scheduler commissioning pending; other LC remote workflows are unsupported.
+  PR exposes Local and Slurm execution for its registered production
+  operations.
 - LC and PR have separate user applications rather than one material-selector
   window.
 - Prepared responses currently cover the supported scalar multiplicative

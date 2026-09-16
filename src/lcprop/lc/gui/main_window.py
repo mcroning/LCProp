@@ -363,11 +363,19 @@ class LCPropMainWindow(QWidget):
         if self.runner is self.slurm_runner and resource_error is not None:
             self.run_button.setEnabled(False)
             self.run_button.setToolTip(resource_error)
-        elif self.runner is self.slurm_runner and experiment != "Static propagation":
-            self.run_button.setEnabled(False)
-            self.run_button.setToolTip(
-                "Slurm commissioning currently supports canonical LC static only"
-            )
+        elif self.runner is self.slurm_runner:
+            if experiment != "Static propagation":
+                self.run_button.setEnabled(False)
+                self.run_button.setToolTip(
+                    "LC Slurm is implemented only for canonical LC static "
+                    "propagation; other remote workflows are unsupported"
+                )
+            else:
+                self.run_button.setEnabled(True)
+                self.run_button.setToolTip(
+                    "LC canonical static Slurm is implemented; real CPU/NumPy "
+                    "scheduler commissioning is pending"
+                )
         elif experiment == "Time-dependent propagation":
             available, reason = self._td_source_mode_availability()
             self.run_button.setEnabled(available)

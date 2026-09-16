@@ -9,6 +9,7 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[1]
 CURRENT_PRODUCT_DOCS = (
     ROOT / "README.md",
+    ROOT / "THIRD_PARTY_NOTICES.md",
     ROOT / "docs" / "README.md",
     ROOT / "docs" / "STATUS.md",
     ROOT / "docs" / "user" / "quick_start.md",
@@ -46,6 +47,35 @@ def test_quick_start_entry_points_match_the_product():
     )
     assert callable(importlib.import_module("lcprop.pr.gui.app").main)
     assert callable(importlib.import_module("lcprop.lc.gui.app").main)
+
+
+def test_release_installation_and_attribution_contracts_are_explicit():
+    project = tomllib.loads(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    assert project["project"]["optional-dependencies"]["test"] == [
+        "pytest>=8",
+        "Pillow",
+    ]
+    assert project["project"]["license-files"] == [
+        "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
+    ]
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "Python 3.11 or newer" in readme
+    assert "https://github.com/mcroning/LaunchPlane" in readme
+    assert ".[gui,test]" in readme
+
+    notices = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    assert "10.3390/photonics12020113" in notices
+    assert "CC BY 4.0" in notices
+    assert notices.count("registered_normalized_residuals.png") == 2
+    assert notices.count("direct_panel_comparison.png") == 2
+    assert "corrected_input_comparison.png" in notices
+
+    assert not (ROOT / "src/lcprop/core/LCProp.code-workspace").exists()
+    assert not (ROOT / "reference/prprop/prprop3d.py").exists()
 
 
 def test_pr_user_matrix_names_all_eight_production_cells_once():

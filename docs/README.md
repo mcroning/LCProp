@@ -13,6 +13,8 @@ references, and event-specific prompts are maintained outside this repository.
   retention, results, warnings, and limitations.
 - [`../README.md`](../README.md) — package overview, installation, examples,
   testing, and contribution guidance.
+- [`../THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) — attribution and
+  license notices for retained third-party publication content.
 - [`STATUS.md`](STATUS.md) — current implementation status and supported
   boundaries.
 - [`architecture/LCProp_Target_Architecture.md`](architecture/LCProp_Target_Architecture.md)

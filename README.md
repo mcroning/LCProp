@@ -77,7 +77,9 @@ src/lcprop/
 
 ## Installation
 
-LCProp requires Python 3.10 or newer. From a checkout:
+LCProp's headless core requires Python 3.10 or newer. The supported GUI and
+normal Product-test installation require Python 3.11 or newer because the
+separate LaunchPlane Product has that requirement. From a checkout:
 
 ```bash
 python -m pip install -e .
@@ -91,16 +93,26 @@ python -m pip install -e '.[gpu]'
 python -m pip install -e '.[gui,gpu]'
 ```
 
-The graphical beam editor is provided by the separate LaunchPane Product.
-Install it independently before starting either GUI; for adjacent development
-checkouts:
+The graphical beam editor is provided by the separate
+[LaunchPlane Product](https://github.com/mcroning/LaunchPlane). LCProp requires
+LaunchPlane schema 3 or newer. Until LaunchPlane has a separately released
+package version, install its public source checkout independently before
+starting either GUI:
 
 ```bash
-python -m pip install -e /path/to/LaunchPane
+git clone https://github.com/mcroning/LaunchPlane.git
+python -m pip install -e ./LaunchPlane
 ```
 
 LCProp consumes LaunchPane through the material-neutral beam-definition
 interface and does not make LaunchPane depend on LCProp.
+
+For a reproducible local Product-test environment, use Python 3.11 or newer,
+install LaunchPlane as above, and install LCProp's GUI and test extras:
+
+```bash
+python -m pip install -e '.[gui,test]'
+```
 
 The `gpu` extra installs the CUDA 12 CuPy distribution. The host CUDA runtime
 and driver must also be compatible with that package.
@@ -197,15 +209,18 @@ normalization, numerical methods, and workflow contracts.
 
 ## Testing
 
-Run the complete automated suite with:
+After the development/test installation above, run the normal Product suite
+with:
 
 ```bash
 python -m pytest -q
 ```
 
 Focused tests live alongside the relevant material or shared boundary in
-`tests/`. GPU tests skip when CuPy or a CUDA device is unavailable; cluster
-commissioning is maintained as a separate, explicitly approved workflow.
+`tests/`. CUDA tests additionally require the `gpu` extra and compatible CUDA
+hardware. Cluster commissioning, historical saved-state checks, and other
+explicitly supplied evidence remain conditional and are not part of the normal
+local test environment.
 
 ## Documentation
 
@@ -219,6 +234,7 @@ commissioning is maintained as a separate, explicitly approved workflow.
 - [User Guide](docs/user/user_guide.md)
 - [PR model contracts](docs/science/pr_model_contracts.md)
 - [LC model contracts](docs/science/lc_model_contracts.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## Contributing
 

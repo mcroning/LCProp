@@ -9,10 +9,11 @@ The corresponding LC equations and numerical semantics are in
 
 ## Beam and input controls
 
-Both applications embed the separate LaunchPane Product. A beam definition
-contains profile, wavelength, power, position, transverse phase gradients,
-phase, and coherence group. LCProp converts that intent into fields on its
-runtime grid without making LaunchPane material-aware.
+Both applications embed the separate LaunchPlane Product, requiring schema 3
+or newer and Python 3.11 or newer for the complete GUI installation. A beam
+definition contains profile, wavelength, power, position, transverse phase
+gradients, phase, and coherence group. LCProp converts that intent into fields
+on its runtime grid without making LaunchPlane material-aware.
 
 Channels with the same explicit coherence group are summed as fields before
 intensity is formed; different groups add as intensities. A two-beam coupling
@@ -62,7 +63,8 @@ The LC application supports:
 - experiment persistence for static and TD requests;
 - checkpoints and continuation;
 - local execution of all displayed workflows;
-- Slurm execution of canonical static propagation only.
+- implemented Slurm execution of canonical static propagation only, with real
+  CPU/NumPy scheduler commissioning still pending.
 
 LC propagation currently uses one optical wavelength kernel. All enabled LC
 channels must therefore use the same wavelength; unequal-wavelength requests
@@ -160,10 +162,18 @@ Those automatic backend rules apply to the PR application. LC does not expose
 an automatic or CuPy production backend: it is NumPy-based, as described in
 the LC section above.
 
+LC Slurm execution is implemented only for canonical NumPy static propagation
+on a CPU resource profile, and real scheduler commissioning is pending. TD,
+soliton, and soliton-existence remote execution are unsupported.
+
 Slurm configuration uses system SSH/agent authentication. Test a profile
 before submission. Structured `progress.json` telemetry is atomically replaced
 when possible and is always best-effort: progress-write failure cannot change
 the scientific result, packaging, cancellation, or original exception.
+
+Automatic Slurm source deployment is a source-checkout workflow: it archives
+the committed `src/` tree and `pyproject.toml` from a clean Git revision. An
+installed wheel alone is not a remote-source deployment mechanism.
 
 ## Runtime and resource planning
 

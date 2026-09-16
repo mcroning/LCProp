@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Optical beam propagation in liquid-crystal and photorefractive media"
 readme = "README.md"
 license = "BSD-3-Clause"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.10"
 dependencies = [
     "numpy",
@@ -15,6 +15,7 @@ dependencies = [
 [project.optional-dependencies]
 gpu = ["cupy-cuda12x"]
 gui = ["PySide6", "pyqtgraph", "matplotlib"]
+test = ["pytest>=8", "Pillow"]
 
 [project.scripts]
 lcprop-pr = "lcprop.pr.gui.app:main"

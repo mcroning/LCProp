@@ -34,8 +34,10 @@ def test_lc_execution_target_defaults_local_and_only_static_is_remote_enabled():
     window.experiment_panel.experiment.setCurrentText("Time-dependent propagation")
     assert not window.run_button.isEnabled()
     assert "canonical LC static" in window.run_button.toolTip()
+    assert "unsupported" in window.run_button.toolTip()
     window.experiment_panel.experiment.setCurrentText("Static propagation")
     assert window.run_button.isEnabled()
+    assert "commissioning is pending" in window.run_button.toolTip()
     window.close()
 
 

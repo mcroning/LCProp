@@ -6,11 +6,15 @@ points, not convergence evidence for a scientific conclusion.
 
 ## Install and launch
 
-LCProp requires Python 3.10 or newer. Its beam editor is the separate
-LaunchPane Product. From local checkouts:
+LCProp's headless core requires Python 3.10 or newer. The GUI requires Python
+3.11 or newer because its beam editor is the separate
+[LaunchPlane Product](https://github.com/mcroning/LaunchPlane), schema 3 or
+newer. Until LaunchPlane has a separately released package version, install it
+from its public source checkout in the same environment:
 
 ```bash
-python -m pip install -e /path/to/LaunchPane
+git clone https://github.com/mcroning/LaunchPlane.git
+python -m pip install -e ./LaunchPlane
 python -m pip install -e '.[gui]'
 ```
 
@@ -105,9 +109,10 @@ For PR Slurm retrieval:
 - **Full** retains the supported complete scientific volumes and costs more to
   package, transfer, and hold in memory.
 
-LC Slurm execution is currently limited to canonical NumPy static propagation
-on a CPU resource profile. The LC GUI does not expose the PR Fast/Full
-retrieval selector.
+LC Slurm execution is implemented only for canonical NumPy static propagation
+on a CPU resource profile; real scheduler commissioning is pending. TD,
+soliton, and soliton-existence remote execution remain unsupported. The LC GUI
+does not expose the PR Fast/Full retrieval selector.
 
 ## Save and reproduce
 
