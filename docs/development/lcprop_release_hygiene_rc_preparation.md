@@ -30,9 +30,10 @@ cluster, and separately supplied historical-evidence checks remain conditional.
 
 ## Workspace and private reference disposition
 
-The tracked `src/lcprop/core/LCProp.code-workspace` file had no runtime or test
-consumer and contained a personal interpreter path. It was removed rather than
-replaced with another workstation assumption.
+The tracked `src/lcprop/core/LCProp.code-workspace` file defines an established
+saved developer workspace, but it contained a personal interpreter path and an
+unconditional sibling LaunchPane root. It now retains only the portable LCProp
+repository root, with no workstation-specific settings or external folders.
 
 The historical `reference/prprop/prprop3d.py` copy had unknown ownership, no
 recorded license, and no Product runtime or test dependency. Its exact 61,640
@@ -70,9 +71,10 @@ clean-Git-checkout workflow; a wheel alone is not a deployment source.
 
 The final candidate produced both `lcprop-0.1.0.tar.gz` and
 `lcprop-0.1.0-py3-none-any.whl` with `python -m build`. Both artifacts contain
-the license and third-party notice, and neither contains the personal workspace
-file or the private PRProp reference. The wheel metadata carries the declared
-Python floor, optional extras, and `lcprop-pr` entry point. A temporary
+the license and third-party notice, and neither contains the former personal
+workspace configuration or the private PRProp reference. The wheel metadata
+carries the declared Python floor, optional extras, and `lcprop-pr` entry
+point. A temporary
 non-editable Python 3.12 installation resolved `lcprop` from the installed
 wheel, loaded both packaged PR resource sets, resolved the entry point, and
 constructed representative LC and PR requests. The focused release tests
