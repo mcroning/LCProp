@@ -27,4 +27,5 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
+"lcprop.pr.assets" = ["runtime_estimator_calibration_v1.json"]
 "lcprop.pr.assets.images" = ["catalog.json", "*.png"]

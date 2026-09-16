@@ -71,6 +71,7 @@ from lcprop.pr.gui.request_adapter import (
     validate_pr_gui_workflow_request,
     validate_pr_gui_request_representable,
 )
+from lcprop.pr.gui.resource_estimator_panel import PRResourceEstimatorPanel
 from lcprop.pr.operations import (
     PR_IMAGE_AMPLIFICATION_OPERATION,
     PR_STATIC_OPERATION,
@@ -115,6 +116,10 @@ from lcprop.pr.transverse.static_workflow import (
     PR_TRANSVERSE_STATIC_WORKFLOW,
 )
 from lcprop.pr.workflow import continue_pr_timedependent
+from lcprop.pr.runtime_estimator import (
+    estimate_pr_resources,
+    format_pr_resource_estimate,
+)
 from lcprop.runners.base import RunnerResult
 from lcprop.runners.local import LocalRunner
 
@@ -284,13 +289,18 @@ class PRMainWindow(QWidget):
         )
         self.input_panel.set_beam_panel(self.beam_panel)
         self.evolution_panel = PREvolutionPanel()
+        self.resource_estimator_panel = PRResourceEstimatorPanel()
         self.results_panel = ResultsPanel()
         self.tabs.addTab(self.material_panel, "PR Material")
         self.tabs.addTab(self.input_panel, "Input")
         self.tabs.addTab(self.beam_panel, "Beam")
         self.tabs.addTab(self.grid_panel, "Grid")
         self.tabs.addTab(self.evolution_panel, "Evolution")
+        self.tabs.addTab(self.resource_estimator_panel, "Run Planning")
         self.tabs.addTab(self.results_panel, "Results")
+        self.resource_estimator_panel.estimateRequested.connect(
+            self._estimate_current_resources
+        )
 
         self.grid_panel.x_aperture_um.valueChanged.connect(
             self._sync_beam_aperture
@@ -352,7 +362,22 @@ class PRMainWindow(QWidget):
             or self._background_running
         ):
             return
+        self.resource_estimator_panel.mark_stale()
         self._refresh_checkpoint_controls()
+
+    @Slot()
+    def _estimate_current_resources(self) -> None:
+        """Estimate the current immutable request without running it."""
+
+        try:
+            request = self._request_for_local_cost(self.build_request())
+            estimate = estimate_pr_resources(request)
+        except Exception as exc:
+            self.resource_estimator_panel.set_error(str(exc))
+            return
+        self.resource_estimator_panel.set_estimate(
+            format_pr_resource_estimate(estimate)
+        )
 
     def _refresh_checkpoint_controls(self) -> None:
         checkpoint = self.last_checkpoint
@@ -574,6 +599,7 @@ class PRMainWindow(QWidget):
             raise
         finally:
             self._hydrating_experiment = False
+        self.resource_estimator_panel.mark_stale()
         self._refresh_checkpoint_controls()
         return loaded
 
@@ -1170,6 +1196,7 @@ class PRMainWindow(QWidget):
             )
         finally:
             self._hydrating_checkpoint = False
+        self.resource_estimator_panel.mark_stale()
         self.last_checkpoint = checkpoint
         self.results_panel.set_request_summary(
             self.describe_request(checkpoint.request)

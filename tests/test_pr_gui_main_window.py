@@ -74,6 +74,7 @@ def test_pr_window_is_standalone_and_registers_both_pr_operations(app):
         "Beam",
         "Grid",
         "Evolution",
+        "Run Planning",
         "Results",
     ]
     assert window.run_status == "idle"
