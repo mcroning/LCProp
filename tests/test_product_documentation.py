@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 from pathlib import Path
 import re
 import tomllib
@@ -74,7 +75,12 @@ def test_release_installation_and_attribution_contracts_are_explicit():
     assert notices.count("direct_panel_comparison.png") == 2
     assert "corrected_input_comparison.png" in notices
 
-    assert not (ROOT / "src/lcprop/core/LCProp.code-workspace").exists()
+    workspace_path = ROOT / "src/lcprop/core/LCProp.code-workspace"
+    workspace = json.loads(workspace_path.read_text(encoding="utf-8"))
+    # The restored workspace contains only the portable Product root: no
+    # personal paths, interpreter settings, tasks, or additional folders.
+    assert workspace == {"folders": [{"path": "../../.."}]}
+    assert (workspace_path.parent / workspace["folders"][0]["path"]).resolve() == ROOT
     assert not (ROOT / "reference/prprop/prprop3d.py").exists()
 
 
