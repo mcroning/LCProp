@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QSpinBox,
     QSplitter,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -33,17 +34,17 @@ try:
     )
     from launchplane.serialization import SCHEMA_VERSION as LAUNCHPANE_SCHEMA_VERSION
     if LAUNCHPANE_SCHEMA_VERSION < 3:
-        raise ImportError("LaunchPane schema 3 or newer is required")
+        raise ImportError("LaunchPlane schema 3 or newer is required")
 except ImportError as exc:
     raise ImportError(
         "The LCProp Beam tab requires the separate 'launchplane' package. "
         "Install it before starting the GUI (for local development, use "
-        "'python -m pip install -e /path/to/LaunchPane')."
+        "'python -m pip install -e /path/to/LaunchPlane')."
     ) from exc
 
 
 class BeamPanel(QWidget):
-    """LCProp Beam tab backed by the independent LaunchPane widget."""
+    """LCProp Beam tab backed by the independent LaunchPlane widget."""
 
     beamStackChanged = Signal(object)
 
@@ -106,22 +107,21 @@ class BeamPanel(QWidget):
             disabled_reason=input_screens_disabled_reason,
             parent=self,
         )
-        self.input_screen_editor.setMinimumWidth(360)
+        self.input_screen_editor.setMinimumWidth(0)
         self.launch_plane_widget.beamStackChanged.connect(
             self._beam_stack_changed
         )
 
         self.splitter = QSplitter(Qt.Horizontal, self)
         self.splitter.addWidget(self.launch_plane_widget)
-        self.splitter.addWidget(self.input_screen_editor)
+
         self.splitter.setStretchFactor(0, 3)
-        self.splitter.setStretchFactor(1, 1)
-        boundary_box = QGroupBox("Transverse optical boundary", self)
+        boundary_box = QGroupBox("Optical edge treatment", self)
         boundary_form = QFormLayout(boundary_box)
         self.boundary_mode = QComboBox(boundary_box)
-        self.boundary_mode.addItem("Periodic / no absorber", "periodic")
-        self.boundary_mode.addItem("Sponge absorber", "sponge")
-        self.boundary_mode.addItem("Tukey window", "tukey")
+        self.boundary_mode.addItem("None", "periodic")
+        self.boundary_mode.addItem("Sponge", "sponge")
+        self.boundary_mode.addItem("Tukey", "tukey")
         self.boundary_width = QDoubleSpinBox(boundary_box)
         self.boundary_width.setRange(0.001, 1.0)
         self.boundary_width.setDecimals(4)
@@ -145,9 +145,14 @@ class BeamPanel(QWidget):
         boundary_form.addRow("Tukey alpha", self.boundary_tukey_alpha)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(boundary_box)
-        layout.addWidget(self.splitter)
-        self.setMinimumSize(1000, 650)
+        self.beam_tabs = QTabWidget(self)
+        self.beam_tabs.addTab(self.splitter, "Beams")
+        self.beam_tabs.addTab(boundary_box, "Optical edge treatment")
+        if input_screens_enabled:
+            self.beam_tabs.addTab(self.input_screen_editor, "Input Screen")
+        else:
+            self.input_screen_editor.hide()
+        layout.addWidget(self.beam_tabs)
         self._initial_aperture_fit_queued = False
         self._initial_aperture_fit_done = False
         for control in (
@@ -235,13 +240,13 @@ class BeamPanel(QWidget):
 
     @property
     def beam_stack_definition(self) -> BeamStackDefinition:
-        """Return the Beam tab's authoritative LaunchPane beam state."""
+        """Return the Beam tab's authoritative LaunchPlane beam state."""
 
         return self.launch_plane_widget.beam_stack
 
     @property
     def launch_plane_definition(self) -> LaunchPlaneDefinition:
-        """Return the aperture currently displayed by LaunchPane."""
+        """Return the aperture currently displayed by LaunchPlane."""
 
         return self.launch_plane_widget.scene.definition
 
@@ -275,7 +280,7 @@ class BeamPanel(QWidget):
         x_aperture_um: float,
         y_aperture_um: float,
     ) -> None:
-        """Update only the LaunchPane aperture, preserving physical beam data."""
+        """Update only the LaunchPlane aperture, preserving physical beam data."""
 
         definition = LaunchPlaneDefinition(
             x_aperture_um=x_aperture_um,
@@ -287,7 +292,7 @@ class BeamPanel(QWidget):
 
         self.launch_plane_widget.scene.set_definition(definition)
 
-        # LaunchPane's inspector ranges are created from its initial aperture.
+        # LaunchPlane's inspector ranges are created from its initial aperture.
         # Include out-of-aperture beams when updating those ranges so reducing
         # the aperture never clamps or rewrites their physical coordinates.
         scene = self.launch_plane_widget.scene
@@ -332,14 +337,14 @@ class BeamPanel(QWidget):
         )
 
     def beams(self) -> BeamStack:
-        """Return enabled LaunchPane beams adapted to LCProp channels."""
+        """Return enabled LaunchPlane beams adapted to LCProp channels."""
 
-        # LaunchPane disables keyboard tracking on its numerical editors.  A
+        # LaunchPlane disables keyboard tracking on its numerical editors.  A
         # value typed into the active editor therefore may not yet have
         # reached its immutable BeamDefinition (notably when a platform does
         # not move keyboard focus to the Run button).  Commit every pending
         # numerical edit before taking the request snapshot.
-        # LaunchPane retains both the angle and transverse-wavevector editors
+        # LaunchPlane retains both the angle and transverse-wavevector editors
         # and hides the inactive pair.  Interpreting an inactive editor would
         # switch the beam back to that editor's input mode, so only commit the
         # controls belonging to the currently displayed inspector state.
@@ -350,7 +355,7 @@ class BeamPanel(QWidget):
         ]
         pending_text = [(editor, editor.lineEdit().text()) for editor in editors]
         for editor, text in pending_text:
-            # Committing one field makes LaunchPane refresh the whole
+            # Committing one field makes LaunchPlane refresh the whole
             # inspector, so restore each captured text immediately before it
             # is interpreted or a preceding commit can erase it.
             editor.lineEdit().setText(text)

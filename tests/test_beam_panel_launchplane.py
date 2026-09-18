@@ -26,7 +26,8 @@ def test_beam_panel_embeds_launchplane_with_lcprop_defaults(app):
     panel = BeamPanel()
 
     assert isinstance(panel.launch_plane_widget, LaunchPlaneWidget)
-    assert panel.layout().count() == 2
+    assert panel.layout().itemAt(0).widget() is panel.beam_tabs
+    assert panel.beam_tabs.widget(0) is panel.splitter
     beam = panel.beam_stack_definition.beams[0]
     assert beam.name == "beam"
     assert beam.wavelength_um == 0.633

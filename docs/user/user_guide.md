@@ -22,7 +22,9 @@ records the launched interpretation.
 
 Profiles are:
 
-- **Collimated Gaussian**: entrance-plane waists are specified directly.
+- **Collimated Gaussian**: entrance-plane waists are specified directly with no
+  focusing curvature there. A Gaussian still has a waist; “collimated” does not
+  imply a physically waist-free beam.
 - **Focused Gaussian**: x/y waists are defined at the focus. The signed focus
   position is relative to the interaction entrance plane and may be upstream.
 - **Uniform**: the consuming grid must make each nonzero transverse phase
@@ -32,16 +34,16 @@ LC currently disables shared input-screen editing because LC requests do not
 yet carry launch-element plans. PR exposes the supported PR input modes and
 launch elements.
 
-## Grid and optical boundaries
+## Grid and optical edge treatment
 
 `Nx` and `Ny` set transverse samples. Apertures set the physical periodic FFT
 cell. `dz` is the optical/material longitudinal sampling interval; optical
 substeps further subdivide propagation within it where supported. These are
 independent convergence controls.
 
-The material-neutral transverse optical boundary choices are:
+FFT propagation always uses a periodic computational domain. Optical edge treatment choices are:
 
-- **Periodic / no absorber**: exact no-op; fields wrap on the FFT cell.
+- **None**: exact no-op; fields wrap on the FFT cell.
 - **Sponge absorber**: a smooth amplitude rate
   `exp(-gamma(x,y) * |delta_z|)` applied during propagation. Accumulated
   attenuation depends on physical distance, so subdividing a fixed distance
@@ -70,7 +72,7 @@ LC propagation currently uses one optical wavelength kernel. All enabled LC
 channels must therefore use the same wavelength; unequal-wavelength requests
 are rejected rather than approximated. Stationary soliton and existence
 workflows are periodic-only. Propagation workflows apply their selected
-Periodic, Sponge, or Tukey boundary to the actual optical march.
+None, Sponge, or Tukey edge treatment to the actual optical march.
 
 **Physics** controls ordinary/extraordinary indices, elastic constant,
 dielectric anisotropy, bias voltage, and x-boundary director angle. **Solver**
@@ -188,7 +190,7 @@ is intentionally conservative. Local-versus-H200 recommendations never modify
 the request, backend, grid, tolerances, retention policy, or execution target.
 
 A publication-facing “Rolls Royce” configuration may reasonably use
-full-transverse nonlinear transport, float64, an open/sponge optical boundary,
+full-transverse nonlinear transport, float64, sponge optical edge treatment,
 fine material-z sampling, sufficient optical substeps, and H200 execution. It
 is not a universal preset: each observable requires its own aperture, grid,
 longitudinal-step, timestep, boundary, and model-convergence study.
@@ -199,11 +201,11 @@ PR remote execution exposes:
 
 - **Fast / Exploratory**: optical endpoints, compact diagnostics/provenance,
   exact full-resolution longitudinal intensity cuts nearest zero, and a
-  bounded float32 MPR preview.
+  bounded float32 orthogonal-slice preview.
 - **Full**: complete supported scientific arrays and volumes in addition to
   compact products.
 
-Fast arbitrary MPR slices are block-averaged visualization products. Metadata
+Fast arbitrary orthogonal slices are block-averaged visualization products. Metadata
 records original/preview grids, actual retained z planes, coordinates,
 reduction, normalization, dtype, and byte budget. They are not quantitative
 replacements for the exact Fast cuts. Fast TD retains the final accepted 3-D
@@ -215,8 +217,8 @@ products unavailable instead of synthesizing them.
 
 ## Understanding results
 
-- **Fields**: transverse fields and the x-y member of a linked MPR volume.
-- **Longitudinal/MPR view**: linked x-y, x-z, and y-z views with a common
+- **Fields**: transverse fields and the x-y member of a linked orthogonal-slice volume.
+- **Longitudinal/orthogonal-slice view**: linked x-y, x-z, and y-z views with a common
   physical crosshair when a volume is available.
 - **Curves**: convergence, accepted-state TD quantities, and workflow-specific
   histories. Linearized modes do not fabricate nonlinear iteration curves.
@@ -390,3 +392,31 @@ add movie history or alter already encoded MP4 previews.
 All scaling is display-only. Rendering may saturate outside the chosen range;
 stored arrays, powers, curves, checkpoints and transport artifacts are unchanged.
 Settings are session-only and do not change experiment/checkpoint schemas.
+
+## User-local configuration and Beam workspace
+
+Cluster profiles belong to you, not to Product defaults. **Configure Remote
+Execution** shows the catalog location and explicit cluster/resource default
+checkboxes. Check one to make it the default when saving; uncheck the current
+default to clear it. Editing another resource preserves the existing default.
+Without an explicit default, the GUI selects the first available entry; this
+fallback does not write a default. Multiple clusters/resources remain supported.
+The catalog lives outside the package/repository and survives ordinary upgrades.
+A new catalog is empty: create your first profile to configure remote execution.
+
+For a profile-only clean-user session on macOS/Linux, without touching your real
+catalog:
+
+```bash
+LCPROP_CLUSTER_CONFIG="$(mktemp -d)/clusters.toml" python -m lcprop.pr.gui.app
+```
+
+The absent temporary catalog starts empty. This override does not isolate native
+macOS file-dialog history or other operating-system preferences. Experiment
+Save/Open supplies an empty initial directory; the native dialog may remember a
+previous location. LCProp does not impose a developer experiment directory.
+
+**Beam → Beams** gives the LaunchPlane editor the workspace. Secondary controls
+remain available in **Optical edge treatment**, and in PR **Input Screen**.
+LC does not support input screens and does not allocate a permanent disabled pane.
+Beam-center and tilt-handle dragging remain LaunchPlane's existing interactions.

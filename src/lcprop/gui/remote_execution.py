@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event
 
@@ -20,9 +20,12 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
+
+from lcprop.gui.layout import FlowLayout, readable_form
 
 from lcprop.runners.cluster_connection import ClusterConnectionTester
 from lcprop.runners.cluster_profiles import (
@@ -116,7 +119,24 @@ class RemoteExecutionDialog(QDialog):
         self._editing_resource_name = None
         self.setWindowTitle("Configure Remote Execution")
         self.setMinimumWidth(620)
-        root = QVBoxLayout(self)
+        self.resize(760, 720)
+        outer = QVBoxLayout(self)
+        self.form_scroll = QScrollArea()
+        self.form_scroll.setWidgetResizable(True)
+        content = QWidget()
+        root = QVBoxLayout(content)
+        self.form_scroll.setWidget(content)
+        outer.addWidget(self.form_scroll)
+        self.config_location = QLabel(
+            "User-owned cluster profiles (preserved across package upgrades):\n"
+            + str(catalog.config_path or default_cluster_config_path())
+        )
+        self.config_location.setWordWrap(True)
+        root.addWidget(self.config_location)
+        self.default_cluster_check = QCheckBox("Use this cluster as my default (uncheck to clear)")
+        self.default_resource_check = QCheckBox("Use this resource as this cluster's default (uncheck to clear)")
+        root.addWidget(self.default_cluster_check)
+        root.addWidget(self.default_resource_check)
         row = QHBoxLayout()
         row.addWidget(QLabel("Saved cluster:"))
         self.saved_cluster = QComboBox()
@@ -127,7 +147,7 @@ class RemoteExecutionDialog(QDialog):
         self.saved_cluster.currentIndexChanged.connect(self._load_cluster)
         self.new_cluster_button.clicked.connect(self._new_cluster)
 
-        form = QFormLayout()
+        form = readable_form(QFormLayout())
         self.profile_name, self.username, self.login_host = (
             QLineEdit(),
             QLineEdit(),
@@ -167,7 +187,7 @@ class RemoteExecutionDialog(QDialog):
         root.addLayout(row)
         self.saved_resource.currentIndexChanged.connect(self._load_resource)
         self.new_resource_button.clicked.connect(self._new_resource)
-        form = QFormLayout()
+        form = readable_form(QFormLayout())
         self.resource_name, self.partition, self.qos = (
             QLineEdit(),
             QLineEdit(),
@@ -224,12 +244,14 @@ class RemoteExecutionDialog(QDialog):
         row.addStretch(1)
         row.addWidget(self.save_button)
         row.addWidget(self.close_button)
-        root.addLayout(row)
+        outer.addLayout(row)
         self.test_button.clicked.connect(self.test_connection)
         self.delete_button.clicked.connect(self.delete_profile)
         self.save_button.clicked.connect(self.save_profile)
         self.close_button.clicked.connect(self.close)
         self._configuration_widgets = (
+            self.default_cluster_check,
+            self.default_resource_check,
             self.saved_cluster,
             self.new_cluster_button,
             self.profile_name,
@@ -278,6 +300,7 @@ class RemoteExecutionDialog(QDialog):
     def _new_cluster(self) -> None:
         self._editing_cluster_name = None
         self._editing_resource_name = None
+        self.default_cluster_check.setChecked(False)
         self.saved_cluster.blockSignals(True)
         self.saved_cluster.setCurrentIndex(-1)
         self.saved_cluster.blockSignals(False)
@@ -302,6 +325,7 @@ class RemoteExecutionDialog(QDialog):
             return
         self._editing_cluster_name = name
         cluster = self.catalog[name]
+        self.default_cluster_check.setChecked(name == self.catalog.default_cluster)
         username, host = split_ssh_host(cluster.host)
         for widget, value in (
             (self.profile_name, cluster.name),
@@ -329,6 +353,7 @@ class RemoteExecutionDialog(QDialog):
     @Slot()
     def _new_resource(self) -> None:
         self._editing_resource_name = None
+        self.default_resource_check.setChecked(False)
         self.saved_resource.blockSignals(True)
         self.saved_resource.setCurrentIndex(-1)
         self.saved_resource.blockSignals(False)
@@ -357,6 +382,9 @@ class RemoteExecutionDialog(QDialog):
         if not cluster_name or not profile_name:
             return
         self._editing_resource_name = profile_name
+        self.default_resource_check.setChecked(
+            profile_name == self.catalog[cluster_name].default_resource_profile
+        )
         profile = self.catalog[cluster_name].profile(profile_name)
         for widget, value in (
             (self.resource_name, profile.name),
@@ -409,6 +437,11 @@ class RemoteExecutionDialog(QDialog):
                 break
         else:
             resources.append(resource)
+        default_resource = self.catalog[old_name].default_resource_profile if old_name else None
+        if self.default_resource_check.isChecked():
+            default_resource = resource.name
+        elif default_resource == old_resource:
+            default_resource = None
         return ClusterProfile(
             self.profile_name.text().strip(),
             compose_ssh_host(self.username.text(), self.login_host.text()),
@@ -417,7 +450,7 @@ class RemoteExecutionDialog(QDialog):
             self.source_root.text().strip(),
             tuple(resources),
             self.poll_interval.value(),
-            resource.name,
+            default_resource,
             self.cleanup_remote_on_success.isChecked(),
         )
 
@@ -427,11 +460,15 @@ class RemoteExecutionDialog(QDialog):
             cluster = self._form_cluster()
             old_name = self._editing_cluster_name
             updated = self.catalog
-            was_default = old_name == updated.default_cluster
+            default = updated.default_cluster
+            if self.default_cluster_check.isChecked():
+                default = cluster.name
+            elif default == old_name:
+                default = None
             if old_name and old_name != cluster.name:
                 updated = delete_cluster_profile(updated, old_name)
             self.catalog = write_cluster_profiles(
-                upsert_cluster_profile(updated, cluster, make_default=was_default)
+                replace(upsert_cluster_profile(updated, cluster), default_cluster=default)
             )
         except (ClusterConfigError, ValueError) as exc:
             QMessageBox.warning(self, "Invalid remote profile", str(exc))
@@ -578,13 +615,14 @@ class RemoteExecutionControls(QWidget):
         super().__init__(parent)
         self.discovery = discovery or discover_remote_execution(config_path)
         self.runner_factory = runner_factory
-        layout = QHBoxLayout(self)
+        layout = FlowLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.cluster_selector, self.resource_selector = QComboBox(), QComboBox()
         self.configure_button, self.availability_label = (
             QPushButton("Configure Remote Execution…"),
             QLabel(),
         )
+        self.availability_label.setWordWrap(True)
         for label, widget in (
             ("Cluster:", self.cluster_selector),
             ("Resource:", self.resource_selector),
@@ -608,7 +646,7 @@ class RemoteExecutionControls(QWidget):
         if self.discovery.error:
             return f"Slurm unavailable — invalid cluster config: {self.discovery.error}"
         if not self.discovery.catalog:
-            return "Slurm unavailable — no cluster profile configured"
+            return "Slurm unavailable — no cluster profile configured. Choose Configure Remote Execution to create your first user-local profile."
         return ""
 
     def refresh(self, discovery) -> None:

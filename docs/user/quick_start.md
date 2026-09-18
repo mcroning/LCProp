@@ -6,17 +6,39 @@ points, not convergence evidence for a scientific conclusion.
 
 ## Install and launch
 
-LCProp's headless core requires Python 3.10 or newer. The GUI requires Python
-3.11 or newer because its beam editor is the separate
-[LaunchPlane Product](https://github.com/mcroning/LaunchPlane), schema 3 or
-newer. Until LaunchPlane has a separately released package version, install it
-from its public source checkout in the same environment:
+LCProp's headless core requires Python 3.10 or newer. GUI and Product-test use
+with current [LaunchPlane](https://github.com/mcroning/LaunchPlane) requires
+Python 3.11 or newer (LaunchPlane schema 3 or newer).
+
+For ordinary Local use, install both Products non-editably from source. Start
+in a directory where you want to keep the two checkouts; the commands below
+create a fresh working directory and Python 3.12 environment. The named LCProp
+branch carries the current public Product; it can lag local development:
 
 ```bash
+mkdir lcprop-work
+cd lcprop-work
+python3.12 -m venv .venv
+source .venv/bin/activate
 git clone https://github.com/mcroning/LaunchPlane.git
-python -m pip install -e ./LaunchPlane
-python -m pip install -e '.[gui]'
+git clone --branch feature/pr-second-order-static https://github.com/mcroning/LCProp.git
+python -m pip install ./LaunchPlane
+cd LCProp
+python -m pip install '.[gui]'
 ```
+
+For **developer editable installation**, use the same environment and checkouts,
+then from the LCProp directory run:
+
+```bash
+python -m pip install -e ../LaunchPlane
+python -m pip install -e '.[gui,test]'
+```
+
+Editable installation is not required for ordinary Local execution. Automatic
+Slurm source deployment separately requires a suitable clean deployable Git
+checkout; see [source deployment guidance](user_guide.md#inspecting-requests-and-identifying-displayed-results).
+Do not infer remote deployment support from a successful Local installation.
 
 Launch the LC application:
 
@@ -35,20 +57,21 @@ The equivalent module command is `python -m lcprop.pr.gui.app`.
 ## First LC calculation
 
 1. In **Experiment**, select **Static propagation**.
-2. In **Beam**, keep one enabled Gaussian beam. LaunchPane controls its power,
+2. In **Beam**, keep one enabled Gaussian beam. LaunchPlane controls its power,
    wavelength, transverse position, phase, coherence group, profile, and focus.
 3. In **Grid**, begin with `Nx=64`, `Ny=64`, a short interaction length, and a
-   longitudinal step that gives several planes. Larger or finer grids require
-   an explicit convergence study.
+   longitudinal step that gives several planes. Use modest settings for quick
+   exploration. Verify grid, step-size, timestep, precision, and model convergence
+   as applicable before drawing quantitative conclusions.
 4. In **Physics**, review refractive indices, elastic constant, dielectric
    anisotropy, bias voltage, and boundary director angle.
 5. In **Solver**, use **local_self_consistent** for coupled static propagation.
-6. Choose **Periodic**, **Sponge**, or **Tukey** in the Beam tab's transverse
-   optical-boundary panel. Sponge is usually the safer exploratory choice when
+6. Choose **None**, **Sponge**, or **Tukey** in **Beam → Optical edge treatment**.
+   FFT propagation uses a periodic domain; None applies no edge attenuation. Sponge is usually the safer exploratory choice when
    diffracted light could reach an FFT boundary.
 7. Leave **Execution** at **Local**, click **Run Static propagation**, and wait
    for the status to complete.
-8. Inspect **Fields**, **Curves**, **Diagnostics**, **Request**, and **Console**
+8. Inspect **Fields**, **Curves**, **Samples / Tables**, **Diagnostics**, **Request**, and **Console**
    in **Results**. The Request tab is the configuration that actually ran.
 
 For time dependence, select **Time-dependent propagation**, choose a beam,
@@ -87,7 +110,7 @@ reopened. Checkpoints are the mechanism for numerical continuation.
   and negative positions are upstream. Elliptical x/y waist evolution is
   resolved independently.
 - **Uniform**: a tilted uniform field must be an exact periodic Fourier mode
-  on the consuming LCProp grid. LaunchPane cannot enforce that grid-dependent
+  on the consuming LCProp grid. LaunchPlane cannot enforce that grid-dependent
   condition by itself.
 
 LaunchPlane expresses beam intent and visualization. LCProp owns the runtime
@@ -104,7 +127,7 @@ experiment choices are preserved.
 For PR Slurm retrieval:
 
 - **Fast / Exploratory** keeps optical endpoints, compact diagnostics, exact
-  full-resolution cuts nearest `x=0` and `y=0`, and a bounded downsampled MPR
+  full-resolution cuts nearest `x=0` and `y=0`, and a bounded downsampled orthogonal-slice
   preview for visualization.
 - **Full** retains the supported complete scientific volumes and costs more to
   package, transfer, and hold in memory.
@@ -124,3 +147,9 @@ retention policy with any scientific result.
 
 Continue with the [LCProp User Guide](user_guide.md) before a large or
 publication-facing run.
+
+The GUI **Help** menu renders concise topics without an editor. Each topic links
+to the [rendered User Guide](https://github.com/mcroning/LCProp/blob/feature/pr-second-order-static/docs/user/user_guide.md)
+and [documentation index](https://github.com/mcroning/LCProp/blob/feature/pr-second-order-static/docs/README.md).
+Online pages follow the published branch and may lag local development; built-in
+Help corresponds to your installation.

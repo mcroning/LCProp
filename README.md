@@ -77,42 +77,32 @@ src/lcprop/
 
 ## Installation
 
-LCProp's headless core requires Python 3.10 or newer. The supported GUI and
-normal Product-test installation require Python 3.11 or newer because the
-separate LaunchPlane Product has that requirement. From a checkout:
+LCProp's headless core requires Python 3.10 or newer. GUI and normal Product-test
+use with current [LaunchPlane](https://github.com/mcroning/LaunchPlane) requires Python 3.11 or newer.
+
+Follow the [Quick Start](docs/user/quick_start.md#install-and-launch) for a complete
+Python environment, LCProp and LaunchPlane acquisition, and installation sequence.
+Ordinary Local use supports non-editable source installation; editable installs
+are for development, not a requirement for running the Product. LaunchPlane is
+installed separately and must support schema 3 or newer.
+
+From the LCProp checkout with LaunchPlane already installed:
 
 ```bash
-python -m pip install -e .
+python -m pip install '.[gui]'
 ```
 
-Install the optional GUI or CUDA dependencies as needed:
-
-```bash
-python -m pip install -e '.[gui]'
-python -m pip install -e '.[gpu]'
-python -m pip install -e '.[gui,gpu]'
-```
-
-The graphical beam editor is provided by the separate
-[LaunchPlane Product](https://github.com/mcroning/LaunchPlane). LCProp requires
-LaunchPlane schema 3 or newer. Until LaunchPlane has a separately released
-package version, install its public source checkout independently before
-starting either GUI:
-
-```bash
-git clone https://github.com/mcroning/LaunchPlane.git
-python -m pip install -e ./LaunchPlane
-```
-
-LCProp consumes LaunchPane through the material-neutral beam-definition
-interface and does not make LaunchPane depend on LCProp.
-
-For a reproducible local Product-test environment, use Python 3.11 or newer,
-install LaunchPlane as above, and install LCProp's GUI and test extras:
+For developer work in that checkout:
 
 ```bash
 python -m pip install -e '.[gui,test]'
 ```
+
+Automatic Slurm source deployment separately expects a suitable clean deployable
+LCProp Git checkout; see the [User Guide](docs/user/user_guide.md#inspecting-requests-and-identifying-displayed-results).
+The GUI Help menu renders concise topics and links to the full
+[rendered documentation](https://github.com/mcroning/LCProp/blob/feature/pr-second-order-static/docs/README.md).
+Online guides describe the published branch and can lag local development.
 
 The `gpu` extra installs the CUDA 12 CuPy distribution. The host CUDA runtime
 and driver must also be compatible with that package.

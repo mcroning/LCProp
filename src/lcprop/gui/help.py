@@ -25,94 +25,119 @@ class HelpTopic:
 
 HELP_TOPICS = (
     HelpTopic(
-        "quick_start",
-        "Quick Start",
-        """Choose **LC** for director propagation or **PR** for photorefractive
-transport. Define the beam in **Beam**, choose a modest grid, run locally, and
-inspect **Fields**, **Curves**, and **Diagnostics**. Save the experiment before
-large runs. The complete walkthrough is `docs/user/quick_start.md`.
+        "quick_start", "Quick Start",
+        """Choose **LC** for liquid-crystal director response or **PR** for photorefractive
+charge transport. Define beams in **Beam**, choose a modest grid, run locally,
+and inspect Results. Save the experiment before large runs.
+Use modest settings for quick exploration. Verify grid, step-size, timestep,
+precision, and model convergence as applicable before quantitative conclusions.
+Open the [rendered Quick Start](https://github.com/mcroning/LCProp/blob/feature/pr-second-order-static/docs/user/quick_start.md)
+for complete LCProp and LaunchPlane installation instructions. Online guides
+follow the published branch and can lag local development; built-in Help
+ships with this installation.
 """,
     ),
     HelpTopic(
-        "model_choices",
-        "Model choices",
-        """LC offers static, time-dependent, soliton, and soliton-sweep
-workflows. PR model choice has three independent axes: evolution, transverse
-transport, and material response. All eight PR combinations are production
-choices; validation and hardware commissioning are separate evidence. See
-`docs/user/user_guide.md`, `docs/science/lc_model_contracts.md`, and
-`docs/science/pr_model_contracts.md`.
+        "model_choices", "Model choices",
+        """LC offers static propagation, time evolution, stationary solitons and sweeps.
+PR offers independent choices of Static/Time dependent, Reduced x-only/Full
+transverse transport, and Fully nonlinear/Linearized response. Choose the model
+whose assumptions match your experiment; linearized response requires a positive
+reference intensity. Current support is a Product capability, not evidence that
+a particular grid or parameter choice is converged.
 """,
     ),
     HelpTopic(
-        "beam_focusing",
-        "Beam focusing",
-        """**Collimated Gaussian** specifies the entrance-plane waist.
-**Focused Gaussian** specifies the waist at its focus and a signed focus
-position measured from the interaction entrance plane; a negative position is
-upstream. LaunchPlane expresses beam intent while LCProp resolves it on the
-selected grid.
+        "beam_focusing", "Beam focusing",
+        """Every Gaussian beam has a waist. **Collimated Gaussian** specifies the entrance
+waist and no focusing curvature there; it does not mean an infinite beam with
+no waist. **Focused Gaussian** specifies the waist at a signed focus position:
+zero is the interaction entrance, positive is downstream, negative upstream.
+LCProp derives entrance size and curvature from that waist, focus, wavelength
+and medium; x/y waists can differ. Use the focus position appropriate to the
+sample. These remain separate Product profile choices.
 """,
     ),
     HelpTopic(
-        "boundary_conditions",
-        "Boundary conditions",
-        """**Periodic** applies no optical absorber. **Sponge** is a smooth
-amplitude-absorption rate accumulated with propagation distance and is
-invariant to subdivision into optical substeps. **Tukey** is a discrete
-apodization window, not a rate. Boundaries do not replace aperture and grid
-convergence checks. LC stationary soliton and existence workflows are
-periodic-only.
+        "boundary_conditions", "Optical edge treatment",
+        """FFT propagation uses a **periodic computational domain** in every case.
+Choose **None** for no edge attenuation/apodization, **Sponge** for smooth
+attenuation accumulated with propagation distance, or **Tukey** for the existing
+discrete apodization window. Tukey is not a per-distance absorption rate.
+Sponge accumulation is invariant to optical substep subdivision. Edge treatment
+reduces unwanted wraparound but does not replace aperture/grid convergence.
+LC stationary soliton and existence workflows require **None** (the persisted
+`periodic` choice); their restriction is unchanged.
 """,
     ),
     HelpTopic(
-        "fanning_scattering",
-        "Fanning and scattering setup",
-        """PR fanning studies require an explicit scattering model, strength,
-correlation length, seed, and canonical slab spacing. Record the beam/focus,
-boundary treatment, material-z sampling, and optical substeps independently.
-Reduced static requests do not carry the canonical scattering specification.
+        "fanning_scattering", "Fanning and scattering setup",
+        """Scattering represents weak spatial perturbations that seed scattered light in
+PR calculations. Fanning studies require an explicit scattering configuration.
+**Strength** sets perturbation magnitude; **correlation length** sets spatial
+texture scale; **seed** selects a reproducible realization; **canonical slab
+spacing** sets the longitudinal partition used to define that realization.
+These are setup/model parameters, not universal material constants. Record them
+with focus, edge treatment, material-z sampling and optical substeps.
+Full-transverse static and supported TD workflows support canonical scattering.
+Reduced static currently does not: this is a Product capability limitation,
+not a physical prohibition on static scattering. Zero strength disables the
+perturbation; inspect the saved request to establish its provenance.
 """,
     ),
     HelpTopic(
-        "slurm",
-        "Running on Slurm",
-        """Execution target and scientific backend are distinct. Configure and
-test a remote profile, select Slurm, then review the immutable request summary.
-An automatically chosen GPU backend is reversible; an explicit or
-experiment-loaded backend is preserved. LC production workflows are
-NumPy-based; LC Slurm support is currently limited to canonical static
-propagation on a CPU resource profile.
+        "slurm", "Running on Slurm",
+        """**Local** runs on this computer. **Slurm** submits to a configured cluster.
+Choose a cluster/resource and check the pre-run execution summary. NumPy uses
+CPU computation; CuPy needs a supported GPU environment. A GPU allocation alone
+does not make NumPy use it. Explicit backend choices are preserved.
+Profiles are user-local configuration, separate from the package; their location
+is shown in **Configure Remote Execution**. A new user must create a profile.
+Ordinary non-editable installation supports Local execution. Automatic Slurm
+source deployment requires a suitable clean deployable LCProp Git checkout.
+For an installed package, configure a runner with the supported `local_source` checkout argument,
+or use an explicitly pinned existing remote source path and SHA as described in
+the User Guide. PR Continue currently runs **Local only**.
 """,
     ),
     HelpTopic(
-        "runtime_estimates",
-        "Runtime estimates",
-        """The PR **Run Planning** estimate is advisory. It reports ranges and
-confidence from committed calibration plus transparent scaling. It does not
-change the request, backend, tolerances, grid, retention mode, or execution
-target. Full-transverse nonlinear static cost is especially continuation
-sensitive.
+        "runtime_estimates", "Runtime estimates",
+        """Use **Run Planning → Configured execution** to check the selected run target.
+Local Mac/NumPy and H200/CuPy numbers are comparison estimates, not selections.
+Estimates are advisory ranges; they do not change the backend, tolerances,
+grid, retention or target. Full-transverse nonlinear static cost is especially
+sensitive to continuation and convergence.
 """,
     ),
     HelpTopic(
-        "fast_full",
-        "Fast vs Full",
-        """PR Slurm **Fast** retrieval keeps optical endpoints, compact
-diagnostics, exact nearest-zero quantitative longitudinal cuts, and a bounded
-visualization-only MPR preview. **Full** retains the complete supported
-scientific volumes. Fast TD keeps only the final 3-D preview plus a compact
-material-time movie, never a 4-D preview history.
+        "fast_full", "Fast vs Full",
+        """PR Slurm **Fast** retrieval keeps optical endpoints, compact diagnostics,
+exact full-resolution longitudinal cuts nearest x=0 and y=0, and a bounded
+visualization-only preview for linked orthogonal slices. **Full** retains the
+supported complete scientific volumes. Fast TD retains the final 3-D preview
+and a compact material-time movie, not a full time history of 3-D volumes.
+Choose Full when you need the supported volume data for quantitative analysis;
+Full output alone is not a remote-continuation contract.
 """,
     ),
     HelpTopic(
-        "results",
-        "Understanding Results",
-        """Use **Fields** for transverse images and linked MPR slices,
-**Curves** for accepted-state histories, **Diagnostics** for convergence and
-carrier-power data, **Request** for the executed configuration, and **Console**
-for progress. Autoscaled image brightness is not a quantitative two-beam
-energy-transfer measure; use carrier-resolved Fourier-space power.
+        "results", "Understanding Results",
+        """**Fields** shows images and linked x-y, x-z and y-z slices. **Curves** shows
+quantitative traces. **Samples / Tables** exposes retained member values and
+convergence gates. **Diagnostics** provides numerical and carrier-power details.
+**Request** identifies the configuration and displayed-result ownership;
+**Console** retains progress and failures.
+Auto/manual/locked image scaling changes only presentation. Brightness is not a
+quantitative two-beam energy-transfer measure. Inspect each carrier's input and
+output powers and available gain: these separate beam contributions in spatial
+frequency where the beams are sufficiently resolved. Unavailable-gain reasons
+explain cases where a reliable separation/ratio cannot be reported.
+Ordinary beams, including general two-beam coupling, do not require the screen
+or symmetry conditions of the specialized **Image Amplification** experiment.
+Solver nonconvergence is not proof of physical nonexistence or instability.
+Inspect exact gates, tolerances, iteration budget and termination reason in
+Tables. Continuation initializes from a previously converged member for branch
+following; it does not waive any convergence criterion.
 """,
     ),
 )
@@ -144,6 +169,10 @@ class ProductHelpDialog(QDialog):
         self.browser.setMarkdown(
             f"# {topic.title}\n\n**Current application:** {material_name}\n\n"
             + topic.markdown
+            + ("\n\nCurrent LC Slurm capability: canonical NumPy static propagation on a CPU resource; other LC workflows run locally."
+               if application == "lc" and topic.key == "slurm" else "")
+            + "\n\n[Read the rendered User Guide](https://github.com/mcroning/LCProp/blob/feature/pr-second-order-static/docs/user/user_guide.md)"
+            + " · [Documentation index](https://github.com/mcroning/LCProp/blob/feature/pr-second-order-static/docs/README.md)"
         )
         layout.addWidget(self.browser)
         buttons = QDialogButtonBox(QDialogButtonBox.Close, parent=self)

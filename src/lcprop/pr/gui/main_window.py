@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lcprop.gui.layout import FlowLayout, application_layout
+
 from functools import partial
 from time import monotonic
 import traceback
@@ -220,8 +222,8 @@ class PRMainWindow(QWidget):
         self.setMinimumSize(1200, 760)
         self.resize(1450, 900)
 
-        root = QVBoxLayout(self)
-        header = QHBoxLayout()
+        root = application_layout(self)
+        header = FlowLayout()
         header.addWidget(QLabel("LCProp PR"))
         header.addStretch(1)
         header.addWidget(QLabel("Execution:"))
@@ -243,8 +245,10 @@ class PRMainWindow(QWidget):
         )
         header.addWidget(self.result_policy_selector)
         self.runner_label = QLabel(f"Runner: {self.runner.name}")
+        self.runner_label.setWordWrap(True)
         header.addWidget(self.runner_label)
         self.status_label = QLabel("Idle")
+        self.status_label.setWordWrap(True)
         header.addWidget(self.status_label)
         self.preview_button = QPushButton("Inspect Request")
         self.preview_button.setToolTip(

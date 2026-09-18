@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from lcprop.gui.layout import FlowLayout, application_layout
 from dataclasses import replace
 from functools import partial
 
@@ -150,9 +152,9 @@ class LCPropMainWindow(QWidget):
         # Default to a wide scientific-visualization layout.
         self.setMinimumSize(1200, 760)
 
-        root = QVBoxLayout(self)
+        root = application_layout(self)
 
-        header = QHBoxLayout()
+        header = FlowLayout()
         header.addWidget(QLabel("LCProp"))
         header.addStretch(1)
         header.addWidget(QLabel("Execution:"))
@@ -164,6 +166,7 @@ class LCPropMainWindow(QWidget):
         )
         header.addWidget(self.execution_target_selector)
         self.runner_label = QLabel(f"Runner: {self.runner.name}")
+        self.runner_label.setWordWrap(True)
         header.addWidget(self.runner_label)
 
         self.td_initial_condition_label = QLabel("Initial condition:")
@@ -414,7 +417,7 @@ class LCPropMainWindow(QWidget):
             self.beam_panel.set_optical_boundary(TransverseBoundarySpec())
             tooltip = (
                 "LC stationary soliton and existence workflows use the "
-                "periodic transverse optical boundary."
+                "periodic FFT domain with Optical edge treatment: None."
             )
             for control in controls:
                 control.setEnabled(False)

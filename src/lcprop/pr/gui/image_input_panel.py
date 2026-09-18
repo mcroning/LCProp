@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lcprop.gui.layout import readable_form
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,7 +62,7 @@ class PRImageInputPanel(QWidget):
         self._enabled_channel_names: list[str] = []
 
         layout = QVBoxLayout(self)
-        form = QFormLayout()
+        form = readable_form(QFormLayout())
         self.input_mode = QComboBox()
         self.input_mode.addItem("General beams / two-beam coupling", PR_GAUSSIAN_INPUT_MODE)
         self.input_mode.addItem(

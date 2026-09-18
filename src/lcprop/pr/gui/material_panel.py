@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from lcprop.gui.layout import readable_form
+
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -33,7 +35,7 @@ class PRMaterialPanel(QWidget):
         super().__init__(parent)
         defaults = PRMaterialSpec()
         layout = QVBoxLayout(self)
-        primary = QFormLayout()
+        primary = readable_form(QFormLayout())
 
         self.dark_intensity = _double_spin(0.0, 1e9, defaults.dark_intensity)
         self.uniform_background_intensity = _double_spin(
@@ -66,7 +68,7 @@ class PRMaterialPanel(QWidget):
         layout.addLayout(primary)
 
         advanced_box = QGroupBox("Advanced material normalization")
-        advanced = QFormLayout(advanced_box)
+        advanced = readable_form(QFormLayout(advanced_box))
         self.relative_permittivity = _double_spin(
             1e-9,
             1e12,

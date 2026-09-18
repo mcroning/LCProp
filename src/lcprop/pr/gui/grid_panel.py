@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from lcprop.gui.layout import readable_form
+
 from PySide6.QtWidgets import QFormLayout, QVBoxLayout, QWidget
 
 from lcprop.core.context import GridSpec
@@ -22,7 +24,7 @@ class PRGridPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        form = QFormLayout()
+        form = readable_form(QFormLayout())
 
         self.Nx = spin_box(2, 4096, PR_DEFAULT_GRID.Nx)
         self.Ny = spin_box(2, 4096, PR_DEFAULT_GRID.Ny)

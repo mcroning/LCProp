@@ -5,6 +5,11 @@ records. Public documentation describes the software and reusable development
 procedures. Private experiment logs, raw scheduler output, unpublished
 references, and event-specific prompts are maintained outside this repository.
 
+The GUI **Help** menu renders concise topics directly. For full guides, use the
+[rendered documentation index](https://github.com/mcroning/LCProp/blob/feature/pr-second-order-static/docs/README.md)
+in a browser; no Markdown editor is required. Published guides can lag a local
+development checkout. Built-in Help ships with the installed Product.
+
 ## Start here
 
 - [`user/quick_start.md`](user/quick_start.md) — shortest path to a small LC

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from lcprop.gui.layout import readable_form
+
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -56,7 +58,7 @@ class PREvolutionPanel(QWidget):
             integrator=PR_SEMI_IMPLICIT_INTEGRATOR,
         )
         layout = QVBoxLayout(self)
-        form = QFormLayout()
+        form = readable_form(QFormLayout())
 
         self.evolution = QComboBox()
         self.evolution.addItem("Static", "static")

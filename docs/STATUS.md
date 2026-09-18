@@ -31,7 +31,7 @@ their state to that optical response.
 
 - physical runtime grids and Fourier coordinates;
 - multichannel Gaussian launch and grouped coherence;
-- focus-defined, collimated, and uniform launch intent through LaunchPane;
+- focus-defined, collimated, and uniform launch intent through LaunchPlane;
 - NumPy/CuPy backend and precision selection;
 - angular-spectrum propagation with explicit optical substepping;
 - periodic, distance-scaled sponge, and discrete Tukey optical boundaries;
@@ -62,7 +62,7 @@ their state to that optical response.
 - Image Amplification and carrier-resolved two-beam diagnostics;
 - PR experiment/checkpoint persistence and continuation;
 - Local and Slurm execution with explicit NumPy/CuPy semantics;
-- Fast/Full remote retention, exact Fast longitudinal cuts, bounded MPR
+- Fast/Full remote retention, exact Fast longitudinal cuts, bounded orthogonal-slice
   previews, TD accepted-state curves, and compact preview movies;
 - structured progress and advisory runtime/resource planning;
 - standalone PR PySide6 application with in-application Help.
