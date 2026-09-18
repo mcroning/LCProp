@@ -27,6 +27,7 @@ from lcprop.lc.products import (
     from_timedependent_live_state,
     to_run_data,
 )
+from lcprop.lc.requests import validate_single_wavelength_lc_beams
 from lcprop.lc import LC_MATERIAL_ID
 from lcprop.lc.operations import (
     LC_CONTINUE_STATIC_OPERATION,
@@ -39,6 +40,9 @@ from lcprop.lc.operations import (
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.runners.local import LocalRunner
 from lcprop.gui.workers import WorkflowWorker
+from lcprop.gui.request_transparency import (
+    begin_request, execution_summary, inspect_request, report_failure, source_preflight,
+)
 from lcprop.gui.help import ProductHelpButton
 from lcprop.gui.remote_execution import (
     RemoteExecutionControls,
@@ -202,6 +206,13 @@ class LCPropMainWindow(QWidget):
         self.use_last_static = QCheckBox("Start TD from last static result")
         self.use_last_static.setEnabled(False)
         self.use_last_static.setVisible(False)
+
+        self.preview_button = QPushButton("Inspect Request")
+        self.preview_button.setToolTip(
+            "Commit pending editor values and validate/inspect without running"
+        )
+        self.preview_button.clicked.connect(self.preview_request_clicked)
+        header.addWidget(self.preview_button)
 
         self.run_button = QPushButton()
         self.run_button.clicked.connect(self.run_static_clicked)
@@ -528,6 +539,7 @@ class LCPropMainWindow(QWidget):
 
     def save_experiment_to(self, path):
         """Save the active LC experiment without running it."""
+        self.results_panel.workspace.operation_boundary("Save Experiment")
 
         if self._background_running:
             raise RuntimeError("cannot save an experiment while a run is active")
@@ -545,6 +557,7 @@ class LCPropMainWindow(QWidget):
 
     def load_experiment_from(self, path):
         """Validate and transactionally restore one LC experiment file."""
+        self.results_panel.workspace.operation_boundary("Open Experiment")
 
         if self._background_running:
             raise RuntimeError("cannot open an experiment while a run is active")
@@ -591,7 +604,7 @@ class LCPropMainWindow(QWidget):
             saved = self.save_experiment_to(path)
         except Exception:
             self.results_panel.append_console("Experiment save failed")
-            self.results_panel.append_console(traceback.format_exc())
+            report_failure(self, traceback.format_exc())
             self.tabs.setCurrentWidget(self.results_panel)
             return
         self.results_panel.append_console(f"Saved LC experiment: {saved}")
@@ -606,7 +619,7 @@ class LCPropMainWindow(QWidget):
         except Exception as exc:
             show_experiment_open_warning(self, exc)
             self.results_panel.append_console("Experiment open failed")
-            self.results_panel.append_console(traceback.format_exc())
+            report_failure(self, traceback.format_exc())
             self.tabs.setCurrentWidget(self.results_panel)
             return
         self.results_panel.append_console(
@@ -930,6 +943,27 @@ class LCPropMainWindow(QWidget):
             raise ValueError(f"unsupported TD initial-condition mode: {mode}")
         return req
 
+    def _validate_execution_request(self, request) -> None:
+        base = self._base_static_request(request)
+        for name in ("grid", "material", "bias", "beams", "runtime", "optical_boundary"):
+            getattr(base, name).validate()
+        validate_single_wavelength_lc_beams(base.beams)
+        if hasattr(request, "validate"):
+            request.validate()
+        if (isinstance(request, SolitonRequest) and request.refine_transverse
+                and len(request.base.beams.channels) != 1):
+            raise ValueError(
+                "Transverse eigensoliton refinement requires exactly one optical "
+                "channel. Select one channel or turn off transverse refinement."
+            )
+        if (self.runner is self.slurm_runner and self.slurm_runner is not None
+                and not isinstance(request, StaticRunRequest)):
+            raise ValueError("Slurm supports only canonical LC static propagation; select Local.")
+        error = self._lc_slurm_resource_error()
+        if error:
+            raise ValueError(error)
+        source_preflight(self)
+
     def build_soliton_request(self) -> SolitonRequest:
         return SolitonRequest(
             base=self.build_request(allow_last_soliton=False),
@@ -958,6 +992,12 @@ class LCPropMainWindow(QWidget):
         while hasattr(base_req, "base"):
             base_req = base_req.base
         return base_req
+
+    def preview_request_clicked(self) -> None:
+        builder, _operation, _label = self._experiment_dispatch()[
+            self.experiment_panel.current_experiment()
+        ]
+        inspect_request(self, builder)
 
     def describe_request(self, req) -> str:
         base_req = self._base_static_request(req)
@@ -1047,7 +1087,7 @@ class LCPropMainWindow(QWidget):
             if powers is not None:
                 lines.append("Powers: " + ", ".join(f"{p:g} mW" for p in powers))
 
-        return "\n".join(lines)
+        return "\n".join(lines) + "\n" + execution_summary(self, req)
 
     def _experiment_dispatch(self):
         return {
@@ -1099,6 +1139,7 @@ class LCPropMainWindow(QWidget):
     def run_static_clicked(self):
         if self._background_running:
             return
+        begin_request(self, "Run")
         experiment = self.experiment_panel.current_experiment()
         if experiment == "Time-dependent propagation":
             self._start_timedependent_background()
@@ -1113,7 +1154,7 @@ class LCPropMainWindow(QWidget):
             req = request_builder()
         except Exception:
             self.results_panel.append_console("ERROR")
-            self.results_panel.append_console(traceback.format_exc())
+            report_failure(self, traceback.format_exc())
             return
         workflow = (
             "soliton"
@@ -1188,10 +1229,11 @@ class LCPropMainWindow(QWidget):
                 if request is None
                 else request
             )
+            self._validate_execution_request(req)
             summary = self.describe_request(req)
         except Exception:
             self.results_panel.append_console("ERROR")
-            self.results_panel.append_console(traceback.format_exc())
+            report_failure(self, traceback.format_exc())
             return
 
         old_checkpoint = (
@@ -1231,6 +1273,7 @@ class LCPropMainWindow(QWidget):
         self.run_status = "running"
         self.last_timedependent_progress = None
         self.last_run_progress = None
+        self.last_remote_status = None
         self._td_outcome_received = False
         self._td_thread_done = False
         self._set_background_controls_enabled(False)
@@ -1292,7 +1335,11 @@ class LCPropMainWindow(QWidget):
         self._td_cancellation_token = token
         self._td_thread = thread
         self._td_worker = worker
+        self.results_panel.workspace.set_operation_status("Starting")
+        if self.runner is self.slurm_runner:
+            self.results_panel.workspace.operation_boundary("Slurm submission / remote execution")
         thread.start()
+        self.results_panel.workspace.set_operation_status("Running")
 
     def _start_static_background(
         self,
@@ -1302,7 +1349,11 @@ class LCPropMainWindow(QWidget):
         z_start_um: float = 0.0,
         is_continuation: bool = False,
     ) -> None:
-        req = self.build_request() if request is None else request
+        try:
+            req = self.build_request() if request is None else request
+        except Exception:
+            report_failure(self, traceback.format_exc())
+            return
         self._start_timedependent_background(
             request=req,
             runner_callable=runner_callable,
@@ -1338,6 +1389,7 @@ class LCPropMainWindow(QWidget):
         checkpoint = self.last_timedependent_checkpoint if is_td else self.last_static_checkpoint
         if self._background_running or checkpoint is None:
             return
+        begin_request(self, "Continue")
         try:
             request = self.build_timedependent_request() if is_td else self.build_request()
             if is_td:
@@ -1349,14 +1401,12 @@ class LCPropMainWindow(QWidget):
                 self.last_timedependent_checkpoint = None
             else:
                 self.last_static_checkpoint = None
-            self.results_panel.append_console(
-                f"Continuation invalidated: {exc}"
-            )
+            report_failure(self, traceback.format_exc())
             self.update_run_button()
             return
         except Exception:
             self.results_panel.append_console("ERROR")
-            self.results_panel.append_console(traceback.format_exc())
+            report_failure(self, traceback.format_exc())
             return
 
         if is_td:
@@ -1385,6 +1435,7 @@ class LCPropMainWindow(QWidget):
         if not self._background_running or token is None:
             return
         token.cancel()
+        self.results_panel.workspace.set_operation_status("Stopping — awaiting safe boundary")
         self.run_status = "stopping"
         self.stop_button.setEnabled(False)
         self.stop_button.setText("Stopping…")
@@ -1409,7 +1460,8 @@ class LCPropMainWindow(QWidget):
         unit = f" {progress.coordinate_unit}" if progress.coordinate_unit else ""
         if progress.workflow == "static" and progress.latest_field_state is not None:
             self.results_panel.set_run_data(
-                from_static_live_state(progress.latest_field_state)
+                from_static_live_state(progress.latest_field_state),
+                state="Current accepted state",
             )
         elif progress.workflow == "timedependent" and progress.latest_field_state is not None:
             if self._active_td_from_static and self._td_static_reference is None:
@@ -1429,12 +1481,14 @@ class LCPropMainWindow(QWidget):
                     progress.latest_field_state,
                     td_from_static=self._active_td_from_static,
                     static_reference=self._td_static_reference,
-                )
+                ),
+                state="Current accepted state",
             )
         elif progress.workflow in {"soliton", "soliton_existence"}:
             if progress.latest_field_state is not None:
                 self.results_panel.set_run_data(
-                    to_run_data(progress.latest_field_state)
+                    to_run_data(progress.latest_field_state),
+                    state="Current progress state",
                 )
         progress_label = {
             "timedependent": "TD",
@@ -1657,7 +1711,7 @@ class LCPropMainWindow(QWidget):
                 self.results_panel.append_console(label)
         except Exception:
             self.results_panel.append_console("ERROR")
-            self.results_panel.append_console(traceback.format_exc())
+            report_failure(self, traceback.format_exc())
         self._td_outcome_received = True
         self._maybe_finish_timedependent_background()
 
@@ -1668,13 +1722,14 @@ class LCPropMainWindow(QWidget):
             and self.last_remote_status.state == RemoteRunState.CANCELLED
         ):
             self.run_status = "stopped"
+            self.results_panel.workspace.finish_attempt("State at stop/cancellation")
             self.results_panel.append_console("Remote job cancelled")
             self._td_outcome_received = True
             self._maybe_finish_timedependent_background()
             return
         self.run_status = "failed"
         self.results_panel.append_console("ERROR")
-        self.results_panel.append_console(formatted_traceback)
+        report_failure(self, formatted_traceback)
         self._td_outcome_received = True
         self._maybe_finish_timedependent_background()
 
@@ -1713,6 +1768,7 @@ class LCPropMainWindow(QWidget):
             return True
         if self._td_cancellation_token is not None:
             self._td_cancellation_token.cancel()
+        self.results_panel.workspace.set_operation_status("Stopping — awaiting safe boundary")
         self.run_status = "stopping"
         thread.quit()
         finished = thread.wait(timeout_ms)
@@ -1761,7 +1817,13 @@ class LCPropMainWindow(QWidget):
                 if runner_result.run_data is not None
                 else to_run_data(result)
             )
+        state = (
+            "State at stop/cancellation"
+            if getattr(result, "status", None) in {"stopped", "cancelled"}
+            else "Completed result"
+        )
         self.results_panel.set_run_data(run_data)
+        self.results_panel.workspace.finish_attempt(state)
         self.results_panel.append_console("")
         self.results_panel.append_console(runner_result.message)
         self._append_result_summary(result, runner_result.kind)

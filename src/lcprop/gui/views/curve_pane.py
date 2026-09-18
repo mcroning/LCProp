@@ -37,6 +37,7 @@ class CurvePane(QWidget):
 
         self.curve_selector.blockSignals(False)
 
+        self.curve_view.setVisible(self.curve_selector.count() > 0)
         if self.curve_selector.count() > 0:
             self.curve_selector.setCurrentIndex(0)
             self._curve_changed(0)

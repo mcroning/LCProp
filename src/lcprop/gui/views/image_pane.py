@@ -112,6 +112,7 @@ class ImagePane(QWidget):
 
         self.field_selector.blockSignals(False)
 
+        self.image_view.setVisible(self.field_selector.count() > 0)
         if self.field_selector.count() > 0:
             default_index = 0
             preferred_found = False

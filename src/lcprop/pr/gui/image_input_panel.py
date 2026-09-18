@@ -62,9 +62,15 @@ class PRImageInputPanel(QWidget):
         layout = QVBoxLayout(self)
         form = QFormLayout()
         self.input_mode = QComboBox()
-        self.input_mode.addItem("Gaussian beams", PR_GAUSSIAN_INPUT_MODE)
+        self.input_mode.addItem("General beams / two-beam coupling", PR_GAUSSIAN_INPUT_MODE)
         self.input_mode.addItem(
-            "Image amplification", PR_IMAGE_AMPLIFICATION_INPUT_MODE
+            "Image amplification — specialized setup", PR_IMAGE_AMPLIFICATION_INPUT_MODE
+        )
+        self.input_mode.setToolTip(
+            "General beams supports ordinary two-beam coupling within the selected "
+            "PR model. Reduced transport acts along x; rotating a crossing is not "
+            "physically equivalent. Specialized image amplification requires its "
+            "signal screen, pump/signal roles, and symmetric x-z carriers."
         )
         self.pump_channel = QComboBox()
         self.signal_channel = QComboBox()

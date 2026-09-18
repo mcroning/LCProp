@@ -355,6 +355,36 @@ class SlurmRunner:
         self._registry = registry
         self._sleep = sleep
 
+    def preflight_source(self) -> None:
+        """Check automatic source locally, without staging or remote probes."""
+        from lcprop.runners.source_deployment import (
+            SourceDeploymentError, resolve_git_source,
+        )
+
+        if self.config.remote_source_path is not None:
+            return  # Existing explicit pre-staged source route.
+        manager = self._source_deployment_manager
+        if manager is None:
+            return  # Execution retains its existing missing-source validation.
+        local_source = getattr(manager, "local_source", None)
+        if local_source is None:
+            return  # A custom deployment manager owns its source contract.
+        try:
+            resolve_git_source(local_source)
+        except SourceDeploymentError as exc:
+            if exc.category == "source_not_git_checkout":
+                raise SourceDeploymentError(
+                    exc.category,
+                    "Automatic Slurm source deployment needs a clean LCProp Git "
+                    "checkout. A normal installed package supports Local execution, "
+                    "but is not a deployable checkout. Use a runner configured with "
+                    "local_source pointing to a clean checkout, or the supported "
+                    "pre-staged LCPROP_SLURM_SOURCE_PATH and "
+                    "LCPROP_SLURM_SOURCE_SHA pair. The profile's Remote source root "
+                    "is a destination, not a local checkout selector.",
+                ) from exc
+            raise
+
     @property
     def registered_operations(self) -> tuple[WorkflowOperation, ...]:
         return tuple(self._operations.values())

@@ -34,6 +34,9 @@ from lcprop.gui.experiment_files import (
     show_experiment_open_warning,
 )
 from lcprop.gui.workers import WorkflowWorker
+from lcprop.gui.request_transparency import (
+    begin_request, execution_summary, inspect_request, report_failure, source_preflight,
+)
 from lcprop.gui.help import ProductHelpButton
 from lcprop.gui.remote_execution import (
     RemoteExecutionControls,
@@ -243,6 +246,13 @@ class PRMainWindow(QWidget):
         header.addWidget(self.runner_label)
         self.status_label = QLabel("Idle")
         header.addWidget(self.status_label)
+        self.preview_button = QPushButton("Inspect Request")
+        self.preview_button.setToolTip(
+            "Commit pending editor values and validate/inspect without running"
+        )
+        self.preview_button.clicked.connect(self.preview_request_clicked)
+        header.addWidget(self.preview_button)
+
         self.run_button = QPushButton("Run PR")
         self.run_button.clicked.connect(self.run_clicked)
         header.addWidget(self.run_button)
@@ -401,7 +411,10 @@ class PRMainWindow(QWidget):
         compatible = checkpoint is not None and reason is None
         actions_enabled = not self._background_running
         self.continue_button.setEnabled(actions_enabled and compatible)
-        self.continue_button.setToolTip("" if compatible else reason or "")
+        self.continue_button.setToolTip(
+            "Continue locally; the Run target selection is not used."
+            if compatible else reason or ""
+        )
         self.save_checkpoint_button.setEnabled(
             actions_enabled
             and workflow_id == PR_TIMEDEPENDENT_WORKFLOW
@@ -534,6 +547,7 @@ class PRMainWindow(QWidget):
 
     def save_experiment_to(self, path):
         """Save the active PR experiment without running it."""
+        self.results_panel.workspace.operation_boundary("Save Experiment")
 
         if self._background_running:
             raise RuntimeError("cannot save an experiment while a run is active")
@@ -551,6 +565,7 @@ class PRMainWindow(QWidget):
 
     def load_experiment_from(self, path):
         """Validate and transactionally restore one PR experiment file."""
+        self.results_panel.workspace.operation_boundary("Open Experiment")
 
         if self._background_running:
             raise RuntimeError("cannot open an experiment while a run is active")
@@ -616,7 +631,7 @@ class PRMainWindow(QWidget):
         except Exception:
             self.status_label.setText("Experiment save failed")
             self.results_panel.append_console("ERROR")
-            self.results_panel.append_console(traceback.format_exc())
+            report_failure(self, traceback.format_exc())
             self.tabs.setCurrentWidget(self.results_panel)
             return
         self.status_label.setText("Experiment saved")
@@ -633,7 +648,7 @@ class PRMainWindow(QWidget):
             show_experiment_open_warning(self, exc)
             self.status_label.setText("Experiment open failed")
             self.results_panel.append_console("ERROR")
-            self.results_panel.append_console(traceback.format_exc())
+            report_failure(self, traceback.format_exc())
             self.tabs.setCurrentWidget(self.results_panel)
             return
         self.status_label.setText("Experiment opened")
@@ -641,8 +656,18 @@ class PRMainWindow(QWidget):
             f"Opened PR experiment: {loaded.workflow_id}"
         )
 
-    def describe_request(self, request) -> str:
+    def preview_request_clicked(self) -> None:
+        inspect_request(self, self.build_request)
+
+    def describe_request(self, request, *, runner=None) -> str:
+        return (
+            self._describe_scientific_request(request, runner=runner)
+            + "\n" + execution_summary(self, request, runner=runner)
+        )
+
+    def _describe_scientific_request(self, request, *, runner=None) -> str:
         """Return a durable, unit-explicit summary of one PR request."""
+        runner = self.runner if runner is None else runner
 
         if isinstance(request, PRImageAmplificationExperimentRequest):
             prepared, _transmission, _grating = (
@@ -749,7 +774,7 @@ class PRMainWindow(QWidget):
                 "Material: photorefractive",
                 f"Workflow: {PR_IMAGE_AMPLIFICATION_WORKFLOW}",
                 "Input mode: Image Amplification",
-                f"Runner: {self.runner.name}",
+                f"Runner: {runner.name}",
                 (
                     f"Grid: {request.grid.Nx} × {request.grid.Ny}, "
                     f"Nz={round(request.grid.z_length_um / request.grid.dz_um)}"
@@ -811,7 +836,7 @@ class PRMainWindow(QWidget):
         lines = [
             "Material: photorefractive",
             f"Workflow: {workflow_id}",
-            f"Runner: {self.runner.name}",
+            f"Runner: {runner.name}",
             (
                 f"Grid: {request.grid.Nx} × {request.grid.Ny}, "
                 f"Nz={round(request.grid.z_length_um / request.grid.dz_um)}"
@@ -1175,6 +1200,7 @@ class PRMainWindow(QWidget):
 
     def save_checkpoint_to(self, run_dir):
         """Save the retained PR checkpoint through the shared dispatcher."""
+        self.results_panel.workspace.operation_boundary("Save Checkpoint")
 
         if self.last_checkpoint is None:
             raise ValueError("no PR checkpoint is available to save")
@@ -1182,6 +1208,7 @@ class PRMainWindow(QWidget):
 
     def load_checkpoint_from(self, run_dir) -> PRTimeDependentCheckpoint:
         """Load, validate, and hydrate one PR checkpoint directory."""
+        self.results_panel.workspace.operation_boundary("Load Checkpoint")
 
         checkpoint = load_run_checkpoint(run_dir)
         if not isinstance(checkpoint, PRTimeDependentCheckpoint):
@@ -1224,7 +1251,7 @@ class PRMainWindow(QWidget):
             saved = self.save_checkpoint_to(directory)
         except Exception:
             self.results_panel.append_console("ERROR")
-            self.results_panel.append_console(traceback.format_exc())
+            report_failure(self, traceback.format_exc())
             return
         self.results_panel.append_console(f"Saved PR checkpoint: {saved}")
 
@@ -1241,7 +1268,7 @@ class PRMainWindow(QWidget):
         except Exception:
             self.status_label.setText("Checkpoint load failed")
             self.results_panel.append_console("ERROR")
-            self.results_panel.append_console(traceback.format_exc())
+            report_failure(self, traceback.format_exc())
             self.tabs.setCurrentWidget(self.results_panel)
             return
         self.results_panel.append_console(
@@ -1261,15 +1288,19 @@ class PRMainWindow(QWidget):
             != PR_TIMEDEPENDENT_WORKFLOW
         ):
             return
+        begin_request(self, "Continue")
         checkpoint = self.last_checkpoint
         try:
             request = self.build_request()
             validate_pr_continuation(request, checkpoint)
-            summary = self.describe_request(request)
+            # Continuation is Local-only; selected Slurm settings apply to Run.
+            self._scientific_preflight(request)
+            summary = self.describe_request(request, runner=self.local_runner)
+            summary += "\nContinuation is Local-only; the Run target selection is not used."
         except Exception:
             self.status_label.setText("Checkpoint incompatible")
             self.results_panel.append_console("ERROR")
-            self.results_panel.append_console(traceback.format_exc())
+            report_failure(self, traceback.format_exc())
             self._refresh_checkpoint_controls()
             return
         additional_steps = int(request.solver.Nt)
@@ -1289,43 +1320,86 @@ class PRMainWindow(QWidget):
             request,
             summary=summary,
             runner_callable=runner_callable,
-            run_label="Continuing",
+            run_label="Continuing locally",
+            execution_runner=self.local_runner,
         )
+
+    def _scientific_preflight(self, request) -> None:
+        preflight_request = request
+        if isinstance(
+            request,
+            (
+                PRBeamPanelImageAmplificationRunRequest,
+                PRImageAmplificationExperimentRequest,
+            ),
+        ):
+            composite = (
+                request
+                if isinstance(request, PRImageAmplificationExperimentRequest)
+                else image_amplification_experiment_request(request)
+            )
+            preflight_request, _transmission, _grating = (
+                prepare_image_amplification_base_request(
+                    composite
+                )
+            )
+            capability = next(
+                capability
+                for capability in image_amplification_base_capabilities()
+                if capability.workflow_id == composite.base_workflow_id
+            )
+            self._append_image_amplification_validation_warning(
+                capability, preflight_request
+            )
+        elif isinstance(request, PRImageAmplificationRunRequest):
+            preflight_request, _transmission, _grating = (
+                prepare_image_amplification_workflow_request(request)
+            )
+        preflight = validate_pr_gui_workflow_request(preflight_request)
+        for warning in preflight.warnings:
+            self.results_panel.append_console(f"WARNING: {warning}")
+
+    def _validate_execution_request(self, request) -> None:
+        self._scientific_preflight(request)
+        if self.runner is self.slurm_runner:
+            self.remote_execution_controls.validate_backend(
+                request.backend.backend
+            )
+            workflow_id = self._workflow_id_for_request(request)
+            if isinstance(request, PRImageAmplificationExperimentRequest):
+                workflow_id = request.base_workflow_id
+            if not self._slurm_supports_workflow(workflow_id):
+                kind = (
+                    "base operation"
+                    if isinstance(
+                        request, PRImageAmplificationExperimentRequest
+                    )
+                    else "operation"
+                )
+                raise ValueError(
+                    "Slurm execution does not support the selected PR "
+                    f"{kind} {workflow_id!r}"
+                )
+        source_preflight(self)
 
     @Slot()
     def run_clicked(self) -> None:
         if self._background_running or self._close_requested:
             return
+        begin_request(self, "Run")
         try:
             request = self.build_request()
             summary = self.describe_request(request)
-            if self.runner is self.slurm_runner:
-                self.remote_execution_controls.validate_backend(
-                    request.backend.backend
-                )
-                workflow_id = self._workflow_id_for_request(request)
-                if isinstance(request, PRImageAmplificationExperimentRequest):
-                    workflow_id = request.base_workflow_id
-                if not self._slurm_supports_workflow(workflow_id):
-                    kind = (
-                        "base operation"
-                        if isinstance(
-                            request, PRImageAmplificationExperimentRequest
-                        )
-                        else "operation"
-                    )
-                    raise ValueError(
-                        "Slurm execution does not support the selected PR "
-                        f"{kind} {workflow_id!r}"
-                    )
+            self._validate_execution_request(request)
         except Exception:
             self.status_label.setText("Invalid request")
             self.results_panel.append_console("ERROR")
-            self.results_panel.append_console(traceback.format_exc())
+            report_failure(self, traceback.format_exc())
             self.tabs.setCurrentWidget(self.results_panel)
             return
 
         if not self._local_run_cost_guard(request):
+            self.results_panel.workspace.set_operation_status("Run not started")
             return
 
         if (
@@ -1448,54 +1522,23 @@ class PRMainWindow(QWidget):
         summary: str,
         runner_callable,
         run_label: str,
+        execution_runner=None,
     ) -> None:
+        execution_runner = self.runner if execution_runner is None else execution_runner
         self.results_panel.reset_field_color_scales()
         self.results_panel.set_request_summary(summary)
         workflow_id = self._workflow_id_for_request(request)
         self.results_panel.append_console(
             f"{run_label} {workflow_id} "
-            f"with {self.runner.name}..."
+            f"with {execution_runner.name}..."
         )
-        preflight_request = request
-        if isinstance(
-            request,
-            (
-                PRBeamPanelImageAmplificationRunRequest,
-                PRImageAmplificationExperimentRequest,
-            ),
-        ):
-            composite = (
-                request
-                if isinstance(request, PRImageAmplificationExperimentRequest)
-                else image_amplification_experiment_request(request)
-            )
-            preflight_request, _transmission, _grating = (
-                prepare_image_amplification_base_request(
-                    composite
-                )
-            )
-            capability = next(
-                capability
-                for capability in image_amplification_base_capabilities()
-                if capability.workflow_id == composite.base_workflow_id
-            )
-            self._append_image_amplification_validation_warning(
-                capability, preflight_request
-            )
-        elif isinstance(request, PRImageAmplificationRunRequest):
-            preflight_request, _transmission, _grating = (
-                prepare_image_amplification_workflow_request(request)
-            )
-        preflight = validate_pr_gui_workflow_request(preflight_request)
-        for warning in preflight.warnings:
-            self.results_panel.append_console(f"WARNING: {warning}")
-
         self._active_request = request
         self._background_running = True
         self._outcome_received = False
         self._thread_done = False
         self.run_status = "running"
         self.last_progress = None
+        self.last_remote_status = None
         self._progress_console_state.clear()
         self.status_label.setText("Running…")
         self.tabs.setCurrentWidget(self.results_panel)
@@ -1522,7 +1565,11 @@ class PRMainWindow(QWidget):
         self._cancellation_token = token
         self._thread = thread
         self._worker = worker
+        self.results_panel.workspace.set_operation_status("Starting")
+        if execution_runner is self.slurm_runner:
+            self.results_panel.workspace.operation_boundary("Slurm submission / remote execution")
         thread.start()
+        self.results_panel.workspace.set_operation_status("Running")
 
     def _append_image_amplification_validation_warning(
         self,
@@ -1565,6 +1612,7 @@ class PRMainWindow(QWidget):
         if not self._background_running or token is None:
             return
         token.cancel()
+        self.results_panel.workspace.set_operation_status("Stopping — awaiting safe boundary")
         self.run_status = "stopping"
         is_transverse_static = isinstance(
             self._active_request,
@@ -1784,7 +1832,13 @@ class PRMainWindow(QWidget):
                 self.status_label.repaint()
                 self.results_panel.set_td_time_indicator("Rendering results...")
                 self.results_panel.append_console("Rendering results...")
+            state = (
+                "State at stop/cancellation"
+                if getattr(result, "status", None) in {"stopped", "cancelled"}
+                else "Completed result"
+            )
             self.results_panel.set_run_data(runner_result.run_data)
+            self.results_panel.workspace.finish_attempt(state)
             if runner_result.kind == PR_IMAGE_AMPLIFICATION_WORKFLOW:
                 td_result = ordinary_result
                 analysis = (
@@ -1989,7 +2043,7 @@ class PRMainWindow(QWidget):
             self.run_status = "failed"
             self.status_label.setText("Failed")
             self.results_panel.append_console("ERROR")
-            self.results_panel.append_console(traceback.format_exc())
+            report_failure(self, traceback.format_exc())
         self._outcome_received = True
         self._maybe_finish_background()
 
@@ -2001,6 +2055,7 @@ class PRMainWindow(QWidget):
         ):
             self.run_status = "stopped"
             self.status_label.setText("Stopped")
+            self.results_panel.workspace.finish_attempt("State at stop/cancellation")
             self.results_panel.append_console("Remote job cancelled")
             self._outcome_received = True
             self._maybe_finish_background()
@@ -2008,7 +2063,7 @@ class PRMainWindow(QWidget):
         self.run_status = "failed"
         self.status_label.setText("Failed")
         self.results_panel.append_console("ERROR")
-        self.results_panel.append_console(formatted_traceback)
+        report_failure(self, formatted_traceback)
         self._outcome_received = True
         self._maybe_finish_background()
 
@@ -2051,6 +2106,7 @@ class PRMainWindow(QWidget):
             return True
         if self._cancellation_token is not None:
             self._cancellation_token.cancel()
+        self.results_panel.workspace.set_operation_status("Stopping — awaiting safe boundary")
         self.run_status = "stopping"
         self.status_label.setText("Stopping…")
         deadline = monotonic() + max(0, timeout_ms) / 1000.0
@@ -2083,6 +2139,7 @@ class PRMainWindow(QWidget):
             self._close_requested = True
             if self._cancellation_token is not None:
                 self._cancellation_token.cancel()
+            self.results_panel.workspace.set_operation_status("Stopping — awaiting safe boundary")
             self.run_status = "stopping"
             self.status_label.setText("Stopping…")
             self.stop_button.setEnabled(False)

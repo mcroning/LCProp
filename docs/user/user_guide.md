@@ -259,3 +259,61 @@ scientific arrays.
   continuation; incomplete candidates are discarded.
 
 For a first run, return to the [Quick Start](quick_start.md).
+
+## Inspecting requests and identifying displayed results
+
+In either LC or PR, **Inspect Request** captures pending editor values,
+constructs and validates the selected request, and opens Results → Request.
+It does not start a worker, propagate fields, relax a material state, or contact
+Slurm. Capturing the request commits pending beam-editor values and updates
+optical context; specialized image validation can also prepare its raster/launch
+inputs. These are request-preparation side effects, not a scientific run.
+
+The preview uses the same scientific summary as execution. It includes
+precision, execution target, requested backend, and the selected cluster/resource
+for Slurm. A backend requiring runtime resolution is explicitly unresolved;
+preview does not probe a GPU. Comparison resource estimates in Run Planning
+are separate from the configured execution path. LC continues to use NumPy
+and its existing float64 GUI settings.
+
+A visible Results banner identifies the displayed request and its state:
+**Previous run**, **Current accepted state** or **Current progress state** when
+available, **Completed result**, or **State at stop/cancellation**. New attempts
+mark retained results as previous before validation, so a rejected request cannot
+claim an older result. When the inspected/requested configuration differs, the
+Request tab also retains the summary that owns the displayed result. A failed
+run with a retained current progress product labels it **State at failure**.
+Completed result means execution returned a result; it does not assert solver
+convergence. Inspect the existing convergence diagnostics separately.
+Unavailable fields or curves are hidden when a new product replaces the old one.
+If a result update fails, all result panes become unavailable and the banner
+reports that no result is displayed; a later successful update restores them.
+
+PR checkpoint **Continue** is Local-only, even when Slurm is selected for Run.
+Its execution summary and Console identify Local execution. Continuation does
+not validate Slurm resources or require an automatically deployable Git source;
+the selected target remains available for the next ordinary Run.
+
+Results refreshes preserve your selected Fields, Curves, Diagnostics, Request,
+or Console subtab. Timestamped Console boundaries separate Run, Continue,
+experiment/checkpoint operations, and remote dispatch. Configuration errors show
+the cause above Results; full tracebacks remain in Console. Scientific field
+names are shortened in the views while original names and provenance remain
+in Diagnostics and persisted products.
+
+For PR, **General beams / two-beam coupling** is the ordinary beam route.
+**Image amplification — specialized setup** requires the signal screen,
+pump/signal roles, and symmetric carriers in the x-z plane. Those specialized
+constraints do not apply to general beams. The selected model still matters:
+reduced PR material transport acts along x with y as a batch axis; rotating
+beam crossings is not generally physically equivalent.
+
+Automatic Slurm source deployment requires a clean deployable LCProp Git
+checkout. A normal non-editable installation remains suitable for Local runs.
+Inspect Request and Run check the automatic source locally before staging or
+submission. If it is not a checkout, configure a runner with the supported
+`local_source` checkout argument, or use the existing pre-staged source route
+with both `LCPROP_SLURM_SOURCE_PATH` and `LCPROP_SLURM_SOURCE_SHA`. The profile's
+Remote source root is the remote destination, not a local checkout selector.
+This preflight does not certify remote connectivity, environment, or device
+availability; those checks remain part of remote execution.

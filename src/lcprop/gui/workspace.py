@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -7,6 +9,7 @@ import numpy as np
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QLabel,
     QPushButton,
     QTextEdit,
     QSplitter,
@@ -15,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from lcprop.products.data_model import FieldCollection
 from lcprop.gui.views import ImagePane, LongitudinalPane, CurvePane
 
 
@@ -24,6 +28,18 @@ class Workspace(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
+
+        self.operation_status = QLabel("Idle")
+        self.operation_status.setWordWrap(True)
+        layout.addWidget(self.operation_status)
+        self.result_ownership = QLabel("No displayed result")
+        self.result_ownership.setWordWrap(True)
+        layout.addWidget(self.result_ownership)
+        self._attempt = 0
+        self._displayed_attempt = None
+        self._request_text = ""
+        self._displayed_request = ""
+        self._display_state = ""
 
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
@@ -83,13 +99,59 @@ class Workspace(QWidget):
         self._td_preview_artifact = None
         self._artifact_directory = None
 
-    def set_request_summary(self, text: str) -> None:
+    def begin_request(self, operation: str) -> None:
+        """Identify a new attempt before construction can fail."""
+        self._attempt += 1
+        self._request_text = "Request construction pending"
+        self.mark_previous()
+        self.operation_boundary(operation)
+        self.set_operation_status("Validating / Preparing")
+        self._refresh_request_text()
+
+    def mark_previous(self) -> None:
+        if self._displayed_attempt is not None:
+            self.result_ownership.setText(
+                f"Previous run — request {self._displayed_attempt} ({self._display_state})"
+            )
+
+    def operation_boundary(self, operation: str) -> None:
+        stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        self.append_console(f"[{stamp}] {operation}")
+
+    def set_operation_status(self, text: str) -> None:
+        self.operation_status.setText(text)
+        # Paint acknowledgement before synchronous GUI request preparation;
+        # do not process arbitrary events/re-enter a Run slot.
+        self.operation_status.repaint()
+
+    def finish_attempt(self, state: str) -> None:
+        self.set_operation_status(state)
+        if (self._displayed_attempt == self._attempt
+                and (state != "State at failure" or self._display_state.startswith("Current"))):
+            self._display_state = state
+            self.result_ownership.setText(f"{state} — request {self._attempt}")
+
+    def _refresh_request_text(self) -> None:
+        text = self._request_text
+        if self._displayed_request and self._displayed_request != text:
+            text = (
+                "Requested / preview configuration:\n" + text
+                + "\n\nDisplayed result request "
+                + str(self._displayed_attempt) + ":\n" + self._displayed_request
+            )
         self.request_summary.setPlainText(text)
+
+    def set_request_summary(self, text: str) -> None:
+        self._request_text = text
+        self._refresh_request_text()
 
     def append_console(self, text: str) -> None:
         self.console.append(text)
 
     def set_td_time_indicator(self, text: str | None) -> None:
+        # New-run progress must not relabel a retained previous field's time.
+        if self._displayed_attempt is not None and self._displayed_attempt != self._attempt:
+            return
         self.image_pane.set_td_time_indicator(text)
 
     def reset_field_color_scales(self) -> None:
@@ -110,7 +172,51 @@ class Workspace(QWidget):
         else:
             self.image_pane.clear_crosshair()
 
-    def set_run_data(self, run_data) -> None:
+    def set_run_data(self, run_data, *, state: str | None = None) -> None:
+        # Publish ownership only after every pane has accepted the product.
+        # Suppress painting while panes may contain a mixture of old/new data.
+        self.setUpdatesEnabled(False)
+        try:
+            summary = run_data.diagnostics.get("summary")
+            values = {} if summary is None else summary.values
+            if state is None:
+                state = (
+                    "State at stop/cancellation"
+                    if values.get("status") in {"stopped", "cancelled"}
+                    else "Completed result"
+                )
+            self._render_run_data(run_data)
+        except Exception:
+            # A partially updated product has no coherent displayed ownership.
+            # Keep the selected tab, but make all result content unavailable.
+            self.image_pane.hide()
+            self.longitudinal_pane.hide()
+            self.curve_pane.curve_view.hide()
+            self.curve_pane.curve_selector.hide()
+            self.diagnostics_view.clear()
+            self.open_td_preview.hide()
+            self._td_preview_artifact = None
+            self._displayed_attempt = None
+            self._displayed_request = ""
+            self._display_state = ""
+            self.result_ownership.setText("No displayed result — result update failed")
+            self.result_ownership.setToolTip("")
+            self._refresh_request_text()
+            raise
+        else:
+            self._displayed_attempt = self._attempt
+            self._displayed_request = self._request_text
+            self._display_state = state
+            self.result_ownership.setText(f"{state} — request {self._attempt}")
+            self.result_ownership.setToolTip(self._displayed_request)
+            self._refresh_request_text()
+            self.image_pane.show()
+            self.longitudinal_pane.show()
+            self.curve_pane.curve_selector.show()
+        finally:
+            self.setUpdatesEnabled(True)
+
+    def _render_run_data(self, run_data) -> None:
         if self._artifact_directory is not None:
             self._artifact_directory.cleanup()
             self._artifact_directory = None
@@ -128,17 +234,17 @@ class Workspace(QWidget):
                     if values.get("status") == "cancelled"
                     else "Final TD time: "
                 )
-                self.set_td_time_indicator(
+                self.image_pane.set_td_time_indicator(
                     prefix + f"{float(cumulative_time):.3f}"
                 )
             else:
-                self.set_td_time_indicator(None)
+                self.image_pane.set_td_time_indicator(None)
         elif run_data.workflow == "static":
             summary = run_data.diagnostics.get("summary")
             values = {} if summary is None else summary.values
             coordinate = values.get("z_reached_um")
             if coordinate is None:
-                self.set_td_time_indicator(None)
+                self.image_pane.set_td_time_indicator(None)
             else:
                 prefix = (
                     "z at stop: "
@@ -147,21 +253,24 @@ class Workspace(QWidget):
                 )
                 completed = values.get("completed_slices")
                 total = values.get("total_slices")
-                self.set_td_time_indicator(
+                self.image_pane.set_td_time_indicator(
                     prefix
                     + f"{float(coordinate):.3f} um; slices: {completed}/{total}"
                 )
         else:
-            self.set_td_time_indicator(None)
+            self.image_pane.set_td_time_indicator(None)
 
-        self.image_pane.set_run_data(run_data)
-        self.longitudinal_pane.set_run_data(run_data)
+        # Rename only view records; preserve original names in Diagnostics and
+        # all scientific arrays, product keys, and persisted/transport records.
+        view_data = replace(run_data, fields=FieldCollection([
+            (key, replace(field, display_name=field.display_name.replace(
+                "Final Authoritative Optical", "Optical"
+            ).replace("Authoritative Optical", "Optical")))
+            for key, field in run_data.fields.items()
+        ]))
+        self.image_pane.set_run_data(view_data)
+        self.longitudinal_pane.set_run_data(view_data)
         self.curve_pane.set_run_data(run_data)
-
-        if run_data.fields:
-            self.tabs.setCurrentWidget(self.fields_splitter)
-        elif self.curve_pane.curve_selector.count() > 0:
-            self.tabs.setCurrentWidget(self.curve_pane)
 
         self.diagnostics_view.setPlainText(self._format_diagnostics(run_data))
 

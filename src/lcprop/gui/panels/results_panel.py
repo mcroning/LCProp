@@ -23,8 +23,8 @@ class ResultsPanel(QWidget):
     def set_td_time_indicator(self, text: str | None) -> None:
         self.workspace.set_td_time_indicator(text)
 
-    def set_run_data(self, run_data) -> None:
-        self.workspace.set_run_data(run_data)
+    def set_run_data(self, run_data, *, state=None) -> None:
+        self.workspace.set_run_data(run_data, state=state)
 
     def reset_field_color_scales(self) -> None:
         self.workspace.reset_field_color_scales()
