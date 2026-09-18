@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
 
 from lcprop.products.data_model import FieldCollection
 from lcprop.gui.views import ImagePane, LongitudinalPane, CurvePane
+from lcprop.gui.views.table_pane import TablePane
+from lcprop.gui.views.display_scale import DisplayScales
 
 
 class Workspace(QWidget):
@@ -44,8 +46,9 @@ class Workspace(QWidget):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
-        self.image_pane = ImagePane()
-        self.longitudinal_pane = LongitudinalPane()
+        self.display_scales = DisplayScales()
+        self.image_pane = ImagePane(self.display_scales)
+        self.longitudinal_pane = LongitudinalPane(self.display_scales)
 
         self.fields_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.fields_splitter.addWidget(self.image_pane)
@@ -88,6 +91,9 @@ class Workspace(QWidget):
         self.console = QTextEdit()
         self.console.setReadOnly(True)
         self.tabs.addTab(self.console, "Console")
+
+        self.table_pane = TablePane()
+        self.tabs.addTab(self.table_pane, "Samples / Tables")
 
         self.open_td_preview = QPushButton("Open downsampled TD preview")
         self.open_td_preview.setToolTip(
@@ -194,6 +200,7 @@ class Workspace(QWidget):
             self.curve_pane.curve_view.hide()
             self.curve_pane.curve_selector.hide()
             self.diagnostics_view.clear()
+            self.table_pane.clear()
             self.open_td_preview.hide()
             self._td_preview_artifact = None
             self._displayed_attempt = None
@@ -271,6 +278,7 @@ class Workspace(QWidget):
         self.image_pane.set_run_data(view_data)
         self.longitudinal_pane.set_run_data(view_data)
         self.curve_pane.set_run_data(run_data)
+        self.table_pane.set_run_data(run_data)
 
         self.diagnostics_view.setPlainText(self._format_diagnostics(run_data))
 

@@ -317,3 +317,76 @@ with both `LCPROP_SLURM_SOURCE_PATH` and `LCPROP_SLURM_SOURCE_SHA`. The profile'
 Remote source root is the remote destination, not a local checkout selector.
 This preflight does not certify remote connectivity, environment, or device
 availability; those checks remain part of remote execution.
+
+## Results and numerical transparency
+
+### Solitons and existence sweeps
+
+**Solver converged within configured limits** means the applicable strict
+convergence checks passed together in one completed outer iteration. A returned
+nonconverged solution remains inspectable; nonconvergence does not establish
+physical nonexistence or instability, and it is distinct from worker execution
+failure or cancellation.
+
+Open **Results → Samples / Tables** and select **Samples**, **Sweep members**,
+or **Convergence gates**. Available member values include power, beta, residuals,
+field relative change, mode overlap, theta update, completed iterations, budget,
+solver status, and termination reason. The gates table shows exact retained
+outer-iteration values, request tolerances, the strict `<` comparison, and
+Pass/Fail. Missing evidence is labeled **Unavailable**, not reconstructed from
+rounded plots. Float cells retain round-trip precision and can be inspected in
+their tooltips.
+
+Convergence curves show applicable tolerance lines and guidance beside the plot;
+mode overlap has no additive axis offset. **Transverse RMS widths** has separate
+x/y legend entries. A near-unity overlap alone does not establish convergence.
+For transverse eigenpair refinement, qualification uses the outer history and
+includes an optical-residual gate. Final polishing does not update that outer
+convergence flag; final returned-field diagnostics can differ from gate values.
+
+The GUI existence path uses `ParameterSweepRequest` with default
+`SolitonRequest`, not the separate `SolitonExistenceRequest` API defaults.
+Continuation initializes a subsequent member from a previously converged member
+and can improve branch following. It does not waive any convergence criterion.
+
+### Configured execution and comparison estimates
+
+Inspect Request and Run Planning identify the configured Local/Slurm target,
+requested backend, precision, and (for Slurm) cluster, resource and retrieval
+policy. Backend resolution remains explicitly unknown until execution where it
+is not yet known; planning does not probe devices. Completed-run diagnostics
+and remote status provide execution evidence.
+
+**Run Planning → Configured execution** is separate from **Comparison estimates**.
+Local Mac/NumPy and H200/CuPy estimates do not select a backend or resource.
+Selecting a GPU allocation with explicit NumPy produces a warning: scientific
+computation will not use the allocated GPU. The explicit choice is preserved.
+Full-transverse PR requires explicit NumPy or CuPy; Auto is unsupported there.
+Configuration changes invalidate the displayed planning estimate.
+
+### Display scaling and temporal locking
+
+Image and longitudinal panes provide **Auto**, **Fixed / manual**, and
+**Lock across frames**, with editable lower/upper limits and **Apply limits**.
+Limits must be finite and lower must be less than upper. Invalid entries leave
+the applied scientific-image mapping unchanged. Select Auto to resume automatic
+scaling, even after an invalid manual entry.
+
+Auto preserves the existing presentation policies: transverse intensity uses a
+robust positive-intensity percentile, other transverse quantities use their
+finite range, and longitudinal cuts use their shared volume range (or the
+combined retained-cut range). Auto can therefore rescale across frames and
+across transverse versus longitudinal views.
+
+Fixed and locked limits share a mapping across x-y/x-z/y-z views explicitly
+linked to the same source quantity. Unrelated quantities have separate settings.
+Lock captures the limits currently displayed in the pane where it is selected;
+identical values then have identical brightness across subsequent updates.
+A new-run scale reset captures fresh limits for locked quantities; manual limits
+persist during the session. Flat or entirely nonfinite fields get finite display
+bounds. These controls work with existing frame/progress updates; they do not
+add movie history or alter already encoded MP4 previews.
+
+All scaling is display-only. Rendering may saturate outside the chosen range;
+stored arrays, powers, curves, checkpoints and transport artifacts are unchanged.
+Settings are session-only and do not change experiment/checkpoint schemas.

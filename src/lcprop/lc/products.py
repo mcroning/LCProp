@@ -909,7 +909,10 @@ def from_soliton_result(result) -> RunData:
             "beta",
         ))
 
+    from lcprop.lc.soliton_presentation import qualification
+    qualification_summary, _gates = qualification(result)
     summary = dict(result.metrics)
+    summary.update(qualification_summary)
     summary["mode"] = getattr(result, "mode", "00")
     summary.update(
         _far_field_metadata(result, refractive_index=soliton_n_ref)
@@ -921,15 +924,31 @@ def from_soliton_result(result) -> RunData:
         fields=FieldCollection(fields),
         curves=curves,
         diagnostics=DiagnosticCollection([
-            ("summary", DiagnosticData("summary", "Summary", summary))
+            ("summary", DiagnosticData("summary", "Summary", summary)),
+            ("convergence_gates", _qualification_diagnostics([(0, result)])),
         ]),
     )
 
 
 
 
+def _qualification_diagnostics(results):
+    from lcprop.lc.soliton_presentation import qualification, CONTINUATION_NOTE
+    rows = []
+    for member_id, result in results:
+        _summary, gates = qualification(result)
+        rows.extend({"member": member_id, **gate} for gate in gates)
+    return DiagnosticData("convergence_gates", "Convergence gates", {
+        "rows": rows, "interpretation": CONTINUATION_NOTE,
+    })
+
+
 def from_soliton_existence_result(result) -> RunData:
+    from lcprop.lc.soliton_presentation import enrich_sample
     rows = list(getattr(result, "samples", []) or [])
+    if type(result).__name__ == "SolitonExistenceResult":
+        rows = [enrich_sample(row, member)[0] for row, member in
+                zip(rows, result.results)] if len(rows) == len(result.results) else rows
     curves = CurveCollection()
 
     if rows:
@@ -947,7 +966,7 @@ def from_soliton_existence_result(result) -> RunData:
             ("overlap_abs", "Mode overlap"),
             ("dtheta_rms", "Theta update RMS"),
             ("elapsed_s", "Elapsed time"),
-            ("converged", "Converged"),
+            ("converged", "Solver converged within configured limits"),
         ]:
             y = np.asarray([r.get(key, np.nan) for r in rows], dtype=float)
             curves.add(key, CurveData(
@@ -956,7 +975,7 @@ def from_soliton_existence_result(result) -> RunData:
                 P,
                 y,
                 "P",
-                key,
+                label,
                 {"P": "mW"},
             ))
         widths = np.column_stack((
@@ -965,13 +984,13 @@ def from_soliton_existence_result(result) -> RunData:
         ))
         curves.add("transverse_rms_widths", CurveData(
             "transverse_rms_widths",
-            "xs and ys",
+            "Transverse RMS widths",
             P,
             widths,
             "P",
             "RMS width",
             {"P": "mW", "RMS width": "µm"},
-            series_labels=("xs", "ys"),
+            series_labels=("x", "y"),
         ))
 
     summary = dict(getattr(result, "metrics", {}) or {})
@@ -1018,6 +1037,7 @@ def from_soliton_existence_result(result) -> RunData:
         diagnostics=DiagnosticCollection([
             ("summary", DiagnosticData("summary", "Summary", summary)),
             ("table", DiagnosticData("table", "Samples", {"rows": rows})),
+            ("convergence_gates", _qualification_diagnostics(enumerate(member_results))),
         ]),
     )
 
@@ -1043,6 +1063,19 @@ def from_parameter_sweep_result(result) -> RunData:
             if row.get(key) is None:
                 row[key] = metrics.get(key)
 
+    from lcprop.lc.soliton_presentation import enrich_sample
+    member_results_by_index = {
+        int(member.requested_index): member.result
+        for member in getattr(result, "members", ()) if member.result is not None
+    }
+    for position, row in enumerate(rows):
+        member_result = member_results_by_index.get(int(row.get("i", position)))
+        if member_result is None and not getattr(result, "members", ()):
+            retained = getattr(result, "results", ())
+            member_result = retained[position] if position < len(retained) else None
+        if member_result is not None and hasattr(member_result, "converged"):
+            rows[position] = enrich_sample(row, member_result)[0]
+            member_results_by_index[int(row.get("i", position))] = member_result
     curve_result = replace(result, samples=rows)
     run_data = from_soliton_existence_result(curve_result)
     fields = FieldCollection()
@@ -1060,6 +1093,16 @@ def from_parameter_sweep_result(result) -> RunData:
             "error_text": member.error_text,
             "completion_order": member.completion_order,
         })
+        if member.result is not None:
+            member_rows[-1], _gates = enrich_sample(member_rows[-1], member.result)
+            for key in ("field_rel", "overlap_abs", "dtheta_rms"):
+                member_rows[-1][key] = member.result.metrics.get(key)
+        else:
+            member_rows[-1]["solver_status"] = {
+                "failed": "Execution failure", "cancelled": "Stopped / cancelled",
+                "not_started": "Not started",
+            }.get(member.status, member.status)
+            member_rows[-1]["termination_reason"] = member.error_text or member.status
         if member.status != "completed" or member.result is None:
             continue
         member_geometry, member_fields = _soliton_profile_products(member.result)
@@ -1096,6 +1139,7 @@ def from_parameter_sweep_result(result) -> RunData:
             )
 
     diagnostics = run_data.diagnostics
+    diagnostics.add("convergence_gates", _qualification_diagnostics(member_results_by_index.items()))
     diagnostics.add(
         "members",
         DiagnosticData(

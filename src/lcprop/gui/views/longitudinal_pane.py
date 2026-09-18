@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from lcprop.products.data_model import FieldData
 from lcprop.gui.views.image_view import ImageView
+from lcprop.gui.views.display_scale import DisplayScales, DisplayScaleControls, scale_key, volume_limits
 
 
 class LongitudinalPane(QWidget):
@@ -30,12 +31,13 @@ class LongitudinalPane(QWidget):
 
     _RETAINED_FAST_CUTS = "__retained_fast_optical_intensity_cuts__"
 
-    def __init__(self):
+    def __init__(self, scales=None):
         super().__init__()
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
+        self.scales = scales if scales is not None else DisplayScales()
         self._run_data = None
         self._current_vmin = None
         self._current_vmax = None
@@ -78,6 +80,10 @@ class LongitudinalPane(QWidget):
         controls.addWidget(self.show_guides)
         controls.addStretch(1)
         layout.addWidget(self.controls_widget)
+
+        self.scale_controls = DisplayScaleControls(self.scales)
+        layout.addWidget(self.scale_controls)
+        self.scales.changed.connect(self._update_views)
 
         z_controls = QHBoxLayout()
         self.z_plane_label = QLabel("z plane")
@@ -196,6 +202,7 @@ class LongitudinalPane(QWidget):
         has_fields = self.field_selector.count() > 0
 
         self.controls_widget.setVisible(has_fields)
+        self.scale_controls.setEnabled(has_fields)
         for widget in (
             self.xz_row,
             self.yz_row,
@@ -244,6 +251,9 @@ class LongitudinalPane(QWidget):
                 )
             if final_index >= 0:
                 default_index = final_index
+        previous_index = self.field_selector.findData(previous_key)
+        if previous_index >= 0:
+            default_index = previous_index
         self.field_selector.setCurrentIndex(default_index)
         self._field_changed(default_index)
 
@@ -272,8 +282,7 @@ class LongitudinalPane(QWidget):
 
         self._iz = data.shape[0] // 2
 
-        self._current_vmin = float(np.nanmin(data))
-        self._current_vmax = float(np.nanmax(data))
+        self._current_vmin, self._current_vmax = volume_limits(data)
 
         if not self.show_guides.isChecked():
             self.show_guides.setChecked(True)
@@ -414,17 +423,19 @@ class LongitudinalPane(QWidget):
             },
         )
 
+        limits = self.scales.limits(scale_key(field), (self._current_vmin, self._current_vmax))
+        self.scale_controls.show_scale(scale_key(field), limits)
         self.xz_view.set_field(
             xz_field,
             extent=self._field_extent(field, "z", "x"),
-            vmin=self._current_vmin,
-            vmax=self._current_vmax,
+            vmin=limits[0],
+            vmax=limits[1],
         )
         self.yz_view.set_field(
             yz_field,
             extent=self._field_extent(field, "z", "y"),
-            vmin=self._current_vmin,
-            vmax=self._current_vmax,
+            vmin=limits[0],
+            vmax=limits[1],
         )
         self._apply_guides()
 
@@ -445,8 +456,7 @@ class LongitudinalPane(QWidget):
         self.z_plane_slider.setRange(0, xz.shape[0] - 1)
         self.z_plane_slider.setValue(self._iz)
         self.z_plane_slider.blockSignals(False)
-        self._current_vmin = float(min(np.nanmin(xz), np.nanmin(yz)))
-        self._current_vmax = float(max(np.nanmax(xz), np.nanmax(yz)))
+        self._current_vmin, self._current_vmax = volume_limits(xz, yz)
         coordinates = xz_field.coordinates
         x_cut_um = float(coordinates["x_cut_um"])
         y_cut_um = float(coordinates["y_cut_um"])
@@ -468,17 +478,19 @@ class LongitudinalPane(QWidget):
     def _update_retained_fast_views(self) -> None:
         xz_field = self._run_data.fields["retained_fast_optical_intensity_xz"]
         yz_field = self._run_data.fields["retained_fast_optical_intensity_yz"]
+        limits = self.scales.limits(scale_key(xz_field), (self._current_vmin, self._current_vmax))
+        self.scale_controls.show_scale(scale_key(xz_field), limits)
         self.xz_view.set_field(
             xz_field,
             extent=self._run_data.geometry.extent_zx(),
-            vmin=self._current_vmin,
-            vmax=self._current_vmax,
+            vmin=limits[0],
+            vmax=limits[1],
         )
         self.yz_view.set_field(
             yz_field,
             extent=self._run_data.geometry.extent_zy(),
-            vmin=self._current_vmin,
-            vmax=self._current_vmax,
+            vmin=limits[0],
+            vmax=limits[1],
         )
         self.xz_view.clear_crosshair()
         self.yz_view.clear_crosshair()

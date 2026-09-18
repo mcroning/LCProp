@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from lcprop.gui.views.image_view import ImageView
+from lcprop.gui.views.display_scale import DisplayScales, DisplayScaleControls, scale_key
 
 
 ROBUST_INTENSITY_PERCENTILE = 99.5
@@ -57,8 +58,9 @@ class ImagePane(QWidget):
     positionSelected = Signal(int, int)
     sourceVolumeSelected = Signal(str)
 
-    def __init__(self):
+    def __init__(self, scales=None):
         super().__init__()
+        self.scales = scales if scales is not None else DisplayScales()
         self._run_data = None
         self._z_index = None
         self._scale_limits: dict[str, tuple[float, float]] = {}
@@ -90,9 +92,15 @@ class ImagePane(QWidget):
         view_controls.addStretch(1)
         layout.addLayout(view_controls)
 
+        self.scale_controls = DisplayScaleControls(self.scales)
+        layout.addWidget(self.scale_controls)
+        self.scales.changed.connect(self._refresh_scale)
         self.image_view = ImageView()
         self.image_view.positionSelected.connect(self._position_selected)
         layout.addWidget(self.image_view)
+
+    def _refresh_scale(self):
+        self._field_changed(self.field_selector.currentIndex())
 
     def image_view_fit(self) -> None:
         self.image_view.fit_default()
@@ -101,6 +109,7 @@ class ImagePane(QWidget):
         self.image_view.fit_full_aperture()
 
     def set_run_data(self, run_data) -> None:
+        previous_key = self.field_selector.currentData()
         self._run_data = run_data
         self._z_index = None
         self.field_selector.blockSignals(True)
@@ -113,6 +122,7 @@ class ImagePane(QWidget):
         self.field_selector.blockSignals(False)
 
         self.image_view.setVisible(self.field_selector.count() > 0)
+        self.scale_controls.setEnabled(self.field_selector.count() > 0)
         if self.field_selector.count() > 0:
             default_index = 0
             preferred_found = False
@@ -128,6 +138,9 @@ class ImagePane(QWidget):
                 final_index = self.field_selector.findData("final_intensity")
                 if final_index >= 0:
                     default_index = final_index
+            previous_index = self.field_selector.findData(previous_key)
+            if previous_index >= 0:
+                default_index = previous_index
             self.field_selector.setCurrentIndex(default_index)
             self._field_changed(default_index)
 
@@ -179,10 +192,12 @@ class ImagePane(QWidget):
         """Start deterministic autoscaling for a fresh run."""
 
         self._scale_limits.clear()
+        self.scales.reset_locks()
 
     def _limits_for_field(self, field) -> tuple[float, float]:
         kind = str(getattr(field, "kind", "field"))
-        limits = display_limits(field)
+        limits = self.scales.limits(scale_key(field), display_limits(field))
+        self.scale_controls.show_scale(scale_key(field), limits)
         self._scale_limits[kind] = limits
         return limits
 

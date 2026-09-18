@@ -62,21 +62,33 @@ def execution_summary(window, request, *, runner=None) -> str:
             "unresolved until execution; no device probe performed"
         ),
     ]
+    profile = None
     if remote:
         # Runner configuration owns the cluster; dispatch may override its resource.
         if window._explicit_slurm_runner is not None:
-            config = getattr(window.runner, "config", None)
+            config = getattr(runner, "config", None)
             cluster = getattr(config, "cluster_profile", "provided runner")
             resource = window.remote_execution_controls.runner_kwargs().get(
                 "resource_profile",
                 getattr(config, "default_resource_profile", "provided runner"),
             )
+            profiles = getattr(config, "resource_profiles", ())
+            profile = next((p for p in profiles if p.name == resource), None)
         else:
             controls = window.remote_execution_controls
             selected = controls.selected_cluster()
             cluster = selected.name if selected is not None else "not selected"
             resource = controls.selected_resource_name() or "not selected"
+            if selected is not None and resource != "not selected":
+                profile = selected.profile(resource)
         lines.extend([f"Cluster: {cluster}", f"Resource: {resource}"])
+        selector = getattr(window, "result_policy_selector", None)
+        policy = selector.currentData() if selector is not None else "full"
+        lines.append(f"Retrieval policy: {policy}")
+        if requested == "numpy" and profile is not None and profile.gpus > 0:
+            lines.append("Warning: NumPy scientific computation will not use the allocated GPU.")
+    if type(base).__name__.startswith("PRTransverse"):
+        lines.append("Full-transverse workflows require explicit NumPy or CuPy; Auto is not supported.")
     lines.append("Comparison resource estimates are not the configured execution plan.")
     return "\n".join(lines)
 

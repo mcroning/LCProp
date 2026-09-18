@@ -81,12 +81,12 @@ def test_curve_pane_combines_soliton_existence_xs_and_ys():
         pane.curve_selector.itemText(index)
         for index in range(pane.curve_selector.count())
     ]
-    assert "xs and ys" in labels
+    assert "Transverse RMS widths" in labels
 
-    pane.curve_selector.setCurrentIndex(labels.index("xs and ys"))
+    pane.curve_selector.setCurrentIndex(labels.index("Transverse RMS widths"))
     assert pane.curve_view.ax.get_ylabel() == "RMS width (µm)"
     assert len(pane.curve_view.lines) == 2
-    assert [line.get_label() for line in pane.curve_view.lines] == ["xs", "ys"]
+    assert [line.get_label() for line in pane.curve_view.lines] == ["x", "y"]
 
 
 def test_curve_pane_lists_timedependent_beam_widths():

@@ -1532,7 +1532,8 @@ class LCPropMainWindow(QWidget):
         elif progress.workflow == "soliton_existence":
             diagnostics = progress.diagnostics or {}
             status = (
-                "converged" if diagnostics.get("converged") else "not converged"
+                "Solver converged within configured limits"
+                if diagnostics.get("converged") else "Solver not converged"
             )
             self.results_panel.set_td_time_indicator(
                 "Existence sweep: "

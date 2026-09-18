@@ -16,7 +16,7 @@ class CurveView(FigureCanvasQTAgg):
         self.line = None
         self.lines = []
 
-    def set_curve(self, curve, title: str | None = None) -> None:
+    def set_curve(self, curve, title: str | None = None, *, tolerances=()) -> None:
         x = np.asarray(curve.x)
         y = np.asarray(curve.y)
 
@@ -37,6 +37,13 @@ class CurveView(FigureCanvasQTAgg):
             self.ax.set_yscale("log")
         else:
             self.ax.set_yscale("linear")
+        if curve.key == "overlap_abs":
+            self.ax.ticklabel_format(axis="y", style="plain", useOffset=False)
+        for tolerance in tolerances:
+            self.ax.axhline(tolerance, color="tab:red", linestyle="--",
+                            label=f"Strict tolerance < {tolerance:.17g}")
+        if tolerances:
+            self.ax.legend()
         self.ax.grid(True)
 
         self.figure.tight_layout()

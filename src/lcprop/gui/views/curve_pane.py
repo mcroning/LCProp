@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QComboBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QLabel, QVBoxLayout, QWidget
 
 from lcprop.gui.views.curve_view import CurveView
 
@@ -18,11 +18,15 @@ class CurvePane(QWidget):
         self.curve_selector.currentIndexChanged.connect(self._curve_changed)
         layout.addWidget(self.curve_selector)
 
+        self.tolerance_label = QLabel()
+        self.tolerance_label.setWordWrap(True)
+        layout.addWidget(self.tolerance_label)
         self.curve_view = CurveView()
         layout.addWidget(self.curve_view)
 
     def set_run_data(self, run_data) -> None:
         self._run_data = run_data
+        self.tolerance_label.clear()
         self._summary = None
         if run_data is not None:
             try:
@@ -66,4 +70,14 @@ class CurvePane(QWidget):
             if mode:
                 title = f"{title} (Mode {mode})"
 
-        self.curve_view.set_curve(curve, title=title)
+        diagnostic = self._run_data.diagnostics.get("convergence_gates")
+        gates = [] if diagnostic is None else diagnostic.values.get("rows", [])
+        tolerances = sorted({row["tolerance"] for row in gates
+                             if row["key"] == key and row["tolerance"] is not None})
+        self.tolerance_label.setText(
+            "Qualification uses the last completed outer iteration. Strict tolerance(s): "
+            + ", ".join(format(value, ".17g") for value in tolerances)
+            + ". Inspect exact values and pass/fail in Samples / Tables → Convergence gates."
+            if tolerances else ""
+        )
+        self.curve_view.set_curve(curve, title=title, tolerances=tolerances)

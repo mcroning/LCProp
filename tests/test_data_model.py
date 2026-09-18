@@ -270,7 +270,7 @@ def test_soliton_existence_result_to_run_data():
         [row["sy_um"] for row in result.samples],
     )
     assert widths.units["RMS width"] == "µm"
-    assert widths.series_labels == ("xs", "ys")
+    assert widths.series_labels == ("x", "y")
     assert list(data.fields.keys()) == [
         "existence_0_intensity",
         "existence_0_theta",

@@ -15,6 +15,7 @@ class PRResourceEstimatorPanel(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         explanation = QLabel(
+            "Local Mac / NumPy and H200 / CuPy are comparison estimates, not target selections. "
             "Planning estimates are broad ranges from versioned measurements and "
             "explicit scaling formulas. Queue and transfer time are not included."
         )

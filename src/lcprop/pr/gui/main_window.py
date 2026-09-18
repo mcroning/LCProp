@@ -311,6 +311,9 @@ class PRMainWindow(QWidget):
         self.tabs.addTab(self.evolution_panel, "Evolution")
         self.tabs.addTab(self.resource_estimator_panel, "Run Planning")
         self.tabs.addTab(self.results_panel, "Results")
+        self.result_policy_selector.currentIndexChanged.connect(
+            self.resource_estimator_panel.mark_stale
+        )
         self.resource_estimator_panel.estimateRequested.connect(
             self._estimate_current_resources
         )
@@ -383,13 +386,16 @@ class PRMainWindow(QWidget):
         """Estimate the current immutable request without running it."""
 
         try:
-            request = self._request_for_local_cost(self.build_request())
+            configured_request = self.build_request()
+            request = self._request_for_local_cost(configured_request)
             estimate = estimate_pr_resources(request)
         except Exception as exc:
             self.resource_estimator_panel.set_error(str(exc))
             return
         self.resource_estimator_panel.set_estimate(
-            format_pr_resource_estimate(estimate)
+            "Configured execution:\n" + execution_summary(self, configured_request)
+            + "\n\nComparison estimates (not the selected execution plan):\n"
+            + format_pr_resource_estimate(estimate)
         )
 
     def _refresh_checkpoint_controls(self) -> None:
@@ -1080,6 +1086,8 @@ class PRMainWindow(QWidget):
 
     @Slot()
     def _execution_target_changed(self) -> None:
+        if hasattr(self, "resource_estimator_panel"):
+            self.resource_estimator_panel.mark_stale()
         target = self.execution_target_selector.currentData()
         self.runner = self.slurm_runner if target == "slurm" else self.local_runner
         if self.runner is None:
