@@ -72,32 +72,58 @@ LC stationary soliton and existence workflows require **None** (the persisted
     ),
     HelpTopic(
         "fanning_scattering", "Fanning and scattering setup",
-        """Scattering represents weak spatial perturbations that seed scattered light in
-PR calculations. Fanning studies require an explicit scattering configuration.
-**Strength** sets perturbation magnitude; **correlation length** sets spatial
-texture scale; **seed** selects a reproducible realization; **canonical slab
-spacing** sets the longitudinal partition used to define that realization.
-These are setup/model parameters, not universal material constants. Record them
-with focus, edge treatment, material-z sampling and optical substeps.
+        """### Set up the current Product model
+
+Scattering introduces weak perturbations into supported PR calculations.
+Configure the controls deliberately and save the request:
+
+- **Strength**: perturbation magnitude; zero disables it.
+- **Transverse correlation length**: transverse texture scale.
+- **Random seed**: reproducible realization.
+- **Longitudinal canonical slab spacing**: longitudinal partition defining the realization.
+
+Record these with focus, edge treatment, material-z sampling and optical
+substeps. They are model/setup parameters, not universal material constants.
+
+### Interpret with care
+
+PR canonical scattering equivalence to the legacy/Photonics model remains on
+**SCIENTIFIC HOLD / unestablished**. A visible or absent fanning pattern does
+not establish that equivalence. No change of defaults is implied.
+
+### Current support
+
 Full-transverse static and supported TD workflows support canonical scattering.
-Reduced static currently does not: this is a Product capability limitation,
-not a physical prohibition on static scattering. Zero strength disables the
-perturbation; inspect the saved request to establish its provenance.
+Reduced static currently does not; this is a Product capability limitation,
+not a physical prohibition. See the User Guide for detailed setup and sampling
+limitations.
 """,
     ),
     HelpTopic(
         "slurm", "Running on Slurm",
-        """**Local** runs on this computer. **Slurm** submits to a configured cluster.
-Choose a cluster/resource and check the pre-run execution summary. NumPy uses
-CPU computation; CuPy needs a supported GPU environment. A GPU allocation alone
-does not make NumPy use it. Explicit backend choices are preserved.
-Profiles are user-local configuration, separate from the package; their location
-is shown in **Configure Remote Execution**. A new user must create a profile.
-Ordinary non-editable installation supports Local execution. Automatic Slurm
-source deployment requires a suitable clean deployable LCProp Git checkout.
-For an installed package, configure a runner with the supported `local_source` checkout argument,
-or use an explicitly pinned existing remote source path and SHA as described in
-the User Guide. PR Continue currently runs **Local only**.
+        """### Choose where to run
+
+**Local** runs on this computer. **Slurm** submits to a configured cluster.
+
+1. Open **Configure Remote Execution** and choose or create a cluster/resource.
+2. Select **Slurm**, then inspect the configured execution before running.
+3. Choose the scientific backend appropriate to that resource, then **Run**.
+
+Profiles are user-local configuration, separate from the installed package;
+the configuration dialog shows their location.
+
+### CPU or GPU computation
+
+NumPy uses the CPU. CuPy needs a supported GPU environment. Allocating a GPU
+does not make NumPy use it; explicit backend choices are preserved.
+
+### Installation and current limits
+
+Ordinary non-editable installation supports Local execution. Installed LCProp
+can also use Slurm when its source deployment is configured correctly:
+automatic deployment requires a suitable clean deployable LCProp Git checkout.
+The User Guide explains supplying that checkout or selecting a pinned existing
+remote source. PR Continue currently runs **Local only**.
 """,
     ),
     HelpTopic(
@@ -122,22 +148,39 @@ Full output alone is not a remote-continuation contract.
     ),
     HelpTopic(
         "results", "Understanding Results",
-        """**Fields** shows images and linked x-y, x-z and y-z slices. **Curves** shows
-quantitative traces. **Samples / Tables** exposes retained member values and
-convergence gates. **Diagnostics** provides numerical and carrier-power details.
-**Request** identifies the configuration and displayed-result ownership;
-**Console** retains progress and failures.
-Auto/manual/locked image scaling changes only presentation. Brightness is not a
-quantitative two-beam energy-transfer measure. Inspect each carrier's input and
-output powers and available gain: these separate beam contributions in spatial
-frequency where the beams are sufficiently resolved. Unavailable-gain reasons
-explain cases where a reliable separation/ratio cannot be reported.
-Ordinary beams, including general two-beam coupling, do not require the screen
-or symmetry conditions of the specialized **Image Amplification** experiment.
-Solver nonconvergence is not proof of physical nonexistence or instability.
-Inspect exact gates, tolerances, iteration budget and termination reason in
-Tables. Continuation initializes from a previously converged member for branch
-following; it does not waive any convergence criterion.
+        """### Find the result you need
+
+- **Fields**: images and linked x-y, x-z and y-z slices.
+- **Curves**: quantitative traces.
+- **Samples / Tables**: retained member values and convergence gates; an empty
+  explanation means this result has no retained tables.
+- **Diagnostics**: numerical and carrier-power details.
+- **Request**: requested configuration, internal request identity and displayed-result ownership.
+- **Console**: timestamped operation boundaries, progress and failures.
+
+### Display scaling
+
+**Auto each frame** follows the current view. **Lock scale across frames** keeps
+a common range. **Manual limits** applies your Minimum and Maximum. These change
+only presentation, never scientific values. Exact numeric values remain available
+in table tooltips; meaningful near-unity overlap precision is preserved.
+
+### Two-beam interpretation
+
+Brightness alone is not quantitative energy transfer. Inspect each carrier's
+input and output powers and available gain where spatial-frequency separation is
+sufficient. Unavailable-gain reasons explain when a reliable ratio cannot be
+reported. General two-beam coupling does not require the screen or symmetry
+conditions of specialized **Image Amplification**.
+
+### Execution and convergence
+
+Execution completion and solver convergence are different. The member summary
+identifies termination, iteration budget and failed gates; retain the detailed
+Convergence gates table for expert inspection. Nonconvergence does not establish
+physical nonexistence or instability. Continuation initializes from a previously
+converged member for branch following; it does not waive a convergence criterion.
+See the User Guide for interpretation and workflow limits.
 """,
     ),
 )
@@ -167,7 +210,7 @@ class ProductHelpDialog(QDialog):
         self.browser.setOpenExternalLinks(True)
         material_name = "Liquid Crystal" if application == "lc" else "Photorefractive"
         self.browser.setMarkdown(
-            f"# {topic.title}\n\n**Current application:** {material_name}\n\n"
+            f"# {topic.title}\n\n**Current application**: {material_name}\n\n"
             + topic.markdown
             + ("\n\nCurrent LC Slurm capability: canonical NumPy static propagation on a CPU resource; other LC workflows run locally."
                if application == "lc" and topic.key == "slurm" else "")

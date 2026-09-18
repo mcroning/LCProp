@@ -1,8 +1,9 @@
 """Small read-only browser for existing DiagnosticData row records."""
 from collections.abc import Mapping
+from lcprop.gui.number_format import format_number
 
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QTableWidget, QTableWidgetItem,
+    QAbstractItemView, QComboBox, QLabel, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -16,6 +17,9 @@ class TablePane(QWidget):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         self._tables = {}
+        self.empty_label = QLabel("No retained tables in this result.")
+        self.empty_label.setWordWrap(True)
+        layout.addWidget(self.empty_label)
         self.selector.currentIndexChanged.connect(self._show_table)
         layout.addWidget(self.selector)
         layout.addWidget(self.table)
@@ -26,6 +30,9 @@ class TablePane(QWidget):
         self.table.clear()
         self.table.setRowCount(0)
         self.table.setColumnCount(0)
+        self.empty_label.show()
+        self.selector.hide()
+        self.table.hide()
 
     def set_run_data(self, run_data):
         previous = self.selector.currentData()
@@ -35,6 +42,9 @@ class TablePane(QWidget):
             if isinstance(rows, (list, tuple)) and rows and all(isinstance(r, Mapping) for r in rows):
                 self._tables[key] = rows
                 self.selector.addItem(diagnostic.display_name, key)
+        self.empty_label.setVisible(not self._tables)
+        self.selector.setVisible(bool(self._tables))
+        self.table.setVisible(bool(self._tables))
         index = self.selector.findData(previous)
         self.selector.setCurrentIndex(max(0, index))
         self._show_table(self.selector.currentIndex())
@@ -52,8 +62,8 @@ class TablePane(QWidget):
         for i, row in enumerate(rows):
             for j, key in enumerate(columns):
                 value = row.get(key)
-                text = "Unavailable" if value is None else repr(value) if isinstance(value, float) else str(value)
+                text = format_number(value, quantity="tolerance" if key == "tolerance" or key.endswith("_tolerance") else key)
                 item = QTableWidgetItem(text)
-                item.setToolTip(text)
+                item.setToolTip(format_number(value, exact=True))
                 self.table.setItem(i, j, item)
         self.table.resizeColumnsToContents()

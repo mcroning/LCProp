@@ -78,7 +78,7 @@ def test_rejected_request_retains_previous_result_and_request(app, monkeypatch, 
         raise ValueError("correct the beam configuration")
     monkeypatch.setattr(window, "build_request", invalid)
     getattr(window, slot)()
-    assert "Previous run" in workspace.result_ownership.text()
+    assert "Previous result" in workspace.result_ownership.text()
     assert "successful request" in workspace.request_summary.toPlainText()
     assert "correct the beam configuration" in workspace.operation_status.text()
     assert "Traceback" in workspace.console.toPlainText()
@@ -241,12 +241,12 @@ def test_failure_with_current_progress_and_stop_keep_true_owner(app):
     workspace.begin_request('Continue')
     workspace.set_request_summary('request two')
     workspace.set_td_time_indicator('new progress time')
-    assert 'Previous run' in workspace.result_ownership.text()
+    assert 'Previous result' in workspace.result_ownership.text()
     workspace.set_run_data(_data(), state='Current accepted state')
     report_failure(window, 'RuntimeError: synthetic worker failure')
-    assert workspace.result_ownership.text() == 'State at failure — request 2'
+    assert workspace.result_ownership.text() == 'State at failure'
     workspace.finish_attempt('State at stop/cancellation')
-    assert 'request 2' in workspace.result_ownership.text()
+    assert 'Request 2' in workspace.request_summary.toPlainText()
     assert 'request two' in workspace.request_summary.toPlainText()
     window.close()
 
@@ -268,7 +268,7 @@ def test_populated_to_empty_products_cannot_relabel_old_views(app, tab):
     assert workspace.curve_pane.curve_selector.count() == 0
     assert workspace.curve_pane.curve_view.isHidden()
     assert not workspace.image_pane.image_view.isHidden()
-    assert workspace.result_ownership.text() == "Completed result — request 2"
+    assert workspace.result_ownership.text() == "Completed result"
     workspace.begin_request("Run")
     workspace.set_run_data(RunData("empty"))
     assert workspace.image_pane.field_selector.count() == 0
@@ -320,7 +320,7 @@ def test_partial_render_failure_has_no_displayed_owner_and_recovers(app, monkeyp
         assert workspace.curve_pane.curve_view.isHidden()
     monkeypatch.setattr(target, method, original)
     workspace.set_run_data(_data())
-    assert workspace.result_ownership.text() == "Completed result — request 2"
+    assert workspace.result_ownership.text() == "Completed result"
     assert not workspace.image_pane.isHidden()
     assert not workspace.image_pane.image_view.isHidden()
     assert workspace.tabs.currentIndex() == 4

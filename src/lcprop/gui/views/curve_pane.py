@@ -1,4 +1,5 @@
 from __future__ import annotations
+from lcprop.gui.number_format import format_number
 
 from PySide6.QtWidgets import QComboBox, QLabel, QVBoxLayout, QWidget
 
@@ -76,7 +77,7 @@ class CurvePane(QWidget):
                              if row["key"] == key and row["tolerance"] is not None})
         self.tolerance_label.setText(
             "Qualification uses the last completed outer iteration. Strict tolerance(s): "
-            + ", ".join(format(value, ".17g") for value in tolerances)
+            + ", ".join(format_number(value, quantity="tolerance") for value in tolerances)
             + ". Inspect exact values and pass/fail in Samples / Tables → Convergence gates."
             if tolerances else ""
         )

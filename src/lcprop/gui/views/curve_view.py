@@ -1,4 +1,5 @@
 from __future__ import annotations
+from lcprop.gui.number_format import format_number
 
 import numpy as np
 
@@ -41,7 +42,7 @@ class CurveView(FigureCanvasQTAgg):
             self.ax.ticklabel_format(axis="y", style="plain", useOffset=False)
         for tolerance in tolerances:
             self.ax.axhline(tolerance, color="tab:red", linestyle="--",
-                            label=f"Strict tolerance < {tolerance:.17g}")
+                            label=f"Strict tolerance < {format_number(tolerance, quantity='tolerance')}")
         if tolerances:
             self.ax.legend()
         self.ax.grid(True)

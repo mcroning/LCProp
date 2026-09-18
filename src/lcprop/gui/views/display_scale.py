@@ -1,5 +1,7 @@
 """Session-only display limits. Never writes to FieldData or scientific arrays."""
 import math
+from lcprop.gui.layout import FlowLayout
+from lcprop.gui.number_format import format_number
 
 import numpy as np
 
@@ -76,21 +78,34 @@ class DisplayScaleControls(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        row = QHBoxLayout()
+        row = FlowLayout()
+        # Establish Qt ownership before adding temporary label/input groups.
+        layout.addLayout(row)
         self.mode = QComboBox()
-        for label, value in [("Auto", "auto"), ("Fixed / manual", "fixed"), ("Lock across frames", "locked")]:
+        for label, value in [("Auto each frame", "auto"), ("Manual limits", "fixed"), ("Lock scale across frames", "locked")]:
             self.mode.addItem(label, value)
         self.lower = QLineEdit()
         self.upper = QLineEdit()
-        self.lower.setPlaceholderText("Lower")
-        self.upper.setPlaceholderText("Upper")
-        self.apply_button = QPushButton("Apply limits")
-        row.addWidget(QLabel("Display scale"))
+        self.lower.setPlaceholderText("Minimum")
+        self.upper.setPlaceholderText("Maximum")
+        for entry in (self.lower, self.upper):
+            entry.setMinimumWidth(100)
+            entry.setFixedWidth(110)
+        self._entry_values = None
+        self._entry_text = None
+        self.apply_button = QPushButton("Apply")
+        self.mode.setAccessibleName("Display scale")
         row.addWidget(self.mode)
-        row.addWidget(self.lower)
-        row.addWidget(self.upper)
+        for label, entry in (("Min", self.lower), ("Max", self.upper)):
+            group = QWidget()
+            pair = QHBoxLayout(group)
+            pair.setContentsMargins(0, 0, 0, 0)
+            pair.setSpacing(2)
+            pair.addWidget(QLabel(label))
+            pair.addWidget(entry)
+            entry.setAccessibleName("Minimum" if label == "Min" else "Maximum")
+            row.addWidget(group)
         row.addWidget(self.apply_button)
-        layout.addLayout(row)
         self.message = QLabel("Display only; fixed/locked limits are shared by linked slices.")
         self.message.setWordWrap(True)
         layout.addWidget(self.message)
@@ -109,8 +124,11 @@ class DisplayScaleControls(QWidget):
         self.mode.setCurrentIndex(self.mode.findData(mode))
         self.mode.blockSignals(False)
         if not editing:
-            self.lower.setText(format(limits[0], '.17g'))
-            self.upper.setText(format(limits[1], '.17g'))
+            self._entry_values = tuple(limits)
+            self._entry_text = tuple(format_number(v) for v in limits)
+            for entry, text, value in zip((self.lower, self.upper), self._entry_text, limits):
+                entry.setText(text)
+                entry.setToolTip("Exact limit: " + format_number(value, exact=True))
 
     def _mode_changed(self, _index):
         if self.key is None:
@@ -135,7 +153,13 @@ class DisplayScaleControls(QWidget):
         if self.key is None:
             return
         try:
-            limits = float(self.lower.text()), float(self.upper.text())
+            limits = tuple(
+                self._entry_values[i]
+                if self._entry_values is not None and not entry.isModified()
+                and entry.text() == self._entry_text[i]
+                else float(entry.text())
+                for i, entry in enumerate((self.lower, self.upper))
+            )
             if not (all(math.isfinite(v) for v in limits) and limits[0] < limits[1]):
                 raise ValueError("Invalid display limits")
             self.lower.setModified(False)

@@ -26,7 +26,7 @@ class ExperimentPanel(QWidget):
         form.addRow("Experiment", self.experiment)
 
         layout.addLayout(form)
-        layout.addWidget(QLabel("Static and time-dependent propagation are wired to LocalRunner."))
+        layout.addWidget(QLabel("Choose the experiment, then inspect the request and execution target before running."))
         layout.addStretch(1)
 
     def current_experiment(self) -> str:

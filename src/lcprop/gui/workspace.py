@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+from html import escape
+from lcprop.gui.convergence_summary import member_explanations
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -10,6 +12,9 @@ from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QLabel,
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
     QPushButton,
     QTextEdit,
     QSplitter,
@@ -30,6 +35,8 @@ class Workspace(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
 
         self.operation_status = QLabel("Idle")
         self.operation_status.setWordWrap(True)
@@ -42,6 +49,33 @@ class Workspace(QWidget):
         self._request_text = ""
         self._displayed_request = ""
         self._display_state = ""
+
+        self.convergence_box = QWidget()
+        convergence_layout = QHBoxLayout(self.convergence_box)
+        convergence_layout.setContentsMargins(0, 0, 0, 0)
+        self.convergence_selector = QComboBox()
+        self.convergence_selector.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.convergence_selector.setMinimumContentsLength(24)
+        self.convergence_details = QPushButton("Convergence details")
+        convergence_layout.addWidget(self.convergence_selector, 1)
+        convergence_layout.addWidget(self.convergence_details)
+        self.convergence_dialog = QDialog(self)
+        self.convergence_dialog.setWindowTitle("Member convergence details")
+        self.convergence_dialog.resize(660, 340)
+        details_layout = QVBoxLayout(self.convergence_dialog)
+        self.convergence_ownership = QLabel("No displayed result")
+        self.convergence_ownership.setWordWrap(True)
+        details_layout.addWidget(self.convergence_ownership)
+        self.convergence_text = QTextEdit()
+        self.convergence_text.setReadOnly(True)
+        details_layout.addWidget(self.convergence_text)
+        self.convergence_details.clicked.connect(self.convergence_dialog.show)
+        self._member_explanations = {}
+        self.convergence_selector.currentIndexChanged.connect(self._show_member_explanation)
+        layout.addWidget(self.convergence_box)
+        self.convergence_box.hide()
 
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
@@ -114,18 +148,25 @@ class Workspace(QWidget):
         self.set_operation_status("Validating / Preparing")
         self._refresh_request_text()
 
+    def _set_ownership_text(self, text):
+        self.result_ownership.setText(text)
+        self.convergence_ownership.setText(text)
+
     def mark_previous(self) -> None:
         if self._displayed_attempt is not None:
-            self.result_ownership.setText(
-                f"Previous run — request {self._displayed_attempt} ({self._display_state})"
+            self._set_ownership_text(
+                f"Previous result ({self._display_state})"
             )
 
     def operation_boundary(self, operation: str) -> None:
         stamp = datetime.now().astimezone().isoformat(timespec="seconds")
-        self.append_console(f"[{stamp}] {operation}")
+        # Reuse the existing boundary event; escape operation names as plain text.
+        self.console.append(
+            f'<hr><p><b>[{stamp}] {escape(operation)}</b></p>'
+        )
 
     def set_operation_status(self, text: str) -> None:
-        self.operation_status.setText(text)
+        self.operation_status.setText(f"Execution status: {text}")
         # Paint acknowledgement before synchronous GUI request preparation;
         # do not process arbitrary events/re-enter a Run slot.
         self.operation_status.repaint()
@@ -135,11 +176,11 @@ class Workspace(QWidget):
         if (self._displayed_attempt == self._attempt
                 and (state != "State at failure" or self._display_state.startswith("Current"))):
             self._display_state = state
-            self.result_ownership.setText(f"{state} — request {self._attempt}")
+            self._set_ownership_text(state)
 
     def _refresh_request_text(self) -> None:
-        text = self._request_text
-        if self._displayed_request and self._displayed_request != text:
+        text = (f"Request {self._attempt}\n" if self._attempt else "") + self._request_text
+        if self._displayed_request and self._displayed_request != self._request_text:
             text = (
                 "Requested / preview configuration:\n" + text
                 + "\n\nDisplayed result request "
@@ -182,6 +223,7 @@ class Workspace(QWidget):
         # Publish ownership only after every pane has accepted the product.
         # Suppress painting while panes may contain a mixture of old/new data.
         self.setUpdatesEnabled(False)
+        self.convergence_dialog.setUpdatesEnabled(False)
         try:
             summary = run_data.diagnostics.get("summary")
             values = {} if summary is None else summary.values
@@ -192,6 +234,7 @@ class Workspace(QWidget):
                     else "Completed result"
                 )
             self._render_run_data(run_data)
+            self.longitudinal_pane.set_progress_state(state.startswith("Current"))
         except Exception:
             # A partially updated product has no coherent displayed ownership.
             # Keep the selected tab, but make all result content unavailable.
@@ -201,12 +244,17 @@ class Workspace(QWidget):
             self.curve_pane.curve_selector.hide()
             self.diagnostics_view.clear()
             self.table_pane.clear()
+            self._member_explanations = {}
+            self.convergence_selector.clear()
+            self.convergence_text.clear()
+            self.convergence_box.hide()
+            self.convergence_dialog.hide()
             self.open_td_preview.hide()
             self._td_preview_artifact = None
             self._displayed_attempt = None
             self._displayed_request = ""
             self._display_state = ""
-            self.result_ownership.setText("No displayed result — result update failed")
+            self._set_ownership_text("No displayed result — result update failed")
             self.result_ownership.setToolTip("")
             self._refresh_request_text()
             raise
@@ -214,13 +262,14 @@ class Workspace(QWidget):
             self._displayed_attempt = self._attempt
             self._displayed_request = self._request_text
             self._display_state = state
-            self.result_ownership.setText(f"{state} — request {self._attempt}")
+            self._set_ownership_text(state)
             self.result_ownership.setToolTip(self._displayed_request)
             self._refresh_request_text()
             self.image_pane.show()
             self.longitudinal_pane.show()
             self.curve_pane.curve_selector.show()
         finally:
+            self.convergence_dialog.setUpdatesEnabled(True)
             self.setUpdatesEnabled(True)
 
     def _render_run_data(self, run_data) -> None:
@@ -279,8 +328,27 @@ class Workspace(QWidget):
         self.longitudinal_pane.set_run_data(view_data)
         self.curve_pane.set_run_data(run_data)
         self.table_pane.set_run_data(run_data)
+        selected = self.convergence_selector.currentData()
+        explanations = member_explanations(run_data)
+        self._member_explanations = {identity: text for identity, _label, text in explanations}
+        self.convergence_selector.blockSignals(True)
+        self.convergence_selector.clear()
+        for identity, label, _text in explanations:
+            self.convergence_selector.addItem(label, identity)
+        self.convergence_selector.setCurrentIndex(max(0, self.convergence_selector.findData(selected)))
+        self.convergence_selector.blockSignals(False)
+        self._show_member_explanation()
+        self.convergence_box.setVisible(bool(explanations))
+        if not explanations:
+            self.convergence_dialog.hide()
 
         self.diagnostics_view.setPlainText(self._format_diagnostics(run_data))
+
+    def _show_member_explanation(self, _index=None):
+        label = self.convergence_selector.currentText()
+        self.convergence_selector.setToolTip(label)
+        text = self._member_explanations.get(self.convergence_selector.currentData(), "")
+        self.convergence_text.setPlainText(label + "\n\n" + text if text else "")
 
     def _open_td_preview(self) -> None:
         artifact = self._td_preview_artifact

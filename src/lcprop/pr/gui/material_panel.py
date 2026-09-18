@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from lcprop.gui.layout import readable_form
+from lcprop.gui.numeric_widgets import CompactDoubleSpinBox
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -21,7 +22,7 @@ def _double_spin(
     *,
     decimals: int = 9,
 ) -> QDoubleSpinBox:
-    widget = QDoubleSpinBox()
+    widget = CompactDoubleSpinBox()
     widget.setRange(minimum, maximum)
     widget.setDecimals(decimals)
     widget.setValue(value)

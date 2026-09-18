@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from lcprop.gui.number_format import format_number
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -48,10 +49,10 @@ class LongitudinalPane(QWidget):
         self._show_guides = True
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(2)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(1)
 
-        self.no_data_label = QLabel("No longitudinal fields are available for this experiment.")
+        self.no_data_label = QLabel("No longitudinal fields are retained in this result.")
         self.no_data_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.no_data_label.hide()
 
@@ -60,24 +61,30 @@ class LongitudinalPane(QWidget):
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Fixed,
         )
-        controls = QHBoxLayout(self.controls_widget)
+        controls = QVBoxLayout(self.controls_widget)
+        selector_row = QHBoxLayout()
+        controls.addLayout(selector_row)
         controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(2)
         self.field_selector_label = QLabel("3-D field")
-        controls.addWidget(self.field_selector_label)
+        selector_row.addWidget(self.field_selector_label)
         self.field_selector = QComboBox()
-        self.field_selector.setMinimumWidth(285)
+        self.field_selector.setMinimumWidth(180)
         self.field_selector.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
-        self.field_selector.setMinimumContentsLength(32)
+        self.field_selector.setMinimumContentsLength(20)
         self.field_selector.currentIndexChanged.connect(self._field_changed)
-        controls.addWidget(self.field_selector)
+        selector_row.addWidget(self.field_selector, 1)
         self.position_label = QLabel("x=—, y=—, z=—")
-        controls.addWidget(self.position_label)
+        self.position_label.setWordWrap(True)
+        position_row = QHBoxLayout()
+        position_row.addWidget(self.position_label, 1)
+        controls.addLayout(position_row)
         self.show_guides = QCheckBox("Show selection guides")
         self.show_guides.setChecked(True)
         self.show_guides.toggled.connect(self._show_guides_changed)
-        controls.addWidget(self.show_guides)
+        position_row.addWidget(self.show_guides)
         controls.addStretch(1)
         layout.addWidget(self.controls_widget)
 
@@ -100,7 +107,7 @@ class LongitudinalPane(QWidget):
         )
         xz_layout = QVBoxLayout(self.xz_row)
         xz_layout.setContentsMargins(0, 0, 0, 0)
-        xz_layout.setSpacing(2)
+        xz_layout.setSpacing(1)
 
         self.y_cut_label = QLabel("x-z cut at center y")
         self.y_cut_slider = QSlider(Qt.Orientation.Horizontal)
@@ -121,7 +128,7 @@ class LongitudinalPane(QWidget):
         )
         yz_layout = QVBoxLayout(self.yz_row)
         yz_layout.setContentsMargins(0, 0, 0, 0)
-        yz_layout.setSpacing(2)
+        yz_layout.setSpacing(1)
 
         self.x_cut_label = QLabel("y-z cut at center x")
         self.x_cut_slider = QSlider(Qt.Orientation.Horizontal)
@@ -161,6 +168,18 @@ class LongitudinalPane(QWidget):
         self._show_guides = bool(checked)
         self._apply_guides()
         self.guidesVisibilityChanged.emit(self._show_guides)
+
+    def set_progress_state(self, in_progress):
+        if self._run_data is None or self.field_selector.count():
+            return
+        message = getattr(self._run_data, "longitudinal_message", None)
+        if message is None and self._run_data.workflow in {"soliton", "soliton_existence"}:
+            message = "Stationary soliton results contain transverse fields only."
+        self.no_data_label.setText(message or (
+            "Longitudinal fields are not available yet."
+            if in_progress and self._run_data.workflow in {"static", "timedependent"}
+            else "No longitudinal fields are retained in this result."
+        ))
 
     def set_run_data(self, run_data) -> None:
         previous_key = self.field_selector.currentData()
@@ -214,7 +233,7 @@ class LongitudinalPane(QWidget):
         message = getattr(run_data, "longitudinal_message", None)
         self.no_data_label.setText(
             message
-            or "No longitudinal fields are available for this experiment."
+            or "No longitudinal fields are retained in this result."
         )
         self.no_data_label.setVisible(not has_fields)
 
@@ -379,11 +398,11 @@ class LongitudinalPane(QWidget):
         y_value = self._coord_value(field, "y", iy)
         z_value = self._coord_value(field, "z", self._iz)
 
-        self.y_cut_label.setText(f"x-z cut at y = {y_value:.6g} µm")
-        self.x_cut_label.setText(f"y-z cut at x = {x_value:.6g} µm")
-        self.z_plane_label.setText(f"z = {z_value:.6g} µm")
+        self.y_cut_label.setText(f"x-z cut at y = {format_number(y_value, quantity='coordinate')} µm")
+        self.x_cut_label.setText(f"y-z cut at x = {format_number(x_value, quantity='coordinate')} µm")
+        self.z_plane_label.setText(f"z = {format_number(z_value, quantity='coordinate')} µm")
         self.position_label.setText(
-            f"x={x_value:.6g}, y={y_value:.6g}, z={z_value:.6g} µm"
+            f"x={format_number(x_value, quantity='coordinate')}, y={format_number(y_value, quantity='coordinate')}, z={format_number(z_value, quantity='coordinate')} µm"
         )
 
         xz = data[:, :, iy]   # (z, x)
@@ -462,16 +481,16 @@ class LongitudinalPane(QWidget):
         y_cut_um = float(coordinates["y_cut_um"])
         self.field_selector_label.setText("Longitudinal field")
         self.y_cut_label.setText(
-            f"Retained Fast x-z cut at y = {y_cut_um:.6g} µm"
+            f"Retained Fast x-z cut at y = {format_number(y_cut_um, quantity='coordinate')} µm"
         )
         self.x_cut_label.setText(
-            f"Retained Fast y-z cut at x = {x_cut_um:.6g} µm"
+            f"Retained Fast y-z cut at x = {format_number(x_cut_um, quantity='coordinate')} µm"
         )
         self.x_cut_slider.hide()
         self.y_cut_slider.hide()
         self.show_guides.hide()
         self.position_label.setText(
-            f"exact fixed cuts: x={x_cut_um:.6g}, y={y_cut_um:.6g} µm"
+            f"exact fixed cuts: x={format_number(x_cut_um, quantity='coordinate')}, y={format_number(y_cut_um, quantity='coordinate')} µm"
         )
         self._update_retained_fast_views()
 

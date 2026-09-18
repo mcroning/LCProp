@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from lcprop.gui.numeric_widgets import CompactDoubleSpinBox
+
 from lcprop.gui.layout import readable_form
 
 from PySide6.QtWidgets import (
@@ -90,7 +92,7 @@ class PREvolutionPanel(QWidget):
         self.algorithm_status = QLabel()
         self.algorithm_status.setWordWrap(True)
         self.Nt = spin_box(0, 1_000_000_000, defaults.Nt)
-        self.dt_normalized = QDoubleSpinBox()
+        self.dt_normalized = CompactDoubleSpinBox()
         self.dt_normalized.setRange(1e-12, 1e6)
         self.dt_normalized.setDecimals(12)
         self.dt_normalized.setValue(defaults.dt_normalized)
@@ -164,7 +166,8 @@ class PREvolutionPanel(QWidget):
             "Transverse applied mean field (normalized)",
             self.transverse_applied_field,
         )
-        form.addRow("Material steps in segment", self.Nt)
+        self.Nt.setToolTip("Material time steps for Run; additional steps for Continue.")
+        form.addRow("Material time steps this run", self.Nt)
         form.addRow("Normalized timestep", self.dt_normalized)
         form.addRow("Material integrator", self.integrator)
         form.addRow("Maximum coupled passes per slice", self.max_coupled_passes)

@@ -330,14 +330,21 @@ nonconverged solution remains inspectable; nonconvergence does not establish
 physical nonexistence or instability, and it is distinct from worker execution
 failure or cancellation.
 
+The member selector above the Results tabs identifies each retained sweep
+member by power, solver status and failed gates. **Convergence details** opens
+its execution status, termination, iteration usage and exact failed values
+without replacing the selected Results subtab. Execution completion does not
+mean solver convergence.
+
 Open **Results → Samples / Tables** and select **Samples**, **Sweep members**,
 or **Convergence gates**. Available member values include power, beta, residuals,
 field relative change, mode overlap, theta update, completed iterations, budget,
 solver status, and termination reason. The gates table shows exact retained
 outer-iteration values, request tolerances, the strict `<` comparison, and
 Pass/Fail. Missing evidence is labeled **Unavailable**, not reconstructed from
-rounded plots. Float cells retain round-trip precision and can be inspected in
-their tooltips.
+rounded plots. Cells use concise quantity-aware text; tooltips retain exact
+round-trip float values. Near-unity overlap retains its meaningful precision.
+Results without retained tables show an explicit explanation.
 
 Convergence curves show applicable tolerance lines and guidance beside the plot;
 mode overlap has no additive axis offset. **Transverse RMS widths** has separate
@@ -368,8 +375,10 @@ Configuration changes invalidate the displayed planning estimate.
 
 ### Display scaling and temporal locking
 
-Image and longitudinal panes provide **Auto**, **Fixed / manual**, and
-**Lock across frames**, with editable lower/upper limits and **Apply limits**.
+Image and longitudinal panes provide **Auto each frame**, **Manual limits**, and
+**Lock scale across frames**, with **Minimum**, **Maximum**, and **Apply**.
+Concise displayed limits keep their exact values when applied without editing;
+tooltips show those exact limits. Auto remains the default.
 Limits must be finite and lower must be less than upper. Invalid entries leave
 the applied scientific-image mapping unchanged. Select Auto to resume automatic
 scaling, even after an invalid manual entry.

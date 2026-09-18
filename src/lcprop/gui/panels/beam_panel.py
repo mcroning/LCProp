@@ -97,6 +97,15 @@ class BeamPanel(QWidget):
             parent=self,
         )
         self.launch_plane_widget.set_beam_stack(default_stack, selected_index=0)
+        # Keep embedded choices accessible even when native selectors elide text.
+        for selector in self.launch_plane_widget.findChildren(QComboBox):
+            guidance = selector.toolTip()
+            def update_tooltip(text, widget=selector, explanation=guidance):
+                widget.setToolTip(text + ("\n" + explanation if explanation else ""))
+            selector.currentTextChanged.connect(update_tooltip)
+            update_tooltip(selector.currentText())
+            for index in range(selector.count()):
+                selector.setItemData(index, selector.itemText(index), Qt.ToolTipRole)
 
         self.input_screen_editor = InputScreenEditor(
             beam_definitions=lambda: self.beam_stack_definition,
