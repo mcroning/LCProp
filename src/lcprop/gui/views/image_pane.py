@@ -121,7 +121,8 @@ class ImagePane(QWidget):
         self.field_selector.clear()
 
         for key, field in run_data.fields.items():
-            if getattr(field.data, "ndim", None) == 2:
+            if (getattr(field.data, "ndim", None) == 2
+                    and not field.coordinates.get("paired_cut_key")):
                 self.field_selector.addItem(field.display_name, key)
 
         self.field_selector.blockSignals(False)

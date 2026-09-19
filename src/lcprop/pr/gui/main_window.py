@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from lcprop.pr.live_results import (PRLivePreviewPolicy, PRLiveSnapshot,
+                                    reduced_pr_live_to_run_data)
+
 from lcprop.gui.runtime_status import RuntimeStatusLabel, reserve_button_text
 
 from lcprop.gui.layout import FlowLayout, application_layout
@@ -163,6 +166,7 @@ def _continue_pr_operation(
         additional_steps,
         cancellation_token=cancellation_token,
         progress_callback=progress_callback,
+        live_preview_policy=PRLivePreviewPolicy(),
     )
     return RunnerResult(
         kind=PR_TIMEDEPENDENT_WORKFLOW,
@@ -1195,6 +1199,8 @@ class PRMainWindow(QWidget):
             kwargs["_before_product_conversion"] = before_product_conversion
         if self.runner is self.slurm_runner:
             kwargs.update(self._remote_runner_kwargs())
+        elif isinstance(request, PRRunRequest):
+            kwargs["live_preview_policy"] = PRLivePreviewPolicy()
         return self.runner.run_registered(
             PR_MATERIAL_ID,
             self._workflow_id_for_request(request),
@@ -1775,14 +1781,24 @@ class PRMainWindow(QWidget):
                 f"elapsed={progress.elapsed_wall_time:.3f} s"
                 )
             return
+        if (progress.workflow == PR_TIMEDEPENDENT_WORKFLOW
+                and isinstance(progress.latest_field_state, PRLiveSnapshot)):
+            self.results_panel.set_run_data(
+                reduced_pr_live_to_run_data(progress.latest_field_state),
+                state="Current accepted state",
+            )
         self.status_label.setText(
             f"Step {progress.completed_units}/{progress.total_units}"
         )
-        self.results_panel.set_td_time_indicator(
-            "PR material time: "
-            f"{float(progress.current_coordinate):.6g} normalized; "
-            f"step {progress.completed_units}/{progress.total_units}"
-        )
+        # Scalar status can advance while a throttled scientific frame remains
+        # at its own accepted step. Never relabel that frame with a later time.
+        if (progress.workflow != PR_TIMEDEPENDENT_WORKFLOW
+                or progress.latest_field_state is not None):
+            self.results_panel.set_td_time_indicator(
+                "PR material time: "
+                f"{float(progress.current_coordinate):.6g} normalized; "
+                f"step {progress.completed_units}/{progress.total_units}"
+            )
         if self._progress_console_due(
             progress.workflow,
             progress.completed_units,

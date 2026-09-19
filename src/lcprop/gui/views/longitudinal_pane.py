@@ -148,7 +148,7 @@ class LongitudinalPane(QWidget):
         """Clicking an x-z view changes the selected x index for the y-z cut."""
         self._iz = int(iz)
         self._set_z_slider(self._iz)
-        if self._is_retained_fast_selection():
+        if self._is_fixed_cut_selection():
             self.zPlaneChanged.emit(self._iz)
             return
         self.set_cut_indices(ix, self._iy)
@@ -158,7 +158,7 @@ class LongitudinalPane(QWidget):
         """Clicking a y-z view changes the selected y index for the x-z cut."""
         self._iz = int(iz)
         self._set_z_slider(self._iz)
-        if self._is_retained_fast_selection():
+        if self._is_fixed_cut_selection():
             self.zPlaneChanged.emit(self._iz)
             return
         self.set_cut_indices(self._ix, iy)
@@ -183,6 +183,10 @@ class LongitudinalPane(QWidget):
 
     def set_run_data(self, run_data) -> None:
         previous_key = self.field_selector.currentData()
+        previous_data = self._run_data
+        previous_position = (getattr(self, "_ix", 0), getattr(self, "_iy", 0),
+                             getattr(self, "_iz", 0))
+        self._fixed_cut_fields = {}
         self._run_data = run_data
         self.field_selector.blockSignals(True)
         self.field_selector.clear()
@@ -207,6 +211,8 @@ class LongitudinalPane(QWidget):
                 and xz.source_volume_key == yz.source_volume_key
                 == "retained_fast_optical_intensity"
             ):
+                self._fixed_cut_fields[self._RETAINED_FAST_CUTS] = (
+                    "retained_fast_optical_intensity_xz", "retained_fast_optical_intensity_yz")
                 self.field_selector.addItem(
                     "Retained Fast Optical Intensity",
                     self._RETAINED_FAST_CUTS,
@@ -217,6 +223,25 @@ class LongitudinalPane(QWidget):
                     "x-z and y-z cuts, separate from any downsampled MPR preview.",
                     Qt.ItemDataRole.ToolTipRole,
                 )
+
+            # Generic fixed paired cuts are explicitly declared by the product.
+            for key, xz in run_data.fields.items():
+                partner = xz.coordinates.get("paired_cut_key")
+                yz = run_data.fields.get(partner) if partner else None
+                if (xz.axes == ("z", "x") and yz is not None
+                        and yz.axes == ("z", "y")
+                        and yz.coordinates.get("paired_cut_key") == key
+                        and xz.source_volume_key == yz.source_volume_key
+                        and xz.quantity == yz.quantity and xz.value_unit == yz.value_unit):
+                    if (np.ndim(xz.data) != 2 or np.ndim(yz.data) != 2
+                            or np.shape(xz.data)[0] != np.shape(yz.data)[0]
+                            or not np.array_equal(
+                                xz.coordinates.get("z", run_data.geometry.z),
+                                yz.coordinates.get("z", run_data.geometry.z))):
+                        raise ValueError("Paired longitudinal cuts require matching z coordinates")
+                    selection = "__paired_cuts__:" + key
+                    self._fixed_cut_fields[selection] = (key, partner)
+                    self.field_selector.addItem(xz.display_name, selection)
 
         has_fields = self.field_selector.count() > 0
 
@@ -275,6 +300,27 @@ class LongitudinalPane(QWidget):
             default_index = previous_index
         self.field_selector.setCurrentIndex(default_index)
         self._field_changed(default_index)
+        if (previous_data is not None and previous_key == self.field_selector.currentData()
+                and self._same_coordinates(previous_data, run_data, previous_key)):
+            ix, iy, iz = previous_position
+            self.z_plane_slider.setValue(min(iz, self.z_plane_slider.maximum()))
+            if not self._is_fixed_cut_selection():
+                self.set_cut_indices(ix, iy)
+
+    def _same_coordinates(self, previous, current, selection):
+        keys = self._fixed_cut_fields.get(selection, (selection,))
+        for key in keys:
+            before, after = previous.fields.get(key), current.fields.get(key)
+            if before is None or after is None or before.axes != after.axes:
+                return False
+            if np.shape(before.data) != np.shape(after.data):
+                return False
+            for axis in before.axes:
+                old = before.coordinates.get(axis, previous.geometry.coord(axis))
+                new = after.coordinates.get(axis, current.geometry.coord(axis))
+                if not np.array_equal(old, new):
+                    return False
+        return True
 
     def _field_changed(self, index: int) -> None:
         if self._run_data is None or index < 0:
@@ -284,8 +330,8 @@ class LongitudinalPane(QWidget):
         if key is None:
             return
 
-        if key == self._RETAINED_FAST_CUTS:
-            self._configure_retained_fast_cuts()
+        if key in self._fixed_cut_fields:
+            self._configure_fixed_cuts()
             return
         field = self._run_data.fields[key]
         data = np.asarray(field.data)
@@ -380,8 +426,8 @@ class LongitudinalPane(QWidget):
         if key is None:
             return
 
-        if key == self._RETAINED_FAST_CUTS:
-            self._update_retained_fast_views()
+        if key in self._fixed_cut_fields:
+            self._update_fixed_cut_views()
             return
 
         field = self._run_data.fields[key]
@@ -458,14 +504,13 @@ class LongitudinalPane(QWidget):
         )
         self._apply_guides()
 
-    def _is_retained_fast_selection(self) -> bool:
-        return (
-            self.field_selector.currentData() == self._RETAINED_FAST_CUTS
-        )
+    def _is_fixed_cut_selection(self) -> bool:
+        return self.field_selector.currentData() in getattr(self, "_fixed_cut_fields", {})
 
-    def _configure_retained_fast_cuts(self) -> None:
-        xz_field = self._run_data.fields["retained_fast_optical_intensity_xz"]
-        yz_field = self._run_data.fields["retained_fast_optical_intensity_yz"]
+    def _configure_fixed_cuts(self) -> None:
+        xz_key, yz_key = self._fixed_cut_fields[self.field_selector.currentData()]
+        xz_field = self._run_data.fields[xz_key]
+        yz_field = self._run_data.fields[yz_key]
         xz = np.asarray(xz_field.data)
         yz = np.asarray(yz_field.data)
         if xz.ndim != 2 or yz.ndim != 2 or xz.shape[0] != yz.shape[0]:
@@ -480,34 +525,40 @@ class LongitudinalPane(QWidget):
         x_cut_um = float(coordinates["x_cut_um"])
         y_cut_um = float(coordinates["y_cut_um"])
         self.field_selector_label.setText("Longitudinal field")
+        prefix = "Retained Fast" if self.field_selector.currentData() == self._RETAINED_FAST_CUTS else "Sampled fixed"
         self.y_cut_label.setText(
-            f"Retained Fast x-z cut at y = {format_number(y_cut_um, quantity='coordinate')} µm"
+            f"{prefix} x-z cut at y = {format_number(y_cut_um, quantity='coordinate')} µm"
         )
         self.x_cut_label.setText(
-            f"Retained Fast y-z cut at x = {format_number(x_cut_um, quantity='coordinate')} µm"
+            f"{prefix} y-z cut at x = {format_number(x_cut_um, quantity='coordinate')} µm"
         )
         self.x_cut_slider.hide()
         self.y_cut_slider.hide()
         self.show_guides.hide()
         self.position_label.setText(
-            f"exact fixed cuts: x={format_number(x_cut_um, quantity='coordinate')}, y={format_number(y_cut_um, quantity='coordinate')} µm"
+            f"{prefix} cuts: x={format_number(x_cut_um, quantity='coordinate')}, y={format_number(y_cut_um, quantity='coordinate')} µm"
         )
-        self._update_retained_fast_views()
+        self._update_fixed_cut_views()
 
-    def _update_retained_fast_views(self) -> None:
-        xz_field = self._run_data.fields["retained_fast_optical_intensity_xz"]
-        yz_field = self._run_data.fields["retained_fast_optical_intensity_yz"]
+    def _update_fixed_cut_views(self) -> None:
+        xz_key, yz_key = self._fixed_cut_fields[self.field_selector.currentData()]
+        xz_field = self._run_data.fields[xz_key]
+        yz_field = self._run_data.fields[yz_key]
+        z_value = self._coord_value(xz_field, "z", self._iz)
+        self.z_plane_label.setText(
+            f"z sample = {format_number(z_value, quantity='coordinate')} µm (fixed cuts)"
+        )
         limits = self.scales.limits(scale_key(xz_field), (self._current_vmin, self._current_vmax))
         self.scale_controls.show_scale(scale_key(xz_field), limits)
         self.xz_view.set_field(
             xz_field,
-            extent=self._run_data.geometry.extent_zx(),
+            extent=self._field_extent(xz_field, "z", "x"),
             vmin=limits[0],
             vmax=limits[1],
         )
         self.yz_view.set_field(
             yz_field,
-            extent=self._run_data.geometry.extent_zy(),
+            extent=self._field_extent(yz_field, "z", "y"),
             vmin=limits[0],
             vmax=limits[1],
         )
@@ -515,7 +566,7 @@ class LongitudinalPane(QWidget):
         self.yz_view.clear_crosshair()
 
     def _apply_guides(self) -> None:
-        if self._is_retained_fast_selection():
+        if self._is_fixed_cut_selection():
             self.xz_view.clear_crosshair()
             self.yz_view.clear_crosshair()
             return

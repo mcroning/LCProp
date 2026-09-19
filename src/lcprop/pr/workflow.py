@@ -17,6 +17,7 @@ from lcprop.optics.splitstep import (
     linear_kernel,
     total_intensity,
 )
+from lcprop.pr.live_results import PRLivePreviewPolicy, reduced_pr_live_snapshot
 from lcprop.pr.checkpoint import (
     PRTimeDependentCheckpoint,
     validate_pr_checkpoint,
@@ -364,6 +365,7 @@ def run_pr_timedependent(
     *,
     cancellation_token: CancellationToken | None = None,
     progress_callback: ProgressCallback | None = None,
+    live_preview_policy: PRLivePreviewPolicy | None = None,
     _completed_steps_offset: int = 0,
     _requested_steps_total: int | None = None,
     _cumulative_start_time: float = 0.0,
@@ -381,6 +383,8 @@ def run_pr_timedependent(
     """
 
     started_at = perf_counter()
+    if live_preview_policy is not None and not isinstance(live_preview_policy, PRLivePreviewPolicy):
+        raise TypeError("live_preview_policy must be a PRLivePreviewPolicy")
 
     request.grid.validate()
     request.beams.validate()
@@ -499,6 +503,8 @@ def run_pr_timedependent(
     cancellation_observed_at: float | None = None
     source_stack = grid.xp.empty(E.shape, dtype=grid.real_dtype)
     accepted_observation: tuple[int, Any, Any] | None = None
+    last_preview_step = None
+    last_preview_at = float("-inf")
     td_scalar_history: list[dict[str, float]] = []
     movie_indices = set(np.unique(np.rint(np.linspace(
         completed_steps,
@@ -692,6 +698,37 @@ def run_pr_timedependent(
             material_time = (
                 float(_cumulative_start_time) + segment_elapsed_time
             )
+            if live_preview_policy is None:
+                field_state = {
+                    "A_initial": np.asarray(asnumpy(A0)).copy(),
+                    "A_current": np.asarray(asnumpy(A_display)).copy(),
+                    "E_initial": np.asarray(asnumpy(E_initial)).copy(),
+                    "E_current": np.asarray(asnumpy(E)).copy(),
+                    "source_intensity_stack": np.asarray(
+                        asnumpy(display_source_stack)
+                    ).copy(),
+                    "grid_summary": grid.summary(),
+                    "launch_summary": launch.summary(),
+                    "material_time_normalized": material_time,
+                }
+            else:
+                now = perf_counter()
+                due = (last_preview_step is None
+                       or segment_completed_steps == segment_total_steps
+                       or now - last_preview_at >= live_preview_policy.interval_seconds)
+                field_state = None
+                if due:
+                    field_state = reduced_pr_live_snapshot(
+                        E=E, A=A_display, source=display_source_stack, grid=grid,
+                        groups=launch.coherence_groups, peak_reference=peak_reference,
+                        background=request.material.background_intensity,
+                        policy=live_preview_policy, completed_steps=completed_steps,
+                        segment_completed_steps=segment_completed_steps,
+                        requested_steps=requested_steps, time_normalized=material_time,
+                        scalar_values=scalar_row,
+                        material_response=request.material_response.model,
+                    )
+                    last_preview_step, last_preview_at = completed_steps, now
             progress_callback(
                 RunProgress(
                     workflow=PR_TIMEDEPENDENT_WORKFLOW,
@@ -702,18 +739,7 @@ def run_pr_timedependent(
                     coordinate_name="material_time",
                     coordinate_unit="normalized",
                     elapsed_wall_time=perf_counter() - started_at,
-                    latest_field_state={
-                        "A_initial": np.asarray(asnumpy(A0)).copy(),
-                        "A_current": np.asarray(asnumpy(A_display)).copy(),
-                        "E_initial": np.asarray(asnumpy(E_initial)).copy(),
-                        "E_current": np.asarray(asnumpy(E)).copy(),
-                        "source_intensity_stack": np.asarray(
-                            asnumpy(display_source_stack)
-                        ).copy(),
-                        "grid_summary": grid.summary(),
-                        "launch_summary": launch.summary(),
-                        "material_time_normalized": material_time,
-                    },
+                    latest_field_state=field_state,
                     checkpoint_available=True,
                     message="PR material-time step completed",
                     completed_step=completed_steps,
@@ -728,6 +754,40 @@ def run_pr_timedependent(
                     cumulative_time=material_time,
                 )
             )
+
+            if live_preview_policy is not None and field_state is not None:
+                last_preview_at = perf_counter()
+
+    if (live_preview_policy is not None and progress_callback is not None
+            and completed_steps > int(_completed_steps_offset)
+            and last_preview_step != completed_steps
+            and accepted_observation is not None
+            and accepted_observation[0] == completed_steps):
+        _, display_A, display_source = accepted_observation
+        snapshot = reduced_pr_live_snapshot(
+            E=E, A=display_A, source=display_source, grid=grid,
+            groups=launch.coherence_groups, peak_reference=peak_reference,
+            background=request.material.background_intensity,
+            policy=live_preview_policy, completed_steps=completed_steps,
+            segment_completed_steps=segment_completed_steps,
+            requested_steps=requested_steps, time_normalized=material_time,
+            scalar_values=scalar_row, material_response=request.material_response.model,
+        )
+        progress_callback(RunProgress(
+            workflow=PR_TIMEDEPENDENT_WORKFLOW, status="running",
+            completed_units=completed_steps, total_units=requested_steps,
+            current_coordinate=material_time, coordinate_name="material_time",
+            coordinate_unit="normalized", elapsed_wall_time=perf_counter()-started_at,
+            latest_field_state=snapshot, checkpoint_available=True,
+            message="Last accepted PR state before cancellation",
+            completed_step=completed_steps, total_steps=requested_steps,
+            current_time=material_time, prior_completed_steps=int(_completed_steps_offset),
+            segment_completed_steps=segment_completed_steps,
+            segment_total_steps=segment_total_steps,
+            cumulative_completed_steps=completed_steps,
+            segment_start_time=float(_cumulative_start_time),
+            segment_elapsed_time=segment_elapsed_time, cumulative_time=material_time,
+        ))
 
     optical_observation = "complete_final_replay"
     if (
@@ -928,6 +988,7 @@ def continue_pr_timedependent(
     *,
     cancellation_token: CancellationToken | None = None,
     progress_callback: ProgressCallback | None = None,
+    live_preview_policy: PRLivePreviewPolicy | None = None,
 ) -> PRRunResult:
     """Continue a compatible accepted PR state for additional material steps."""
 
@@ -949,6 +1010,7 @@ def continue_pr_timedependent(
         continuation_request,
         cancellation_token=cancellation_token,
         progress_callback=progress_callback,
+        live_preview_policy=live_preview_policy,
         _completed_steps_offset=int(checkpoint.completed_steps),
         _requested_steps_total=(
             int(checkpoint.completed_steps) + resolved_additional_steps

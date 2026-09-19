@@ -291,6 +291,23 @@ Unavailable fields or curves are hidden when a new product replaces the old one.
 If a result update fails, all result panes become unavailable and the banner
 reports that no result is displayed; a later successful update restores them.
 
+Reduced PR time-dependent **Local** runs and Local Continue display bounded
+**Current accepted state** snapshots in the existing Results tabs. They contain
+sampled output intensity, one accepted material-field plane (its z position is
+shown), and fixed nearest-zero x-z/y-z optical cuts. Diagnostics records the
+accepted segment/cumulative step, normalized time, existing scalar diagnostics,
+and point-sampling coordinates. Cuts use the existing slice-average optical
+intensity convention. These visualization-only samples are not a checkpoint or
+a material-time history; final scientific results retain their existing policy.
+
+The first and final accepted steps are displayed; intermediate scientific frames
+are limited to one per 0.5 seconds after the previous delivery. Status may advance
+between frames, while the displayed frame retains its own step/time. Stop makes
+the last accepted step available. No accepted update means no new live frame.
+Changing display limits cannot change the calculation. Full-transverse PR live
+Results and remote scientific previews are not part of this capability; Slurm
+continues to report scalar progress.
+
 PR checkpoint **Continue** is Local-only, even when Slurm is selected for Run.
 Its execution summary and Console identify Local execution. Continuation does
 not validate Slurm resources or require an automatically deployable Git source;
