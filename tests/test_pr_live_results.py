@@ -398,3 +398,90 @@ def test_sample_provenance_keeps_reduced_model_validation_status():
     assert summary['material_response_validation'] == 'locally_validated'
     assert summary['visualization_only'] is True
     assert not data.curves and not data.artifacts
+
+
+def test_real_worker_run_and_continue_render_intermediate_accepted_state(app, monkeypatch, no_movie_encoder):
+    """Exercise native dispatch/signals/slot/adapter/views without replacing them."""
+    from PySide6.QtCore import QThread
+    from tests.test_pr_gui_main_window import _wait_for
+
+    w = PRMainWindow()
+    w.grid_panel.Nx.setValue(8)
+    w.grid_panel.Ny.setValue(8)
+    w.grid_panel.dz_um.setValue(10.)
+    w.grid_panel.z_length_um.setValue(20.)
+    w.evolution_panel.Nt.setValue(10)
+    ws = w.results_panel.workspace
+    gui_thread = QThread.currentThread()
+    deliveries, displays, runner_threads = [], [], []
+    original_data = ws.set_run_data
+    original_time = ws.set_td_time_indicator
+    original_runner = w.local_runner.run_registered
+
+    def run_registered(*args, **kwargs):
+        runner_threads.append(QThread.currentThread())
+        return original_runner(*args, **kwargs)
+
+    def set_data(data, *, state=None):
+        original_data(data, state=state)
+        if state == 'Current accepted state':
+            deliveries.append((data, ws._attempt, ws._displayed_attempt))
+
+    def set_time(text):
+        original_time(text)
+        progress = w.last_progress
+        if progress is None or not isinstance(progress.latest_field_state, PRLiveSnapshot):
+            return
+        # Observe after the real slot has rendered fields AND set their time.
+        # Store evidence here; assertions run outside Qt's exception boundary.
+        xy, longitudinal = ws.image_pane, ws.longitudinal_pane
+        displays.append(dict(
+            snapshot=progress.latest_field_state, text=text,
+            ownership=ws.result_ownership.text(),
+            xy_key=xy.field_selector.currentData(),
+            xy_count=xy.field_selector.count(),
+            xy_size=np.size(xy.image_view.image.get_array()),
+            cut_key=longitudinal.field_selector.currentData(),
+            cut_count=longitudinal.field_selector.count(),
+            xz_size=np.size(longitudinal.xz_view.image.get_array()),
+            yz_size=np.size(longitudinal.yz_view.image.get_array()),
+            thread=QThread.currentThread(),
+        ))
+
+    monkeypatch.setattr(w.local_runner, 'run_registered', run_registered)
+    monkeypatch.setattr(ws, 'set_run_data', set_data)
+    monkeypatch.setattr(ws, 'set_td_time_indicator', set_time)
+    try:
+        w.run_clicked()
+        _wait_for(app, lambda: not w._background_running)
+        assert w.last_checkpoint is not None
+        first_run = list(displays)
+        displays.clear()
+        w.continue_clicked()
+        _wait_for(app, lambda: not w._background_running)
+        assert runner_threads and all(t != gui_thread for t in runner_threads)
+        for observed, first_step, total in ((first_run, 1, 10), (displays, 11, 20)):
+            assert observed
+            first = observed[0]
+            s = first['snapshot']
+            assert s.completed_steps == first_step < total
+            assert s.segment_completed_steps == 1
+            assert s.requested_steps == total
+            assert s.time_normalized == pytest.approx(first_step * .001)
+            assert first['ownership'] == 'Current accepted state'
+            assert first['xy_count'] >= 1 and first['xy_size'] > 0
+            assert first['xy_key'] == 'live_output_intensity'
+            assert first['cut_count'] >= 1 and first['xz_size'] > 0 and first['yz_size'] > 0
+            assert first['cut_key'] == '__paired_cuts__:live_optical_xz'
+            assert first['text'] == (
+                f'PR material time: {s.time_normalized:.6g} normalized; '
+                f'step {first_step}/{total}')
+            assert first['thread'] == gui_thread
+            assert observed[-1]['snapshot'].completed_steps == total
+        assert deliveries
+        assert all(len(data.fields) == 4 and attempt == owner
+                   for data, attempt, owner in deliveries)
+        assert len({attempt for _, attempt, _ in deliveries}) == 2
+    finally:
+        assert w.shutdown_background_run()
+        close_widget(w)

@@ -232,3 +232,124 @@ The stopping point is an unstaged candidate with an external exact manifest and
 validation evidence, followed by a separately authorized strictly read-only
 pre-commit review. No commit or integration is authorized by this development
 record.
+
+
+## Native acceptance follow-up: worker-path coverage and launch provenance
+
+The follow-up uses the same isolated branch at committed P2A-1 HEAD
+`40914d6d0a840199008f63e850ccd6ebfd47529b`; its parent and the unchanged
+Authoritative Product are `d9010ae04ef9228023bde22a08ab5447ef8b88fb`.
+The reported native symptom was material time 0.004, step 4/10, with
+“No displayed result” and empty field selectors. This follow-up changes only
+this record and the existing live-results test module. No production patch is
+justified by the reproduced evidence below.
+
+### End-to-end findings
+
+With this isolated checkout's `src` selected on PYTHONPATH, a real Local Run
+through the native window's `run_clicked`, LocalRunner, WorkflowWorker,
+BlockingQueuedConnection, and unchanged `_on_progress` reaches
+`Workspace.set_run_data(..., state="Current accepted state")` on the first
+accepted step. RunData contains `live_output_intensity`, `live_material_plane`,
+`live_optical_xz`, and `live_optical_yz`. Both transverse products and the generic
+paired cuts render. The same path works for Local Continue with cumulative
+step/time. No snapshot is lost at any of these boundaries in the tested source.
+
+A controlled launch without PYTHONPATH using the established interpreter instead
+resolves `lcprop.pr.gui.main_window` to the unchanged authoritative checkout;
+`lcprop.pr.live_results` is absent there. That older source emits legacy dictionary
+progress and updates the time/status labels without a live adapter/Workspace
+call. It reproduces the reported symptom exactly at step 4/10: time 0.004,
+“No displayed result”, zero transverse fields, and zero longitudinal selections.
+This is a verified launch-provenance failure mode, not evidence that the bounded
+snapshot was dropped by the candidate's worker. The original native session's
+launch command/interpreter has been requested; attribution of that particular
+session remains unconfirmed until its provenance is supplied.
+
+The first bounded snapshot bypasses throttling and survives the real worker
+signal. The GUI recognizes PRLiveSnapshot, the adapter produces four fields,
+and shared views accept their metadata. Current request and displayed-result
+attempt IDs agree. Later scalar-only updates intentionally do not relabel the
+last displayed scientific frame. Existing accepted-state ordering, Stop flush,
+0.5-second cadence, producer memory bound, scientific arrays, and all exclusions
+remain unchanged.
+
+### Regression and probe limitations
+
+The new regression starts real window Run and Continue operations, uses the real
+registered workflow/worker/progress slot, and observes Workspace delivery and
+its time indicator after rendering. It checks the first intermediate accepted
+steps (1/10 and 11/20), ownership, request identity, four fields, selectable
+nonempty transverse and paired-cut images, GUI-thread rendering, and cumulative
+time. It also observes the final accepted step for each segment. Assertions run
+outside Qt callback exception handling so a missing delivery cannot silently
+pass. Existing movie encoding is stubbed by the established test fixture;
+scientific integration and GUI progress dispatch are not stubbed.
+
+Two temporary tracing probes replaced/overrode the progress slot and caused a
+BlockingQueuedConnection affinity deadlock; both were interrupted and aborted
+with an active-QThread warning. These were probe failures, not reproductions of
+the reported empty-Results symptom. The successful probes and regression leave
+the production Qt slot untouched and observe Workspace methods on the GUI
+thread. Test-owned widgets are cooperatively shut down and explicitly disposed.
+No Qt cleanup or production ownership behavior was changed.
+
+### Launch the isolated candidate for native acceptance
+
+Select the source explicitly; merely changing the working directory does not
+override an interpreter's installed/editable package resolution. From the
+isolated worktree, using the established Python 3.12 interpreter as `python`:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/src" python -c \
+  'import lcprop.pr.gui.main_window as m; import lcprop.pr.live_results as l; print(m.__file__); print(l.__file__)'
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/src" python -m lcprop.pr.gui.app
+```
+
+Both printed module paths must belong to the isolated checkout before native
+acceptance. These launch instructions do not integrate, reinstall, or alter
+Authoritative Product. Native visual acceptance remains pending; offscreen
+regressions do not establish the provenance or outcome of the original session.
+
+
+### Follow-up validation and candidate boundary
+
+Using the same Python 3.12 environment and focused/affected/full commands above:
+
+- live-results module: **22 passed in 3.90s**;
+- focused batch: **145 passed in 24.59s**;
+- affected batch: **360 passed in 41.46s**;
+- complete Product suite: **1,796 passed, 77 skipped in 505.35s**.
+
+No failure or Qt abort occurred in these validation runs. Syntax compilation in
+memory, Markdown links/anchors, whitespace, and `git diff --check` pass. No
+scientific or production code changes were made. Development self-review of the
+two-file follow-up passes, with original native-session attribution and native
+visual acceptance explicitly unresolved rather than claimed complete.
+
+External evidence uses the `lcprop-p2a1-native-` prefix in `/private/tmp`, with
+`focused-probe.log`, `focused.log`, `affected.log`, `full.log`, and
+`final-checks.log`. The two-file unstaged candidate is recorded in
+`lcprop-p2a1-native-candidate-manifest.json` relative to commit `40914d6...`.
+A separate `lcprop-p2a1-native-combined-manifest.json` describes the combined eight
+P2A-1 files relative to the authoritative baseline; it is not an eight-file
+uncommitted candidate. The original reviewed manifest remains preserved.
+
+Authoritative Product, LaunchPlane, and Research retain their preflight commits
+and clean tracked worktrees/indexes. The historical protection check does **not**
+match the earlier timestamp-sensitive fingerprint. All 4,336 paths, content
+hashes, sizes, and modes are unchanged, but six `src/lcprop.egg-info` files have
+new modification times around 2026-09-19 16:13:14 UTC: PKG-INFO, SOURCES.txt,
+dependency_links.txt, entry_points.txt, requires.txt, and top_level.txt.
+No install, packaging, or timestamp-reset operation was performed by this
+follow-up; the origin of the timestamp changes is unverified. The current
+fingerprint is
+`cbed042a4576fd09c778ed67813799a6dc7cfac0a97eeb5bb00cf1adb63683e3`,
+compared with the earlier
+`d6eb804afc3a6a1ce0fe2ede3b35ea42102f1d0a829b2e5abefee650bfbdce64`.
+This is an explicit protection exception for review, not an exact-preservation
+pass; no attempt was made to restore timestamps or overwrite historical files.
+Nothing is staged, committed, integrated, pushed, or archived by this follow-up.
+The next gate is strictly read-only review of the trace evidence, regression,
+qualified provenance conclusion, and this two-file candidate. No implementation
+of P2A-2 or other excluded work is authorized.
