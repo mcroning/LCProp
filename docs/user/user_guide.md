@@ -378,7 +378,9 @@ Configuration changes invalidate the displayed planning estimate.
 Image and longitudinal panes provide **Auto each frame**, **Manual limits**, and
 **Lock scale across frames**, with **Minimum**, **Maximum**, and **Apply**.
 Concise displayed limits keep their exact values when applied without editing;
-tooltips show those exact limits. Auto remains the default.
+tooltips show those exact limits. Auto remains the default. Transverse x-y
+scaling is independent of longitudinal scaling. The x-z and y-z views of the
+same selected 3-D quantity share one longitudinal scale.
 Limits must be finite and lower must be less than upper. Invalid entries leave
 the applied scientific-image mapping unchanged. Select Auto to resume automatic
 scaling, even after an invalid manual entry.
@@ -389,8 +391,9 @@ finite range, and longitudinal cuts use their shared volume range (or the
 combined retained-cut range). Auto can therefore rescale across frames and
 across transverse versus longitudinal views.
 
-Fixed and locked limits share a mapping across x-y/x-z/y-z views explicitly
-linked to the same source quantity. Unrelated quantities have separate settings.
+Fixed and locked limits share a mapping between x-z/y-z views of the same
+source quantity. Transverse x-y limits remain independent, even when the plane
+comes from that volume. Unrelated quantities have separate settings.
 Lock captures the limits currently displayed in the pane where it is selected;
 identical values then have identical brightness across subsequent updates.
 A new-run scale reset captures fresh limits for locked quantities; manual limits

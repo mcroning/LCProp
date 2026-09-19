@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from lcprop.gui.runtime_status import RuntimeStatusLabel
+
 from dataclasses import replace
 
 import numpy as np
@@ -67,7 +69,10 @@ class ImagePane(QWidget):
 
         layout = QVBoxLayout(self)
 
-        self.td_time_label = QLabel()
+        self.td_time_label = RuntimeStatusLabel()
+        time_policy = self.td_time_label.sizePolicy()
+        time_policy.setRetainSizeWhenHidden(True)
+        self.td_time_label.setSizePolicy(time_policy)
         self.td_time_label.setVisible(False)
         layout.addWidget(self.td_time_label)
 

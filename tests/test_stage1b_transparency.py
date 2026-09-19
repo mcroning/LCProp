@@ -168,8 +168,8 @@ def test_auto_fixed_return_auto_and_invalid_ranges(app):
     curve = run.curves['power'].y.copy()
     controls.lower.setText('2');controls.upper.setText('10');controls.apply_limits()
     assert pane.image_view.image.get_clim() == (2.,10.)
-    assert workspace.longitudinal_pane.xz_view.image.get_clim() == (2.,10.)
-    assert workspace.longitudinal_pane.yz_view.image.get_clim() == (2.,10.)
+    assert workspace.longitudinal_pane.xz_view.image.get_clim() == (0.,23.)
+    assert workspace.longitudinal_pane.yz_view.image.get_clim() == (0.,23.)
     for lo,hi in [('nan','4'),('5','2'),('a','5'),('inf','10'),('3','3')]:
         controls.lower.setText(lo);controls.upper.setText(hi);controls.apply_limits()
         assert 'Invalid' in controls.message.text()
@@ -189,7 +189,7 @@ def test_locked_frames_share_mapping_unlocked_rescale_and_quantity_isolation(app
     color_before = pane.image_view.image.cmap(pane.image_view.image.norm(5.))
     second = image_data(100.);workspace.set_run_data(second)
     assert pane.image_view.image.get_clim() == limits
-    assert workspace.longitudinal_pane.xz_view.image.get_clim() == limits
+    assert workspace.longitudinal_pane.xz_view.image.get_clim() == (0.,2300.)
     assert pane.image_view.image.cmap(pane.image_view.image.norm(5.)) == color_before
     pane.field_selector.setCurrentIndex(pane.field_selector.findData('theta'))
     assert pane.scale_controls.mode.currentData() == 'auto'

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lcprop.gui.runtime_status import RuntimeStatusLabel, reserve_button_text
+
 from lcprop.gui.layout import FlowLayout, application_layout
 
 from functools import partial
@@ -244,11 +246,9 @@ class PRMainWindow(QWidget):
             "retrieves longitudinal material volumes."
         )
         header.addWidget(self.result_policy_selector)
-        self.runner_label = QLabel(f"Runner: {self.runner.name}")
-        self.runner_label.setWordWrap(True)
+        self.runner_label = RuntimeStatusLabel(f"Runner: {self.runner.name}", preferred_width=160)
         header.addWidget(self.runner_label)
-        self.status_label = QLabel("Idle")
-        self.status_label.setWordWrap(True)
+        self.status_label = RuntimeStatusLabel("Idle", preferred_width=280)
         header.addWidget(self.status_label)
         self.preview_button = QPushButton("Inspect Request")
         self.preview_button.setToolTip(
@@ -289,6 +289,8 @@ class PRMainWindow(QWidget):
             self.open_experiment_clicked
         )
         header.addWidget(self.experiment_file_buttons)
+        reserve_button_text(self.run_button, ["Run PR", "Running…"])
+        reserve_button_text(self.stop_button, ["Stop", "Stopping…"], retain_hidden=True)
         root.addLayout(header)
         root.addWidget(self.remote_execution_controls)
         self.remote_execution_controls.selectionChanged.connect(

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from html import escape
+from lcprop.gui.runtime_status import RuntimeStatusLabel
 from lcprop.gui.convergence_summary import member_explanations
 from dataclasses import replace
 from pathlib import Path
@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QFont, QTextBlockFormat, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QLabel,
     QComboBox,
@@ -38,11 +38,9 @@ class Workspace(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(4)
 
-        self.operation_status = QLabel("Idle")
-        self.operation_status.setWordWrap(True)
+        self.operation_status = RuntimeStatusLabel("Idle")
         layout.addWidget(self.operation_status)
-        self.result_ownership = QLabel("No displayed result")
-        self.result_ownership.setWordWrap(True)
+        self.result_ownership = RuntimeStatusLabel("No displayed result")
         layout.addWidget(self.result_ownership)
         self._attempt = 0
         self._displayed_attempt = None
@@ -65,8 +63,7 @@ class Workspace(QWidget):
         self.convergence_dialog.setWindowTitle("Member convergence details")
         self.convergence_dialog.resize(660, 340)
         details_layout = QVBoxLayout(self.convergence_dialog)
-        self.convergence_ownership = QLabel("No displayed result")
-        self.convergence_ownership.setWordWrap(True)
+        self.convergence_ownership = RuntimeStatusLabel("No displayed result")
         details_layout.addWidget(self.convergence_ownership)
         self.convergence_text = QTextEdit()
         self.convergence_text.setReadOnly(True)
@@ -82,7 +79,8 @@ class Workspace(QWidget):
 
         self.display_scales = DisplayScales()
         self.image_pane = ImagePane(self.display_scales)
-        self.longitudinal_pane = LongitudinalPane(self.display_scales)
+        self.longitudinal_display_scales = DisplayScales()
+        self.longitudinal_pane = LongitudinalPane(self.longitudinal_display_scales)
 
         self.fields_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.fields_splitter.addWidget(self.image_pane)
@@ -160,10 +158,7 @@ class Workspace(QWidget):
 
     def operation_boundary(self, operation: str) -> None:
         stamp = datetime.now().astimezone().isoformat(timespec="seconds")
-        # Reuse the existing boundary event; escape operation names as plain text.
-        self.console.append(
-            f'<hr><p><b>[{stamp}] {escape(operation)}</b></p>'
-        )
+        self._append_console_text(f"[{stamp}] {operation}", boundary=True)
 
     def set_operation_status(self, text: str) -> None:
         self.operation_status.setText(f"Execution status: {text}")
@@ -193,7 +188,29 @@ class Workspace(QWidget):
         self._refresh_request_text()
 
     def append_console(self, text: str) -> None:
-        self.console.append(text)
+        self._append_console_text(text)
+
+    def _append_console_text(self, text, *, boundary=False):
+        # QTextEdit.append can inherit an HTML rule/block format. Construct each
+        # block explicitly so ordinary logs cannot inherit boundary decoration.
+        scroll = self.console.verticalScrollBar()
+        follow_tail = scroll.value() >= scroll.maximum()
+        cursor = QTextCursor(self.console.document())
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        block = QTextBlockFormat()
+        if boundary:
+            block.setTopMargin(6)
+            block.setBottomMargin(4)
+        char = QTextCharFormat()
+        char.setFontWeight(QFont.Weight.Bold if boundary else QFont.Weight.Normal)
+        if not self.console.document().isEmpty():
+            cursor.insertBlock(block, char)
+        else:
+            cursor.setBlockFormat(block)
+            cursor.setCharFormat(char)
+        cursor.insertText(text, char)
+        if follow_tail:
+            scroll.setValue(scroll.maximum())
 
     def set_td_time_indicator(self, text: str | None) -> None:
         # New-run progress must not relabel a retained previous field's time.
@@ -203,6 +220,7 @@ class Workspace(QWidget):
 
     def reset_field_color_scales(self) -> None:
         self.image_pane.reset_color_scales()
+        self.longitudinal_display_scales.reset_locks()
 
     def _image_position_selected(self, ix: int, iy: int) -> None:
         self.longitudinal_pane.set_cut_indices(ix, iy)

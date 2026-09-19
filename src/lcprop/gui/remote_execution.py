@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lcprop.gui.runtime_status import RuntimeStatusLabel
+
 from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event
@@ -620,9 +622,8 @@ class RemoteExecutionControls(QWidget):
         self.cluster_selector, self.resource_selector = QComboBox(), QComboBox()
         self.configure_button, self.availability_label = (
             QPushButton("Configure Remote Execution…"),
-            QLabel(),
+            RuntimeStatusLabel(preferred_width=300),
         )
-        self.availability_label.setWordWrap(True)
         for label, widget in (
             ("Cluster:", self.cluster_selector),
             ("Resource:", self.resource_selector),

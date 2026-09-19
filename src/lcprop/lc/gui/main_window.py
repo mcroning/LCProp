@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from lcprop.gui.runtime_status import RuntimeStatusLabel, reserve_button_text
+
 from lcprop.gui.layout import FlowLayout, application_layout
 from dataclasses import replace
 from functools import partial
@@ -148,14 +150,14 @@ class LCPropMainWindow(QWidget):
         self._td_thread_done = False
         self._hydrating_experiment = False
         self._propagation_optical_boundary = None
-        self.setWindowTitle("LCProp")
+        self.setWindowTitle("LCProp LC")
         # Default to a wide scientific-visualization layout.
         self.setMinimumSize(1200, 760)
 
         root = application_layout(self)
 
         header = FlowLayout()
-        header.addWidget(QLabel("LCProp"))
+        header.addWidget(QLabel("LCProp LC"))
         header.addStretch(1)
         header.addWidget(QLabel("Execution:"))
         self.execution_target_selector = execution_target_selector(
@@ -165,8 +167,7 @@ class LCPropMainWindow(QWidget):
             self._execution_target_changed
         )
         header.addWidget(self.execution_target_selector)
-        self.runner_label = QLabel(f"Runner: {self.runner.name}")
-        self.runner_label.setWordWrap(True)
+        self.runner_label = RuntimeStatusLabel(f"Runner: {self.runner.name}", preferred_width=160)
         header.addWidget(self.runner_label)
 
         self.td_initial_condition_label = QLabel("Initial condition:")
@@ -244,6 +245,8 @@ class LCPropMainWindow(QWidget):
         )
         header.addWidget(self.experiment_file_buttons)
 
+        reserve_button_text(self.run_button, ["Running…", "Run Static propagation", "Run Time-dependent propagation", "Run Soliton", "Run Soliton existence curve"])
+        reserve_button_text(self.stop_button, ["Stop", "Stopping…"], retain_hidden=True)
         root.addLayout(header)
         root.addWidget(self.remote_execution_controls)
         self.remote_execution_controls.selectionChanged.connect(
