@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QLabel,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -29,7 +30,9 @@ from lcprop.pr.image_sources import PRImageSource
 
 
 PR_GAUSSIAN_INPUT_MODE = "gaussian_beams"
+# Retained identifier for historical specialized requests and saved experiments.
 PR_IMAGE_AMPLIFICATION_INPUT_MODE = "image_amplification"
+PR_IMAGE_ANALYSIS_INPUT_MODE = "ordinary_pr_image_analysis"
 
 
 @dataclass(frozen=True)
@@ -66,27 +69,38 @@ class PRImageInputPanel(QWidget):
         self.input_mode = QComboBox()
         self.input_mode.addItem("General beams / two-beam coupling", PR_GAUSSIAN_INPUT_MODE)
         self.input_mode.addItem(
-            "Image amplification — specialized setup", PR_IMAGE_AMPLIFICATION_INPUT_MODE
+            "Image amplification — optional analysis", PR_IMAGE_ANALYSIS_INPUT_MODE
+        )
+        self.input_mode.addItem(
+            "Historical Image Amplification — compatibility",
+            PR_IMAGE_AMPLIFICATION_INPUT_MODE,
         )
         self.input_mode.setToolTip(
-            "General beams supports ordinary two-beam coupling within the selected "
-            "PR model. Reduced transport acts along x; rotating a crossing is not "
-            "physically equivalent. Specialized image amplification requires its "
-            "signal screen, pump/signal roles, and symmetric x-z carriers."
+            "General beams and optional image analysis use ordinary PR propagation. "
+            "Images may be on any beam; missing or unsupported image analysis does "
+            "not prevent propagation. Historical compatibility retains its original "
+            "specialized setup. Reduced transport still acts along x."
         )
         self.pump_channel = QComboBox()
         self.signal_channel = QComboBox()
         self.role_note = QLabel(
-            "Configure beams and the signal intensity screen on the shared "
-            "Beam tab. Channel numbers use the enabled-channel ordering."
+            "Configure beams and screens on the Beam tab. Pump/Signal select "
+            "optional analysis only. Roles use session-local enabled-channel "
+            "ordering, not persistent identities."
         )
         self.role_note.setWordWrap(True)
+        self.analysis_note = QLabel()
+        self.analysis_note.setWordWrap(True)
+        self.clear_roles = QPushButton("Clear analysis roles")
+        self.clear_roles.clicked.connect(self._clear_roles)
 
         form.addRow("Input mode", self.input_mode)
         form.addRow("Pump channel", self.pump_channel)
         form.addRow("Signal channel", self.signal_channel)
         layout.addLayout(form)
         layout.addWidget(self.role_note)
+        layout.addWidget(self.clear_roles)
+        layout.addWidget(self.analysis_note)
         layout.addStretch(1)
         self._image_widgets = tuple(
             widget
@@ -123,8 +137,29 @@ class PRImageInputPanel(QWidget):
     def is_image_amplification(self) -> bool:
         return self.mode_id() == PR_IMAGE_AMPLIFICATION_INPUT_MODE
 
+    def requests_optional_image_analysis(self) -> bool:
+        return self.mode_id() == PR_IMAGE_ANALYSIS_INPUT_MODE
+
+    def _clear_roles(self) -> None:
+        self.pump_channel.setCurrentIndex(-1)
+        self.signal_channel.setCurrentIndex(-1)
+
     def _mode_changed(self, *_args) -> None:
-        enabled = self.is_image_amplification()
+        optional = self.requests_optional_image_analysis()
+        enabled = self.is_image_amplification() or optional
+        self.role_note.setText(
+            "Configure beams and screens on the Beam tab. "
+            + ("Pump/Signal select optional analysis only. " if optional else
+               "The historical experiment requires valid Pump/Signal selections. ")
+            + "Roles use session-local enabled-channel ordering, not persistent identities."
+        )
+        self.clear_roles.setVisible(optional)
+        self.analysis_note.setVisible(optional)
+        self.analysis_note.setText(
+            "Runs ordinary PR. Specialized image analysis is optional and may "
+            "be unavailable. Save Experiment stores the ordinary propagation "
+            "request; analysis selections are session-only."
+        )
         for widget in self._image_widgets:
             widget.setVisible(enabled)
         self.modeChanged.emit(self.mode_id())
@@ -284,6 +319,7 @@ __all__ = [
     "DecodedPRImage",
     "PR_GAUSSIAN_INPUT_MODE",
     "PR_IMAGE_AMPLIFICATION_INPUT_MODE",
+    "PR_IMAGE_ANALYSIS_INPUT_MODE",
     "PRImageInputPanel",
     "decode_user_image",
     "supported_user_image_formats",

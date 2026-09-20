@@ -320,12 +320,41 @@ the cause above Results; full tracebacks remain in Console. Scientific field
 names are shortened in the views while original names and provenance remain
 in Diagnostics and persisted products.
 
-For PR, **General beams / two-beam coupling** is the ordinary beam route.
-**Image amplification — specialized setup** requires the signal screen,
-pump/signal roles, and symmetric carriers in the x-z plane. Those specialized
-constraints do not apply to general beams. The selected model still matters:
-reduced PR material transport acts along x with y as a batch axis; rotating
-beam crossings is not generally physically equivalent.
+For PR, **General beams / two-beam coupling** and **Image amplification —
+optional analysis** both run the ordinary selected PR workflow. Configure beams
+and intensity screens on the Beam tab: one or more supported beams, no screen,
+a screen on any beam, or multiple independently screened beams. Removing a
+screen, omitting Pump/Signal roles, or using supported asymmetric geometry does
+not invalidate ordinary propagation. An individual beam may have zero power
+when total launch power remains positive. Shared wavelength and selected
+material-model restrictions still apply. Reduced transport acts along x with
+y as a batch axis; rotating a crossing is not generally physically equivalent.
+
+The optional-analysis mode attempts the existing specialized image analysis
+only when its two-beam roles, signal screen, geometry, coherence, and carrier
+separation requirements are met. Otherwise Results Diagnostics and Console
+explain why analysis is unavailable; successful propagation stays successful.
+Analysis errors likewise do not change the base scientific run's status.
+Existing image metrics and carrier-power ratios keep their established meanings.
+This does not add N-carrier power curves or new gain definitions.
+
+**Historical Image Amplification — compatibility** retains the specialized
+request, validation, and result semantics used by existing saved experiments
+and historical APIs. Opening an old specialized experiment selects that mode.
+Selecting either ordinary mode explicitly leaves the historical configuration
+path; it does not convert the old saved file in place.
+
+Save Experiment in optional-analysis mode stores the ordinary scientific request,
+including beams and screens. It reopens as General beams; optional analysis roles
+are session-only and must be reselected. Existing specialized experiments still
+save with their original roles/analysis contract. Session role mapping uses
+names and enabled-channel ordering, not durable beam identities. PR Continue
+keeps its existing compatibility checks and Local-only execution; optional
+analysis is requested on fresh Run, not on Continue. Historical Image
+Amplification still has no Continue action.
+
+Linearized PR remains a uniform-reference tangent model. Support for finite
+beams/screens does not imply validity for every illumination in that approximation.
 
 Automatic Slurm source deployment requires a clean deployable LCProp Git
 checkout. A normal non-editable installation remains suitable for Local runs.

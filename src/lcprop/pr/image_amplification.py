@@ -1483,13 +1483,9 @@ def run_image_amplification_experiment(
     progress.
     """
 
-    from lcprop.pr.products import augment_pr_image_amplification_run_data
-    from lcprop.runners.base import RunnerResult
-
     base_request, transmission, normalized_grating = (
         prepare_image_amplification_base_request(request)
     )
-    capability = _base_capability(request.base_workflow_id)
     benchmark_started_at = perf_counter()
     base_started_at = perf_counter()
     kwargs = dict(runner_kwargs or {})
@@ -1502,6 +1498,42 @@ def run_image_amplification_experiment(
         **kwargs,
     )
     base_runtime = perf_counter() - base_started_at
+    return analyze_image_amplification_result(
+        request, base_runner_result,
+        prepared=(base_request, transmission, normalized_grating),
+        cancellation_token=cancellation_token,
+        progress_callback=progress_callback,
+        base_runtime=base_runtime,
+        benchmark_started_at=benchmark_started_at,
+    )
+
+
+def analyze_image_amplification_result(
+    request: PRImageAmplificationExperimentRequest,
+    base_runner_result,
+    *,
+    prepared=None,
+    cancellation_token=None,
+    progress_callback=None,
+    base_runtime=0.0,
+    benchmark_started_at=None,
+):
+    """Apply historical image analysis to an already executed ordinary result.
+
+    This seam shares the established mathematics and composite status contract.
+    Callers exposing optional analysis must preserve base propagation status.
+    No material operation is dispatched here.
+    """
+    from lcprop.pr.products import augment_pr_image_amplification_run_data
+    from lcprop.runners.base import RunnerResult
+
+    base_request, transmission, normalized_grating = (
+        prepare_image_amplification_base_request(request)
+        if prepared is None else prepared
+    )
+    capability = _base_capability(request.base_workflow_id)
+    if benchmark_started_at is None:
+        benchmark_started_at = perf_counter()
     base_result = base_runner_result.result
     if not isinstance(base_result, capability.result_type):
         raise TypeError(

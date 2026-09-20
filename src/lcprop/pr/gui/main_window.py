@@ -83,6 +83,9 @@ from lcprop.pr.gui.request_adapter import (
     validate_pr_gui_request_representable,
 )
 from lcprop.pr.gui.resource_estimator_panel import PRResourceEstimatorPanel
+from lcprop.pr.optional_image_analysis import (
+    PRImageAnalysisSelection, add_optional_image_analysis,
+)
 from lcprop.pr.operations import (
     PR_IMAGE_AMPLIFICATION_OPERATION,
     PR_STATIC_OPERATION,
@@ -676,10 +679,18 @@ class PRMainWindow(QWidget):
         inspect_request(self, self.build_request)
 
     def describe_request(self, request, *, runner=None) -> str:
-        return (
+        summary = (
             self._describe_scientific_request(request, runner=runner)
             + "\n" + execution_summary(self, request, runner=runner)
         )
+        if self.input_panel.requests_optional_image_analysis():
+            summary += (
+                "\nOn Run: optional specialized image analysis; ordinary PR "
+                "propagation remains authoritative. Analysis may be unavailable."
+                "\nAnalysis roles are session-only; Save Experiment stores "
+                "the ordinary propagation request."
+            )
+        return summary
 
     def _describe_scientific_request(self, request, *, runner=None) -> str:
         """Return a durable, unit-explicit summary of one PR request."""
@@ -1208,6 +1219,15 @@ class PRMainWindow(QWidget):
             **kwargs,
         )
 
+    def _run_with_optional_image_analysis(self, request, *, selection, **kwargs):
+        started = monotonic()
+        base = self._run_registered(request, **kwargs)
+        return add_optional_image_analysis(
+            base, request, selection, base_runtime=monotonic() - started,
+            cancellation_token=kwargs.get("cancellation_token"),
+            progress_callback=kwargs.get("progress_callback"),
+        )
+
     def _slurm_supports_workflow(self, workflow_id: str) -> bool:
         """Return whether the active Slurm composition registers one PR operation."""
 
@@ -1431,10 +1451,21 @@ class PRMainWindow(QWidget):
                 "Starting a fresh PR run; previous checkpoint cleared."
             )
             self.last_checkpoint = None
+        runner_callable = self._run_registered
+        if self.input_panel.requests_optional_image_analysis():
+            # Snapshot roles on the GUI thread. The worker never reads widgets
+            # or lets subsequent editing change this run's analysis ownership.
+            selection = PRImageAnalysisSelection(
+                self.input_panel.pump_channel.currentData(),
+                self.input_panel.signal_channel.currentData(),
+            )
+            runner_callable = partial(
+                self._run_with_optional_image_analysis, selection=selection,
+            )
         self._start_background(
             request,
             summary=summary,
-            runner_callable=self._run_registered,
+            runner_callable=runner_callable,
             run_label="Running",
         )
 
@@ -1611,6 +1642,7 @@ class PRMainWindow(QWidget):
             self.beam_panel,
             self.grid_panel,
             self.evolution_panel,
+            self.input_panel,
         ):
             panel.setEnabled(enabled)
         self.execution_target_selector.setEnabled(enabled)
