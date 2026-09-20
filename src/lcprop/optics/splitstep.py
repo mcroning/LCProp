@@ -158,6 +158,45 @@ def linear_kernel(
     return xp.exp(-1j * np.pi * float(dz) * float(wavelength) * fxy2 / float(n_ref))
 
 
+def scalar_angular_spectrum_kernel(
+    fxy2: Array,
+    *,
+    dz: float,
+    wavelength: float,
+    n_ref: float,
+    complex_dtype: Any | None = None,
+    xp: Any | None = None,
+) -> Array:
+    """Full scalar diffraction, including longitudinal carrier phase.
+
+    Frequencies are unshifted ``fftfreq`` cycles/um, with ``fxy2 = fx**2+fy**2``.
+    For q = 1-(wavelength/n_ref)**2*fxy2 >= 0, return exp(i*k*dz*sqrt(q));
+    otherwise return zero, for either sign of dz (also at dz=0). Grazing q=0
+    is retained. Negative distance is an inverse only on retained modes.
+
+    Construct q and phase in backend float64, then cast to the requested
+    complex64/complex128 optical precision. This avoids float32 cancellation
+    during construction; cutoff uses q>=0 without an epsilon. Input frequency
+    rounding still belongs to the supplied grid. Only bounded transverse
+    arrays are created, with no device-to-host transfer or scalar reduction.
+    """
+    xp = _xp_from(fxy2, xp=xp)
+    distance, wavelength, index = float(dz), float(wavelength), float(n_ref)
+    if not all(np.isfinite(v) for v in (distance, wavelength, index)):
+        raise ValueError("distance, wavelength and n_ref must be finite")
+    if wavelength <= 0.0 or index <= 0.0:
+        raise ValueError("wavelength and n_ref must be positive")
+    frequencies = xp.asarray(fxy2)
+    dtype = np.dtype(complex_dtype if complex_dtype is not None else (
+        np.complex64 if frequencies.dtype == np.dtype('float32') else np.complex128
+    ))
+    if dtype not in (np.dtype('complex64'), np.dtype('complex128')):
+        raise ValueError("optical complex_dtype must be complex64 or complex128")
+    q = 1.0 - (wavelength / index) ** 2 * frequencies.astype(xp.float64, copy=False)
+    phase = (2.0 * np.pi * index * distance / wavelength) * xp.sqrt(xp.maximum(q, 0.0))
+    return xp.where(q >= 0.0, xp.exp(1j * phase), 0.0).astype(dtype, copy=False)
+
+
 def hop_linear(A: Array, kernel: Array, *, xp: Any | None = None) -> Array:
     """Apply one linear Fourier hop to every channel."""
 
@@ -302,6 +341,7 @@ __all__ = [
     "channel_intensities",
     "total_intensity",
     "linear_kernel",
+    "scalar_angular_spectrum_kernel",
     "hop_linear",
     "hop_linear_inplace",
     "apply_response_screen_inplace",

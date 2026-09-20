@@ -466,20 +466,33 @@ kx = k_medium*sin(theta)*cos(phi)
 ky = k_medium*sin(theta)*sin(phi)
 ```
 
-The actual LCProp paraxial kernel is
-`exp(-i*pi*dz*wavelength*(fx^2+fy^2)/n)`. Differentiating its spectral phase
-with respect to transverse spatial frequency gives the numerical envelope
-slopes
+Canonical PR diffraction uses the full scalar angular-spectrum kernel
+`exp(i*dz*sqrt(k_medium**2-kx**2-ky**2))` on propagating modes, including
+longitudinal carrier phase. Nonpropagating modes are suppressed for both signs
+of distance; grazing modes are retained. Narrow-packet slopes are
 
 ```text
-dx/dz = kx/k_medium = sin(theta)*cos(phi)
-dy/dz = ky/k_medium = sin(theta)*sin(phi).
+kz = sqrt(k_medium**2-kx**2-ky**2)
+dx/dz = kx/kz = tan(theta)*cos(phi)
+dy/dz = ky/kz = tan(theta)*sin(phi).
 ```
 
-Consequently, launch centers for a crossing at `(xc, yc, zc)` are
-`x0=xc-zc*kx/k_medium` and `y0=yc-zc*ky/k_medium`. They deliberately do not
-use the exact-ray `tan(theta)` slope because that is not the trajectory
-implemented by the selected paraxial kernel.
+Launch centers for a crossing at `(xc, yc, zc)` are therefore
+`x0=xc-zc*kx/kz` and `y0=yc-zc*ky/kz`. Phase gradients remain the declared
+launch quantities. Grazing/nonpropagating carrier centers have no finite
+forward trajectory and are rejected by the geometry helper. The optical
+kernel's separate retained-mode policy still applies to broadband fields.
+Gaussian radius/focus estimates retain the paraxial Gaussian launch model;
+they are approximate envelope preflight estimates, not a scalar focus guarantee.
+
+This is a pre-release scientific migration of ordinary PR, including its
+replays, production streaming and marching-static optics. No saved-data or
+checkpoint schema changes are introduced. Historical Image Amplification
+post-processing retains its explicitly paraxial reconstruction/reference
+operator; it is not a matched scalar inverse of new canonical PR propagation.
+The shared Fresnel helper and LC behavior are unchanged. See the
+[optical model contract](../../../docs/science/pr_model_contracts.md) and
+[migration record](../../../docs/development/lcprop_pr_full_angular_spectrum_migration.md).
 
 The periodic plane-wave benchmark uses integer FFT modes `+m` and `-m`, so
 both fields and their `2m` interference grating are continuous across x. With

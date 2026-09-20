@@ -7,7 +7,7 @@ import numpy as np
 from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
-from lcprop.optics.splitstep import linear_kernel
+from lcprop.optics.splitstep import scalar_angular_spectrum_kernel
 from lcprop.pr.scattering import (
     PR_CANONICAL_SCATTERING_V2,
     PRCanonicalScatteringSpec,
@@ -475,7 +475,7 @@ def test_accepted_local_state_replays_one_interval_without_scattering():
         np.fft.fftfreq(request.grid.Nx, d=dx)[:, None] ** 2
         + np.fft.fftfreq(request.grid.Ny, d=dy)[None, :] ** 2
     )
-    kernel = linear_kernel(
+    kernel = scalar_angular_spectrum_kernel(
         fxy2,
         dz=request.grid.dz_um,
         wavelength=0.633,

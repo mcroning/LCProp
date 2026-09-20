@@ -1164,6 +1164,10 @@ def isolate_signal_carrier(field, mask: np.ndarray) -> np.ndarray:
 def _linear_propagate(
     field: np.ndarray, grid, *, distance_um: float, request
 ) -> np.ndarray:
+    """Historical Fresnel analysis, not the inverse of canonical scalar PR.
+
+    Keep legacy image-metric semantics; generic scalar reconstruction is separate.
+    """
     kernel = linear_kernel(
         grid.fxy2_um,
         dz=float(distance_um),

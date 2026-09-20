@@ -16,7 +16,7 @@ from lcprop.optics.launch import OpticalLaunchContext, build_launch
 from lcprop.optics.splitstep import (
     advance_prepared_response,
     hop_linear_inplace,
-    linear_kernel,
+    scalar_angular_spectrum_kernel,
 )
 from lcprop.pr.geometry import (
     PRApertureReport,
@@ -303,12 +303,13 @@ def trace_frozen_pr_state(request: PRRunRequest, E) -> PRPropagationTrace:
     wavelength = float(request.beams.channels[0].wavelength_um)
     Nsub = int(request.solver.optical_substeps)
     dz_substep = float(grid.dz_um) / Nsub
-    kernel = linear_kernel(
+    kernel = scalar_angular_spectrum_kernel(
         grid.fxy2_um,
         dz=dz_substep,
         wavelength=wavelength,
         n_ref=request.material.refractive_index,
         xp=np,
+        complex_dtype=np.complex128,
     )
     z_values = np.arange(grid.Nz + 1, dtype=float) * float(grid.dz_um)
     matched = np.empty((grid.Nz + 1, A.shape[0]), dtype=float)

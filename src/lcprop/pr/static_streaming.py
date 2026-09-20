@@ -28,7 +28,7 @@ from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid, round_nz
 from lcprop.optics.launch import OpticalLaunchContext, build_launch, normalized_power
-from lcprop.optics.splitstep import linear_kernel
+from lcprop.optics.splitstep import scalar_angular_spectrum_kernel
 from lcprop.pr.evolution import hopping_rhs
 from lcprop.pr.optical_response import half_step_response_from_E
 from lcprop.pr.scattering import (
@@ -308,18 +308,9 @@ def legacy_linearized_static_residual_spectral(
 def _legacy_angular_spectrum_kernel(
     grid, *, wavelength_um: float, n_ref: float, xp: Any
 ):
-    argument = 1.0 - (float(wavelength_um) / float(n_ref)) ** 2 * grid.fxy2_um
-    return xp.where(
-        argument >= 0.0,
-        xp.exp(
-            2.0j
-            * math.pi
-            * float(n_ref)
-            * float(grid.dz_um)
-            / float(wavelength_um)
-            * xp.sqrt(xp.maximum(argument, 0.0))
-        ),
-        0.0,
+    # Historical Lie ordering remains distinct; the scalar dispersion is shared.
+    return scalar_angular_spectrum_kernel(
+        grid.fxy2_um, dz=grid.dz_um, wavelength=wavelength_um, n_ref=n_ref, xp=xp,
     )
 
 
@@ -832,12 +823,13 @@ def run_pr_static_streaming(
     tolerances = _resolve_static_tolerances(
         request.solver.coupled, real_dtype=backend.real_dtype
     )
-    kernel = linear_kernel(
+    kernel = scalar_angular_spectrum_kernel(
         grid.fxy2_um,
         dz=grid.dz_um / int(request.solver.coupled.optical_substeps),
         wavelength=wavelength_um,
         n_ref=request.material.refractive_index,
         xp=xp,
+        complex_dtype=backend.complex_dtype,
     )
     legacy_kernel = _legacy_angular_spectrum_kernel(
         grid,

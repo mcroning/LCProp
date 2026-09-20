@@ -14,7 +14,7 @@ from lcprop.core.grid import make_grid
 from lcprop.optics.launch import OpticalLaunchContext, build_launch, normalized_power
 from lcprop.optics.launch_configuration import reject_prepared_launch_conflict
 from lcprop.optics.screens import validate_channel_launch_elements
-from lcprop.optics.splitstep import linear_kernel, total_intensity
+from lcprop.optics.splitstep import scalar_angular_spectrum_kernel, total_intensity
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.longitudinal_cuts import (
     extract_backend_longitudinal_optical_intensity_cuts,
@@ -297,12 +297,13 @@ def run_pr_transverse_timedependent(
     if any(value != wavelengths[0] for value in wavelengths[1:]):
         raise ValueError("transverse PR workflow requires one shared wavelength")
     wavelength_um = wavelengths[0]
-    kernel = linear_kernel(
+    kernel = scalar_angular_spectrum_kernel(
         grid.fxy2_um,
         dz=grid.dz_um / int(request.solver.optical_substeps),
         wavelength=wavelength_um,
         n_ref=request.material.refractive_index,
         xp=xp,
+        complex_dtype=backend.complex_dtype,
     )
     peak_reference = channel_peak_intensity_reference(A0, xp=xp)
     scattering_phase_stack = _canonical_scattering_phase_stack(

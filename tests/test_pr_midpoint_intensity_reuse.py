@@ -9,7 +9,7 @@ from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch import build_launch, normalized_power
-from lcprop.optics.splitstep import linear_kernel
+from lcprop.optics.splitstep import scalar_angular_spectrum_kernel
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.specs import PRMaterialSpec, PRRunRequest, PRSolverOptions
 import lcprop.pr.workflow as workflow
@@ -69,7 +69,7 @@ def _case(*, xp, nz: int, optical_substeps: int, groups: tuple[str, ...]):
     launch = build_launch(beams, grid, complex_dtype=complex_dtype)
     A0 = launch.A0.copy()
     peak_reference = channel_peak_intensity_reference(A0, xp=xp)
-    kernel = linear_kernel(
+    kernel = scalar_angular_spectrum_kernel(
         grid.fxy2_um,
         dz=grid.dz_um / optical_substeps,
         wavelength=0.633,

@@ -21,7 +21,7 @@ from lcprop.optics.launch_configuration import (
     reject_prepared_launch_conflict,
 )
 from lcprop.optics.screens import ChannelLaunchElements
-from lcprop.optics.splitstep import linear_kernel
+from lcprop.optics.splitstep import scalar_angular_spectrum_kernel
 from lcprop.pr.carrier_power import carrier_channels_from_beams
 from lcprop.pr.evolution import hopping_rhs
 from lcprop.pr.reduced_linearized import (
@@ -442,12 +442,13 @@ def run_pr_static(
             raise ValueError("initial_E must contain only finite values")
 
     wavelength_um = wavelengths[0]
-    kernel = linear_kernel(
+    kernel = scalar_angular_spectrum_kernel(
         grid.fxy2_um,
         dz=grid.dz_um / int(request.solver.optical_substeps),
         wavelength=wavelength_um,
         n_ref=request.material.refractive_index,
         xp=xp,
+        complex_dtype=backend.complex_dtype,
     )
     peak_reference = channel_peak_intensity_reference(A0, xp=xp)
     groups = request.beams.coherence_groups

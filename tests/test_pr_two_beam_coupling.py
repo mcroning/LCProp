@@ -8,7 +8,7 @@ from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch import build_launch
-from lcprop.optics.splitstep import hop_linear_inplace, linear_kernel
+from lcprop.optics.splitstep import hop_linear_inplace, scalar_angular_spectrum_kernel
 from lcprop.pr.coupling import (
     FiniteGaussianCouplingSpec,
     PlaneWaveCouplingSpec,
@@ -37,7 +37,7 @@ def _axis_centroid(field, coordinate, *, axis):
      ((math.pi / 2.0, 3.0 * math.pi / 2.0), 1, "tilt_y_rad_per_um")),
     ids=("positive-negative-x", "positive-negative-y"),
 )
-def test_linear_kernel_rays_cross_at_requested_midpoint(azimuths, axis, tilt_name):
+def test_scalar_angular_spectrum_kernel_rays_cross_at_requested_midpoint(azimuths, axis, tilt_name):
     wavelength = 0.633
     index = 1.6
     length = 80.0
@@ -83,7 +83,7 @@ def test_linear_kernel_rays_cross_at_requested_midpoint(azimuths, axis, tilt_nam
         grid,
         complex_dtype=np.complex128,
     ).A0.copy()
-    kernel = linear_kernel(
+    kernel = scalar_angular_spectrum_kernel(
         grid.fxy2_um,
         dz=grid.dz_um,
         wavelength=wavelength,

@@ -14,7 +14,7 @@ from lcprop.core.grid import make_grid
 from lcprop.optics.launch import OpticalLaunchContext, build_launch, normalized_power
 from lcprop.optics.splitstep import (
     advance_prepared_response,
-    linear_kernel,
+    scalar_angular_spectrum_kernel,
     total_intensity,
 )
 from lcprop.pr.live_results import PRLivePreviewPolicy, reduced_pr_live_snapshot
@@ -478,12 +478,13 @@ def run_pr_timedependent(
 
     wavelength_um = wavelengths[0]
     dz_substep = grid.dz_um / int(request.solver.optical_substeps)
-    kernel = linear_kernel(
+    kernel = scalar_angular_spectrum_kernel(
         grid.fxy2_um,
         dz=dz_substep,
         wavelength=wavelength_um,
         n_ref=request.material.refractive_index,
         xp=grid.xp,
+        complex_dtype=backend.complex_dtype,
     )
 
     segment_total_steps = int(request.solver.Nt)

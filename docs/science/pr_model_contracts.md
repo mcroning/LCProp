@@ -24,6 +24,46 @@ The scalar optical response uses the declared active space-charge component.
 The current full-transverse v1 projection is `E_active = E_x`; `E_y` remains a
 material field and diagnostic rather than an extra scalar optical term.
 
+## Canonical PR optical diffraction
+
+Canonical PR uses full scalar angular-spectrum diffraction. For vacuum
+wavelength lambda, reference index n, and unshifted transverse FFT frequencies
+fx, fy in cycles/um:
+
+```text
+k = 2*pi*n/lambda
+q = 1 - (lambda/n)**2 * (fx**2 + fy**2)
+H(d) = exp(i*k*d*sqrt(q)) for q >= 0; otherwise 0
+```
+
+The longitudinal carrier phase is retained. Grazing q=0 is retained without
+an epsilon; nonpropagating modes are discarded, also for negative or zero
+distance. Forward/backward composition is identity only on retained spectral
+support. It cannot recover cutoff, aperture or absorption losses.
+
+The [shared primitive](../../src/lcprop/optics/splitstep.py) constructs the
+cutoff and phase in backend float64, without host transfer, then returns the
+requested complex64/complex128 optical dtype. Cutoff refers to the supplied
+frequency grid, including its rounding. Near-cutoff phase is ill-conditioned;
+CPU local tests do not constitute GPU commissioning.
+
+The four ordinary workflows, marching static, streaming production, and
+coupling trace/references use this same dispersion for substeps and replay.
+Response half-screens, optical-substep counts, sponge/Tukey/scattering placement,
+source cadence, material updates and acceptance logic are unchanged.
+This remains scalar homogeneous diffraction plus local material phase screens,
+not a full-vector or exact inhomogeneous Helmholtz solver.
+
+Launch phase gradients retain their rad/um meaning. Narrow-packet trajectories
+use Kx/Kz, Ky/Kz; Gaussian focus/radius construction remains the existing
+paraxial entrance-field prescription, without an exact scalar-focus claim.
+
+This pre-release migration does not preserve accidental ordinary Fresnel
+behavior through a selector, checkpoint version, or saved-data migration.
+Historical Image Amplification analysis keeps its paraxial post-processing
+contract for now; it is not a scalar inverse. LC and its existing helpers are
+not migrated. See the [development record](../development/lcprop_pr_full_angular_spectrum_migration.md).
+
 ## Reduced x-only nonlinear model
 
 The reduced state is the normalized space-charge field `E`. Material

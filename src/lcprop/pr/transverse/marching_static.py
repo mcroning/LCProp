@@ -23,7 +23,7 @@ from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch import OpticalLaunchContext, build_launch, normalized_power
 from lcprop.optics.boundaries import TransverseBoundarySpec
-from lcprop.optics.splitstep import advance_prepared_response, linear_kernel
+from lcprop.optics.splitstep import advance_prepared_response, scalar_angular_spectrum_kernel
 from lcprop.pr.optical_response import half_step_response_from_E
 from lcprop.pr.scattering import (
     PRCanonicalScatteringSpec,
@@ -572,12 +572,13 @@ def run_pr_transverse_static_marching(
     if any(value != wavelengths[0] for value in wavelengths[1:]):
         raise ValueError("transverse PR workflow requires one shared wavelength")
     wavelength_um = wavelengths[0]
-    kernel = linear_kernel(
+    kernel = scalar_angular_spectrum_kernel(
         grid.fxy2_um,
         dz=grid.dz_um / int(request.solver.optical_substeps),
         wavelength=wavelength_um,
         n_ref=request.material.refractive_index,
         xp=xp,
+        complex_dtype=precision.optical_complex_dtype,
     ).astype(precision.optical_complex_dtype, copy=False)
     peak_reference = channel_peak_intensity_reference(A0, xp=xp)
     request_fingerprint = _request_fingerprint(

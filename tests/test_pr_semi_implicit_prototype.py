@@ -7,7 +7,7 @@ from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
 from lcprop.optics.launch import build_launch, normalized_power
-from lcprop.optics.splitstep import linear_kernel
+from lcprop.optics.splitstep import scalar_angular_spectrum_kernel
 from lcprop.pr.evolution import (
     diffusion_implicit_split,
     euler_step,
@@ -72,7 +72,7 @@ def _coupled_optical_case():
     launch = build_launch(beams, grid, complex_dtype=np.complex128)
     A0 = launch.A0.copy()
     peak_reference = channel_peak_intensity_reference(A0, xp=np)
-    kernel = linear_kernel(
+    kernel = scalar_angular_spectrum_kernel(
         grid.fxy2_um,
         dz=grid.dz_um,
         wavelength=beams.channels[0].wavelength_um,

@@ -10,7 +10,7 @@ from lcprop.optics.launch import OpticalLaunchContext, build_launch
 from lcprop.optics.splitstep import (
     advance_prepared_response,
     hop_linear,
-    linear_kernel,
+    scalar_angular_spectrum_kernel,
 )
 from lcprop.pr.evolution import (
     centered_difference_symbols,
@@ -378,7 +378,7 @@ def test_zero_pr_response_equals_pure_diffraction():
         real_dtype=np.float64,
     )
     Nsub = 3
-    kernel = linear_kernel(
+    kernel = scalar_angular_spectrum_kernel(
         grid.fxy2_um,
         dz=grid.dz_um / Nsub,
         wavelength=0.633,
@@ -437,7 +437,7 @@ def test_real_pr_phase_response_conserves_optical_power():
     E = rng.normal(size=(14, 9))
     fxy2 = np.fft.fftfreq(14, d=1.0)[:, None] ** 2
     fxy2 = fxy2 + np.fft.fftfreq(9, d=1.0)[None, :] ** 2
-    kernel = linear_kernel(
+    kernel = scalar_angular_spectrum_kernel(
         fxy2,
         dz=0.4,
         wavelength=0.633,
@@ -483,7 +483,7 @@ def test_frozen_response_lie_and_strang_converge_but_strang_is_more_accurate():
 
     def propagate(nsteps, *, strang):
         dz = length / nsteps
-        kernel = linear_kernel(
+        kernel = scalar_angular_spectrum_kernel(
             fxy2,
             dz=dz,
             wavelength=0.633,
@@ -574,8 +574,11 @@ def test_small_plane_wave_workflow_matches_analytic_uniform_prediction():
         / intensity
         * (1.0 - multiplier**request.solver.Nt)
     )
+    # Full scalar diffraction retains exp(i*k*L); the material phase is unchanged.
+    k = 2.0 * np.pi * request.material.refractive_index / request.beams.channels[0].wavelength_um
+    distance = round(request.grid.z_length_um / request.grid.dz_um) * request.grid.dz_um
     phase_expected = np.exp(
-        -2j * request.material.gain_length_product * E_expected
+        1j * k * distance - 2j * request.material.gain_length_product * E_expected
     )
 
     assert result.diagnostics["backend"]["backend"] == "numpy"
@@ -668,8 +671,11 @@ def test_semi_implicit_plane_wave_workflow_matches_heun_prediction():
     multiplier = 1.0 - dt_intensity + 0.5 * dt_intensity**2
     equilibrium = request.material.applied_field * background / intensity
     E_expected = equilibrium * (1.0 - multiplier**request.solver.Nt)
+    # Full scalar diffraction retains exp(i*k*L); the material phase is unchanged.
+    k = 2.0 * np.pi * request.material.refractive_index / request.beams.channels[0].wavelength_um
+    distance = round(request.grid.z_length_um / request.grid.dz_um) * request.grid.dz_um
     phase_expected = np.exp(
-        -2j * request.material.gain_length_product * E_expected
+        1j * k * distance - 2j * request.material.gain_length_product * E_expected
     )
 
     assert result.diagnostics["integrator"] == PR_SEMI_IMPLICIT_INTEGRATOR
