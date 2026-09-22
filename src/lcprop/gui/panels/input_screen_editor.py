@@ -60,7 +60,11 @@ def _array_pixmap(values, *, xy_axes: bool, size: QSize) -> QPixmap:
     if pixels.ndim != 2 or not np.all(np.isfinite(pixels)):
         raise ValueError("preview values must be a finite two-dimensional array")
     if xy_axes:
-        pixels = pixels.T
+        # Canonical fields are [x, y], with both coordinates increasing.
+        # QImage is [row, column], with rows increasing downward: the top
+        # row must therefore contain the largest y, and columns increase x.
+        # This is the Qt equivalent of ImageView's transpose + origin='lower'.
+        pixels = pixels[:, ::-1].T
     minimum = float(np.min(pixels))
     maximum = float(np.max(pixels))
     if maximum > minimum:

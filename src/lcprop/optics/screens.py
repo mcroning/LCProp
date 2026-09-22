@@ -251,8 +251,11 @@ def prepare_intensity_raster_transmission(
     """Prepare a passive intensity raster on an explicitly selected grid.
 
     The version-1 policy preserves the established image-amplification order:
-    max normalization, optional inversion, even-square padding, image-to-``xy``
-    rotation, nearest-neighbor resampling, and explicit exterior transmission.
+    max normalization, optional inversion, even-square padding, raster-to-``xy``
+    conversion, nearest-neighbor resampling, and explicit exterior transmission.
+    Raster rows run downward and columns rightward. Canonical field axes are
+    increasing physical x and y: raster [row, column] therefore maps to
+    [column, side - 1 - row], on the laboratory entrance plane.
     """
 
     placement.validate()
@@ -273,7 +276,10 @@ def prepare_intensity_raster_transmission(
         y_offset : y_offset + image.shape[0],
         x_offset : x_offset + image.shape[1],
     ] = image
-    image_xy = np.rot90(square)
+    # Convert once from top-down raster rows to ascending physical [x, y].
+    # rot90(square) instead reverses columns, rotating the physical screen
+    # by 180 degrees relative to the source raster.
+    image_xy = square[::-1, :].T
 
     target_nx = max(2, int(round(float(placement.width_um) / float(grid.dx_um))))
     target_ny = max(2, int(round(float(placement.height_um) / float(grid.dy_um))))
