@@ -1,4 +1,5 @@
 from __future__ import annotations
+from lcprop.optics.launch import OpticalLaunchContext
 
 from dataclasses import replace
 import hashlib
@@ -74,30 +75,30 @@ def _grid() -> GridSpec:
 def _beams(n_channels: int = 2) -> BeamStack:
     base = (
         BeamChannel(
-            name="one",
+            name='one',
             wavelength_um=0.633,
             power_mW=3.0,
-            waist_x_um=6.0,
-            waist_y_um=5.0,
             x0_um=-2.0,
-            coherence_group="one",
+            coherence_group='one',
+            w1_um=6.0,
+            w2_um=5.0,
         ),
         BeamChannel(
-            name="two",
+            name='two',
             wavelength_um=0.633,
             power_mW=1.0,
-            waist_x_um=6.0,
-            waist_y_um=5.0,
             x0_um=2.0,
-            coherence_group="two",
+            coherence_group='two',
+            w1_um=6.0,
+            w2_um=5.0,
         ),
         BeamChannel(
-            name="three",
+            name='three',
             wavelength_um=0.633,
             power_mW=2.0,
-            waist_x_um=5.0,
-            waist_y_um=4.0,
-            coherence_group="three",
+            coherence_group='three',
+            w1_um=5.0,
+            w2_um=4.0,
         ),
     )
     return BeamStack(channels=base[:n_channels])
@@ -148,6 +149,7 @@ def _independent(request):
         grid,
         complex_dtype=np.complex128,
         launch_elements=request.launch_elements,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
     )
 
 
@@ -181,8 +183,8 @@ def test_reduced_td_accepts_any_and_multiple_screened_channels_exactly():
     assert np.array_equal(result.A_initial[1], incident_result.A_initial[1])
     assert not np.array_equal(result.A_initial[2], incident_result.A_initial[2])
     assert result.launch_summary["physical_channel_powers_mW"] == [3.0, 1.0, 2.0]
-    assert result.launch_summary["channel_throughput_fractions"][1] == pytest.approx(1.0)
-    assert result.launch_summary["post_element_total_power_mW"] < 6.0
+    assert result.launch_summary["channel_throughput_fractions"][1] == pytest.approx(incident_result.launch_summary["channel_throughput_fractions"][1])
+    assert sum(result.launch_summary["power_normalization"]["post_screen_central_direction_estimate_mW"]) < 6.0
 
 
 def test_in_memory_td_continuation_preserves_prepared_screened_launch_once():
@@ -236,8 +238,8 @@ def test_transverse_static_receives_exact_screened_launch():
     independent = _independent(request)
     assert np.array_equal(result.A_initial, independent.A0)
     assert result.source_intensity_stack.shape == (1, 12, 8)
-    assert result.launch_summary["channel_throughput_fractions"][0] == pytest.approx(1.0)
-    assert result.launch_summary["channel_throughput_fractions"][1] < 1.0
+    assert result.launch_summary["power_normalization"]["screen_transmission_of_captured"][0] == pytest.approx(1.0)
+    assert result.launch_summary["power_normalization"]["requested_to_post_screen_estimate"][1] < 1.0
 
 
 @pytest.mark.parametrize("kind", ("td", "static", "transverse"))

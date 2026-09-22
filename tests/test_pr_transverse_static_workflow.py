@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from dataclasses import replace
 
 import numpy as np
@@ -43,9 +45,9 @@ def _request(
         ),
         beams=BeamStack(channels=(BeamChannel(
             wavelength_um=0.633,
-            waist_x_um=10.0,
-            waist_y_um=10.0,
-            coherence_group="transverse-static",
+            coherence_group='transverse-static',
+            w1_um=10.0,
+            w2_um=10.0,
         ),)),
         material=PRMaterialSpec(
             dark_intensity=0.4,
@@ -73,17 +75,19 @@ def _two_beam_request(*, coherent: bool):
         beams=BeamStack(channels=(
             replace(
                 request.beams.channels[0],
-                name="beam-a",
+                name='beam-a',
                 x0_um=-3.0,
-                tilt_x_rad_per_um=0.15,
                 coherence_group=groups[0],
+                theta_ext_rad=math.asin(math.hypot(0.15, request.beams.channels[0].tilt_y_rad_per_um) * request.beams.channels[0].wavelength_um / (2 * math.pi * request.beams.channels[0].n_ext)),
+                phi_rad=math.atan2(request.beams.channels[0].tilt_y_rad_per_um, 0.15) % (2 * math.pi),
             ),
             replace(
                 request.beams.channels[0],
-                name="beam-b",
+                name='beam-b',
                 x0_um=3.0,
-                tilt_x_rad_per_um=-0.15,
                 coherence_group=groups[1],
+                theta_ext_rad=math.asin(math.hypot(-0.15, request.beams.channels[0].tilt_y_rad_per_um) * request.beams.channels[0].wavelength_um / (2 * math.pi * request.beams.channels[0].n_ext)),
+                phi_rad=math.atan2(request.beams.channels[0].tilt_y_rad_per_um, -0.15) % (2 * math.pi),
             ),
         )),
     )

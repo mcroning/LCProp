@@ -749,9 +749,14 @@ class InputScreenEditor(QGroupBox):
                 np.asarray(launch.channel_throughput_fractions)[index]
             )
             self.incident_power.setText(f"{incident:.9g}")
-            self.transmitted_power.setText(f"{transmitted:.9g}")
-            self.throughput.setText(f"{throughput:.9g}")
-            self.status.clear()
+            qualification = launch.power_metadata["post_screen_spectral_qualification"][index]
+            available = qualification["narrow_band_available"]
+            self.transmitted_power.setText(f"{transmitted:.9g}" if available else "Unavailable")
+            self.throughput.setText(f"{throughput:.9g}" if available else "Unavailable")
+            self.status.setText(
+                "Central-direction scalar flux estimate; includes aperture loss."
+                if available else "; ".join(qualification["reasons"])
+            )
         except Exception as exc:
             self.incident_power.setText("—")
             self.transmitted_power.setText("—")

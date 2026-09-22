@@ -132,42 +132,39 @@ def _launchplane_stack():
     model = pytest.importorskip("launchplane.model")
     return model.BeamStackDefinition(
         beams=(
-            model.BeamDefinition.from_launch_angles(
-                name="angle-originated",
+            model.BeamDefinition(
+                name='angle-originated',
                 wavelength_um=0.633,
                 power_mW=1.25,
                 x_um=-3.0,
                 y_um=4.0,
-                waist_x_um=7.0,
-                waist_y_um=8.0,
-                angle_x_rad=0.031,
-                angle_y_rad=-0.017,
-                launch_medium_index=1.0,
                 phase_rad=0.2,
-                coherence_group="laser-a",
+                coherence_group='laser-a',
+                w1_um=7.0,
+                w2_um=8.0,
+                theta_ext_rad=math.atan(math.hypot(math.tan(0.031), math.tan(-0.017))),
+                phi_rad=math.atan2(math.tan(-0.017), math.tan(0.031)) % (2 * math.pi),
+                n_ext=1.0,
             ),
             model.BeamDefinition(
-                name="legacy-phase-slope",
+                name='legacy-phase-slope',
                 wavelength_um=0.532,
                 power_mW=0.75,
                 x_um=6.0,
                 y_um=-2.0,
-                waist_x_um=9.0,
-                waist_y_um=10.0,
-                tilt_x_rad_per_um=0.712345678901234,
-                tilt_y_rad_per_um=-0.412345678901234,
-                launch_medium_index=None,
-                launch_input_mode="transverse_wavevector",
                 phase_rad=-0.3,
-                coherence_group="laser-b",
+                coherence_group='laser-b',
+                w1_um=9.0,
+                w2_um=10.0,
+                theta_ext_rad=math.asin(math.hypot(0.712345678901234, -0.412345678901234) * 0.532 / (2 * math.pi)),
+                phi_rad=math.atan2(-0.412345678901234, 0.712345678901234) % (2 * math.pi),
             ),
             model.BeamDefinition(
-                name="disabled-editor-beam",
-                tilt_x_rad_per_um=1.1,
-                launch_medium_index=None,
-                launch_input_mode="transverse_wavevector",
-                coherence_group="unused",
+                name='disabled-editor-beam',
+                coherence_group='unused',
                 enabled=False,
+                theta_ext_rad=math.asin(math.hypot(1.1, 0.0) * 0.633 / (2 * math.pi)),
+                phi_rad=math.atan2(0.0, 1.1) % (2 * math.pi),
             ),
         )
     )
@@ -178,30 +175,30 @@ def _beams():
     return BeamStack(
         channels=(
             BeamChannel(
-                name="angle-originated",
+                name='angle-originated',
                 wavelength_um=0.633,
                 power_mW=1.25,
                 x0_um=-3.0,
                 y0_um=4.0,
-                waist_x_um=7.0,
-                waist_y_um=8.0,
-                tilt_x_rad_per_um=qx,
-                tilt_y_rad_per_um=qy,
                 phase_rad=0.2,
-                coherence_group="laser-a",
+                coherence_group='laser-a',
+                w1_um=7.0,
+                w2_um=8.0,
+                theta_ext_rad=math.atan(math.hypot(math.tan(0.031), math.tan(-0.017))),
+                phi_rad=math.atan2(math.tan(-0.017), math.tan(0.031)) % (2 * math.pi),
             ),
             BeamChannel(
-                name="legacy-phase-slope",
+                name='legacy-phase-slope',
                 wavelength_um=0.532,
                 power_mW=0.75,
                 x0_um=6.0,
                 y0_um=-2.0,
-                waist_x_um=9.0,
-                waist_y_um=10.0,
-                tilt_x_rad_per_um=0.712345678901234,
-                tilt_y_rad_per_um=-0.412345678901234,
                 phase_rad=-0.3,
-                coherence_group="laser-b",
+                coherence_group='laser-b',
+                w1_um=9.0,
+                w2_um=10.0,
+                theta_ext_rad=math.asin(math.hypot(0.712345678901234, -0.412345678901234) * 0.532 / (2 * math.pi)),
+                phi_rad=math.atan2(-0.412345678901234, 0.712345678901234) % (2 * math.pi),
             ),
         )
     )
@@ -221,22 +218,12 @@ def _lc_beams():
     )
 
 
-def test_legacy_canonical_beam_payload_defaults_to_entrance_gaussian():
+def test_obsolete_canonical_beam_payload_requires_recreation():
     payload = encode_beam_stack(_beams())
-    new_fields = (
-        "profile",
-        "waist_x_at_focus_um",
-        "waist_y_at_focus_um",
-        "focus_z_um",
-        "focus_at_interaction_midpoint",
-    )
     for channel in payload["channels"]:
-        for name in new_fields:
-            del channel[name]
-
-    restored = decode_beam_stack(payload)
-
-    assert restored == _beams()
+        channel.pop("n_ext")
+    with pytest.raises(ValueError, match="physical launch"):
+        decode_beam_stack(payload)
 
 
 def _presentation() -> dict:
@@ -545,11 +532,11 @@ def test_initial_request_codecs_round_trip_exactly(
     assert document["format"] == EXPERIMENT_FORMAT
     assert document["schema_version"] == EXPERIMENT_SCHEMA_VERSION
     assert document["request_payload"]["beams"]["channels"][0][
-        "tilt_x_rad_per_um"
-    ] == request.beams.channels[0].tilt_x_rad_per_um
+        "theta_ext_rad"
+    ] == request.beams.channels[0].theta_ext_rad
     assert document["request_payload"]["beams"]["channels"][1][
-        "tilt_x_rad_per_um"
-    ] == 0.712345678901234
+        "theta_ext_rad"
+    ] == request.beams.channels[1].theta_ext_rad
     assert path.read_text(encoding="utf-8").endswith("\n")
     assert not (tmp_path / f"{workflow_id}.lcprop.json.tmp").exists()
 
@@ -599,9 +586,8 @@ def test_previous_experiment_schema_without_optical_boundary_defaults_to_periodi
     del document["request_payload"]["optical_boundary"]
     path.write_text(json.dumps(document), encoding="utf-8")
 
-    loaded = load_experiment(path, expected_material_id=material_id)
-
-    assert loaded.request.optical_boundary == TransverseBoundarySpec()
+    with pytest.raises(ValueError, match="unsupported .* experiment request schema"):
+        load_experiment(path, expected_material_id=material_id)
 
 
 def test_reduced_td_schema_five_without_scattering_migrates_to_none(tmp_path):
@@ -618,9 +604,8 @@ def test_reduced_td_schema_five_without_scattering_migrates_to_none(tmp_path):
     del document["request_payload"]["scattering"]
     path.write_text(json.dumps(document), encoding="utf-8")
 
-    loaded = load_experiment(path, expected_material_id=PR_MATERIAL_ID)
-
-    assert loaded.request.scattering is None
+    with pytest.raises(ValueError, match="unsupported PR experiment request schema"):
+        load_experiment(path, expected_material_id=PR_MATERIAL_ID)
 
 
 @pytest.mark.parametrize(
@@ -1054,10 +1039,10 @@ def test_launchplane_presentation_round_trip_preserves_modes_and_disabled_beam(
 
     assert loaded.presentation_payload == _presentation()
     beams = loaded.presentation_payload["beam_editor"]["beam_stack"]["beams"]
-    assert beams[0]["launch_input_mode"] == "angle"
-    assert beams[0]["launch_medium_index"] == 1.0
-    assert beams[1]["launch_input_mode"] == "transverse_wavevector"
-    assert beams[1]["launch_medium_index"] is None
+    assert beams[0]["n_ext"] == 1.0
+    assert beams[1]["n_ext"] == 1.0
+    assert "tilt_x_rad_per_um" not in beams[0]
+    assert "launch_input_mode" not in beams[0]
     assert beams[2]["enabled"] is False
 
 
@@ -1065,7 +1050,7 @@ def test_launchplane_presentation_cannot_override_canonical_q(tmp_path):
     request = _pr_timedependent_request()
     presentation = _presentation()
     presentation["beam_editor"]["beam_stack"]["beams"][0][
-        "tilt_x_rad_per_um"
+        "theta_ext_rad"
     ] += 0.01
 
     with pytest.raises(ExperimentPresentationError, match="disagree"):
@@ -1088,7 +1073,7 @@ def test_launchplane_presentation_cannot_override_canonical_q(tmp_path):
     document = json.loads(path.read_text(encoding="utf-8"))
     document["presentation_payload"]["beam_editor"]["beam_stack"]["beams"][
         0
-    ]["tilt_x_rad_per_um"] += 0.01
+    ]["theta_ext_rad"] += 0.01
     path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(ExperimentPresentationError, match="disagree"):
         load_experiment(path)

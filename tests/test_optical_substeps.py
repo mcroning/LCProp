@@ -64,12 +64,7 @@ def _request(*, strategy="fixed_theta", runtime=None, beams=None):
         beams=beams
         or BeamStack(
             channels=(
-                BeamChannel(
-                    wavelength_um=0.633,
-                    power_mW=0.05,
-                    waist_x_um=3.0,
-                    waist_y_um=3.0,
-                ),
+                BeamChannel(wavelength_um=0.633, power_mW=0.05, w1_um=3.0, w2_um=3.0),
             )
         ),
         solver=StaticSolverOptions(
@@ -326,20 +321,8 @@ def test_substep_planner_uses_shortest_wavelength_but_lc_rejects_mixed_stack():
 
     beams = BeamStack(
         channels=(
-            BeamChannel(
-                name="long",
-                wavelength_um=1.064,
-                power_mW=0.025,
-                waist_x_um=3.0,
-                waist_y_um=3.0,
-            ),
-            BeamChannel(
-                name="short",
-                wavelength_um=0.532,
-                power_mW=0.025,
-                waist_x_um=3.0,
-                waist_y_um=3.0,
-            ),
+            BeamChannel(name='long', wavelength_um=1.064, power_mW=0.025, w1_um=3.0, w2_um=3.0),
+            BeamChannel(name='short', wavelength_um=0.532, power_mW=0.025, w1_um=3.0, w2_um=3.0),
         )
     )
     with pytest.raises(ValueError, match="same wavelength"):

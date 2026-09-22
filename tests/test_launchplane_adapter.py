@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 
 import builtins
 import os
@@ -29,148 +30,25 @@ def launchplane_model():
     )
 
 
-def test_one_enabled_beam_maps_field_for_field(launchplane_model):
+def test_physical_intent_maps_and_round_trips_field_for_field(launchplane_model):
     beam = launchplane_model.BeamDefinition(
-        name="probe",
-        wavelength_um=0.532,
-        power_mW=2.5,
-        x_um=1.25,
-        y_um=-3.5,
-        waist_x_um=4.0,
-        waist_y_um=5.0,
-        tilt_x_rad_per_um=0.01,
-        tilt_y_rad_per_um=-0.02,
-        phase_rad=0.75,
-        coherence_group="laser-green",
-        enabled=True,
-    )
-
+        name="probe", wavelength_um=.532, power_mW=2.5, n_ext=1.1,
+        theta_ext_rad=.3, phi_rad=2., w1_um=4., w2_um=5., psi_rad=.7,
+        x_um=1.25, y_um=-3.5, phase_rad=.75, coherence_group="laser-green")
     channel = beam_definition_to_channel(beam)
-
-    assert channel.name == beam.name
-    assert channel.wavelength_um == beam.wavelength_um
-    assert channel.power_mW == beam.power_mW
-    assert channel.x0_um == beam.x_um
-    assert channel.y0_um == beam.y_um
-    assert channel.waist_x_um == beam.waist_x_um
-    assert channel.waist_y_um == beam.waist_y_um
-    assert channel.tilt_x_rad_per_um == beam.tilt_x_rad_per_um
-    assert channel.tilt_y_rad_per_um == beam.tilt_y_rad_per_um
-    assert channel.phase_rad == beam.phase_rad
-    assert channel.coherence_group == beam.coherence_group
+    for name in ("name", "wavelength_um", "power_mW", "n_ext", "theta_ext_rad",
+                 "phi_rad", "w1_um", "w2_um", "psi_rad", "phase_rad", "coherence_group"):
+        assert getattr(channel, name) == getattr(beam, name)
+    assert (channel.x0_um, channel.y0_um) == (beam.x_um, beam.y_um)
+    assert beam_stack_to_launchplane(BeamStack(channels=(channel,))).beams == (beam,)
+    assert channel.tilt_x_rad_per_um == pytest.approx(2*np.pi/beam.wavelength_um*beam.n_ext*np.sin(.3)*np.cos(2.))
 
 
-def test_external_air_angle_transfers_resolved_wavevector_exactly(
-    launchplane_model,
-):
-    beam = launchplane_model.BeamDefinition.from_launch_angles(
-        wavelength_um=0.633,
-        angle_x_rad=0.1,
-        angle_y_rad=0.0,
-        launch_medium_index=1.0,
-    )
-
-    channel = beam_definition_to_channel(beam)
-
-    assert beam.tilt_x_rad_per_um == pytest.approx(
-        0.990950800381,
-        abs=5e-13,
-    )
-    assert channel.tilt_x_rad_per_um == beam.transverse_wavevector_x_rad_per_um
-    assert channel.tilt_y_rad_per_um == beam.transverse_wavevector_y_rad_per_um
-
-
-def test_legacy_phase_slope_remains_phase_slope(launchplane_model):
-    beam = launchplane_model.BeamDefinition(tilt_x_rad_per_um=0.1)
-
-    channel = beam_definition_to_channel(beam)
-
-    assert beam.launch_input_mode == "transverse_wavevector"
-    assert beam.launch_medium_index is None
-    assert channel.tilt_x_rad_per_um == 0.1
-
-
-def test_lcprop_round_trip_preserves_wavevector_without_air_provenance():
-    stack = BeamStack(
-        channels=(
-            BeamChannel(
-                name="off-axis",
-                tilt_x_rad_per_um=0.73,
-                tilt_y_rad_per_um=-0.41,
-                coherence_group="laser",
-            ),
-        )
-    )
-
-    definition = beam_stack_to_launchplane(stack)
-    rebuilt = beam_stack_definition_to_lcprop(definition)
-    beam = definition.beams[0]
-
-    assert beam.launch_input_mode == "transverse_wavevector"
-    assert beam.launch_medium_index is None
-    assert rebuilt.channels[0].tilt_x_rad_per_um == 0.73
-    assert rebuilt.channels[0].tilt_y_rad_per_um == -0.41
-
-
-def test_focused_launch_intent_round_trips_through_launchplane():
-    channel = BeamChannel(
-        name="focused",
-        profile="focused_gaussian",
-        waist_x_at_focus_um=4.0,
-        waist_y_at_focus_um=7.0,
-        focus_at_interaction_midpoint=True,
-        coherence_group="laser",
-    )
-
-    rebuilt = beam_stack_definition_to_lcprop(
-        beam_stack_to_launchplane(BeamStack(channels=(channel,)))
-    ).channels[0]
-
-    assert rebuilt == channel
-
-
-def test_launchplane_focus_geometry_matches_lcprop_realized_entrance_field(
-    launchplane_model,
-):
-    serialization = pytest.importorskip("launchplane.serialization")
-    assert serialization.SCHEMA_VERSION == 3
-    definition = launchplane_model.BeamDefinition(
-        name="focused",
-        profile="focused_gaussian",
-        waist_x_at_focus_um=5.0,
-        waist_y_at_focus_um=8.0,
-        focus_z_um=-35.0,
-    )
-    channel = beam_definition_to_channel(definition)
-    grid = make_grid(
-        GridSpec(Nx=384, Ny=384, x_aperture_um=192.0, y_aperture_um=192.0),
-        real_dtype=np.float64,
-    )
-    context = OpticalLaunchContext(grid=grid, n_ref=2.1, interaction_length_um=80.0)
-    field = build_launch(
-        BeamStack(channels=(channel,)),
-        grid,
-        complex_dtype=np.complex128,
-        context=context,
-    ).A0[0]
-    _, expected_x, expected_y, _, _ = (
-        launchplane_model.focused_gaussian_entrance_geometry(
-            definition,
-            n_ref=2.1,
-            interaction_length_um=80.0,
-        )
-    )
-    intensity = np.abs(field) ** 2
-    measured_x = 2.0 * np.sqrt(
-        np.sum(np.sum(intensity, axis=1) * grid.x_um**2) / np.sum(intensity)
-    )
-    measured_y = 2.0 * np.sqrt(
-        np.sum(np.sum(intensity, axis=0) * grid.y_um**2) / np.sum(intensity)
-    )
-
-    assert (measured_x, measured_y) == pytest.approx(
-        (expected_x, expected_y), abs=3e-9
-    )
+def test_obsolete_wavevector_and_focused_definitions_are_rejected(launchplane_model):
+    with pytest.raises(TypeError):
+        launchplane_model.BeamDefinition(tilt_x_rad_per_um=.1)
+    with pytest.raises(ValueError, match="collimated"):
+        launchplane_model.BeamDefinition(profile="focused_gaussian")
 
 
 @pytest.mark.parametrize(
@@ -186,13 +64,13 @@ def test_external_angle_phase_gradient_and_paraxial_centroid_slope(
     wavelength_um = 0.633
     z_um = 20.0
     n_ref = 1.5
-    beam = launchplane_model.BeamDefinition.from_launch_angles(
+    beam = launchplane_model.BeamDefinition(
         wavelength_um=wavelength_um,
-        waist_x_um=10.0,
-        waist_y_um=10.0,
-        angle_x_rad=angle_x_rad,
-        angle_y_rad=angle_y_rad,
-        launch_medium_index=1.0,
+        w1_um=10.0,
+        w2_um=10.0,
+        theta_ext_rad=math.atan(math.hypot(math.tan(angle_x_rad), math.tan(angle_y_rad))),
+        phi_rad=math.atan2(math.tan(angle_y_rad), math.tan(angle_x_rad)) % (2 * math.pi),
+        n_ext=1.0,
     )
     channel = beam_definition_to_channel(beam)
     grid = make_grid(
@@ -210,6 +88,7 @@ def test_external_angle_phase_gradient_and_paraxial_centroid_slope(
         BeamStack(channels=(channel,)),
         grid,
         complex_dtype=np.complex128,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
     ).A0
     q = (
         channel.tilt_x_rad_per_um

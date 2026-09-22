@@ -68,9 +68,9 @@ def _request(
         ),
         beams=BeamStack(channels=(BeamChannel(
             wavelength_um=0.633,
-            waist_x_um=waist_um,
-            waist_y_um=waist_um,
-            coherence_group="linearized-production",
+            coherence_group='linearized-production',
+            w1_um=waist_um,
+            w2_um=waist_um,
         ),)),
         material=PRMaterialSpec(
             dark_intensity=0.4,
@@ -288,9 +288,8 @@ def test_linearized_request_persistence_and_transport_are_explicit_and_additive(
     legacy["schema_version"] = 2
     legacy.pop("material_response")
     legacy.pop("optical_boundary")
-    decoded_legacy = decode_pr_transverse_static_request(legacy)
-    assert decoded_legacy.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR
-    assert decoded_legacy.material_response.reference_intensity is None
+    with pytest.raises(ValueError, match="unsupported PR transverse-static experiment request schema"):
+        decode_pr_transverse_static_request(legacy)
 
     portable = encode_pr_transverse_static_transport_request(request)
     decoded = decode_pr_transverse_static_transport_request(

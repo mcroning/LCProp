@@ -52,9 +52,9 @@ def _grid(nx=256, ny=256, nz=2):
 
 BEAMS = BeamStack(channels=(BeamChannel(
     wavelength_um=0.633,
-    waist_x_um=20.0,
-    waist_y_um=20.0,
-    coherence_group="estimate",
+    coherence_group='estimate',
+    w1_um=20.0,
+    w2_um=20.0,
 ),))
 BACKEND = BackendSpec("numpy", "float64", False)
 

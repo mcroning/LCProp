@@ -9,26 +9,36 @@ The corresponding LC equations and numerical semantics are in
 
 ## Beam and input controls
 
-Both applications embed the separate LaunchPlane Product, requiring schema 3
-or newer and Python 3.11 or newer for the complete GUI installation. A beam
-definition contains profile, wavelength, power, position, transverse phase
-gradients, phase, and coherence group. LCProp converts that intent into fields
-on its runtime grid without making LaunchPlane material-aware.
+Both applications require LaunchPlane schema 4 with the host-resolved preview
+interface. Install the coordinated LCProp/LaunchPlane versions together; old
+launch definitions must be recreated, not silently reinterpreted.
 
-Channels with the same explicit coherence group are summed as fields before
-intensity is formed; different groups add as intensities. A two-beam coupling
-study must therefore set coherence groups deliberately. The Request summary
-records the launched interpretation.
+Each beam specifies vacuum wavelength, incident physical power, external index,
+external polar angle and azimuth, external beam-normal 1/e field radii, independent
+roll, entrance-face axis intersection, phase at that intersection, and coherence
+group. Tangential wavevectors are derived. LCProp resolves the internal direction
+and laboratory-face footprint using its material reference index. LaunchPlane
+displays the host-supplied dashed footprints without computing refraction.
 
-Profiles are:
+Only **Collimated Gaussian** physical launch is supported. Focused launch is
+explicitly deferred. Old laboratory-waist, direct-wavevector and uniform-profile
+experiment definitions are rejected. Analytic prepared-field benchmarks remain
+separate from the physical beam editor.
 
-- **Collimated Gaussian**: entrance-plane waists are specified directly with no
-  focusing curvature there. A Gaussian still has a waist; “collimated” does not
-  imply a physically waist-free beam.
-- **Focused Gaussian**: x/y waists are defined at the focus. The signed focus
-  position is relative to the interaction entrance plane and may be upstream.
-- **Uniform**: the consuming grid must make each nonzero transverse phase
-  gradient an exact periodic Fourier mode.
+Requested mW is incident power through the external beam-normal plane. The ideal
+scalar interface transmits unit power without Fresnel coefficients. Finite-grid
+clipping and laboratory screens remove represented power; neither is normalized
+away. A tilted field's unweighted squared-amplitude integral is not physical
+power. Flux estimates carry spectral/sampling qualifications, and unavailable
+physical-power diagnostics state the reason. Existing carrier endpoint ratios
+remain ratios of unweighted carrier norms.
+
+Channels in one coherence group sum as fields before material intensity is formed;
+different groups add as intensities. Source powers are normalized per beam before
+interference. Coherent sums are never renormalized. The interface model is a
+scalar reference, not a vector or anisotropic boundary solution; LC uses its
+ordinary-index reference. Stationary LC eigenmodes remain restricted to normal
+launch.
 
 LC currently disables shared input-screen editing because LC requests do not
 yet carry launch-element plans. PR exposes the supported PR input modes and

@@ -536,11 +536,11 @@ def _workflow_request(*, backend: str, precision: str, scattering: bool):
         ),
         beams=BeamStack(channels=(BeamChannel(
             wavelength_um=0.633,
-            waist_x_um=10.0,
-            waist_y_um=10.0,
-            tilt_x_rad_per_um=0.0,
-            tilt_y_rad_per_um=0.0,
-            coherence_group="transverse-static-gpu",
+            coherence_group='transverse-static-gpu',
+            w1_um=10.0,
+            w2_um=10.0,
+            theta_ext_rad=math.asin(math.hypot(0.0, 0.0) * 0.633 / (2 * math.pi)),
+            phi_rad=math.atan2(0.0, 0.0) % (2 * math.pi),
         ),)),
         material=PRMaterialSpec(
             dark_intensity=0.4,

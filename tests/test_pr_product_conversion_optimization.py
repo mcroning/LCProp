@@ -171,10 +171,10 @@ def _synthetic_static_result() -> PRTransverseStaticRunResult:
             "channels": (
                 {
                     "wavelength_um": 0.633,
-                    "tilt_x_rad_per_um": 0.2,
-                    "tilt_y_rad_per_um": -0.1,
-                    "waist_x_um": 8.0,
-                    "waist_y_um": 7.0,
+                    "theta_ext_rad": float(np.arcsin(np.hypot(.2, -.1)*.633/(2*np.pi))),
+                    "phi_rad": float(np.arctan2(-.1, .2)),
+                    "w1_um": 8.0,
+                    "w2_um": 7.0,
                 },
             ),
         },

@@ -1,3 +1,4 @@
+from lcprop.optics.launch import OpticalLaunchContext
 from dataclasses import replace
 import math
 
@@ -65,7 +66,7 @@ def test_scalar_angular_spectrum_kernel_rays_cross_at_requested_midpoint(azimuth
         transverse_phase_gradient_rad_per_um=positive_tilt,
         wavelength_um=wavelength,
         refractive_index=index,
-    ) == pytest.approx(math.sin(theta))
+    ) == pytest.approx(math.sin(theta)/index)
 
     grid = make_grid(
         GridSpec(
@@ -79,9 +80,10 @@ def test_scalar_angular_spectrum_kernel_rays_cross_at_requested_midpoint(azimuth
         real_dtype=np.float64,
     )
     A = build_launch(
-        BeamStack(channels=channels, coherence="coherent"),
+        BeamStack(channels=channels, coherence='coherent'),
         grid,
         complex_dtype=np.complex128,
+        context=OpticalLaunchContext(grid, index, grid.spec.z_length_um),
     ).A0.copy()
     kernel = scalar_angular_spectrum_kernel(
         grid.fxy2_um,

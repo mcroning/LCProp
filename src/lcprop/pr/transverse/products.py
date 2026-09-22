@@ -6,6 +6,7 @@ from copy import deepcopy
 
 import numpy as np
 
+from lcprop.core.beams import BeamChannel
 from lcprop.optics.farfield import direction_cosine_spectrum
 from lcprop.optics.splitstep import total_intensity
 from lcprop.pr.carrier_power import carrier_power_diagnostic_from_summary
@@ -52,8 +53,8 @@ def _add_carrier_power_diagnostic(diagnostics, result) -> None:
         launch_summary["carrier_channels"] = [
             {
                 "name": str(channel.get("name") or f"Carrier {index + 1}"),
-                "kx_rad_per_um": float(channel["tilt_x_rad_per_um"]),
-                "ky_rad_per_um": float(channel["tilt_y_rad_per_um"]),
+                "kx_rad_per_um": float(BeamChannel(**channel).tilt_x_rad_per_um),
+                "ky_rad_per_um": float(BeamChannel(**channel).tilt_y_rad_per_um),
             }
             for index, channel in enumerate(channels)
         ]
@@ -390,17 +391,17 @@ def _carrier_exclusion_mask(
     for channel in beam_request["channels"]:
         wavelength = float(channel["wavelength_um"])
         k_medium = 2.0 * np.pi * float(refractive_index) / wavelength
-        center_x = float(channel["tilt_x_rad_per_um"]) / k_medium
-        center_y = float(channel["tilt_y_rad_per_um"]) / k_medium
+        center_x = float(BeamChannel(**channel).tilt_x_rad_per_um) / k_medium
+        center_y = float(BeamChannel(**channel).tilt_y_rad_per_um) / k_medium
         half_x = max(
             2.0 * ds_x,
             wavelength
-            / (2.0 * float(refractive_index) * float(channel["waist_x_um"])),
+            / (2.0 * float(refractive_index) * float(channel["w1_um"])),
         )
         half_y = max(
             2.0 * ds_y,
             wavelength
-            / (2.0 * float(refractive_index) * float(channel["waist_y_um"])),
+            / (2.0 * float(refractive_index) * float(channel["w2_um"])),
         )
         carrier_core = (
             np.abs(s_x[:, None] - center_x) <= half_x

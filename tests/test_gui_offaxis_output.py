@@ -34,14 +34,14 @@ def test_exact_gui_offaxis_run_plots_current_final_intensity(monkeypatch):
         BeamStackDefinition(
             beams=(
                 BeamDefinition(
-                    name="off-axis",
+                    name='off-axis',
                     wavelength_um=0.633,
                     power_mW=1.0,
                     x_um=-20.0,
                     y_um=0.0,
-                    waist_x_um=3.0,
-                    waist_y_um=3.0,
-                    coherence_group="laser_A",
+                    coherence_group='laser_A',
+                    w1_um=3.0,
+                    w2_um=3.0,
                 ),
             )
         )
@@ -50,7 +50,7 @@ def test_exact_gui_offaxis_run_plots_current_final_intensity(monkeypatch):
     request = window.build_request()
     channel = request.beams.channels[0]
     assert (channel.x0_um, channel.y0_um) == (-20.0, 0.0)
-    assert (channel.waist_x_um, channel.waist_y_um) == (3.0, 3.0)
+    assert (channel.w1_um, channel.w2_um) == (3.0, 3.0)
     assert request.grid.Nx == request.grid.Ny == 128
     assert request.grid.x_aperture_um == 75.0
     assert request.grid.y_aperture_um == 100.0

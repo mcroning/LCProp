@@ -1,3 +1,4 @@
+from tests.physical_launch_oracles import scalar_lineage_flux, normal_gaussian_norm
 import numpy as np
 
 from lcprop.core.context import GridSpec, LCMaterial, BiasSpec
@@ -20,12 +21,7 @@ def test_run_static_relax_workflow_smoke():
         bias=BiasSpec(theta_bc=0.0),
         beams=BeamStack(
             channels=(
-                BeamChannel(
-                    wavelength_um=0.633,
-                    power_mW=0.1,
-                    waist_x_um=3.0,
-                    waist_y_um=3.0,
-                ),
+                BeamChannel(wavelength_um=0.633, power_mW=0.1, w1_um=3.0, w2_um=3.0),
             )
         ),
         solver=StaticSolverOptions(
@@ -52,9 +48,9 @@ def test_run_static_relax_workflow_smoke():
     assert result.method == "local_self_consistent"
     assert np.isfinite(np.asarray(result.A_final)).all()
     assert np.isfinite(np.asarray(result.theta_final)).all()
-    assert np.isclose(result.power_initial, 1.0, rtol=1e-6)
-    assert np.isclose(result.power_final, 1.0, rtol=1e-5)
-    assert np.isclose(result.physical_power_initial_mW, 0.1, rtol=1e-6)
+    assert np.isclose(result.power_initial, normal_gaussian_norm(request.grid, request.beams), rtol=1e-12)
+    assert np.isclose(result.power_final, result.power_initial, rtol=1e-5)
+    assert np.isclose(result.physical_power_initial_mW, scalar_lineage_flux(result.A_initial, request.grid, request.beams, request.material.no), rtol=1e-12)
     assert result.launch_summary["field_normalization"] == (
-        "sum_channel_integrals_equals_one"
+        "physical_irradiance_carrier_cosine_v1"
     )

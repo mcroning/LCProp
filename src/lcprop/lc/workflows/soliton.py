@@ -104,8 +104,8 @@ def _mode_seed_factor(grid, beams, mode: str, *, xp):
         return None
 
     ch0 = beams.channels[0]
-    wx = max(1e-300, float(getattr(ch0, "waist_x_um", 1.0)))
-    wy = max(1e-300, float(getattr(ch0, "waist_y_um", wx)))
+    wx = max(1e-300, float(getattr(ch0, "w1_um", 1.0)))
+    wy = max(1e-300, float(getattr(ch0, "w2_um", wx)))
 
     X = grid.x_um[:, None]
     Y = grid.y_um[None, :]
@@ -271,6 +271,14 @@ def rayleigh_beta(A, theta, beta_symbol, *, grid, ne: float, no: float, n_ref: f
     return float(asnumpy(xp.real(num / den)))
 
 
+def _validate_stationary_launch(request: SolitonRequest) -> None:
+    """Reject unqualified incidence at execution entry, before runtime creation."""
+    if any(channel.theta_ext_rad != 0 for channel in request.base.beams.channels):
+        raise ValueError(
+            "stationary LC eigenmodes require normal launch; tilted physical launch is not qualified"
+        )
+
+
 def run_soliton(
     request: SolitonRequest,
     *,
@@ -278,6 +286,7 @@ def run_soliton(
     progress_callback=None,
 ) -> SolitonResult:
     request.validate()
+    _validate_stationary_launch(request)
 
     runtime = build_runtime_components(request.base, theta_dt=7.5e-4, mobility=1.0)
     grid = runtime.grid

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from lcprop.optics.launch import OpticalLaunchContext
 
 from pathlib import Path
 
@@ -39,8 +40,8 @@ def _grid():
 def _beams():
     return BeamStack(
         channels=(
-            BeamChannel(name="one", power_mW=3.0, waist_x_um=3.0, waist_y_um=2.0),
-            BeamChannel(name="two", power_mW=1.0, waist_x_um=3.0, waist_y_um=2.0),
+            BeamChannel(name='one', power_mW=3.0, w1_um=3.0, w2_um=2.0),
+            BeamChannel(name='two', power_mW=1.0, w1_um=3.0, w2_um=2.0),
         ),
         coherence="coherent",
     )
@@ -61,21 +62,29 @@ def _screen(samples, *, width_um=14.0, height_um=6.0, boundary="reject"):
 
 def test_no_screen_build_launch_is_bitwise_identical_and_reports_identity_power():
     grid = _grid()
-    default = build_launch(_beams(), grid, complex_dtype=np.complex128)
+    default = build_launch(
+        _beams(),
+        grid,
+        complex_dtype=np.complex128,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
+    )
     explicit = build_launch(
         _beams(),
         grid,
         complex_dtype=np.complex128,
         launch_elements=(),
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
     )
 
     assert np.array_equal(default.A0, explicit.A0)
     assert np.array_equal(default.physical_powers_mW, [3.0, 1.0])
-    assert np.allclose(default.post_element_physical_powers_mW, [3.0, 1.0])
-    assert default.post_element_total_power_mW == pytest.approx(4.0)
-    assert np.allclose(default.channel_throughput_fractions, [1.0, 1.0])
+    capture = float(np.sum(2/(np.pi*3*2)*np.exp(
+        -2*(grid.x_um[:,None]/3)**2-2*(grid.y_um[None,:]/2)**2))*grid.dx_um*grid.dy_um)
+    assert np.allclose(default.post_element_physical_powers_mW, np.array([3., 1.])*capture)
+    assert default.post_element_total_power_mW == pytest.approx(4*capture)
+    assert np.allclose(default.channel_throughput_fractions, [capture, capture])
     assert default.summary()["physical_channel_powers_mW"] == [3.0, 1.0]
-    assert default.summary()["post_element_total_power_mW"] == pytest.approx(4.0)
+    assert default.summary()["post_element_total_power_mW"] == pytest.approx(4*capture)
 
 
 def test_passive_identity_attenuation_opaque_and_nonuniform_power_semantics():
@@ -130,15 +139,19 @@ def test_pure_phase_and_general_complex_screens_are_passive():
 
 def test_channel_assignment_changes_only_selected_channel_and_reports_throughput():
     grid = _grid()
-    incident = build_launch(_beams(), grid, complex_dtype=np.complex128)
+    incident = build_launch(
+        _beams(),
+        grid,
+        complex_dtype=np.complex128,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
+    )
     screen = _screen([[0.0, 1.0], [1.0, 0.0]])
     transformed = build_launch(
         _beams(),
         grid,
         complex_dtype=np.complex128,
-        launch_elements=(
-            ChannelLaunchElements(channel_index=1, elements=(screen,)),
-        ),
+        launch_elements=(ChannelLaunchElements(channel_index=1, elements=(screen,)),),
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
     )
 
     assert np.array_equal(transformed.A0[0], incident.A0[0])
@@ -146,23 +159,27 @@ def test_channel_assignment_changes_only_selected_channel_and_reports_throughput
     assert np.array_equal(transformed.physical_powers_mW, incident.physical_powers_mW)
     expected = channel_power_integrals(transformed.A0, grid) * 4.0
     assert np.allclose(transformed.post_element_physical_powers_mW, expected)
-    assert transformed.channel_throughput_fractions[0] == pytest.approx(1.0)
+    assert transformed.channel_throughput_fractions[0] == pytest.approx(incident.channel_throughput_fractions[0])
     assert 0.0 < transformed.channel_throughput_fractions[1] < 1.0
     assert transformed.post_element_total_power_mW < 4.0
 
 
 def test_ordered_elements_multiply_in_declared_order():
     grid = _grid()
-    incident = build_launch(_beams(), grid, complex_dtype=np.complex128)
+    incident = build_launch(
+        _beams(),
+        grid,
+        complex_dtype=np.complex128,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
+    )
     first = _screen([[0.0, 1.0], [1.0, 0.25]])
     second = _screen([[1.0, 0.5], [0.25, 0.0]])
     transformed = build_launch(
         _beams(),
         grid,
         complex_dtype=np.complex128,
-        launch_elements=(
-            ChannelLaunchElements(channel_index=1, elements=(first, second)),
-        ),
+        launch_elements=(ChannelLaunchElements(channel_index=1, elements=(first, second)),),
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
     )
     first_t = intensity_transmission_to_field_transmittance(
         prepare_intensity_raster_screen(first, grid)
@@ -181,11 +198,13 @@ def test_ordered_elements_multiply_in_declared_order():
 def test_assignment_index_is_resolved_against_canonical_enabled_channels(
     channel_index,
 ):
+    grid = _grid()
     with pytest.raises(ValueError, match="canonical enabled beam channel"):
         build_launch(
             _beams(),
-            _grid(),
+            grid,
             launch_elements=(ChannelLaunchElements(channel_index=channel_index),),
+            context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
         )
 
 
@@ -214,17 +233,18 @@ def test_assignment_index_follows_enabled_channel_order_after_adapter_filtering(
     )
     beams = beam_stack_definition_to_lcprop(definition)
     grid = _grid()
-    incident = build_launch(beams, grid, complex_dtype=np.complex128)
+    incident = build_launch(
+        beams,
+        grid,
+        complex_dtype=np.complex128,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
+    )
     transformed = build_launch(
         beams,
         grid,
         complex_dtype=np.complex128,
-        launch_elements=(
-            ChannelLaunchElements(
-                channel_index=1,
-                elements=(_screen([[0.0, 1.0], [1.0, 0.0]]),),
-            ),
-        ),
+        launch_elements=(ChannelLaunchElements(channel_index=1, elements=(_screen([[0.0, 1.0], [1.0, 0.0]]),)),),
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
     )
 
     assert tuple(channel.name for channel in beams.channels) == (
@@ -237,11 +257,13 @@ def test_assignment_index_follows_enabled_channel_order_after_adapter_filtering(
 
 def test_duplicate_channel_assignments_are_rejected():
     assignment = ChannelLaunchElements(channel_index=0)
+    grid = _grid()
     with pytest.raises(ValueError, match="only one ordered element assignment"):
         build_launch(
             _beams(),
-            _grid(),
+            grid,
             launch_elements=(assignment, assignment),
+            context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
         )
 
 

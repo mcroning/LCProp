@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 
 from dataclasses import replace
 import hashlib
@@ -50,29 +51,27 @@ def _make_angle_stack():
     model = pytest.importorskip("launchplane.model")
     return model.BeamStackDefinition(
         beams=(
-            model.BeamDefinition.from_launch_angles(
-                name="angle beam",
+            model.BeamDefinition(
+                name='angle beam',
                 wavelength_um=0.633,
                 power_mW=1.0,
                 x_um=-2.0,
                 y_um=3.0,
-                waist_x_um=6.0,
-                waist_y_um=7.0,
-                angle_x_rad=0.02,
-                angle_y_rad=-0.01,
-                launch_medium_index=1.6,
                 phase_rad=0.3,
-                coherence_group="laser-a",
+                coherence_group='laser-a',
+                w1_um=6.0,
+                w2_um=7.0,
+                theta_ext_rad=math.atan(math.hypot(math.tan(0.02), math.tan(-0.01))),
+                phi_rad=math.atan2(math.tan(-0.01), math.tan(0.02)) % (2 * math.pi),
+                n_ext=1.6,
             ),
             model.BeamDefinition(
-                name="disabled q beam",
+                name='disabled q beam',
                 x_um=500.0,
                 y_um=-400.0,
-                tilt_x_rad_per_um=0.4,
-                tilt_y_rad_per_um=-0.2,
-                launch_medium_index=None,
-                launch_input_mode="transverse_wavevector",
                 enabled=False,
+                theta_ext_rad=math.asin(math.hypot(0.4, -0.2) * 0.633 / (2 * math.pi)),
+                phi_rad=math.atan2(-0.2, 0.4) % (2 * math.pi),
             ),
         )
     )
@@ -82,33 +81,33 @@ def _make_coherent_two_beam_angle_stack():
     model = pytest.importorskip("launchplane.model")
     return model.BeamStackDefinition(
         beams=(
-            model.BeamDefinition.from_launch_angles(
-                name="signal",
+            model.BeamDefinition(
+                name='signal',
                 wavelength_um=0.633,
                 power_mW=1.75,
                 x_um=-12.0,
                 y_um=2.5,
-                waist_x_um=18.0,
-                waist_y_um=19.0,
-                angle_x_rad=0.013,
-                angle_y_rad=-0.004,
-                launch_medium_index=2.4,
                 phase_rad=0.25,
-                coherence_group="pr-laser",
+                coherence_group='pr-laser',
+                w1_um=18.0,
+                w2_um=19.0,
+                theta_ext_rad=math.atan(math.hypot(math.tan(0.013), math.tan(-0.004))),
+                phi_rad=math.atan2(math.tan(-0.004), math.tan(0.013)) % (2 * math.pi),
+                n_ext=2.4,
             ),
-            model.BeamDefinition.from_launch_angles(
-                name="pump",
+            model.BeamDefinition(
+                name='pump',
                 wavelength_um=0.633,
                 power_mW=3.5,
                 x_um=13.0,
                 y_um=-1.5,
-                waist_x_um=21.0,
-                waist_y_um=22.0,
-                angle_x_rad=-0.011,
-                angle_y_rad=0.006,
-                launch_medium_index=2.4,
                 phase_rad=-0.35,
-                coherence_group="pr-laser",
+                coherence_group='pr-laser',
+                w1_um=21.0,
+                w2_um=22.0,
+                theta_ext_rad=math.atan(math.hypot(math.tan(-0.011), math.tan(0.006))),
+                phi_rad=math.atan2(math.tan(0.006), math.tan(-0.011)) % (2 * math.pi),
+                n_ext=2.4,
             ),
         )
     )
@@ -131,28 +130,30 @@ def _configure_image_amplification_window(window, image_path, workflow_id):
         model.BeamStackDefinition(
             beams=(
                 model.BeamDefinition(
-                    name="pump",
+                    name='pump',
                     wavelength_um=0.633,
                     power_mW=2.5,
                     x_um=-8.0,
                     y_um=1.0,
-                    waist_x_um=12.0,
-                    waist_y_um=7.0,
-                    tilt_x_rad_per_um=0.2,
                     phase_rad=0.35,
-                    coherence_group="image-laser",
+                    coherence_group='image-laser',
+                    w1_um=12.0,
+                    w2_um=7.0,
+                    theta_ext_rad=math.asin(math.hypot(0.2, 0.0) * 0.633 / (2 * math.pi)),
+                    phi_rad=math.atan2(0.0, 0.2) % (2 * math.pi),
                 ),
                 model.BeamDefinition(
-                    name="signal",
+                    name='signal',
                     wavelength_um=0.633,
                     power_mW=0.25,
                     x_um=9.0,
                     y_um=-2.0,
-                    waist_x_um=10.0,
-                    waist_y_um=6.0,
-                    tilt_x_rad_per_um=-0.2,
                     phase_rad=-0.15,
-                    coherence_group="image-laser",
+                    coherence_group='image-laser',
+                    w1_um=10.0,
+                    w2_um=6.0,
+                    theta_ext_rad=math.asin(math.hypot(-0.2, 0.0) * 0.633 / (2 * math.pi)),
+                    phi_rad=math.atan2(0.0, -0.2) % (2 * math.pi),
                 ),
             )
         )
@@ -327,8 +328,8 @@ def test_legacy_pr_schema_one_empty_launch_plan_still_loads(app, tmp_path):
     document["request_payload"].pop("scattering")
     path.write_text(json.dumps(document), encoding="utf-8")
 
-    loaded = load_experiment(path, expected_material_id=PR_MATERIAL_ID)
-    assert loaded.request == request
+    with pytest.raises(ValueError, match="unsupported PR experiment request schema"):
+        load_experiment(path, expected_material_id=PR_MATERIAL_ID)
 
 
 def test_pr_image_experiment_rejects_corrupt_embedded_source(app, tmp_path):
@@ -448,8 +449,7 @@ def test_lc_experiment_cross_session_round_trip(
     assert loaded.request == expected == rebuilt
     assert target.experiment_panel.current_experiment() == experiment
     beams = target.beam_panel.beam_stack_definition.beams
-    assert beams[0].launch_input_mode == "angle"
-    assert beams[0].launch_medium_index == 1.6
+    assert beams[0].n_ext == 1.6
     assert beams[1].enabled is False
     assert (beams[1].x_um, beams[1].y_um) == (500.0, -400.0)
 
@@ -472,8 +472,7 @@ def test_pr_experiment_cross_session_round_trip(app, tmp_path, workflow_id):
     assert loaded.request == expected == target.build_request()
     assert target.evolution_panel.workflow_id() == workflow_id
     beams = target.beam_panel.beam_stack_definition.beams
-    assert beams[0].launch_input_mode == "angle"
-    assert beams[0].launch_medium_index == 1.6
+    assert beams[0].n_ext == 1.6
     assert beams[1].enabled is False
     assert (beams[1].x_um, beams[1].y_um) == (500.0, -400.0)
 
@@ -533,15 +532,10 @@ def test_pr_transverse_static_save_open_buttons_round_trip_exactly(
         "pr-laser",
         "pr-laser",
     )
-    assert tuple(beam.launch_input_mode for beam in restored) == (
-        "angle",
-        "angle",
-    )
-    assert restored[0].angle_x_rad == pytest.approx(0.013)
-    assert restored[1].angle_y_rad == pytest.approx(0.006)
+    assert restored == _make_coherent_two_beam_angle_stack().beams
 
 
-def test_absent_presentation_uses_safe_canonical_q_mode(app, tmp_path):
+def test_absent_presentation_preserves_external_physical_intent(app, tmp_path):
     source = PRMainWindow()
     source.beam_panel.set_beam_stack_definition(_make_angle_stack())
     request = source.build_request()
@@ -557,8 +551,8 @@ def test_absent_presentation_uses_safe_canonical_q_mode(app, tmp_path):
     target.load_experiment_from(path)
 
     beam = target.beam_panel.beam_stack_definition.beams[0]
-    assert beam.launch_input_mode == "transverse_wavevector"
-    assert beam.launch_medium_index is None
+    assert beam.n_ext == request.beams.channels[0].n_ext
+    assert beam.theta_ext_rad == request.beams.channels[0].theta_ext_rad
     assert target.build_request().beams == request.beams
 
 

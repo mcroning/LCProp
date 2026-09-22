@@ -1,4 +1,5 @@
 """General PR configuration through native workers and optional image analysis."""
+import math
 
 from dataclasses import replace
 import gc
@@ -71,11 +72,13 @@ def general_window(windows, n, screens=(), *, asymmetric=False, zero=False):
     w.material_panel.gain_length_product.setValue(.02)
     w.beam_panel.set_beam_stack_definition(BeamStackDefinition(beams=tuple(
         BeamDefinition(
-            name=f"Beam {j}", power_mW=0. if zero and j == 0 else 1.,
-            waist_x_um=10., waist_y_um=10.,
-            tilt_x_rad_per_um=.15 if j == 0 else -.15 * j,
-            tilt_y_rad_per_um=.08 if asymmetric and j == 0 else 0.,
-            coherence_group="group-a" if j % 2 == 0 else "group-b",
+            name=f'Beam {j}',
+            power_mW=0.0 if zero and j == 0 else 1.0,
+            coherence_group='group-a' if j % 2 == 0 else 'group-b',
+            w1_um=10.0,
+            w2_um=10.0,
+            theta_ext_rad=math.asin(math.hypot(0.15 if j == 0 else -0.15 * j, 0.08 if asymmetric and j == 0 else 0.0) * 0.633 / (2 * math.pi)),
+            phi_rad=math.atan2(0.08 if asymmetric and j == 0 else 0.0, 0.15 if j == 0 else -0.15 * j) % (2 * math.pi),
         ) for j in range(n)
     )))
     editor = w.beam_panel.input_screen_editor
@@ -172,7 +175,9 @@ def valid_image_window(app, windows):
     # exact legacy-analysis comparison without inventing separation criteria.
     beams = w.beam_panel.beam_stack_definition
     w.beam_panel.set_beam_stack_definition(replace(beams, beams=tuple(
-        replace(b, profile="uniform", tilt_x_rad_per_um=(1 if j == 0 else -1)*2*np.pi*3/40)
+        replace(b, profile='collimated_gaussian', w1_um=8., w2_um=8.,
+                theta_ext_rad=math.asin(3*b.wavelength_um/(40*b.n_ext)),
+                phi_rad=0. if j == 0 else math.pi)
         for j, b in enumerate(beams.beams)
     )))
     editor = w.beam_panel.input_screen_editor
@@ -222,7 +227,7 @@ def test_optional_failure_cannot_fail_propagation(app, windows, monkeypatch, fau
     elif fault == "separation":
         beams = w.beam_panel.beam_stack_definition
         w.beam_panel.set_beam_stack_definition(replace(beams, beams=tuple(
-            replace(b, tilt_x_rad_per_um=0.) for b in beams.beams
+            replace(b, theta_ext_rad=0., phi_rad=0.) for b in beams.beams
         )))
         w.beam_panel.input_screen_editor.channel.setCurrentIndex(1)
         w.beam_panel.input_screen_editor.set_source(PRImageSource.from_array(np.ones((8, 8))))

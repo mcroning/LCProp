@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
+from lcprop.optics.physical_launch import resolve_beam_geometry
 from lcprop.core.beams import BeamChannel, BeamStack
 
 
@@ -80,8 +81,8 @@ def crossing_beam_channels(
 ) -> tuple[BeamChannel, BeamChannel]:
     """Construct two channels whose kernel rays meet at a physical point.
 
-    Polar and azimuth angles define ``kx = k_medium*sin(theta)*cos(phi)`` and
-    ``ky = k_medium*sin(theta)*sin(phi)``. LCProp's scalar PR kernel moves
+    External polar and azimuth angles (n_ext=1) define ``kx = k0*sin(theta)*cos(phi)`` and
+    ``ky = k0*sin(theta)*sin(phi)``. LCProp's scalar PR kernel moves
     a narrow envelope with slopes ``kx/kz`` and ``ky/kz``. Launch centers
     are back-projected with those slopes (tan(theta) in the tilt direction).
     """
@@ -122,13 +123,13 @@ def crossing_beam_channels(
     index = float(refractive_index)
     if wavelength <= 0.0 or index <= 0.0:
         raise ValueError("wavelength_um and refractive_index must be positive")
-    k_medium = 2.0 * math.pi * index / wavelength
+    k_external = 2.0 * math.pi / wavelength
 
     channels = []
     for beam in range(2):
         theta = angles[beam]
         phi = azimuths[beam]
-        k_transverse = k_medium * math.sin(theta)
+        k_transverse = k_external * math.sin(theta)
         kx = k_transverse * math.cos(phi)
         ky = k_transverse * math.sin(phi)
         slope_x, slope_y = scalar_kernel_slopes(
@@ -140,12 +141,12 @@ def crossing_beam_channels(
                 name=names[beam],
                 wavelength_um=wavelength,
                 power_mW=powers[beam],
-                waist_x_um=waists_x[beam],
-                waist_y_um=waists_y[beam],
+                w1_um=waists_x[beam],
+                w2_um=waists_y[beam],
                 x0_um=float(crossing_x_um) - z_cross * slope_x,
                 y0_um=float(crossing_y_um) - z_cross * slope_y,
-                tilt_x_rad_per_um=kx,
-                tilt_y_rad_per_um=ky,
+                theta_ext_rad=abs(theta),
+                phi_rad=phi if theta >= 0 else phi + math.pi,
                 coherence_group=coherence_group,
             )
         )
@@ -191,19 +192,13 @@ def _beam_radius_at_plane(
 ) -> float:
     """Return the 1/e field radius implied by one launch profile."""
 
-    if channel.profile == "uniform":
-        return math.inf
-    if channel.profile == "focused_gaussian":
-        waist = float(getattr(channel, f"waist_{axis}_at_focus_um"))
-        focus_z = (
-            0.5 * float(interaction_length_um)
-            if channel.focus_at_interaction_midpoint
-            else float(channel.focus_z_um)
-        )
-        distance = float(z_um) - focus_z
-    else:
-        waist = float(getattr(channel, f"waist_{axis}_um"))
-        distance = float(z_um)
+    geometry = resolve_beam_geometry(channel, refractive_index)
+    # Conservative marginal face radius. Propagation broadening is a scalar
+    # paraxial envelope estimate used only for aperture guidance, not execution.
+    q = geometry.interface_quadratic
+    determinant = q[0, 0]*q[1, 1]-q[0, 1]*q[1, 0]
+    waist = math.sqrt(float(q[1, 1] if axis == "x" else q[0, 0])/determinant)
+    distance = float(z_um)
     rayleigh = (
         math.pi
         * float(refractive_index)
@@ -272,17 +267,12 @@ def analyze_beam_stack_aperture(
                 refractive_index=index,
             )
             plane_radii.append((radius_x, radius_y))
-            if channel.profile == "uniform":
-                beam_margins = dict.fromkeys(
-                    ("x_min", "x_max", "y_min", "y_max"), math.inf
-                )
-            else:
-                beam_margins = {
-                    "x_min": center_x - envelope_radii * radius_x + half_x,
-                    "x_max": half_x - center_x - envelope_radii * radius_x,
-                    "y_min": center_y - envelope_radii * radius_y + half_y,
-                    "y_max": half_y - center_y - envelope_radii * radius_y,
-                }
+            beam_margins = {
+                "x_min": center_x - envelope_radii * radius_x + half_x,
+                "x_max": half_x - center_x - envelope_radii * radius_x,
+                "y_min": center_y - envelope_radii * radius_y + half_y,
+                "y_max": half_y - center_y - envelope_radii * radius_y,
+            }
             plane_margins.append(beam_margins)
             if min(beam_margins.values()) <= 0.0:
                 warnings.append(
@@ -297,28 +287,9 @@ def analyze_beam_stack_aperture(
         margins[plane_name] = tuple(plane_margins)
 
     samples = tuple(
-        (
-            (
-                math.inf
-                if channel.profile == "uniform"
-                else float(
-                    channel.waist_x_at_focus_um
-                    if channel.profile == "focused_gaussian"
-                    else channel.waist_x_um
-                )
-                / float(grid.dx_um)
-            ),
-            (
-                math.inf
-                if channel.profile == "uniform"
-                else float(
-                    channel.waist_y_at_focus_um
-                    if channel.profile == "focused_gaussian"
-                    else channel.waist_y_um
-                )
-                / float(grid.dy_um)
-            ),
-        )
+        tuple(_beam_radius_at_plane(channel, axis=axis, z_um=0.,
+              interaction_length_um=grid.spec.z_length_um, refractive_index=index)/spacing
+              for axis, spacing in (("x", grid.dx_um), ("y", grid.dy_um)))
         for channel in beams.channels
     )
     if (
@@ -435,17 +406,12 @@ def analyze_crossing_aperture(
                 refractive_index=index,
             )
             plane_radii.append((wx, wy))
-            if channel.profile == "uniform":
-                beam_margins = dict.fromkeys(
-                    ("x_min", "x_max", "y_min", "y_max"), math.inf
-                )
-            else:
-                beam_margins = {
-                    "x_min": cx - envelope_radii * wx + half_x,
-                    "x_max": half_x - cx - envelope_radii * wx,
-                    "y_min": cy - envelope_radii * wy + half_y,
-                    "y_max": half_y - cy - envelope_radii * wy,
-                }
+            beam_margins = {
+                "x_min": cx - envelope_radii * wx + half_x,
+                "x_max": half_x - cx - envelope_radii * wx,
+                "y_min": cy - envelope_radii * wy + half_y,
+                "y_max": half_y - cy - envelope_radii * wy,
+            }
             plane_margins.append(beam_margins)
             if min(beam_margins.values()) <= 0.0:
                 warnings.append(
@@ -455,28 +421,9 @@ def analyze_crossing_aperture(
         margins[plane_name] = tuple(plane_margins)  # type: ignore[assignment]
 
     samples = tuple(
-        (
-            (
-                math.inf
-                if channel.profile == "uniform"
-                else float(
-                    channel.waist_x_at_focus_um
-                    if channel.profile == "focused_gaussian"
-                    else channel.waist_x_um
-                )
-                / float(grid.dx_um)
-            ),
-            (
-                math.inf
-                if channel.profile == "uniform"
-                else float(
-                    channel.waist_y_at_focus_um
-                    if channel.profile == "focused_gaussian"
-                    else channel.waist_y_um
-                )
-                / float(grid.dy_um)
-            ),
-        )
+        tuple(_beam_radius_at_plane(channel, axis=axis, z_um=0.,
+              interaction_length_um=grid.spec.z_length_um, refractive_index=index)/spacing
+              for axis, spacing in (("x", grid.dx_um), ("y", grid.dy_um)))
         for channel in channels
     )
     if min(value for pair in samples for value in pair) < minimum_samples_per_waist:

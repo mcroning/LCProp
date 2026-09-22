@@ -34,12 +34,7 @@ def _request(*, steps: int = 3) -> PRRunRequest:
         grid=grid,
         beams=BeamStack(
             channels=(
-                BeamChannel(
-                    wavelength_um=0.633,
-                    waist_x_um=20.0,
-                    waist_y_um=20.0,
-                    coherence_group="pr-execution",
-                ),
+                BeamChannel(wavelength_um=0.633, coherence_group='pr-execution', w1_um=20.0, w2_um=20.0),
             ),
         ),
         material=PRMaterialSpec(

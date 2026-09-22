@@ -895,8 +895,8 @@ class PRMainWindow(QWidget):
             lines.append(
                 f"Beam {index}: {channel.name}; P={channel.power_mW:g} mW; "
                 f"λ={channel.wavelength_um:g} µm; "
-                f"waists=({channel.waist_x_um:g}, "
-                f"{channel.waist_y_um:g}) µm; "
+                f"external beam-normal radii=({channel.w1_um:g}, "
+                f"{channel.w2_um:g}) µm; "
                 f"center=({channel.x0_um:g}, {channel.y0_um:g}) µm; "
                 "phase gradients="
                 f"({channel.tilt_x_rad_per_um:g}, "

@@ -37,7 +37,13 @@ def canonical_beam_channel_values(values: Mapping[str, Any]) -> dict[str, Any]:
 def beam_channel_from_mapping(values: Mapping[str, Any]) -> BeamChannel:
     """Construct a canonical channel from current or legacy serialized data."""
 
-    return BeamChannel(**canonical_beam_channel_values(values))
+    canonical = canonical_beam_channel_values(values)
+    required = {"n_ext", "theta_ext_rad", "phi_rad", "w1_um", "w2_um", "psi_rad"}
+    if not required <= canonical.keys():
+        raise ValueError("obsolete launch definition; recreate with external physical beam intent")
+    channel = BeamChannel(**canonical)
+    channel.validate()
+    return channel
 
 
 def discard_legacy_unit_theta_weight(options: dict[str, Any]) -> None:

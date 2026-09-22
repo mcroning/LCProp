@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 
 from lcprop.core.backend import asnumpy
+from lcprop.optics.physical_launch import resolve_beam_geometry
 from lcprop.optics.farfield import direction_cosine_spectrum
 from lcprop.optics.splitstep import total_intensity
 from lcprop.pr.carrier_power import (
@@ -437,8 +438,9 @@ def _image_amplification_default_display_extent(
         signal = result.request.beams.channels[signal_index]
         center_x = float(signal.x0_um)
         center_y = float(signal.y0_um)
-        waist_x = float(signal.waist_x_um)
-        waist_y = float(signal.waist_y_um)
+        resolved = resolve_beam_geometry(signal, result.request.material.refractive_index)
+        marginal_radii = np.sqrt(np.diag(np.linalg.inv(resolved.interface_quadratic)))
+        waist_x, waist_y = map(float, marginal_radii)
         x = np.asarray(base.geometry.x, dtype=float)
         y = np.asarray(base.geometry.y, dtype=float)
     except (AttributeError, IndexError, StopIteration, TypeError, ValueError):
@@ -993,6 +995,12 @@ def augment_pr_image_amplification_run_data(
                     result.post_element_channel_powers_mW[1]
                 ),
                 "signal_screen_throughput": result.signal_throughput_fraction,
+                "physical_power_qualification": (
+                    "Post-screen mW is a qualified central-direction scalar flux estimate; "
+                    "unavailable values indicate broad/unresolved spectra. Isolated-carrier "
+                    "endpoint mW is unavailable: the existing algorithm measures unweighted norm. "
+                    "Measured gain retains its norm-ratio definition."
+                ),
                 "measured_gain_reference_signal_power_mW": (
                     result.measured_gain_reference_signal_power_mW
                 ),

@@ -266,12 +266,7 @@ def _streaming_request(*, dz_um):
     )
     beams = BeamStack(
         channels=(
-            BeamChannel(
-                wavelength_um=0.633,
-                waist_x_um=8.0,
-                waist_y_um=6.0,
-                coherence_group="readiness",
-            ),
+            BeamChannel(wavelength_um=0.633, coherence_group='readiness', w1_um=8.0, w2_um=6.0),
         ),
         coherence="coherent",
     )

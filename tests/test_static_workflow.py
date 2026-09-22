@@ -1,3 +1,4 @@
+from tests.physical_launch_oracles import scalar_lineage_flux, normal_gaussian_norm
 import numpy as np
 
 from lcprop.core.context import GridSpec, LCMaterial, BiasSpec
@@ -22,12 +23,7 @@ def test_run_static_fixed_theta_workflow():
         bias=BiasSpec(theta_bc=0.0),
         beams=BeamStack(
             channels=(
-                BeamChannel(
-                    wavelength_um=0.633,
-                    power_mW=1.0,
-                    waist_x_um=3.0,
-                    waist_y_um=3.0,
-                ),
+                BeamChannel(wavelength_um=0.633, power_mW=1.0, w1_um=3.0, w2_um=3.0),
             )
         ),
         solver=StaticSolverOptions(),
@@ -40,16 +36,16 @@ def test_run_static_fixed_theta_workflow():
     assert result.theta_final.shape == (64, 64)
     assert result.n_steps == 10
     assert np.isclose(result.power_final, result.power_initial, rtol=1e-5)
-    assert np.isclose(result.power_initial, 1.0, rtol=1e-6)
-    assert np.isclose(result.physical_power_initial_mW, 1.0, rtol=1e-6)
-    assert np.isclose(result.physical_power_final_mW, 1.0, rtol=1e-5)
+    assert np.isclose(result.power_initial, normal_gaussian_norm(request.grid, request.beams), rtol=1e-12)
+    assert np.isclose(result.physical_power_initial_mW, scalar_lineage_flux(result.A_initial, request.grid, request.beams, request.material.no), rtol=1e-12)
+    assert np.isclose(result.physical_power_final_mW, scalar_lineage_flux(result.A_final, request.grid, request.beams, request.material.no), rtol=1e-12)
     assert result.grid_summary["Nz"] == 10
     assert result.grid_summary["du"] == 2.0 / 63.0
     assert result.grid_summary["dv"] == (2.0 / 63.0) * (1.0 / 0.75)
     assert "fixed prepared theta" in result.warnings[0]
 
 
-def test_lc_workflow_supplies_material_neutral_focus_context():
+def test_lc_workflow_supplies_physical_material_context():
     request = StaticRunRequest(
         grid=GridSpec(
             Nx=96,
@@ -64,10 +60,7 @@ def test_lc_workflow_supplies_material_neutral_focus_context():
         beams=BeamStack(
             channels=(
                 BeamChannel(
-                    profile="focused_gaussian",
-                    waist_x_at_focus_um=8.0,
-                    waist_y_at_focus_um=10.0,
-                    focus_at_interaction_midpoint=True,
+                    theta_ext_rad=.03, w1_um=8.0, w2_um=10.0,
                 ),
             )
         ),

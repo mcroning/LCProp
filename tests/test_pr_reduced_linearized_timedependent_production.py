@@ -74,9 +74,9 @@ def _request(
             channels=(BeamChannel(
                 wavelength_um=0.633,
                 power_mW=1.0,
-                waist_x_um=8.0,
-                waist_y_um=7.0,
-                coherence_group="reduced-linearized-td",
+                coherence_group='reduced-linearized-td',
+                w1_um=8.0,
+                w2_um=7.0,
             ),)
         ),
         material=PRMaterialSpec(
@@ -313,7 +313,7 @@ def test_experiment_transport_fast_full_products_and_legacy_migration(monkeypatc
     experiment = encode_pr_timedependent_request(request)
     assert experiment["schema_version"] == (
         PR_EXPERIMENT_REQUEST_SCHEMA_VERSION
-    ) == 6
+    ) == 7
     assert decode_pr_timedependent_request(experiment) == request
 
     legacy_request = _request(linearized=False, steps=1)
@@ -321,10 +321,8 @@ def test_experiment_transport_fast_full_products_and_legacy_migration(monkeypatc
     legacy["schema_version"] = 4
     legacy.pop("material_response")
     legacy.pop("scattering")
-    assert (
-        decode_pr_timedependent_request(legacy).material_response.model
-        == "nonlinear"
-    )
+    with pytest.raises(ValueError, match="unsupported PR experiment request schema"):
+        decode_pr_timedependent_request(legacy)
 
     encoded_request = encode_pr_timedependent_transport_request(request)
     decoded_request = decode_pr_timedependent_transport_request(

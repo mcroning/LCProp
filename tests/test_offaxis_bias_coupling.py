@@ -47,14 +47,14 @@ def _offaxis_request(*, strategy: str, max_iterations: int = 4) -> StaticRunRequ
         beams=BeamStack(
             channels=(
                 BeamChannel(
-                    name="off-axis",
+                    name='off-axis',
                     wavelength_um=0.633,
                     power_mW=1.0,
-                    waist_x_um=12.0,
-                    waist_y_um=12.0,
                     x0_um=-20.0,
                     y0_um=0.0,
-                    coherence_group="probe",
+                    coherence_group='probe',
+                    w1_um=12.0,
+                    w2_um=12.0,
                 ),
             )
         ),

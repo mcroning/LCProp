@@ -49,10 +49,10 @@ def _static_request(*, slices=3):
         bias=BiasSpec(),
         beams=BeamStack(channels=(BeamChannel(
             power_mW=0.1,
-            waist_x_um=4.0,
-            waist_y_um=4.0,
             x0_um=-3.0,
-            coherence_group="laser-A",
+            coherence_group='laser-A',
+            w1_um=4.0,
+            w2_um=4.0,
         ),)),
         solver=StaticSolverOptions(
             workflow=_workflow(),

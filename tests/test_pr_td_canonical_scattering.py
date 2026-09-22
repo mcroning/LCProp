@@ -48,9 +48,9 @@ def _common(*, dz_um: float = 2.0, optical_substeps: int = 1, scattering=None):
     )
     beams = BeamStack(channels=(BeamChannel(
         wavelength_um=0.633,
-        waist_x_um=7.0,
-        waist_y_um=6.0,
-        coherence_group="canonical-scattering-test",
+        coherence_group='canonical-scattering-test',
+        w1_um=7.0,
+        w2_um=6.0,
     ),))
     material = PRMaterialSpec(
         dark_intensity=0.1,

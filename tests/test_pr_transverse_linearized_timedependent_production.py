@@ -67,9 +67,9 @@ def _request(
         ),
         beams=BeamStack(channels=(BeamChannel(
             wavelength_um=0.633,
-            waist_x_um=7.0,
-            waist_y_um=6.0,
-            coherence_group="linearized-td-production",
+            coherence_group='linearized-td-production',
+            w1_um=7.0,
+            w2_um=6.0,
         ),)),
         material=PRMaterialSpec(
             dark_intensity=0.4,
@@ -442,9 +442,8 @@ def test_experiment_and_transport_round_trip_with_legacy_default():
     legacy_experiment["schema_version"] = 2
     legacy_experiment.pop("material_response")
     legacy_experiment.pop("optical_boundary")
-    assert decode_pr_transverse_timedependent_request(
-        legacy_experiment
-    ).material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR
+    with pytest.raises(ValueError, match="unsupported PR transverse-TD experiment request schema"):
+        decode_pr_transverse_timedependent_request(legacy_experiment)
 
     encoded = encode_pr_transverse_timedependent_transport_request(request)
     decoded = decode_pr_transverse_timedependent_transport_request(
@@ -529,9 +528,7 @@ def test_weak_full_optical_runs_agree_with_nonzero_gain(monkeypatch):
         linearized_request,
         beams=replace(
             linearized_request.beams,
-            channels=(replace(
-                channel, waist_x_um=1.0e5, waist_y_um=1.0e5
-            ),),
+            channels=(replace(channel, w1_um=100000.0, w2_um=100000.0),),
         ),
         material=replace(
             linearized_request.material, gain_length_product=1.0e-3

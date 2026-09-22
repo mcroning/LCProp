@@ -53,12 +53,7 @@ def _pr_request(*, steps: int = 2) -> PRRunRequest:
         grid=grid,
         beams=BeamStack(
             channels=(
-                BeamChannel(
-                    wavelength_um=0.633,
-                    waist_x_um=20.0,
-                    waist_y_um=20.0,
-                    coherence_group="pr-operation",
-                ),
+                BeamChannel(wavelength_um=0.633, coherence_group='pr-operation', w1_um=20.0, w2_um=20.0),
             ),
         ),
         material=PRMaterialSpec(

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 
 from dataclasses import replace
 import os
@@ -164,30 +165,30 @@ def test_beam_stack_inverse_mapping_preserves_optical_fields_and_signs(app):
     stack = BeamStack(
         channels=(
             BeamChannel(
-                name="positive-x",
+                name='positive-x',
                 wavelength_um=0.532,
                 power_mW=1.25,
-                waist_x_um=18.0,
-                waist_y_um=21.0,
                 x0_um=-4.0,
                 y0_um=3.0,
-                tilt_x_rad_per_um=0.031,
-                tilt_y_rad_per_um=-0.047,
                 phase_rad=0.7,
-                coherence_group="laser-a",
+                coherence_group='laser-a',
+                w1_um=18.0,
+                w2_um=21.0,
+                theta_ext_rad=math.asin(math.hypot(0.031, -0.047) * 0.532 / (2 * math.pi)),
+                phi_rad=math.atan2(-0.047, 0.031) % (2 * math.pi),
             ),
             BeamChannel(
-                name="negative-x",
+                name='negative-x',
                 wavelength_um=0.532,
                 power_mW=0.75,
-                waist_x_um=22.0,
-                waist_y_um=19.0,
                 x0_um=5.0,
                 y0_um=-2.0,
-                tilt_x_rad_per_um=-0.029,
-                tilt_y_rad_per_um=0.041,
                 phase_rad=-0.4,
-                coherence_group="laser-a",
+                coherence_group='laser-a',
+                w1_um=22.0,
+                w2_um=19.0,
+                theta_ext_rad=math.asin(math.hypot(-0.029, 0.041) * 0.532 / (2 * math.pi)),
+                phi_rad=math.atan2(0.041, -0.029) % (2 * math.pi),
             ),
         ),
         coherence="incoherent",
@@ -202,8 +203,8 @@ def test_beam_stack_inverse_mapping_preserves_optical_fields_and_signs(app):
         assert actual.name == expected.name
         assert actual.wavelength_um == expected.wavelength_um
         assert actual.power_mW == expected.power_mW
-        assert actual.waist_x_um == expected.waist_x_um
-        assert actual.waist_y_um == expected.waist_y_um
+        assert actual.w1_um == expected.w1_um
+        assert actual.w2_um == expected.w2_um
         assert actual.x0_um == expected.x0_um
         assert actual.y0_um == expected.y0_um
         assert actual.tilt_x_rad_per_um == expected.tilt_x_rad_per_um
@@ -226,30 +227,30 @@ def test_apply_and_rebuild_saved_pr_request_is_lossless(app):
         beams=BeamStack(
             channels=(
                 BeamChannel(
-                    name="pump",
+                    name='pump',
                     wavelength_um=0.633,
                     power_mW=1.2,
-                    waist_x_um=24.0,
-                    waist_y_um=23.0,
                     x0_um=-8.0,
                     y0_um=4.0,
-                    tilt_x_rad_per_um=0.021,
-                    tilt_y_rad_per_um=-0.017,
                     phase_rad=0.25,
-                    coherence_group="shared-laser",
+                    coherence_group='shared-laser',
+                    w1_um=24.0,
+                    w2_um=23.0,
+                    theta_ext_rad=math.asin(math.hypot(0.021, -0.017) * 0.633 / (2 * math.pi)),
+                    phi_rad=math.atan2(-0.017, 0.021) % (2 * math.pi),
                 ),
                 BeamChannel(
-                    name="signal",
+                    name='signal',
                     wavelength_um=0.633,
                     power_mW=0.8,
-                    waist_x_um=25.0,
-                    waist_y_um=22.0,
                     x0_um=7.0,
                     y0_um=-3.0,
-                    tilt_x_rad_per_um=-0.019,
-                    tilt_y_rad_per_um=0.013,
                     phase_rad=-0.35,
-                    coherence_group="shared-laser",
+                    coherence_group='shared-laser',
+                    w1_um=25.0,
+                    w2_um=22.0,
+                    theta_ext_rad=math.asin(math.hypot(-0.019, 0.013) * 0.633 / (2 * math.pi)),
+                    phi_rad=math.atan2(0.013, -0.019) % (2 * math.pi),
                 ),
             ),
             coherence="incoherent",
@@ -340,18 +341,20 @@ def test_pr_gui_preflight_reports_sampling_boundary_and_grating_risks(app):
     request = _build(_controls(app))
     first = replace(
         request.beams.channels[0],
-        name="first",
-        waist_x_um=1.0,
-        waist_y_um=1.0,
+        name='first',
+        w1_um=1.0,
+        w2_um=1.0,
         x0_um=99.0,
-        tilt_x_rad_per_um=0.0,
-        coherence_group="coherent",
+        coherence_group='coherent',
+        theta_ext_rad=math.asin(math.hypot(0.0, request.beams.channels[0].tilt_y_rad_per_um) * request.beams.channels[0].wavelength_um / (2 * math.pi * request.beams.channels[0].n_ext)),
+        phi_rad=math.atan2(request.beams.channels[0].tilt_y_rad_per_um, 0.0) % (2 * math.pi),
     )
     second = replace(
         first,
-        name="second",
+        name='second',
         x0_um=0.0,
-        tilt_x_rad_per_um=5.0,
+        theta_ext_rad=math.asin(math.hypot(5.0, first.tilt_y_rad_per_um) * first.wavelength_um / (2 * math.pi * first.n_ext)),
+        phi_rad=math.atan2(first.tilt_y_rad_per_um, 5.0) % (2 * math.pi),
     )
     risky = replace(
         request,
@@ -368,48 +371,12 @@ def test_pr_gui_preflight_reports_sampling_boundary_and_grating_risks(app):
     assert any("periodic boundary" in warning for warning in warnings)
 
 
-def test_pr_gui_preflight_uses_focus_defined_waists_and_midpoint_geometry(app):
+@pytest.mark.parametrize("profile", ["focused_gaussian", "uniform"])
+def test_pr_gui_preflight_rejects_unsupported_physical_profiles(app, profile):
     request = _build(_controls(app))
-    focused = replace(
-        request.beams.channels[0],
-        profile="focused_gaussian",
-        waist_x_at_focus_um=6.0,
-        waist_y_at_focus_um=9.0,
-        focus_at_interaction_midpoint=True,
-    )
-    request = replace(request, beams=BeamStack(channels=(focused,)))
-
-    aperture = validate_pr_gui_request(request).aperture
-
-    assert aperture.samples_per_waist[0] == pytest.approx(
-        (
-            6.0 * request.grid.Nx / request.grid.x_aperture_um,
-            9.0 * request.grid.Ny / request.grid.y_aperture_um,
-        )
-    )
-    assert aperture.radii_um["entrance"][0] == pytest.approx(
-        aperture.radii_um["output"][0]
-    )
-
-
-def test_pr_gui_preflight_accepts_periodic_uniform_profile_without_edge_warning(app):
-    request = _build(_controls(app))
-    uniform = replace(
-        request.beams.channels[0],
-        profile="uniform",
-        waist_x_at_focus_um=None,
-        waist_y_at_focus_um=None,
-        focus_z_um=None,
-        focus_at_interaction_midpoint=False,
-        tilt_x_rad_per_um=0.0,
-        tilt_y_rad_per_um=0.0,
-    )
-    request = replace(request, beams=BeamStack(channels=(uniform,)))
-
-    aperture = validate_pr_gui_request(request).aperture
-
-    assert aperture.samples_per_waist[0] == (np.inf, np.inf)
-    assert not any("periodic boundary" in item for item in aperture.warnings)
+    channel = replace(request.beams.channels[0], profile=profile)
+    with pytest.raises(ValueError, match="collimated physical Gaussian"):
+        validate_pr_gui_request(replace(request, beams=BeamStack(channels=(channel,))))
 
 
 def test_pr_gui_preflight_uses_implemented_timestep_guard(app):

@@ -28,11 +28,7 @@ def make_small_soliton_request() -> SolitonRequest:
         bias=BiasSpec(V_bias=0.9144),
         beams=BeamStack(
             channels=(
-                BeamChannel(
-                    power_mW=0.05,
-                    waist_x_um=3.0,
-                    waist_y_um=3.0,
-                ),
+                BeamChannel(power_mW=0.05, w1_um=3.0, w2_um=3.0),
             )
         ),
         solver=StaticSolverOptions(max_iterations=1),

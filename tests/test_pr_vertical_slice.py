@@ -531,11 +531,7 @@ def _plane_wave_request(*, backend="numpy", integrator="euler"):
     )
     beams = BeamStack(
         channels=(
-            BeamChannel(
-                wavelength_um=0.633,
-                waist_x_um=20.0,
-                waist_y_um=20.0,
-            ),
+            BeamChannel(wavelength_um=0.633, w1_um=20.0, w2_um=20.0),
         )
     )
     material = PRMaterialSpec(
@@ -588,13 +584,10 @@ def test_small_plane_wave_workflow_matches_analytic_uniform_prediction():
     assert result.power_final == pytest.approx(result.power_initial, rel=2e-14)
 
 
-def test_pr_workflow_supplies_material_neutral_focus_context():
+def test_pr_workflow_supplies_physical_material_context():
     request = _plane_wave_request()
     channel = BeamChannel(
-        profile="focused_gaussian",
-        waist_x_at_focus_um=18.0,
-        waist_y_at_focus_um=16.0,
-        focus_at_interaction_midpoint=True,
+        theta_ext_rad=.03, w1_um=18.0, w2_um=16.0,
     )
     request = PRRunRequest(
         grid=request.grid,

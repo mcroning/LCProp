@@ -13,10 +13,8 @@ from typing import Any
 
 import numpy as np
 
-from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
-from lcprop.optics.launch import build_launch
 from lcprop.pr.evolution import hopping_rhs, periodic_derivatives_x
 from lcprop.pr.source import channel_peak_intensity_reference, pr_driving_intensity
 from lcprop.pr.specs import PRMaterialSpec
@@ -369,41 +367,32 @@ def optical_source_fixture() -> GuardFixture:
     )
     grid = make_grid(grid_spec, xp=np, real_dtype=np.float64)
     carrier = 2.0 * math.pi * 3.0 / grid_spec.x_aperture_um
-    beams = BeamStack(
-        channels=(
-            BeamChannel(
-                name="pump",
-                power_mW=1.0,
-                waist_x_um=18.0,
-                waist_y_um=10.0,
-                tilt_x_rad_per_um=carrier,
-                coherence_group="laser",
-            ),
-            BeamChannel(
-                name="signal",
-                power_mW=0.2,
-                waist_x_um=18.0,
-                waist_y_um=10.0,
-                tilt_x_rad_per_um=-carrier,
-                coherence_group="laser",
-            ),
-        )
-    )
-    launch = build_launch(beams, grid, complex_dtype=np.complex128)
-    reference = channel_peak_intensity_reference(launch.A0, xp=np)
+    # Freeze the original material-regression source independently of the
+    # physical-launch API. This is a numerical fixture, not a supported launch
+    # mode. Changing entrance geometry must not regenerate the committed
+    # positive-carrier gate oracle or weaken its bitwise material assertions.
+    fields = []
+    for gradient, fraction in ((carrier, 1/1.2), (-carrier, .2/1.2)):
+        amplitude = np.exp(-(grid.x_um[:, None]/18.)**2
+                           -(grid.y_um[None, :]/10.)**2)
+        amplitude = (amplitude*np.exp(1j*gradient*grid.x_um[:, None])).astype(np.complex128)
+        norm = np.sum(np.abs(amplitude)**2)*grid.dx_um*grid.dy_um
+        fields.append(amplitude*np.sqrt(fraction/norm))
+    A0 = np.stack(fields)
+    reference = channel_peak_intensity_reference(A0, xp=np)
     background = 0.1
     intensity = pr_driving_intensity(
-        launch.A0,
+        A0,
         peak_intensity_reference=reference,
         background_intensity=background,
-        coherence_groups=launch.coherence_groups,
+        coherence_groups=("laser", "laser"),
         xp=np,
     )
     return GuardFixture(
         name="optical_two_beam_source",
         description=(
-            "frozen source produced by the production coherent two-beam optical "
-            "launch and PR source-normalization path"
+            "frozen historical two-beam numerical source and unchanged PR "
+            "source-normalization path; independent of current launch semantics"
         ),
         intensity=np.asarray(intensity),
         initial_E=np.zeros_like(intensity),

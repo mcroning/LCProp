@@ -1,4 +1,5 @@
 """Stage 1A presentation/dispatch regressions; no scientific evidence runs."""
+import math
 from dataclasses import replace
 import os
 from types import SimpleNamespace
@@ -34,12 +35,26 @@ def _data():
 def _two_beams(window):
     from launchplane.model import BeamDefinition, BeamStackDefinition
     window.beam_panel.set_beam_stack_definition(BeamStackDefinition(beams=(
-        BeamDefinition(name="pump", wavelength_um=0.633, power_mW=1,
-                       waist_x_um=12, waist_y_um=12,
-                       tilt_x_rad_per_um=0.01, coherence_group="laser"),
-        BeamDefinition(name="signal", wavelength_um=0.633, power_mW=0.2,
-                       waist_x_um=12, waist_y_um=12,
-                       tilt_x_rad_per_um=-0.02, coherence_group="laser"),
+        BeamDefinition(
+            name='pump',
+            wavelength_um=0.633,
+            power_mW=1,
+            coherence_group='laser',
+            w1_um=12,
+            w2_um=12,
+            theta_ext_rad=math.asin(math.hypot(0.01, 0.0) * 0.633 / (2 * math.pi)),
+            phi_rad=math.atan2(0.0, 0.01) % (2 * math.pi),
+        ),
+        BeamDefinition(
+            name='signal',
+            wavelength_um=0.633,
+            power_mW=0.2,
+            coherence_group='laser',
+            w1_um=12,
+            w2_um=12,
+            theta_ext_rad=math.asin(math.hypot(-0.02, 0.0) * 0.633 / (2 * math.pi)),
+            phi_rad=math.atan2(0.0, -0.02) % (2 * math.pi),
+        ),
     )))
 
 
@@ -203,7 +218,11 @@ def test_specialized_preview_keeps_screen_geometry_validation(app, tmp_path):
     assert 'not executed' in window.results_panel.workspace.operation_status.text()
     stack = window.beam_panel.beam_stack_definition
     window.beam_panel.set_beam_stack_definition(replace(
-        stack, beams=(stack.beams[0], replace(stack.beams[1], tilt_x_rad_per_um=-0.1))
+        stack, beams=(stack.beams[0], replace(
+            stack.beams[1],
+            theta_ext_rad=math.asin(math.hypot(-0.1, stack.beams[1].transverse_wavevector_rad_per_um[1]) * stack.beams[1].wavelength_um / (2 * math.pi * stack.beams[1].n_ext)),
+            phi_rad=math.atan2(stack.beams[1].transverse_wavevector_rad_per_um[1], -0.1) % (2 * math.pi),
+        ))
     ))
     window.preview_request_clicked()
     assert 'symmetric' in window.results_panel.workspace.operation_status.text()

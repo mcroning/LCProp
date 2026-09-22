@@ -1,3 +1,4 @@
+import math
 from dataclasses import replace
 from pathlib import Path
 import json
@@ -68,9 +69,12 @@ from lcprop.transport.status import (
 
 def _beam_stack(group="remote"):
     return BeamStack(channels=(BeamChannel(
-        wavelength_um=0.633, waist_x_um=8.0, waist_y_um=8.0,
-        tilt_x_rad_per_um=0.05, tilt_y_rad_per_um=-0.03,
+        wavelength_um=0.633,
         coherence_group=group,
+        w1_um=8.0,
+        w2_um=8.0,
+        theta_ext_rad=math.asin(math.hypot(0.05, -0.03) * 0.633 / (2 * math.pi)),
+        phi_rad=math.atan2(-0.03, 0.05) % (2 * math.pi),
     ),))
 
 

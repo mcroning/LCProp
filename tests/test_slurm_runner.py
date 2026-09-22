@@ -73,9 +73,7 @@ def _request():
             dz_um=2.0, z_length_um=2.0,
         ),
         material=LCMaterial(), bias=BiasSpec(),
-        beams=BeamStack(channels=(BeamChannel(
-            wavelength_um=0.633, waist_x_um=4.0, waist_y_um=4.0,
-        ),)),
+        beams=BeamStack(channels=(BeamChannel(wavelength_um=0.633, w1_um=4.0, w2_um=4.0),)),
         solver=StaticSolverOptions(), output=OutputOptions(),
     )
 
@@ -87,8 +85,10 @@ def _pr_request():
             dz_um=2.0, z_length_um=2.0,
         ),
         beams=BeamStack(channels=(BeamChannel(
-            wavelength_um=0.633, waist_x_um=4.0, waist_y_um=4.0,
-            coherence_group="remote-pr",
+            wavelength_um=0.633,
+            coherence_group='remote-pr',
+            w1_um=4.0,
+            w2_um=4.0,
         ),)),
         material=PRMaterialSpec(
             dark_intensity=0.4, uniform_background_intensity=0.1,
@@ -112,12 +112,7 @@ def _pr_td_request():
         ),
         beams=BeamStack(
             channels=(
-                BeamChannel(
-                    wavelength_um=0.633,
-                    waist_x_um=4.0,
-                    waist_y_um=4.0,
-                    coherence_group="remote-pr-td",
-                ),
+                BeamChannel(wavelength_um=0.633, coherence_group='remote-pr-td', w1_um=4.0, w2_um=4.0),
             )
         ),
         material=PRMaterialSpec(
@@ -147,9 +142,9 @@ def _pr_transverse_td_request():
             channels=(
                 BeamChannel(
                     wavelength_um=0.633,
-                    waist_x_um=4.0,
-                    waist_y_um=4.0,
-                    coherence_group="remote-pr-transverse-td",
+                    coherence_group='remote-pr-transverse-td',
+                    w1_um=4.0,
+                    w2_um=4.0,
                 ),
             )
         ),

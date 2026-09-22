@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from lcprop.lc.products import (
+    _result_power_diagnostics,
     from_static_live_state,
     from_timedependent_live_state,
     to_run_data,
@@ -1028,7 +1029,7 @@ class LCPropMainWindow(QWidget):
             "Wavelengths: " + ", ".join(f"{value:g} µm" for value in wavelengths),
             "Lasers/coherence groups: " + ", ".join(coherence_groups),
             f"First enabled beam: {first_channel.name}, P={first_channel.power_mW:g} mW, "
-            f"waists=({first_channel.waist_x_um:g}, {first_channel.waist_y_um:g}) µm, "
+            f"external beam-normal radii=({first_channel.w1_um:g}, {first_channel.w2_um:g}) µm, "
             f"λ={first_channel.wavelength_um:g} µm",
             f"Workflow: {base_req.solver.workflow.strategy}",
             "Initial condition: Beam pane launch",
@@ -1862,13 +1863,16 @@ class LCPropMainWindow(QWidget):
             self.results_panel.append_console(
                 f"normalized_field_integral_final:   {result.power_final:.8g}"
             )
-        if getattr(result, "physical_power_initial_mW", None) is not None:
+        if any(getattr(result, f"physical_power_{stage}_mW", None) is not None
+               for stage in ("initial", "final")):
+            # Share Results terminology; these may be lineage currents rather
+            # than coherent-group totals or vector Poynting power.
+            power_diagnostics = _result_power_diagnostics(result)
+            for key, value in power_diagnostics.items():
+                if key.endswith("_mW") and value is not None:
+                    self.results_panel.append_console(f"{key}: {value:.8g}")
             self.results_panel.append_console(
-                f"physical_power_initial_mW: {result.physical_power_initial_mW:.8g}"
-            )
-        if getattr(result, "physical_power_final_mW", None) is not None:
-            self.results_panel.append_console(
-                f"physical_power_final_mW:   {result.physical_power_final_mW:.8g}"
+                f"power_qualification: {power_diagnostics['power_qualification']}"
             )
 
         if hasattr(result, "cumulative_time"):

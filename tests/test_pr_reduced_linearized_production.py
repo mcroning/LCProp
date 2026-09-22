@@ -89,11 +89,7 @@ def _base_request(
     )
     beams = BeamStack(
         channels=(
-            BeamChannel(
-                wavelength_um=0.633,
-                waist_x_um=18.0,
-                waist_y_um=15.0,
-            ),
+            BeamChannel(wavelength_um=0.633, w1_um=18.0, w2_um=15.0),
         )
     )
     x = np.arange(nx)[:, None]

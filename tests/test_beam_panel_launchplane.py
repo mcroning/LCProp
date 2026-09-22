@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 
 import builtins
 import os
@@ -33,16 +34,14 @@ def test_beam_panel_embeds_launchplane_with_lcprop_defaults(app):
     assert beam.wavelength_um == 0.633
     assert beam.power_mW == 1.0
     assert (beam.x_um, beam.y_um) == (0.0, 0.0)
-    assert (beam.waist_x_um, beam.waist_y_um) == (3.0, 3.0)
-    assert (beam.tilt_x_rad_per_um, beam.tilt_y_rad_per_um) == (0.0, 0.0)
+    assert (beam.w1_um, beam.w2_um) == (3.0, 3.0)
+    assert beam.transverse_wavevector_rad_per_um == (0.0, 0.0)
     assert beam.phase_rad == 0.0
     assert beam.coherence_group == "laser_A"
     assert beam.enabled is True
-    assert beam.launch_input_mode == "angle"
-    assert beam.launch_medium_index == 1.0
-    assert panel.launch_plane_widget.launch_input_mode_combo.currentData() == "angle"
-    assert not panel.launch_plane_widget.angle_x_spin.isHidden()
-    assert panel.launch_plane_widget.tilt_x_spin.isHidden()
+    assert beam.n_ext == 1.0
+    assert not panel.launch_plane_widget.theta_spin.isHidden()
+    assert 'read-only' in panel.launch_plane_widget.derived_k.text()
     assert panel.optical_boundary() == TransverseBoundarySpec()
     panel.close()
 
@@ -66,10 +65,9 @@ def test_lc_request_captures_selected_optical_boundary(app):
 def test_pr_default_beam_uses_same_external_angle_editor_semantics():
     beam = pr_default_beam_stack_definition().beams[0]
 
-    assert beam.launch_input_mode == "angle"
-    assert beam.launch_medium_index == 1.0
-    assert beam.angle_x_rad == 0.0
-    assert beam.angle_y_rad == 0.0
+    assert beam.n_ext == 1.0
+    assert beam.theta_ext_rad == 0.0
+    assert beam.phi_rad == 0.0
 
 
 def test_beam_panel_first_show_fits_current_aperture_once_without_moving_beams(
@@ -117,12 +115,12 @@ def test_beam_panel_beams_adapts_fields_without_axis_swap(app):
         BeamStackDefinition(
             beams=(
                 BeamDefinition(
-                    name="probe",
+                    name='probe',
                     x_um=7.0,
                     y_um=-11.0,
-                    waist_x_um=4.0,
-                    waist_y_um=6.0,
-                    coherence_group="probe-laser",
+                    coherence_group='probe-laser',
+                    w1_um=4.0,
+                    w2_um=6.0,
                 ),
             )
         )
@@ -132,36 +130,14 @@ def test_beam_panel_beams_adapts_fields_without_axis_swap(app):
 
     assert channel.name == "probe"
     assert (channel.x0_um, channel.y0_um) == (7.0, -11.0)
-    assert (channel.waist_x_um, channel.waist_y_um) == (4.0, 6.0)
+    assert (channel.w1_um, channel.w2_um) == (4.0, 6.0)
     assert channel.coherence_group == "probe-laser"
     panel.close()
 
 
-def test_beam_panel_adapts_focus_defined_profile_intent(app):
-    panel = BeamPanel()
-    panel.set_beam_stack_definition(
-        BeamStackDefinition(
-            beams=(
-                BeamDefinition(
-                    name="focused",
-                    profile="focused_gaussian",
-                    waist_x_at_focus_um=4.0,
-                    waist_y_at_focus_um=6.0,
-                    focus_at_interaction_midpoint=True,
-                    coherence_group="laser",
-                ),
-            )
-        )
-    )
-
-    channel = panel.beams().channels[0]
-
-    assert channel.profile == "focused_gaussian"
-    assert channel.waist_x_at_focus_um == 4.0
-    assert channel.waist_y_at_focus_um == 6.0
-    assert channel.focus_z_um is None
-    assert channel.focus_at_interaction_midpoint is True
-    panel.close()
+def test_beam_panel_rejects_deferred_focused_profile(app):
+    with pytest.raises(ValueError, match="focused launch is deferred"):
+        BeamDefinition(name="focused", profile="focused_gaussian")
 
 
 def test_beam_panel_preserves_enabled_order_and_coherence_groups(app):
@@ -235,13 +211,13 @@ def test_aperture_update_preserves_beam_coordinates_waists_and_tilts(app):
     stack = BeamStackDefinition(
         beams=(
             BeamDefinition(
-                name="outside",
+                name='outside',
                 x_um=30.0,
                 y_um=-40.0,
-                waist_x_um=8.0,
-                waist_y_um=9.0,
-                tilt_x_rad_per_um=0.01,
-                tilt_y_rad_per_um=-0.02,
+                w1_um=8.0,
+                w2_um=9.0,
+                theta_ext_rad=math.asin(math.hypot(0.01, -0.02) * 0.633 / (2 * math.pi)),
+                phi_rad=math.atan2(-0.02, 0.01) % (2 * math.pi),
             ),
         )
     )
@@ -279,37 +255,24 @@ def test_request_construction_uses_adapted_beam_stack(app):
     window.close()
 
 
-def test_request_construction_commits_pending_tilt_edits(app):
+def test_request_construction_commits_pending_physical_edits(app):
     window = LCPropMainWindow()
     widget = window.beam_panel.launch_plane_widget
-    widget.launch_input_mode_combo.setCurrentIndex(
-        widget.launch_input_mode_combo.findData("transverse_wavevector")
-    )
-
-    # Model a typed value that has not emitted valueChanged yet. LaunchPane
-    # deliberately disables keyboard tracking on these spin boxes.
-    widget.tilt_x_spin.lineEdit().setText("0.125000")
-    widget.tilt_y_spin.lineEdit().setText("-0.062500")
-
+    widget.theta_spin.lineEdit().setText("12.500000")
+    widget.phi_spin.lineEdit().setText("230.000000")
     channel = window.build_request().beams.channels[0]
-
-    assert channel.tilt_x_rad_per_um == pytest.approx(0.125)
-    assert channel.tilt_y_rad_per_um == pytest.approx(-0.0625)
+    assert channel.theta_ext_rad == pytest.approx(math.radians(12.5))
+    assert channel.phi_rad == pytest.approx(math.radians(230))
     window.close()
 
 
 def test_request_construction_commits_pending_external_angle_edit(app):
     window = LCPropMainWindow()
     widget = window.beam_panel.launch_plane_widget
-    widget.angle_y_spin.lineEdit().setText("0.00000000")
-    widget.angle_x_spin.lineEdit().setText("0.10000000")
-
+    widget.phi_spin.lineEdit().setText("0.000000")
+    widget.theta_spin.lineEdit().setText("10.000000")
     channel = window.build_request().beams.channels[0]
-
-    assert channel.tilt_x_rad_per_um == pytest.approx(
-        0.990950800381,
-        abs=5e-13,
-    )
+    assert channel.tilt_x_rad_per_um == pytest.approx(2*math.pi/.633*math.sin(math.radians(10)))
     assert channel.tilt_y_rad_per_um == 0.0
     window.close()
 
@@ -372,8 +335,9 @@ try:
     import lcprop.gui.main_window
 except ImportError as exc:
     message = str(exc)
-    assert "separate 'launchplane' package" in message
-    assert "pip install -e" in message
+    assert "coordinated LaunchPlane schema 4" in message
+    assert "Install the reviewed LCProp/LaunchPlane pair together" in message
+    assert "obsolete packages are incompatible" in message
 else:
     raise AssertionError("LCProp GUI import succeeded without LaunchPane")
 """

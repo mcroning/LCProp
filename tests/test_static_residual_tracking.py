@@ -57,13 +57,7 @@ def _request(**solver_updates) -> StaticRunRequest:
         bias=BiasSpec(),
         beams=BeamStack(
             channels=(
-                BeamChannel(
-                    power_mW=1.0,
-                    waist_x_um=6.0,
-                    waist_y_um=6.0,
-                    x0_um=-10.0,
-                    coherence_group="A",
-                ),
+                BeamChannel(power_mW=1.0, x0_um=-10.0, coherence_group='A', w1_um=6.0, w2_um=6.0),
             )
         ),
         solver=solver,

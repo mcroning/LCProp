@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 
 import os
 
@@ -40,11 +41,11 @@ def static_products():
         ),
         beams=BeamStack(channels=(BeamChannel(
             wavelength_um=0.633,
-            waist_x_um=7.0,
-            waist_y_um=5.0,
-            tilt_x_rad_per_um=0.15,
-            tilt_y_rad_per_um=-0.08,
-            coherence_group="presentation",
+            coherence_group='presentation',
+            w1_um=7.0,
+            w2_um=5.0,
+            theta_ext_rad=math.asin(math.hypot(0.15, -0.08) * 0.633 / (2 * math.pi)),
+            phi_rad=math.atan2(-0.08, 0.15) % (2 * math.pi),
         ),)),
         material=PRMaterialSpec(
             dark_intensity=0.4,

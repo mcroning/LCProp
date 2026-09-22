@@ -1,3 +1,4 @@
+from lcprop.optics.launch import OpticalLaunchContext
 import numpy as np
 
 from lcprop.core.beams import BeamChannel, BeamStack
@@ -19,14 +20,10 @@ def _normalization_metrics(power_mW: float, Nx: int) -> tuple[float, float]:
     material = LCMaterial()
     beams = BeamStack(
         channels=(
-            BeamChannel(
-                power_mW=power_mW,
-                waist_x_um=3.0,
-                waist_y_um=3.0,
-            ),
+            BeamChannel(power_mW=power_mW, w1_um=3.0, w2_um=3.0),
         )
     )
-    launch = build_launch(beams, grid)
+    launch = build_launch(beams, grid, context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um))
     weighted_intensity = director_driving_intensity(
         launch.A0,
         coherence_groups=launch.coherence_groups,

@@ -1,3 +1,4 @@
+import math
 from dataclasses import replace
 
 import numpy as np
@@ -51,26 +52,26 @@ def _request(*, precision: str = "float64", steps: int = 2) -> PRRunRequest:
         beams=BeamStack(
             channels=(
                 BeamChannel(
-                    name="signal",
+                    name='signal',
                     wavelength_um=0.633,
                     power_mW=0.8,
-                    waist_x_um=8.0,
-                    waist_y_um=7.0,
-                    tilt_x_rad_per_um=0.08,
-                    tilt_y_rad_per_um=-0.04,
                     phase_rad=0.2,
-                    coherence_group="laser",
+                    coherence_group='laser',
+                    w1_um=8.0,
+                    w2_um=7.0,
+                    theta_ext_rad=math.asin(math.hypot(0.08, -0.04) * 0.633 / (2 * math.pi)),
+                    phi_rad=math.atan2(-0.04, 0.08) % (2 * math.pi),
                 ),
                 BeamChannel(
-                    name="pump",
+                    name='pump',
                     wavelength_um=0.633,
                     power_mW=1.2,
-                    waist_x_um=9.0,
-                    waist_y_um=8.0,
-                    tilt_x_rad_per_um=-0.06,
-                    tilt_y_rad_per_um=0.03,
                     phase_rad=-0.1,
-                    coherence_group="laser",
+                    coherence_group='laser',
+                    w1_um=9.0,
+                    w2_um=8.0,
+                    theta_ext_rad=math.asin(math.hypot(-0.06, 0.03) * 0.633 / (2 * math.pi)),
+                    phi_rad=math.atan2(0.03, -0.06) % (2 * math.pi),
                 ),
             ),
             coherence="coherent",

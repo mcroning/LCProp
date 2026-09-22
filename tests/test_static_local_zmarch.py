@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.physical_launch_oracles import scalar_lineage_flux
+
 import numpy as np
 import pytest
 
@@ -43,13 +45,13 @@ def _request_parts() -> dict:
         "beams": BeamStack(
             channels=(
                 BeamChannel(
-                    name="off-axis",
+                    name='off-axis',
                     power_mW=1.0,
-                    waist_x_um=10.0,
-                    waist_y_um=10.0,
                     x0_um=-20.0,
                     y0_um=0.0,
-                    coherence_group="A",
+                    coherence_group='A',
+                    w1_um=10.0,
+                    w2_um=10.0,
                 ),
             )
         ),
@@ -126,7 +128,7 @@ def test_static_local_self_consistent_marches_theta_and_field_along_z(monkeypatc
     assert result.max_final_residual_rms <= 0.005
     assert result.max_final_residual_max <= 0.02
     assert np.isfinite(theta).all()
-    assert result.physical_power_final_mW == pytest.approx(1.0, abs=1.0e-10)
+    assert result.physical_power_final_mW == pytest.approx(scalar_lineage_flux(result.A_final, request.grid, request.beams, request.material.no), abs=1e-12)
     y_rms = _rms_y(np.asarray(result.intensity_stack), np.asarray(grid.y_um))
     assert y_rms[-1] == pytest.approx(6.256, abs=1.1)
 
@@ -186,20 +188,20 @@ def test_two_incoherent_beams_converge_with_trusted_scale_widths():
     parts["beams"] = BeamStack(
         channels=(
             BeamChannel(
-                name="lower",
+                name='lower',
                 power_mW=0.5,
-                waist_x_um=10.0,
-                waist_y_um=10.0,
                 y0_um=-10.0,
-                coherence_group="lower",
+                coherence_group='lower',
+                w1_um=10.0,
+                w2_um=10.0,
             ),
             BeamChannel(
-                name="upper",
+                name='upper',
                 power_mW=0.5,
-                waist_x_um=10.0,
-                waist_y_um=10.0,
                 y0_um=10.0,
-                coherence_group="upper",
+                coherence_group='upper',
+                w1_um=10.0,
+                w2_um=10.0,
             ),
         ),
         coherence="incoherent",
@@ -218,5 +220,5 @@ def test_two_incoherent_beams_converge_with_trusted_scale_widths():
     assert result.max_final_residual_max <= 0.02
     assert np.isfinite(np.asarray(result.theta_final)).all()
     assert np.isfinite(np.asarray(result.intensity_stack)).all()
-    assert result.physical_power_final_mW == pytest.approx(1.0, abs=1.0e-10)
+    assert result.physical_power_final_mW == pytest.approx(scalar_lineage_flux(result.A_final, request.grid, request.beams, request.material.no), abs=1e-12)
     assert y_rms[-1] == pytest.approx(3.420, abs=0.5)

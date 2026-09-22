@@ -8,6 +8,8 @@ from lcprop.core.beams import BeamChannel
 
 def _channel_values() -> dict[str, object]:
     return {
+        "n_ext": 1., "theta_ext_rad": 0., "phi_rad": 0.,
+        "w1_um": 3., "w2_um": 3., "psi_rad": 0.,
         "name": "legacy",
         "power_mW": 2.0,
         "coherence_group": "laser",

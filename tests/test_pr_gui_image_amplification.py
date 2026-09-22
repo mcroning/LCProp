@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 
 from dataclasses import replace
 import hashlib
@@ -307,7 +308,10 @@ def test_source_resolution_never_changes_grid_or_incident_power():
         dxdy = workflow.grid.x_aperture_um / workflow.grid.Nx
         dxdy *= workflow.grid.y_aperture_um / workflow.grid.Ny
         integrals = np.sum(np.abs(workflow.initial_A) ** 2, axis=(1, 2)) * dxdy
-        assert integrals[0] * 3.5 == pytest.approx(3.0)
+        # The finite window captures less than requested; source raster size
+        # does not alter the beam or restore aperture loss.
+        assert 0 < integrals[0]*3.5 < 3.0
+        np.testing.assert_array_equal(low_workflow.initial_A, high_workflow.initial_A)
         assert integrals[1] * 3.5 < 0.5
         assert sum(
             channel.power_mW for channel in workflow.beams.channels
@@ -390,7 +394,19 @@ def test_image_element_changes_only_signal_and_does_not_restore_absorption():
         np.sum(np.abs(absorbing_workflow.initial_A) ** 2, axis=(1, 2)) * dxdy
     )
 
-    assert open_integrals * 3.5 == pytest.approx(np.array([3.0, 0.5]))
+    # Requested incident power is independent of finite-grid capture and of
+    # the unweighted face norm. Check the analytic external Gaussian instead.
+    assert [c.power_mW for c in open_workflow.beams.channels] == [3., .5]
+    grid = make_grid(open_workflow.grid, real_dtype=np.float64)
+    expected_norms = []
+    for channel in open_workflow.beams.channels:
+        ce = np.cos(channel.theta_ext_rad)
+        ci = np.sqrt(1-(channel.n_ext*np.sin(channel.theta_ext_rad)/open_workflow.material.refractive_index)**2)
+        density = np.exp(-2*((grid.x_um[:,None]-channel.x0_um)*ce/channel.w1_um)**2
+                         -2*((grid.y_um[None,:]-channel.y0_um)/channel.w2_um)**2)
+        expected_norms.append(np.sum(density)*dxdy*2/(np.pi*channel.w1_um*channel.w2_um)
+                              *ce/ci*channel.power_mW/3.5)
+    assert open_integrals == pytest.approx(expected_norms, rel=1e-13)
     assert np.array_equal(
         open_workflow.initial_A[0], absorbing_workflow.initial_A[0]
     )
@@ -494,7 +510,7 @@ def test_physical_operation_is_distinct_from_historical_normalized_benchmark():
     assert physical_power < historical_power
     assert historical.transparency_policy == "historical_normalized_benchmark"
     assert physical.transparency_policy == "passive_intensity_transmission_v1"
-    assert physical.signal_throughput_fraction < 1.0
+    assert physical.signal_throughput_fraction is None  # sharp image is outside narrow-band qualification
 
 
 def test_rectangular_result_products_have_independent_axes():
@@ -525,10 +541,10 @@ def test_rectangular_result_products_have_independent_axes():
     assert values["incident_pump_power_mW"] == pytest.approx(3.0)
     assert values["incident_signal_power_mW"] == pytest.approx(0.5)
     assert values["incident_total_power_mW"] == pytest.approx(3.5)
-    assert values["post_element_pump_power_mW"] == pytest.approx(3.0)
-    assert values["post_element_signal_power_mW"] < 0.5
-    assert values["power_entering_pr_medium_mW"] < 3.5
-    assert values["signal_throughput_fraction"] < 1.0
+    assert 0 < values["post_element_pump_power_mW"] < 3.0  # finite aperture loss
+    assert values["post_element_signal_power_mW"] is None
+    assert values["power_entering_pr_medium_mW"] is None
+    assert values["signal_throughput_fraction"] is None
     assert values["transparency_policy"] == "passive_intensity_transmission_v1"
     metrics = run_data.diagnostics["image_amplification_metrics"].values
     assert metrics["measured_signal_gain"] == result.measured_absolute_signal_gain
@@ -567,7 +583,12 @@ def test_image_products_default_to_offset_rectangular_signal_screen_frame(app):
     assert analysis is not None
     run_data = composite.run_data
     base_run_data = composite.result.base_runner_result.run_data
-    expected = (6.55, 36.45, -17.8, -2.2)
+    # Independent face geometry: incidence is in x-z with zero roll,
+    # so the external beam-normal x radius projects to w1/cos(theta_ext).
+    face_radius = 5.0 / math.sqrt(1.0 - (0.15 * 0.633 / (2 * math.pi)) ** 2)
+    left, right = 20.0 - 2.0 * face_radius, 33.0
+    margin = 0.15 * (right - left)
+    expected = (left - margin, right + margin, -17.8, -2.2)
     full_extent = tuple(run_data.geometry.extent_xy())
     assert np.array_equal(run_data.geometry.x, base_run_data.geometry.x)
     assert np.array_equal(run_data.geometry.y, base_run_data.geometry.y)
@@ -620,7 +641,11 @@ def test_image_default_frame_supports_screen_centered_on_signal():
 
     assert composite.run_data.fields[
         "amplified_image"
-    ].default_display_extent == pytest.approx((7.0, 33.0, -17.8, -2.2))
+    ].default_display_extent == pytest.approx((
+        20.0 - 13.0 / math.sqrt(1.0 - (0.15 * 0.633 / (2 * math.pi)) ** 2),
+        20.0 + 13.0 / math.sqrt(1.0 - (0.15 * 0.633 / (2 * math.pi)) ** 2),
+        -17.8, -2.2,
+    ))
 
 
 @pytest.mark.parametrize(
@@ -632,7 +657,10 @@ def test_image_default_frame_supports_screen_centered_on_signal():
         ),
         (
             {"signal_waist_x_um": 12.0, "screen_width_um": 8.0},
-            (-11.2, 51.2),
+            (
+                20.0 - 31.2 / math.sqrt(1.0 - (0.15 * 0.633 / (2 * math.pi)) ** 2),
+                20.0 + 31.2 / math.sqrt(1.0 - (0.15 * 0.633 / (2 * math.pi)) ** 2),
+            ),
         ),
     ),
 )
@@ -705,12 +733,9 @@ def test_measured_gain_power_diagnostics_use_existing_carrier_isolation():
         rel=0.0,
         abs=1.0e-15,
     )
-    assert analysis.measured_absolute_signal_gain == pytest.approx(
-        analysis.output_isolated_signal_power_mW
-        / analysis.measured_gain_reference_signal_power_mW,
-        rel=0.0,
-        abs=1.0e-15,
-    )
+    assert analysis.output_isolated_signal_power_mW is None
+    assert analysis.measured_gain_reference_signal_power_mW is None
+    assert "unweighted norm" in metrics["physical_power_qualification"]
     assert metrics["measured_gain_reference_signal_power_mW"] == (
         analysis.measured_gain_reference_signal_power_mW
     )
@@ -745,20 +770,22 @@ def test_gui_user_mode_builds_and_dispatches_registered_operation(app, tmp_path)
         BeamStackDefinition(
             beams=(
                 BeamDefinition(
-                    name="pump",
+                    name='pump',
                     power_mW=2.0,
-                    waist_x_um=10.0,
-                    waist_y_um=6.0,
-                    tilt_x_rad_per_um=kx,
-                    coherence_group="image-laser",
+                    coherence_group='image-laser',
+                    w1_um=10.0,
+                    w2_um=6.0,
+                    theta_ext_rad=math.asin(math.hypot(kx, 0.0) * 0.633 / (2 * math.pi)),
+                    phi_rad=math.atan2(0.0, kx) % (2 * math.pi),
                 ),
                 BeamDefinition(
-                    name="signal",
+                    name='signal',
                     power_mW=0.25,
-                    waist_x_um=10.0,
-                    waist_y_um=6.0,
-                    tilt_x_rad_per_um=-kx,
-                    coherence_group="image-laser",
+                    coherence_group='image-laser',
+                    w1_um=10.0,
+                    w2_um=6.0,
+                    theta_ext_rad=math.asin(math.hypot(-kx, 0.0) * 0.633 / (2 * math.pi)),
+                    phi_rad=math.atan2(0.0, -kx) % (2 * math.pi),
                 ),
             )
         )
@@ -933,24 +960,26 @@ def _presentation_image_experiment(
     beams = BeamStack(
         channels=(
             BeamChannel(
-                name="pump",
+                name='pump',
                 power_mW=1.0,
-                waist_x_um=5.0,
-                waist_y_um=3.0,
                 x0_um=-20.0,
                 y0_um=10.0,
-                tilt_x_rad_per_um=0.15,
-                coherence_group="image-presentation",
+                coherence_group='image-presentation',
+                w1_um=5.0,
+                w2_um=3.0,
+                theta_ext_rad=math.asin(math.hypot(0.15, 0.0) * 0.633 / (2 * math.pi)),
+                phi_rad=math.atan2(0.0, 0.15) % (2 * math.pi),
             ),
             BeamChannel(
-                name="signal",
+                name='signal',
                 power_mW=0.2,
-                waist_x_um=signal_waist_x_um,
-                waist_y_um=signal_waist_y_um,
                 x0_um=20.0,
                 y0_um=-10.0,
-                tilt_x_rad_per_um=-0.15,
-                coherence_group="image-presentation",
+                coherence_group='image-presentation',
+                w1_um=signal_waist_x_um,
+                w2_um=signal_waist_y_um,
+                theta_ext_rad=math.asin(math.hypot(-0.15, 0.0) * 0.633 / (2 * math.pi)),
+                phi_rad=math.atan2(0.0, -0.15) % (2 * math.pi),
             ),
         ),
         coherence="coherent",
@@ -1013,20 +1042,22 @@ def _configured_multi_algorithm_image_window(app):
         BeamStackDefinition(
             beams=(
                 BeamDefinition(
-                    name="pump",
+                    name='pump',
                     power_mW=1.0,
-                    waist_x_um=10.0,
-                    waist_y_um=10.0,
-                    tilt_x_rad_per_um=0.15,
-                    coherence_group="image-validation",
+                    coherence_group='image-validation',
+                    w1_um=10.0,
+                    w2_um=10.0,
+                    theta_ext_rad=math.asin(math.hypot(0.15, 0.0) * 0.633 / (2 * math.pi)),
+                    phi_rad=math.atan2(0.0, 0.15) % (2 * math.pi),
                 ),
                 BeamDefinition(
-                    name="signal",
+                    name='signal',
                     power_mW=0.2,
-                    waist_x_um=10.0,
-                    waist_y_um=10.0,
-                    tilt_x_rad_per_um=-0.15,
-                    coherence_group="image-validation",
+                    coherence_group='image-validation',
+                    w1_um=10.0,
+                    w2_um=10.0,
+                    theta_ext_rad=math.asin(math.hypot(-0.15, 0.0) * 0.633 / (2 * math.pi)),
+                    phi_rad=math.atan2(0.0, -0.15) % (2 * math.pi),
                 ),
             )
         )
@@ -1100,7 +1131,11 @@ def test_beampanel_request_rejects_nonzero_y_carrier():
     pump, signal = request.launch_configuration.beams.channels
     beams = replace(
         request.launch_configuration.beams,
-        channels=(pump, replace(signal, tilt_y_rad_per_um=0.01)),
+        channels=(pump, replace(
+            signal,
+            theta_ext_rad=math.asin(math.hypot(signal.tilt_x_rad_per_um, 0.01) * signal.wavelength_um / (2 * math.pi * signal.n_ext)),
+            phi_rad=math.atan2(0.01, signal.tilt_x_rad_per_um) % (2 * math.pi),
+        )),
     )
 
     with pytest.raises(ValueError, match="carriers in the x-z plane"):
@@ -1119,7 +1154,11 @@ def test_beampanel_request_requires_symmetric_x_carriers():
     pump, signal = request.launch_configuration.beams.channels
     beams = replace(
         request.launch_configuration.beams,
-        channels=(pump, replace(signal, tilt_x_rad_per_um=-0.5)),
+        channels=(pump, replace(
+            signal,
+            theta_ext_rad=math.asin(math.hypot(-0.5, signal.tilt_y_rad_per_um) * signal.wavelength_um / (2 * math.pi * signal.n_ext)),
+            phi_rad=math.atan2(signal.tilt_y_rad_per_um, -0.5) % (2 * math.pi),
+        )),
     )
 
     with pytest.raises(ValueError, match="symmetric pump/signal x carriers"):
@@ -2310,7 +2349,10 @@ def test_image_experiment_reduced_td_matches_direct_completed_result_bit_for_bit
         composite_values = composite.run_data.diagnostics[key].values
         direct_values = direct_run_data.diagnostics[key].values
         if key != "summary":
-            assert composite_values == direct_values
+            # Equal endpoints retain equal partition/ratio diagnostics. Launch
+            # provenance differs: explicit prepared field versus configured screen.
+            assert {k:v for k,v in composite_values.items() if k != "power_normalization"} == {
+                k:v for k,v in direct_values.items() if k != "power_normalization"}
             continue
         assert {
             name: value
@@ -2334,11 +2376,12 @@ def test_image_experiment_reduced_td_matches_direct_completed_result_bit_for_bit
             "wavelengths_um",
         ):
             assert composite_launch[name] == direct_launch[name]
-        assert composite_launch["post_element_channel_powers_mW"] == list(
-            analyzed.post_element_channel_powers_mW
-        )
-        assert direct_launch["channel_throughput_fractions"][1] == 1.0
-        assert composite_launch["channel_throughput_fractions"][1] < 1.0
+        for estimate, qualified in zip(composite_launch["post_element_channel_powers_mW"],
+                                       analyzed.post_element_channel_powers_mW):
+            if qualified is not None:
+                assert estimate == qualified
+        assert direct_launch["power_normalization"]["screen_transmission_of_captured"][1] == 1.0
+        assert composite_launch["power_normalization"]["requested_to_post_screen_estimate"][1] < 1.0
 
 
 def test_image_experiment_cancellation_between_analysis_stages_preserves_base():
@@ -2422,14 +2465,16 @@ def test_mode_switch_preserves_shared_beams_screens_and_role_names(app):
     stack = BeamStackDefinition(
         beams=(
             BeamDefinition(
-                name="pump",
-                tilt_x_rad_per_um=kx,
-                coherence_group="shared",
+                name='pump',
+                coherence_group='shared',
+                theta_ext_rad=math.asin(math.hypot(kx, 0.0) * 0.633 / (2 * math.pi)),
+                phi_rad=math.atan2(0.0, kx) % (2 * math.pi),
             ),
             BeamDefinition(
-                name="signal",
-                tilt_x_rad_per_um=-kx,
-                coherence_group="shared",
+                name='signal',
+                coherence_group='shared',
+                theta_ext_rad=math.asin(math.hypot(-kx, 0.0) * 0.633 / (2 * math.pi)),
+                phi_rad=math.atan2(0.0, -kx) % (2 * math.pi),
             ),
         )
     )

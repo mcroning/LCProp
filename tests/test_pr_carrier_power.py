@@ -213,7 +213,9 @@ def test_synthetic_transfer_recovers_power_gain_delta_and_balance():
     np.testing.assert_allclose(diagnostic["carrier_power_output"], (0.5, 0.5))
     np.testing.assert_allclose(diagnostic["carrier_gain"], (2.0 / 3.0, 2.0))
     np.testing.assert_allclose(diagnostic["carrier_delta_power"], (-0.25, 0.25))
-    np.testing.assert_allclose(diagnostic["carrier_power_input_mW"], (3.0, 1.0))
+    assert diagnostic["carrier_power_input_mW"] is None
+    assert diagnostic["physical_power_availability"] == "unavailable"
+    assert "resolver-qualified" in diagnostic["physical_power_unavailable_reason"]
     assert abs(diagnostic["carrier_power_balance_error"]) < 2e-15
     assert diagnostic["carrier_separation_quality"] == pytest.approx(1.0)
     assert diagnostic["carrier_gain_status"] == ["available", "available"]
@@ -419,20 +421,20 @@ def three_model_results():
     beams = BeamStack(
         channels=(
             BeamChannel(
-                name="Pump",
+                name='Pump',
                 power_mW=3.0,
-                waist_x_um=20.0,
-                waist_y_um=18.0,
-                tilt_x_rad_per_um=kx,
-                tilt_y_rad_per_um=ky,
+                w1_um=20.0,
+                w2_um=18.0,
+                theta_ext_rad=math.asin(math.hypot(kx, ky) * 0.633 / (2 * math.pi)),
+                phi_rad=math.atan2(ky, kx) % (2 * math.pi),
             ),
             BeamChannel(
-                name="Signal",
+                name='Signal',
                 power_mW=1.0,
-                waist_x_um=18.0,
-                waist_y_um=16.0,
-                tilt_x_rad_per_um=-kx,
-                tilt_y_rad_per_um=-ky,
+                w1_um=18.0,
+                w2_um=16.0,
+                theta_ext_rad=math.asin(math.hypot(-kx, -ky) * 0.633 / (2 * math.pi)),
+                phi_rad=math.atan2(-ky, -kx) % (2 * math.pi),
             ),
         ),
         coherence="coherent",

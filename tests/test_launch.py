@@ -1,3 +1,4 @@
+import math
 import json
 
 import numpy as np
@@ -16,31 +17,16 @@ from lcprop.optics.launch import (
 from lcprop.optics.splitstep import hop_linear, linear_kernel, total_intensity
 
 
-def test_beam_channel_old_positional_constructor_remains_stable():
-    channel = BeamChannel(
-        "old",
-        0.532,
-        2.0,
-        4.0,
-        5.0,
-        1.0,
-        -2.0,
-        0.1,
-        -0.2,
-        0.3,
-        "laser",
-    )
-
-    assert channel.coherence_group == "laser"
-    assert channel.profile == "legacy_gaussian"
-    assert channel.waist_x_at_focus_um is None
+def test_obsolete_positional_constructor_is_rejected():
+    with pytest.raises(TypeError):
+        BeamChannel("old", .532, 2., 4., 5.)
 
 
 @pytest.mark.parametrize("resolution", [64, 128])
 def test_single_gaussian_launch_power_normalization(resolution):
     grid = make_grid(GridSpec(Nx=resolution, Ny=resolution, z_length_um=50.0))
     beams = BeamStack(channels=(BeamChannel(power_mW=2.0),))
-    launch = build_launch(beams, grid)
+    launch = build_launch(beams, grid, context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um))
 
     assert launch.A0.shape == (1, resolution, resolution)
     assert np.isclose(total_power(launch.A0, grid), 1.0, rtol=1e-6)
@@ -59,7 +45,7 @@ def test_two_channel_launch_power_normalization():
         coherence="coherent",
     )
 
-    launch = build_launch(beams, grid)
+    launch = build_launch(beams, grid, context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um))
 
     assert launch.A0.shape == (2, 128, 128)
     assert launch.coherence == "coherent"
@@ -69,13 +55,13 @@ def test_two_channel_launch_power_normalization():
     assert np.allclose(launch.power_fractions, [0.25, 0.75])
     assert np.allclose(
         reconstructed_physical_powers_mW(launch.A0, grid, launch),
-        [1.0, 3.0],
+        [1.0, 3.0], rtol=0.002,
     )
     assert launch.summary()["physical_channel_powers_mW"] == [1.0, 3.0]
     assert launch.summary()["physical_total_power_mW"] == 4.0
     assert launch.summary()["power_fractions"] == [0.25, 0.75]
     assert launch.summary()["field_normalization"] == (
-        "sum_channel_integrals_equals_one"
+        "physical_irradiance_carrier_cosine_v1"
     )
     assert np.allclose(np.asarray(launch.wavelengths_um), [0.633, 0.633])
 
@@ -84,7 +70,7 @@ def test_legacy_incoherent_stack_migrates_to_distinct_groups():
     grid = make_grid(GridSpec(Nx=32, Ny=32))
     beams = BeamStack(channels=(BeamChannel(name="a"), BeamChannel(name="b")))
 
-    launch = build_launch(beams, grid)
+    launch = build_launch(beams, grid, context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um))
 
     assert len(set(launch.coherence_groups)) == 2
     assert launch.summary()["coherence"] == "incoherent"
@@ -102,7 +88,7 @@ def test_legacy_coherence_summary_remains_backward_compatible(coherence, expecte
         coherence=coherence,
     )
 
-    launch = build_launch(beams, grid)
+    launch = build_launch(beams, grid, context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um))
 
     assert launch.summary()["coherence"] == expected
 
@@ -113,6 +99,7 @@ def test_single_channel_summary_preserves_legacy_label(coherence):
     launch = build_launch(
         BeamStack(channels=(BeamChannel(),), coherence=coherence),
         grid,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
     )
 
     assert launch.summary()["coherence"] == coherence
@@ -128,7 +115,7 @@ def test_partially_coherent_explicit_groups_are_preserved_and_reported():
         )
     )
 
-    launch = build_launch(beams, grid)
+    launch = build_launch(beams, grid, context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um))
 
     assert launch.coherence_groups == ("A", "A", "B")
     assert launch.summary()["coherence"] == "coherent"
@@ -143,7 +130,7 @@ def test_launch_summary_reports_effective_explicit_group_coherence():
         )
     )
 
-    launch = build_launch(beams, grid)
+    launch = build_launch(beams, grid, context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um))
 
     assert launch.coherence == "incoherent"
     assert launch.coherence_groups == ("laser", "laser")
@@ -160,7 +147,7 @@ def test_distinct_explicit_groups_override_legacy_coherent_summary():
         coherence="coherent",
     )
 
-    launch = build_launch(beams, grid)
+    launch = build_launch(beams, grid, context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um))
 
     assert launch.coherence == "coherent"
     assert launch.coherence_groups == ("A", "B")
@@ -170,13 +157,9 @@ def test_distinct_explicit_groups_override_legacy_coherent_summary():
 def test_launch_summary_is_deterministic_json_safe_and_numerically_non_mutating():
     grid = make_grid(GridSpec(Nx=32, Ny=24))
     launch = build_launch(
-        BeamStack(
-            channels=(
-                BeamChannel(name="a", power_mW=1.0, coherence_group="laser"),
-                BeamChannel(name="b", power_mW=2.0, coherence_group="laser"),
-            )
-        ),
+        BeamStack(channels=(BeamChannel(name='a', power_mW=1.0, coherence_group='laser'), BeamChannel(name='b', power_mW=2.0, coherence_group='laser'))),
         grid,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
     )
     numerical_before = {
         "A0": launch.A0.copy(),
@@ -220,12 +203,12 @@ def test_partially_migrated_coherence_groups_are_rejected():
 
 
 def test_zero_power_channel_is_zero():
-    grid = make_grid(GridSpec(Nx=32, Ny=32))
+    grid = make_grid(GridSpec(Nx=128, Ny=128))
     beams = BeamStack(
         channels=(BeamChannel(power_mW=0.0), BeamChannel(power_mW=1.0))
     )
 
-    launch = build_launch(beams, grid)
+    launch = build_launch(beams, grid, context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um))
 
     assert np.allclose(launch.A0[0], 0.0)
     assert np.isclose(total_power(launch.A0, grid), 1.0)
@@ -236,19 +219,28 @@ def test_all_zero_power_channels_are_rejected():
     beams = BeamStack(channels=(BeamChannel(power_mW=0.0),))
 
     with pytest.raises(ValueError, match="total physical power must be positive"):
-        build_launch(beams, grid)
+        build_launch(beams, grid, context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um))
 
 
 def test_tilt_adds_phase_variation():
     grid = make_grid(GridSpec(Nx=64, Ny=64))
 
-    no_tilt = BeamStack(channels=(BeamChannel(tilt_x_rad_per_um=0.0),))
-    tilted = BeamStack(channels=(BeamChannel(tilt_x_rad_per_um=0.1),))
+    no_tilt = BeamStack(channels=(BeamChannel(
+        theta_ext_rad=math.asin(math.hypot(0.0, 0.0) * 0.633 / (2 * math.pi)),
+        phi_rad=math.atan2(0.0, 0.0) % (2 * math.pi),
+    ),))
+    tilted = BeamStack(channels=(BeamChannel(
+        theta_ext_rad=math.asin(math.hypot(0.1, 0.0) * 0.633 / (2 * math.pi)),
+        phi_rad=math.atan2(0.0, 0.1) % (2 * math.pi),
+    ),))
 
-    A0 = build_launch(no_tilt, grid).A0[0]
-    A1 = build_launch(tilted, grid).A0[0]
+    A0 = build_launch(no_tilt, grid, context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um)).A0[0]
+    A1 = build_launch(tilted, grid, context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um)).A0[0]
 
-    assert np.allclose(np.abs(A0), np.abs(A1), rtol=1e-5, atol=1e-7)
+    theta = tilted.channels[0].theta_ext_rad
+    expected_envelope = np.sqrt(2/(np.pi*3**2))*np.exp(
+        -(grid.x_um[:, None]*np.cos(theta)/3)**2-(grid.y_um[None, :]/3)**2)
+    np.testing.assert_allclose(np.abs(A1), expected_envelope, rtol=2e-5, atol=1e-7)
     assert not np.allclose(A0, A1)
 
 
@@ -271,13 +263,14 @@ def test_gaussian_channel_phase_gradient_matches_requested_tilt(
         ),
         real_dtype=np.float64,
     )
-    channel = BeamChannel(
-        waist_x_um=10.0,
-        waist_y_um=10.0,
-        **{field_name: requested_gradient},
-    )
+    channel = BeamChannel(w1_um=10., w2_um=10.,
+                          theta_ext_rad=math.asin(abs(requested_gradient)*.633/(2*math.pi)),
+                          phi_rad=0. if axis == 0 else 3*math.pi/2)
     field = build_launch(
-        BeamStack(channels=(channel,)), grid, complex_dtype=np.complex128
+        BeamStack(channels=(channel,)),
+        grid,
+        complex_dtype=np.complex128,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
     ).A0[0]
 
     # Measure phase differences only where both adjacent samples have useful
@@ -312,8 +305,12 @@ def test_coherent_group_interference_does_not_renormalize_channel_fractions():
         )
     )
 
-    launch_in = build_launch(in_phase, grid)
-    launch_out = build_launch(out_of_phase, grid)
+    launch_in = build_launch(in_phase, grid, context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um))
+    launch_out = build_launch(
+        out_of_phase,
+        grid,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
+    )
     area = grid.dx_um * grid.dy_um
     grouped_in = total_intensity(
         launch_in.A0,
@@ -344,238 +341,26 @@ def _second_moment_radii(field, grid):
     )
 
 
-@pytest.mark.parametrize("focus_z_um", [45.0, -45.0])
-def test_focus_defined_circular_gaussian_reaches_requested_signed_focus(focus_z_um):
-    grid = make_grid(
-        GridSpec(Nx=256, Ny=256, x_aperture_um=160.0, y_aperture_um=160.0),
-        real_dtype=np.float64,
-    )
-    channel = BeamChannel(
-        profile="focused_gaussian",
-        waist_x_at_focus_um=6.0,
-        waist_y_at_focus_um=6.0,
-        focus_z_um=focus_z_um,
-    )
-    context = OpticalLaunchContext(grid=grid, n_ref=2.4, interaction_length_um=90.0)
-    entrance = build_launch(
-        BeamStack(channels=(channel,)),
-        grid,
-        complex_dtype=np.complex128,
-        context=context,
-    ).A0
-    propagated = hop_linear(
-        entrance,
-        linear_kernel(
-            grid.fxy2_um,
-            dz=focus_z_um,
-            wavelength=channel.wavelength_um,
-            n_ref=context.n_ref,
-        ),
-    )
-
-    assert _second_moment_radii(propagated[0], grid) == pytest.approx(
-        (6.0, 6.0), abs=2e-9
-    )
-
-
-def test_elliptical_gaussian_and_midpoint_convenience_reach_axis_waists():
-    grid = make_grid(
-        GridSpec(Nx=384, Ny=384, x_aperture_um=192.0, y_aperture_um=192.0),
-        real_dtype=np.float64,
-    )
-    channel = BeamChannel(
-        profile="focused_gaussian",
-        waist_x_at_focus_um=5.0,
-        waist_y_at_focus_um=9.0,
-        focus_at_interaction_midpoint=True,
-    )
-    context = OpticalLaunchContext(grid=grid, n_ref=1.7, interaction_length_um=80.0)
-    entrance = build_launch(
-        BeamStack(channels=(channel,)),
-        grid,
-        complex_dtype=np.complex128,
-        context=context,
-    ).A0
-    propagated = hop_linear(
-        entrance,
-        linear_kernel(
-            grid.fxy2_um,
-            dz=40.0,
-            wavelength=channel.wavelength_um,
-            n_ref=context.n_ref,
-        ),
-    )
-
-    assert context.resolved_focus_z_um(channel) == 40.0
-    assert _second_moment_radii(propagated[0], grid) == pytest.approx(
-        (5.0, 9.0), abs=3e-9
-    )
-
-
-def test_elliptical_gaussian_reaches_requested_negative_focus():
-    grid = make_grid(
-        GridSpec(Nx=384, Ny=384, x_aperture_um=192.0, y_aperture_um=192.0),
-        real_dtype=np.float64,
-    )
-    channel = BeamChannel(
-        profile="focused_gaussian",
-        waist_x_at_focus_um=5.0,
-        waist_y_at_focus_um=9.0,
-        focus_z_um=-37.0,
-    )
-    context = OpticalLaunchContext(grid=grid, n_ref=1.7, interaction_length_um=80.0)
-    entrance = build_launch(
-        BeamStack(channels=(channel,)),
-        grid,
-        complex_dtype=np.complex128,
-        context=context,
-    ).A0
-    propagated = hop_linear(
-        entrance,
-        linear_kernel(
-            grid.fxy2_um,
-            dz=-37.0,
-            wavelength=channel.wavelength_um,
-            n_ref=context.n_ref,
-        ),
-    )
-
-    assert context.resolved_focus_z_um(channel) == -37.0
-    assert _second_moment_radii(propagated[0], grid) == pytest.approx(
-        (5.0, 9.0), abs=3e-9
-    )
-
-
-def test_focus_respects_negative_propagation_convention():
-    grid = make_grid(
-        GridSpec(Nx=256, Ny=256, x_aperture_um=160.0, y_aperture_um=160.0),
-        real_dtype=np.float64,
-    )
-    channel = BeamChannel(
-        profile="focused_gaussian",
-        waist_x_at_focus_um=6.0,
-        waist_y_at_focus_um=6.0,
-        focus_z_um=45.0,
-    )
-    context = OpticalLaunchContext(
-        grid=grid,
-        n_ref=2.4,
-        interaction_length_um=90.0,
-        propagation_sign=-1,
-    )
-    entrance = build_launch(
-        BeamStack(channels=(channel,)),
-        grid,
-        complex_dtype=np.complex128,
-        context=context,
-    ).A0
-    propagated = hop_linear(
-        entrance,
-        linear_kernel(
-            grid.fxy2_um,
-            dz=-45.0,
-            wavelength=channel.wavelength_um,
-            n_ref=context.n_ref,
-        ),
-    )
-
-    assert _second_moment_radii(propagated[0], grid) == pytest.approx(
-        (6.0, 6.0), abs=2e-9
-    )
-
-
-@pytest.mark.parametrize(
-    "channel",
-    (
-        BeamChannel(profile="collimated_gaussian"),
-        BeamChannel(profile="uniform"),
-        BeamChannel(
-            profile="focused_gaussian",
-            waist_x_at_focus_um=4.0,
-            waist_y_at_focus_um=7.0,
-            focus_z_um=20.0,
-        ),
-    ),
-)
-def test_explicit_profile_modes_preserve_normalized_power(channel):
-    grid = make_grid(GridSpec(Nx=96, Ny=80), real_dtype=np.float64)
-    context = OpticalLaunchContext(grid=grid, n_ref=2.4, interaction_length_um=40.0)
-
-    launch = build_launch(
-        BeamStack(channels=(channel,)),
-        grid,
-        complex_dtype=np.complex128,
-        context=context,
-    )
-
-    assert total_power(launch.A0, grid) == pytest.approx(1.0, abs=2e-15)
-
-
-@pytest.mark.parametrize("profile", ["collimated_gaussian", "uniform"])
-def test_collimated_and_uniform_launches_have_no_quadratic_phase(profile):
-    grid = make_grid(
-        GridSpec(Nx=64, Ny=48, x_aperture_um=64.0, y_aperture_um=48.0),
-        real_dtype=np.float64,
-    )
-    field = build_launch(
-        BeamStack(
-            channels=(
-                BeamChannel(profile=profile, waist_x_um=8.0, waist_y_um=7.0),
-            )
-        ),
-        grid,
-        complex_dtype=np.complex128,
-    ).A0[0]
-
-    assert np.max(np.abs(np.imag(field))) == 0.0
-    if profile == "uniform":
-        np.testing.assert_array_equal(np.abs(field), np.abs(field[0, 0]))
-        assert field[0, 0] == field[-1, -1]
-
-
-def test_uniform_launch_requires_exact_periodic_tilt_modes():
+@pytest.mark.parametrize("profile", ["legacy_gaussian", "uniform", "focused_gaussian"])
+def test_obsolete_or_deferred_launch_profiles_are_explicitly_rejected(profile):
     grid = make_grid(GridSpec(Nx=32, Ny=24), real_dtype=np.float64)
-    exact_qx = 2.0 * np.pi * 3.0 / grid.spec.x_aperture_um
-    build_launch(
-        BeamStack(
-            channels=(BeamChannel(profile="uniform", tilt_x_rad_per_um=exact_qx),)
-        ),
-        grid,
-        complex_dtype=np.complex128,
-    )
-
-    with pytest.raises(ValueError, match="exact periodic Fourier mode"):
-        build_launch(
-            BeamStack(
-                channels=(
-                    BeamChannel(profile="uniform", tilt_x_rad_per_um=0.9 * exact_qx),
-                )
-            ),
-            grid,
-            complex_dtype=np.complex128,
-        )
+    with pytest.raises(ValueError, match="collimated physical Gaussian"):
+        build_launch(BeamStack(channels=(BeamChannel(profile=profile),)), grid,
+                     context=OpticalLaunchContext(grid, 1.5, 50.))
 
 
-def test_legacy_launch_is_bitwise_unchanged_when_context_is_supplied():
-    grid = make_grid(GridSpec(Nx=64, Ny=48), real_dtype=np.float64)
-    beams = BeamStack(
-        channels=(
-            BeamChannel(
-                power_mW=2.0,
-                waist_x_um=7.0,
-                waist_y_um=9.0,
-                tilt_x_rad_per_um=0.03,
-                phase_rad=0.2,
-            ),
-        )
-    )
-    legacy = build_launch(beams, grid, complex_dtype=np.complex128)
-    contextual = build_launch(
-        beams,
-        grid,
-        complex_dtype=np.complex128,
-        context=OpticalLaunchContext(grid=grid, n_ref=1.5, interaction_length_um=50.0),
-    )
+def test_material_context_changes_flux_amplitude_but_not_face_geometry():
+    grid = make_grid(GridSpec(Nx=128, Ny=128), real_dtype=np.float64)
+    beams = BeamStack(channels=(BeamChannel(theta_ext_rad=.2, w1_um=7., w2_um=9.),))
+    air = build_launch(beams, grid, complex_dtype=np.complex128,
+                       context=OpticalLaunchContext(grid, 1., 50.))
+    glass = build_launch(beams, grid, complex_dtype=np.complex128,
+                         context=OpticalLaunchContext(grid, 1.5, 50.))
+    ci = np.sqrt(1-(np.sin(.2)/1.5)**2)
+    np.testing.assert_allclose(glass.A0, air.A0*np.sqrt(np.cos(.2)/ci), atol=1e-16)
 
-    np.testing.assert_array_equal(contextual.A0, legacy.A0)
-    np.testing.assert_array_equal(contextual.power_fractions, legacy.power_fractions)
+
+def test_missing_material_context_is_rejected():
+    grid = make_grid(GridSpec(Nx=32, Ny=24))
+    with pytest.raises(ValueError, match="explicit material"):
+        build_launch(BeamStack(), grid)

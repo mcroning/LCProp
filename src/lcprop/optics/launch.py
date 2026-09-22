@@ -14,12 +14,17 @@ A single beam is still a one-channel stack.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
 
 from lcprop.core.beams import BeamStack
+from lcprop.optics.physical_launch import (
+    CAPTURE_TOLERANCE, MINIMUM_FORWARD_COSINE, SPECTRAL_COSINE_RELATIVE_TOLERANCE,
+    NONPROPAGATING_NORM_TOLERANCE, NYQUIST_EDGE_NORM_TOLERANCE,
+    resolve_beam_geometry, sample_resolved_beam, scalar_flux_diagnostic,
+)
 from lcprop.core.grid import RuntimeGrid
 from lcprop.optics.screens import (
     ChannelLaunchElements,
@@ -51,10 +56,6 @@ class OpticalLaunchContext:
         if self.propagation_convention != "angular_spectrum_forward_z":
             raise ValueError("unsupported propagation convention")
 
-    def resolved_focus_z_um(self, channel) -> float:
-        if channel.focus_at_interaction_midpoint:
-            return 0.5 * float(self.interaction_length_um)
-        return float(channel.focus_z_um)
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,8 @@ class LaunchResult:
     post_element_physical_powers_mW: Array | None = None
     post_element_total_power_mW: float | None = None
     channel_throughput_fractions: Array | None = None
+    resolved_geometry: tuple = ()
+    power_metadata: dict | None = None
 
     def summary(self) -> dict:
         # Explicit groups are authoritative for multichannel interference.
@@ -98,6 +101,9 @@ class LaunchResult:
             if self.channel_throughput_fractions is None
             else np.asarray(_to_numpy(self.channel_throughput_fractions))
         )
+        qualification = (self.power_metadata or {}).get("post_screen_spectral_qualification", ())
+        available = ([item["narrow_band_available"] for item in qualification]
+                     if qualification else [True]*int(self.A0.shape[0]))
         return {
             "Nch": int(self.A0.shape[0]),
             "coherence": effective_coherence,
@@ -105,14 +111,17 @@ class LaunchResult:
             "physical_channel_powers_mW": [float(x) for x in np.asarray(_to_numpy(self.physical_powers_mW)).ravel()],
             "physical_total_power_mW": float(self.physical_total_power_mW),
             "post_element_channel_powers_mW": [
-                float(x) for x in np.asarray(_to_numpy(post_element_powers)).ravel()
+                float(x) if valid else None for x, valid in
+                zip(np.asarray(_to_numpy(post_element_powers)).ravel(), available)
             ],
-            "post_element_total_power_mW": float(post_element_total),
+            "post_element_total_power_mW": float(post_element_total) if all(available) else None,
             "channel_throughput_fractions": [
-                float(x) for x in throughput.ravel()
+                float(x) if valid else None for x, valid in zip(throughput.ravel(), available)
             ],
             "power_fractions": [float(x) for x in np.asarray(_to_numpy(self.power_fractions)).ravel()],
-            "field_normalization": "sum_channel_integrals_equals_one",
+            "field_normalization": "physical_irradiance_carrier_cosine_v1",
+            "power_normalization": self.power_metadata,
+            "resolved_beams": [geometry.summary() for geometry in self.resolved_geometry],
             "wavelengths_um": [float(x) for x in np.asarray(_to_numpy(self.wavelengths_um)).ravel()],
         }
 
@@ -136,94 +145,14 @@ def gaussian_channel(
     complex_dtype: Any,
     context: OpticalLaunchContext | None = None,
 ) -> Array:
-    """Return a Gaussian whose intensity integral is ``power_fraction``.
-
-    ``BeamChannel.power_mW`` remains physical request metadata. It is converted
-    to a normalized channel fraction by :func:`build_launch`; physical power is
-    not embedded in the optical field amplitude.
-
-    Channel tilts are transverse phase gradients in rad/um, so the phase
-    factor is exactly ``exp(1j * (kx*x + ky*y + phase))``.
-    """
-
-    xp = grid.xp
-    X = grid.x_um[:, None]
-    Y = grid.y_um[None, :]
-
-    profile = ch.profile
-    if profile == "uniform":
-        for gradient, aperture, axis in (
-            (ch.tilt_x_rad_per_um, grid.spec.x_aperture_um, "x"),
-            (ch.tilt_y_rad_per_um, grid.spec.y_aperture_um, "y"),
-        ):
-            cycles = float(gradient) * float(aperture) / (2.0 * np.pi)
-            if not np.isclose(cycles, round(cycles), rtol=0.0, atol=1.0e-12):
-                raise ValueError(
-                    f"uniform profile {axis} phase gradient must be an exact "
-                    "periodic Fourier mode"
-                )
-        amp = xp.ones((grid.Nx, grid.Ny), dtype=grid.real_dtype)
-    elif profile in ("legacy_gaussian", "collimated_gaussian"):
-        amp = xp.exp(
-            -(((X - float(ch.x0_um)) / float(ch.waist_x_um)) ** 2)
-            -(((Y - float(ch.y0_um)) / float(ch.waist_y_um)) ** 2)
-        )
-    else:
-        if context is None:
-            raise ValueError("focused_gaussian requires an OpticalLaunchContext")
-        context.validate()
-        if context.grid is not grid:
-            raise ValueError("OpticalLaunchContext grid must be the launch grid")
-        focus_z = context.resolved_focus_z_um(ch)
-        k_ref = 2.0 * np.pi * float(context.n_ref) / float(ch.wavelength_um)
-        distance = -int(context.propagation_sign) * focus_z
-
-        def entrance_axis(waist_at_focus):
-            waist = float(waist_at_focus)
-            rayleigh = 0.5 * k_ref * waist * waist
-            radius = waist * np.sqrt(1.0 + (distance / rayleigh) ** 2)
-            curvature = (
-                np.inf
-                if distance == 0.0
-                else distance * (1.0 + (rayleigh / distance) ** 2)
-            )
-            return radius, curvature
-
-        radius_x, curvature_x = entrance_axis(ch.waist_x_at_focus_um)
-        radius_y, curvature_y = entrance_axis(ch.waist_y_at_focus_um)
-        x_offset = X - float(ch.x0_um)
-        y_offset = Y - float(ch.y0_um)
-        amp = xp.exp(-(x_offset / radius_x) ** 2 - (y_offset / radius_y) ** 2)
-        quadratic_phase = xp.zeros_like(amp)
-        if np.isfinite(curvature_x):
-            quadratic_phase = quadratic_phase + 0.5 * k_ref * x_offset**2 / curvature_x
-        if np.isfinite(curvature_y):
-            quadratic_phase = quadratic_phase + 0.5 * k_ref * y_offset**2 / curvature_y
-        amp = amp * xp.exp(1j * quadratic_phase)
-
-    phase = float(ch.phase_rad)
-    if ch.tilt_x_rad_per_um or ch.tilt_y_rad_per_um or phase:
-        amp = amp * xp.exp(
-            1j
-            * (
-                float(ch.tilt_x_rad_per_um) * X
-                + float(ch.tilt_y_rad_per_um) * Y
-                + phase
-            )
-        )
-
-    amp = amp.astype(complex_dtype, copy=False)
-
-    # Normalize the transverse shape density in 1/um^2. A zero-power channel is
-    # permitted by the beam model and becomes a deterministic zero field.
-    dxdy = float(grid.dx_um) * float(grid.dy_um)
-    p0 = xp.sum(xp.abs(amp) ** 2) * dxdy
-    if float(power_fraction) == 0.0:
-        amp = xp.zeros_like(amp)
-    else:
-        amp = amp * xp.sqrt(float(power_fraction) / p0)
-
-    return amp.astype(complex_dtype, copy=False)
+    """Sample an analytically normalized external physical beam on the face."""
+    if context is None:
+        raise ValueError("physical launch requires an explicit material OpticalLaunchContext")
+    context.validate()
+    if context.grid is not grid:
+        raise ValueError("OpticalLaunchContext grid must be the launch grid")
+    geometry = resolve_beam_geometry(ch, context.n_ref)
+    return sample_resolved_beam(ch, geometry, grid, power_fraction, complex_dtype)
 
 
 def build_launch(
@@ -242,6 +171,8 @@ def build_launch(
     """
 
     beams.validate()
+    if context is None:
+        raise ValueError("physical launch requires an explicit material OpticalLaunchContext")
     if context is not None:
         context.validate()
         if context.grid is not grid:
@@ -269,10 +200,39 @@ def build_launch(
     ]
 
     A0 = xp.stack(fields, axis=0).astype(complex_dtype, copy=False)
+    geometry = tuple(resolve_beam_geometry(ch, context.n_ref) for ch in beams.channels)
+    cosines = np.array([item.cosine_internal for item in geometry])
+    captured = channel_power_integrals(A0, grid)*physical_total_power_mW*cosines
+    pre_diagnostics = [scalar_flux_diagnostic(field, grid, item, physical_total_power_mW)
+                       for field, item in zip(A0, geometry)]
+    external_diagnostics = [scalar_flux_diagnostic(field, grid,
+        replace(item, k_internal=2*np.pi*channel.n_ext/channel.wavelength_um,
+                cosine_internal=item.cosine_external), physical_total_power_mW)
+        for field, item, channel in zip(A0, geometry, beams.channels)]
     A0 = apply_channel_launch_elements(A0, grid, launch_elements)
+    post_diagnostics = [scalar_flux_diagnostic(field, grid, item, physical_total_power_mW)
+                        for field, item in zip(A0, geometry)]
+
+    for pre, post, external in zip(pre_diagnostics, post_diagnostics, external_diagnostics):
+        if not external["narrow_band_available"]:
+            reason = "external spectrum is outside the narrow-band ideal-interface approximation"
+            pre["reasons"].append(reason)
+            post["reasons"].append(reason)
+            pre["narrow_band_available"] = post["narrow_band_available"] = False
+    group_flux = {}
+    for group in dict.fromkeys(beams.coherence_groups):
+        indices = [i for i, label in enumerate(beams.coherence_groups) if label == group]
+        if len({beams.channels[i].wavelength_um for i in indices}) != 1:
+            group_flux[group] = {"available": False, "reason": "coherent group has different wavelengths"}
+        else:
+            field = xp.sum(A0[indices], axis=0)
+            diagnostic = scalar_flux_diagnostic(field, grid, geometry[indices[0]], physical_total_power_mW)
+            group_flux[group] = {"available": True,
+                "scalar_axial_current_mW": diagnostic["scalar_axial_current_mW"],
+                "qualification": "homogeneous isotropic scalar reference; no single carrier cosine assigned to group"}
 
     post_element_powers_numpy = (
-        channel_power_integrals(A0, grid) * physical_total_power_mW
+        channel_power_integrals(A0, grid) * physical_total_power_mW * cosines
     )
     incident_powers_numpy = np.asarray(
         [float(ch.power_mW) for ch in beams.channels],
@@ -309,6 +269,40 @@ def build_launch(
         post_element_physical_powers_mW=post_element_physical_powers_mW,
         post_element_total_power_mW=float(np.sum(post_element_powers_numpy)),
         channel_throughput_fractions=channel_throughput_fractions,
+        resolved_geometry=geometry,
+        power_metadata={
+            "convention": "irradiance_amplitude_unit_interface_power_transmission",
+            "capture_scope": "configured beam launch before any explicitly supplied initial_A override",
+            "prepared_field_qualification": "explicit initial_A must already use the declared irradiance units; its provenance is supplied by the caller",
+            "power_scale_mW": physical_total_power_mW,
+            "material_reference_index": float(context.n_ref),
+            "interface_qualification": "isotropic scalar reference; anisotropic/vector interface not modeled",
+            "power_estimate": "central-direction normal flux; consult spectral qualification",
+            "captured_pre_screen_mW": captured.tolist(),
+            "post_screen_central_direction_estimate_mW": post_element_powers_numpy.tolist(),
+            "requested_to_post_screen_estimate": throughput_numpy.tolist(),
+            "capture_fraction": np.divide(captured, incident_powers_numpy,
+                out=np.zeros_like(captured), where=incident_powers_numpy > 0).tolist(),
+            "screen_transmission_of_captured": np.divide(post_element_powers_numpy, captured,
+                out=np.zeros_like(captured), where=captured > 0).tolist(),
+            "external_spectral_qualification": external_diagnostics,
+            "coherent_group_scalar_flux": group_flux,
+            "pre_screen_spectral_qualification": pre_diagnostics,
+            "post_screen_spectral_qualification": post_diagnostics,
+            "capture_warnings": [
+                "finite aperture loss or quadrature error; no renormalization"
+                if p > 0 and abs(c/p-1) > CAPTURE_TOLERANCE else ""
+                for c, p in zip(captured, incident_powers_numpy)],
+            "tolerances": {
+                "capture": CAPTURE_TOLERANCE,
+                "minimum_forward_cosine": MINIMUM_FORWARD_COSINE,
+                "cosine_relative_rms": SPECTRAL_COSINE_RELATIVE_TOLERANCE,
+                "nonpropagating_norm_fraction": NONPROPAGATING_NORM_TOLERANCE,
+                "nyquist_edge_norm_fraction": NYQUIST_EDGE_NORM_TOLERANCE,
+            },
+            "unweighted_norm_to_mW_available": False,
+            "unweighted_norm_to_mW_reason": "oblique/diffracting irradiance requires angular flux weighting",
+        },
     )
 
 
@@ -331,8 +325,16 @@ def reconstructed_physical_powers_mW(
     grid: RuntimeGrid,
     launch: LaunchResult,
 ) -> np.ndarray:
-    """Reconstruct per-channel physical powers from normalized field integrals."""
-    return channel_power_integrals(A0, grid) * float(launch.physical_total_power_mW)
+    """Return per-channel homogeneous scalar axial current, not vector power.
+
+    Material-induced angle changes prevent inferring this from a fixed cosine
+    or an unweighted norm. Coherent group totals require summing fields first.
+    """
+    if len(launch.resolved_geometry) != len(A0):
+        raise ValueError("resolved physical launch geometry is required for scalar flux")
+    return np.array([scalar_flux_diagnostic(field, grid, geometry,
+                     launch.physical_total_power_mW)["scalar_axial_current_mW"]
+                     for field, geometry in zip(A0, launch.resolved_geometry)])
 
 
 def total_power(A0: Array, grid: RuntimeGrid) -> float:

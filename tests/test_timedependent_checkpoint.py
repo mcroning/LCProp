@@ -1,3 +1,4 @@
+import math
 from dataclasses import replace
 import json
 
@@ -41,11 +42,11 @@ def _request(*, steps: int) -> TimeDependentRunRequest:
             channels=(
                 BeamChannel(
                     power_mW=0.1,
-                    waist_x_um=4.0,
-                    waist_y_um=4.0,
                     x0_um=-3.0,
-                    tilt_x_rad_per_um=0.037,
-                    tilt_y_rad_per_um=-0.021,
+                    w1_um=4.0,
+                    w2_um=4.0,
+                    theta_ext_rad=math.asin(math.hypot(0.037, -0.021) * 0.633 / (2 * math.pi)),
+                    phi_rad=math.atan2(-0.021, 0.037) % (2 * math.pi),
                 ),
             )
         ),
@@ -130,8 +131,8 @@ def test_checkpoint_save_load_preserves_minimal_state(tmp_path):
     assert loaded.schema_version == TD_CHECKPOINT_SCHEMA_VERSION == 2
     assert loaded.request == result.checkpoint.request
     loaded_channel = loaded.request.beams.channels[0]
-    assert loaded_channel.tilt_x_rad_per_um == 0.037
-    assert loaded_channel.tilt_y_rad_per_um == -0.021
+    assert loaded_channel.tilt_x_rad_per_um == pytest.approx(0.037, abs=1e-16)
+    assert loaded_channel.tilt_y_rad_per_um == pytest.approx(-0.021, abs=1e-16)
     assert loaded.completed_steps == 2
     assert loaded.requested_steps == 2
     assert loaded.current_time == result.checkpoint.current_time

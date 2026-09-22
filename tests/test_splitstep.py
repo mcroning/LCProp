@@ -1,3 +1,5 @@
+import math
+from lcprop.optics.launch import OpticalLaunchContext
 import numpy as np
 import pytest
 
@@ -127,7 +129,7 @@ def test_single_channel_grouped_behavior_is_unchanged():
 def test_linear_hop_preserves_power():
     grid = make_grid(GridSpec(Nx=64, Ny=64, z_length_um=50.0))
     beams = BeamStack(channels=(BeamChannel(power_mW=1.0),))
-    launch = build_launch(beams, grid)
+    launch = build_launch(beams, grid, context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um))
 
     A0 = launch.A0.copy()
     p0 = total_power(A0, grid)
@@ -169,13 +171,16 @@ def test_linear_propagation_centroid_follows_geometric_angle(
     k_medium_rad_per_um = 2.0 * np.pi * n_medium / wavelength_um
     channel = BeamChannel(
         wavelength_um=wavelength_um,
-        waist_x_um=10.0,
-        waist_y_um=10.0,
-        tilt_x_rad_per_um=k_medium_rad_per_um * np.sin(angle_x_rad),
-        tilt_y_rad_per_um=k_medium_rad_per_um * np.sin(angle_y_rad),
+        w1_um=10.0,
+        w2_um=10.0,
+        theta_ext_rad=math.asin(math.hypot(k_medium_rad_per_um * np.sin(angle_x_rad), k_medium_rad_per_um * np.sin(angle_y_rad)) * wavelength_um / (2 * math.pi)),
+        phi_rad=math.atan2(k_medium_rad_per_um * np.sin(angle_y_rad), k_medium_rad_per_um * np.sin(angle_x_rad)) % (2 * math.pi),
     )
     field = build_launch(
-        BeamStack(channels=(channel,)), grid, complex_dtype=np.complex128
+        BeamStack(channels=(channel,)),
+        grid,
+        complex_dtype=np.complex128,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
     ).A0
     kernel = linear_kernel(
         grid.fxy2_um,

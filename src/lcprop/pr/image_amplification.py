@@ -14,6 +14,7 @@ from lcprop.core.beams import BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
+from lcprop.optics.physical_launch import resolve_beam_geometry, scalar_flux_diagnostic
 from lcprop.optics.launch import (
     OpticalLaunchContext,
     build_launch,
@@ -401,17 +402,17 @@ class PRImageAmplificationResult:
     measured_absolute_signal_gain: float
     measured_gain_reference_signal_power_normalized: float
     output_isolated_signal_power_normalized: float
-    measured_gain_reference_signal_power_mW: float
-    output_isolated_signal_power_mW: float
+    measured_gain_reference_signal_power_mW: float | None
+    output_isolated_signal_power_mW: float | None
     image_intensity_correlation: float
     zero_response_image_intensity_correlation: float
     normalized_image_rmse: float
     normalized_power_relative_drift: float
     incident_channel_powers_mW: tuple[float, float]
-    post_element_channel_powers_mW: tuple[float, float]
+    post_element_channel_powers_mW: tuple[float | None, float | None]
     incident_total_power_mW: float
-    post_element_total_power_mW: float
-    signal_throughput_fraction: float
+    post_element_total_power_mW: float | None
+    signal_throughput_fraction: float | None
     transparency_policy: str
     pr_workflow_runtime_s: float
     reconstruction_optical_runtime_s: float
@@ -936,7 +937,7 @@ def prepare_image_amplification_workflow_request(
         * float(request.material.refractive_index)
         / float(launch_spec.wavelength_um)
     )
-    internal_angle = math.asin(kx / k_medium)
+    external_angle = math.asin(kx*float(launch_spec.wavelength_um)/(2*math.pi))
     normalized_grating = (
         -2.0 * kx / float(request.material.characteristic_wavenumber_per_um)
     )
@@ -944,7 +945,7 @@ def prepare_image_amplification_workflow_request(
         wavelength_um=float(launch_spec.wavelength_um),
         refractive_index=float(request.material.refractive_index),
         interaction_length_um=float(request.grid.z_length_um),
-        polar_angles_rad=(internal_angle, internal_angle),
+        polar_angles_rad=(external_angle, external_angle),
         azimuths_rad=(0.0, math.pi),
         waist_x_um=float(launch_spec.beam_waist_x_um),
         waist_y_um=float(launch_spec.beam_waist_y_um),
@@ -955,6 +956,7 @@ def prepare_image_amplification_workflow_request(
         coherence_group=launch_spec.coherence_group,
         names=("pump", "image signal"),
     )
+    normalized_grating = (channels[1].tilt_x_rad_per_um-channels[0].tilt_x_rad_per_um) / float(request.material.characteristic_wavenumber_per_um)
     preliminary_beams = BeamStack(channels=channels, coherence="coherent")
     half_size = 0.5 * float(launch_spec.image_physical_size_um)
     if bool(launch_spec.require_full_footprint) and (
@@ -1324,15 +1326,21 @@ def _analyze_prepared_image_amplification(
     incident_powers = tuple(float(value) for value in incident_channel_powers_mW)
     incident_total = float(sum(incident_powers))
     prepared_channel_powers = channel_power_integrals(prepared_A, grid)
-    post_element_powers = (
-        float(prepared_channel_powers[pump_channel_index]) * incident_total,
-        float(prepared_channel_powers[signal_channel_index]) * incident_total,
-    )
-    signal_throughput = (
-        post_element_powers[1] / incident_powers[1]
-        if incident_powers[1] > 0.0
-        else 0.0
-    )
+    # Preserve endpoint norm-ratio algorithms above. Physical units require a
+    # separately justified conversion under the new irradiance convention.
+    qualified_powers = []
+    for index in (pump_channel_index, signal_channel_index):
+        geometry = resolve_beam_geometry(request.beams.channels[index], request.material.refractive_index)
+        flux = scalar_flux_diagnostic(prepared_A[index], grid, geometry, incident_total)
+        pre = run_result.launch_summary.get("power_normalization", {}).get(
+            "pre_screen_spectral_qualification", ())
+        interface_available = bool(pre) and pre[index]["narrow_band_available"]
+        qualified_powers.append(
+            float(prepared_channel_powers[index])*incident_total*geometry.cosine_internal
+            if flux["narrow_band_available"] and interface_available else None)
+    post_element_powers = tuple(qualified_powers)
+    signal_throughput = (None if post_element_powers[1] is None else
+                         post_element_powers[1]/incident_powers[1])
 
     return PRImageAmplificationResult(
         request=request,
@@ -1351,12 +1359,8 @@ def _analyze_prepared_image_amplification(
         measured_absolute_signal_gain=measured_gain,
         measured_gain_reference_signal_power_normalized=input_signal_power,
         output_isolated_signal_power_normalized=output_signal_power,
-        measured_gain_reference_signal_power_mW=(
-            input_signal_power * incident_total
-        ),
-        output_isolated_signal_power_mW=(
-            output_signal_power * incident_total
-        ),
+        measured_gain_reference_signal_power_mW=None,
+        output_isolated_signal_power_mW=None,
         image_intensity_correlation=correlation,
         zero_response_image_intensity_correlation=zero_correlation,
         normalized_image_rmse=normalized_rmse,
@@ -1364,7 +1368,7 @@ def _analyze_prepared_image_amplification(
         incident_channel_powers_mW=incident_powers,
         post_element_channel_powers_mW=post_element_powers,
         incident_total_power_mW=incident_total,
-        post_element_total_power_mW=float(sum(post_element_powers)),
+        post_element_total_power_mW=(None if any(p is None for p in post_element_powers) else float(sum(post_element_powers))),
         signal_throughput_fraction=signal_throughput,
         transparency_policy=transparency_policy,
         pr_workflow_runtime_s=pr_workflow_runtime_s,

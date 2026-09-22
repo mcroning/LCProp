@@ -52,9 +52,9 @@ def _request(
         ),
         beams=BeamStack(channels=(BeamChannel(
             wavelength_um=0.633,
-            waist_x_um=10.0,
-            waist_y_um=10.0,
-            coherence_group="cost-guard",
+            coherence_group='cost-guard',
+            w1_um=10.0,
+            w2_um=10.0,
         ),)),
         solver=PRTransverseStaticWorkflowOptions(
             max_coupled_iterations=max_coupled,

@@ -25,27 +25,19 @@ def _launchplane_types():
         from launchplane.model import BeamDefinition, BeamStackDefinition
     except ImportError as exc:
         raise ImportError(_MISSING_LAUNCHPANE_MESSAGE) from exc
+    from launchplane.serialization import SCHEMA_VERSION
+    if SCHEMA_VERSION != 4:
+        raise ImportError("physical LCProp launch requires LaunchPlane schema 4; update both packages together")
     return BeamDefinition, BeamStackDefinition
 
 
 def _beam_definition_to_channel(beam: BeamDefinition) -> BeamChannel:
     return BeamChannel(
-        name=beam.name,
-        wavelength_um=beam.wavelength_um,
-        power_mW=beam.power_mW,
-        x0_um=beam.x_um,
-        y0_um=beam.y_um,
-        waist_x_um=beam.waist_x_um,
-        waist_y_um=beam.waist_y_um,
-        tilt_x_rad_per_um=beam.transverse_wavevector_x_rad_per_um,
-        tilt_y_rad_per_um=beam.transverse_wavevector_y_rad_per_um,
-        phase_rad=beam.phase_rad,
-        coherence_group=beam.coherence_group,
-        profile=beam.profile,
-        waist_x_at_focus_um=beam.waist_x_at_focus_um,
-        waist_y_at_focus_um=beam.waist_y_at_focus_um,
-        focus_z_um=beam.focus_z_um,
-        focus_at_interaction_midpoint=beam.focus_at_interaction_midpoint,
+        name=beam.name, wavelength_um=beam.wavelength_um, power_mW=beam.power_mW,
+        n_ext=beam.n_ext, theta_ext_rad=beam.theta_ext_rad, phi_rad=beam.phi_rad,
+        w1_um=beam.w1_um, w2_um=beam.w2_um, psi_rad=beam.psi_rad,
+        x0_um=beam.x_um, y0_um=beam.y_um, phase_rad=beam.phase_rad,
+        coherence_group=beam.coherence_group, profile=beam.profile,
     )
 
 
@@ -111,22 +103,16 @@ def beam_stack_to_launchplane(stack: BeamStack):
                 power_mW=channel.power_mW,
                 x_um=channel.x0_um,
                 y_um=channel.y0_um,
-                waist_x_um=channel.waist_x_um,
-                waist_y_um=channel.waist_y_um,
-                tilt_x_rad_per_um=channel.tilt_x_rad_per_um,
-                tilt_y_rad_per_um=channel.tilt_y_rad_per_um,
-                launch_medium_index=None,
-                launch_input_mode="transverse_wavevector",
+                n_ext=channel.n_ext,
+                theta_ext_rad=channel.theta_ext_rad,
+                phi_rad=channel.phi_rad,
+                w1_um=channel.w1_um,
+                w2_um=channel.w2_um,
+                psi_rad=channel.psi_rad,
                 phase_rad=channel.phase_rad,
                 coherence_group=group,
                 enabled=True,
                 profile=channel.profile,
-                waist_x_at_focus_um=channel.waist_x_at_focus_um,
-                waist_y_at_focus_um=channel.waist_y_at_focus_um,
-                focus_z_um=channel.focus_z_um,
-                focus_at_interaction_midpoint=(
-                    channel.focus_at_interaction_midpoint
-                ),
             )
             for channel, group in zip(
                 stack.channels,

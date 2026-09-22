@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 
 from dataclasses import replace
 
@@ -57,11 +58,12 @@ def _request(*, strategy: str, y0_um: float = 0.0, z_length_um: float = 600.0):
                 BeamChannel(
                     wavelength_um=WAVELENGTH_UM,
                     power_mW=1.0,
-                    waist_x_um=3.0,
-                    waist_y_um=3.0,
                     y0_um=y0_um,
-                    tilt_y_rad_per_um=TILT_Y_RAD_PER_UM,
-                    coherence_group="A",
+                    coherence_group='A',
+                    w1_um=3.0,
+                    w2_um=3.0,
+                    theta_ext_rad=math.asin(math.hypot(0.0, TILT_Y_RAD_PER_UM) * WAVELENGTH_UM / (2 * math.pi)),
+                    phi_rad=math.atan2(TILT_Y_RAD_PER_UM, 0.0) % (2 * math.pi),
                 ),
             )
         ),

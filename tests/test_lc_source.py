@@ -1,4 +1,5 @@
 from __future__ import annotations
+from lcprop.optics.launch import OpticalLaunchContext
 
 import ast
 from dataclasses import fields
@@ -55,6 +56,7 @@ def test_lc_midpoint_source_shapes_and_definition():
     launch = build_launch(
         BeamStack(channels=(BeamChannel(power_mW=1.0),)),
         grid,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
     )
     theta = np.zeros((32, 32), dtype=np.float32)
     kernel = linear_kernel(

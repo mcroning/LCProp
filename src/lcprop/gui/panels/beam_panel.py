@@ -22,7 +22,7 @@ from lcprop.core.grid import make_grid
 from lcprop.gui.panels.input_screen_editor import InputScreenEditor
 from lcprop.optics.launch_configuration import LaunchConfiguration
 from lcprop.optics.boundaries import TransverseBoundarySpec
-from lcprop.optics.launch import OpticalLaunchContext
+from lcprop.optics.launch import OpticalLaunchContext, build_launch
 from lcprop.optics.screens import ChannelLaunchElements
 
 try:
@@ -33,13 +33,13 @@ try:
         LaunchPlaneDefinition,
     )
     from launchplane.serialization import SCHEMA_VERSION as LAUNCHPANE_SCHEMA_VERSION
-    if LAUNCHPANE_SCHEMA_VERSION < 3:
-        raise ImportError("LaunchPlane schema 3 or newer is required")
+    if LAUNCHPANE_SCHEMA_VERSION != 4 or not hasattr(LaunchPlaneWidget, "set_resolved_preview"):
+        raise ImportError("LaunchPlane schema 4 with host-resolved preview support is required")
 except ImportError as exc:
     raise ImportError(
-        "The LCProp Beam tab requires the separate 'launchplane' package. "
-        "Install it before starting the GUI (for local development, use "
-        "'python -m pip install -e /path/to/LaunchPlane')."
+        "The LCProp Beam tab requires coordinated LaunchPlane schema 4 with "
+        "host-resolved preview support. Install the reviewed LCProp/LaunchPlane "
+        "pair together before starting the GUI; obsolete packages are incompatible."
     ) from exc
 
 
@@ -75,16 +75,16 @@ class BeamPanel(QWidget):
         )
         default_stack = BeamStackDefinition(
             beams=(
-                BeamDefinition.from_launch_angles(
+                BeamDefinition(
                     name="beam",
                     wavelength_um=0.633,
                     power_mW=1.0,
                     x_um=0.0,
                     y_um=0.0,
-                    waist_x_um=3.0,
-                    waist_y_um=3.0,
-                    angle_x_rad=0.0,
-                    angle_y_rad=0.0,
+                    w1_um=3.0,
+                    w2_um=3.0,
+                    theta_ext_rad=0.0,
+                    phi_rad=0.0,
                     phase_rad=0.0,
                     coherence_group="laser_A",
                     enabled=True,
@@ -224,13 +224,32 @@ class BeamPanel(QWidget):
         )
 
     def _boundary_changed(self, _value=None) -> None:
-        mode = str(self.boundary_mode.currentData())
-        self.launch_plane_widget.set_optical_context(
-            n_ref=self._preview_n_ref,
-            interaction_length_um=self._interaction_length_um,
-            propagation_sign=self._propagation_sign,
-            boundary_mode=mode,
-        )
+        contours = []
+        try:
+            grid = self._screen_preview_grid()
+            beams = beam_stack_definition_to_lcprop(self.beam_stack_definition)
+            launch = build_launch(beams, grid, complex_dtype=np.complex128,
+                                  context=self._preview_launch_context(grid))
+            descriptions = []
+            angles = np.linspace(0, 2*np.pi, 65)
+            circle = np.stack((np.cos(angles), np.sin(angles)))
+            for index, (beam, geometry) in enumerate(zip(beams.channels, launch.resolved_geometry)):
+                eigenvalues, axes = np.linalg.eigh(geometry.interface_quadratic)
+                points = (axes @ (circle/np.sqrt(eigenvalues)[:, None])).T
+                points += [beam.x0_um, beam.y0_um]
+                contours.append(points.tolist())
+                capture = launch.power_metadata["capture_fraction"][index]
+                descriptions.append(
+                    f"{beam.name}: internal angle {np.degrees(geometry.theta_internal):.3g}°, "
+                    f"captured entrance flux estimate {capture:.2%}"
+                )
+            description = (
+                "Host-resolved 1/e field footprints (dashed). " + "; ".join(descriptions)
+                + ". Scalar ideal interface; spectral/sampling qualification applies."
+            )
+        except (ValueError, TypeError) as exc:
+            description = f"Resolved preview unavailable: {exc}"
+        self.launch_plane_widget.set_resolved_preview(contours, description=description)
 
     def showEvent(self, event) -> None:
         """Fit once after Qt has assigned the embedded view its real size."""
@@ -282,6 +301,7 @@ class BeamPanel(QWidget):
         """Relay every canonical interactive or programmatic stack change."""
 
         self.input_screen_editor.sync_beams()
+        self._boundary_changed()
         self.beamStackChanged.emit(stack)
 
     def set_aperture(

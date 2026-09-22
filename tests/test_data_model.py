@@ -1,3 +1,5 @@
+
+import math
 from dataclasses import replace
 
 import numpy as np
@@ -66,7 +68,8 @@ def test_static_result_to_run_data():
     assert np.max(data.fields["far_field_log_db"].data) == 0.0
     summary = data.diagnostics["summary"].values
     assert summary["normalized_field_integral_initial"] == result.power_initial
-    assert summary["physical_power_initial_mW"] == 0.05
+    assert summary["scalar_lineage_axial_current_initial_mW"] == result.physical_power_initial_mW
+    assert "not anisotropic/vector" in summary["power_qualification"]
     assert "power_initial" not in summary
 
 
@@ -160,15 +163,17 @@ def test_lc_far_field_preserves_coherent_group_semantics():
                 replace(
                     channel,
                     x0_um=-2.0,
-                    tilt_x_rad_per_um=0.08,
-                    coherence_group="shared",
+                    coherence_group='shared',
+                    theta_ext_rad=math.asin(math.hypot(0.08, channel.tilt_y_rad_per_um) * channel.wavelength_um / (2 * math.pi * channel.n_ext)),
+                    phi_rad=math.atan2(channel.tilt_y_rad_per_um, 0.08) % (2 * math.pi),
                 ),
                 replace(
                     channel,
                     x0_um=2.0,
-                    tilt_x_rad_per_um=-0.08,
                     phase_rad=0.3,
-                    coherence_group="shared",
+                    coherence_group='shared',
+                    theta_ext_rad=math.asin(math.hypot(-0.08, channel.tilt_y_rad_per_um) * channel.wavelength_um / (2 * math.pi * channel.n_ext)),
+                    phi_rad=math.atan2(channel.tilt_y_rad_per_um, -0.08) % (2 * math.pi),
                 ),
             ),
             coherence="coherent",

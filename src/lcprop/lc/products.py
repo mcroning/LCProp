@@ -78,13 +78,17 @@ def _result_coherence(result) -> tuple[bool, tuple[str, ...] | None]:
     return summary.get("coherence") == "coherent", None if groups is None else tuple(groups)
 
 
-def _result_power_diagnostics(result) -> dict[str, float | None]:
+def _result_power_diagnostics(result) -> dict[str, Any]:
     """Separate normalized field integrals from physical power diagnostics."""
+    physical = getattr(result, "launch_summary", {}).get("power_normalization")
+    prefix = "scalar_lineage_axial_current" if physical else "physical_power"
     return {
+        "power_qualification": ("sum of channel scalar reference currents; excludes coherent cross terms; not anisotropic/vector Poynting power" if physical else "legacy normalized power"),
+        "power_normalization": physical,
         "normalized_field_integral_initial": result.power_initial,
         "normalized_field_integral_final": result.power_final,
-        "physical_power_initial_mW": getattr(result, "physical_power_initial_mW", None),
-        "physical_power_final_mW": getattr(result, "physical_power_final_mW", None),
+        f"{prefix}_initial_mW": getattr(result, "physical_power_initial_mW", None),
+        f"{prefix}_final_mW": getattr(result, "physical_power_final_mW", None),
     }
 
 

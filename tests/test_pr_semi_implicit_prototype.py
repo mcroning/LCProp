@@ -1,3 +1,5 @@
+import math
+from lcprop.optics.launch import OpticalLaunchContext
 import numpy as np
 import pytest
 from scipy.integrate import solve_ivp
@@ -42,14 +44,15 @@ def _coupled_optical_case():
     beams = BeamStack(
         channels=(
             BeamChannel(
-                name="coupled-order beam",
+                name='coupled-order beam',
                 wavelength_um=0.633,
                 power_mW=1.0,
-                waist_x_um=5.0,
-                waist_y_um=4.0,
                 x0_um=-1.5,
-                tilt_x_rad_per_um=0.12,
-                coherence_group="order-test",
+                coherence_group='order-test',
+                w1_um=5.0,
+                w2_um=4.0,
+                theta_ext_rad=math.asin(math.hypot(0.12, 0.0) * 0.633 / (2 * math.pi)),
+                phi_rad=math.atan2(0.0, 0.12) % (2 * math.pi),
             ),
         )
     )
@@ -69,7 +72,12 @@ def _coupled_optical_case():
         backend=BackendSpec(backend="numpy", precision="float64", verbose=False),
     )
     grid = make_grid(grid_spec, real_dtype=np.float64)
-    launch = build_launch(beams, grid, complex_dtype=np.complex128)
+    launch = build_launch(
+        beams,
+        grid,
+        complex_dtype=np.complex128,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
+    )
     A0 = launch.A0.copy()
     peak_reference = channel_peak_intensity_reference(A0, xp=np)
     kernel = scalar_angular_spectrum_kernel(

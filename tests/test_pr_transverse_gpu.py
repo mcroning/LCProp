@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 
 from dataclasses import replace
 
@@ -51,11 +52,11 @@ def _request(*, precision: str, scattering: bool = False):
             channels=(
                 BeamChannel(
                     wavelength_um=0.633,
-                    waist_x_um=12.0,
-                    waist_y_um=9.0,
-                    tilt_x_rad_per_um=0.08,
-                    tilt_y_rad_per_um=-0.04,
-                    coherence_group="transverse-gpu",
+                    coherence_group='transverse-gpu',
+                    w1_um=12.0,
+                    w2_um=9.0,
+                    theta_ext_rad=math.asin(math.hypot(0.08, -0.04) * 0.633 / (2 * math.pi)),
+                    phi_rad=math.atan2(-0.04, 0.08) % (2 * math.pi),
                 ),
             )
         ),

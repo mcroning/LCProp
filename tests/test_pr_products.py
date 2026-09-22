@@ -170,12 +170,7 @@ def test_small_real_pr_run_converts_to_run_data():
         ),
         beams=BeamStack(
             channels=(
-                BeamChannel(
-                    wavelength_um=0.633,
-                    waist_x_um=20.0,
-                    waist_y_um=20.0,
-                    coherence_group="pr-smoke",
-                ),
+                BeamChannel(wavelength_um=0.633, coherence_group='pr-smoke', w1_um=20.0, w2_um=20.0),
             ),
         ),
         material=PRMaterialSpec(
@@ -243,11 +238,7 @@ def test_td_volume_products_share_readonly_authoritative_result_memory():
         grid=grid,
         beams=BeamStack(
             channels=(
-                BeamChannel(
-                    wavelength_um=0.633,
-                    waist_x_um=20.0,
-                    waist_y_um=20.0,
-                ),
+                BeamChannel(wavelength_um=0.633, w1_um=20.0, w2_um=20.0),
             ),
         ),
         solver=PRSolverOptions(Nt=1, dt_normalized=0.01),

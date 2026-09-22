@@ -5,12 +5,7 @@ import math
 from typing import Literal
 
 CoherenceMode = Literal["incoherent", "coherent"]
-BeamProfile = Literal[
-    "legacy_gaussian",
-    "focused_gaussian",
-    "collimated_gaussian",
-    "uniform",
-]
+BeamProfile = Literal["collimated_gaussian"]
 
 # Reserved internal migration sentinel; user-defined coherence groups must not
 # use this value.
@@ -41,89 +36,67 @@ def normalize_coherence_groups(
     return groups
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class BeamChannel:
-    """One optical input channel.
+    """External physical intent; wavevectors are derived, never input fields.
 
-    ``tilt_x_rad_per_um`` and ``tilt_y_rad_per_um`` are transverse phase
-    gradients, not geometric angles.  The launch phase is
-    ``tilt_x_rad_per_um * x + tilt_y_rad_per_um * y + phase_rad``.
+    Radii are external beam-normal 1/e field radii. Phase is referenced to
+    the beam axis intersection with the laboratory entrance plane.
     """
 
     name: str = "beam"
-
     wavelength_um: float = 0.633
     power_mW: float = 1.0
-
-    waist_x_um: float = 3.0
-    waist_y_um: float = 3.0
-
+    n_ext: float = 1.0
+    theta_ext_rad: float = 0.0
+    phi_rad: float = 0.0
+    w1_um: float = 3.0
+    w2_um: float = 3.0
+    psi_rad: float = 0.0
     x0_um: float = 0.0
     y0_um: float = 0.0
-
-    tilt_x_rad_per_um: float = 0.0
-    tilt_y_rad_per_um: float = 0.0
-
     phase_rad: float = 0.0
-
     coherence_group: str = LEGACY_COHERENCE_GROUP
+    profile: BeamProfile = "collimated_gaussian"
 
-    # Appended launch-intent fields preserve the historical positional
-    # constructor.  The legacy profile keeps waist_x_um/waist_y_um as the
-    # entrance-plane 1/e field radii.  New focused beams use the explicitly
-    # named focus-plane radii below.
-    profile: BeamProfile = "legacy_gaussian"
-    waist_x_at_focus_um: float | None = None
-    waist_y_at_focus_um: float | None = None
-    focus_z_um: float | None = None
-    focus_at_interaction_midpoint: bool = False
+    def __post_init__(self) -> None:
+        # Match the public intent model's azimuth/roll canonicalization.
+        # Construction remains separate from validation for request builders.
+        for name in ("wavelength_um", "power_mW", "n_ext", "theta_ext_rad",
+                     "phi_rad", "w1_um", "w2_um", "psi_rad", "x0_um", "y0_um", "phase_rad"):
+            object.__setattr__(self, name, float(getattr(self, name)))
+        object.__setattr__(self, "phi_rad", self.phi_rad % math.tau)
+        object.__setattr__(self, "psi_rad", self.psi_rad % math.tau)
+
+    @property
+    def tilt_x_rad_per_um(self) -> float:
+        """Derived conserved tangential kx, retained as a read-only consumer API."""
+        return 2*math.pi*self.n_ext/self.wavelength_um*math.sin(self.theta_ext_rad)*math.cos(self.phi_rad)
+
+    @property
+    def tilt_y_rad_per_um(self) -> float:
+        """Derived conserved tangential ky."""
+        return 2*math.pi*self.n_ext/self.wavelength_um*math.sin(self.theta_ext_rad)*math.sin(self.phi_rad)
 
     def validate(self) -> None:
-        if self.wavelength_um <= 0.0:
-            raise ValueError("wavelength_um must be positive")
-        if self.power_mW < 0.0:
+        for name in ("wavelength_um", "power_mW", "n_ext", "theta_ext_rad",
+                     "phi_rad", "w1_um", "w2_um", "psi_rad", "x0_um", "y0_um", "phase_rad"):
+            if not math.isfinite(float(getattr(self, name))):
+                raise ValueError(f"{name} must be finite")
+        if self.wavelength_um <= 0 or self.n_ext <= 0:
+            raise ValueError("wavelength_um and n_ext must be positive")
+        if not math.isfinite(2*math.pi*self.n_ext/self.wavelength_um):
+            raise ValueError("external wavevector must be finite")
+        if self.power_mW < 0:
             raise ValueError("power_mW must be nonnegative")
-        if self.waist_x_um <= 0.0 or self.waist_y_um <= 0.0:
-            raise ValueError("waists must be positive")
+        if self.w1_um <= 0 or self.w2_um <= 0:
+            raise ValueError("external beam-normal radii must be positive")
+        if not 0 <= self.theta_ext_rad < math.pi/2:
+            raise ValueError("theta_ext_rad must be in [0, pi/2); grazing launch is unsupported")
         if not isinstance(self.coherence_group, str) or not self.coherence_group.strip():
             raise ValueError("coherence_group must be non-empty")
-        if self.profile not in (
-            "legacy_gaussian",
-            "focused_gaussian",
-            "collimated_gaussian",
-            "uniform",
-        ):
-            raise ValueError("unsupported beam profile")
-        focus_values = (self.waist_x_at_focus_um, self.waist_y_at_focus_um)
-        if self.profile == "focused_gaussian":
-            if any(value is None for value in focus_values):
-                raise ValueError(
-                    "focused_gaussian requires waist_x_at_focus_um and "
-                    "waist_y_at_focus_um"
-                )
-            if any(
-                not math.isfinite(float(value)) or float(value) <= 0.0
-                for value in focus_values
-            ):
-                raise ValueError("focus-plane waists must be finite and positive")
-            if self.focus_at_interaction_midpoint:
-                if self.focus_z_um is not None:
-                    raise ValueError(
-                        "focus_z_um must be omitted when "
-                        "focus_at_interaction_midpoint is true"
-                    )
-            elif self.focus_z_um is None or not math.isfinite(float(self.focus_z_um)):
-                raise ValueError(
-                    "focused_gaussian requires finite focus_z_um or midpoint focus"
-                )
-        elif (
-            any(value is not None for value in focus_values)
-            or self.focus_z_um is not None
-            or self.focus_at_interaction_midpoint
-        ):
-            raise ValueError(
-                "focus-plane parameters are available only for focused_gaussian"
-            )
+        if self.profile != "collimated_gaussian":
+            raise ValueError("only collimated physical Gaussian launch is supported; focused launch is deferred")
 
 
 @dataclass(frozen=True)

@@ -57,9 +57,9 @@ def _request(
         ),
         beams=BeamStack(channels=(BeamChannel(
             wavelength_um=0.633,
-            waist_x_um=10.0,
-            waist_y_um=10.0,
-            coherence_group="marching-static",
+            coherence_group='marching-static',
+            w1_um=10.0,
+            w2_um=10.0,
         ),)),
         material=PRMaterialSpec(
             dark_intensity=0.4,

@@ -159,6 +159,7 @@ def carrier_power_diagnostic(
     coherence_groups: Sequence[str],
     carrier_channels: Sequence[Mapping[str, Any]],
     physical_total_power_mW: float | None = None,
+    power_normalization: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Measure two coherent input-carrier regions at input and output.
 
@@ -276,9 +277,12 @@ def carrier_power_diagnostic(
         status = "ok"
         reason = None
 
+    # Requested source power is not itself a conversion from field norm.
+    # The resolver currently withholds this scalar conversion for physical
+    # launch. A caller must retain an explicit qualified conversion record.
     physical_scale = None
-    if physical_total_power_mW is not None:
-        candidate = float(physical_total_power_mW)
+    if power_normalization and power_normalization.get("unweighted_norm_to_mW_available") is True:
+        candidate = float(power_normalization["unweighted_norm_to_mW_scale"])
         if math.isfinite(candidate) and candidate > 0.0:
             physical_scale = candidate
     input_mw = None if physical_scale is None else input_power * physical_scale
@@ -349,6 +353,10 @@ def carrier_power_diagnostic(
         "parseval_partition_error_output": output_partition_error,
         "normalized_power_unit": "normalized optical integral",
         "physical_power_unit": "mW" if physical_scale is not None else None,
+        "physical_power_availability": "available" if physical_scale is not None else "unavailable",
+        "physical_power_unavailable_reason": (None if physical_scale is not None else
+            "no resolver-qualified conversion from unweighted carrier norm to physical mW"),
+        "power_normalization": power_normalization,
         "analyzed_coherence_group": str(coherence_groups[0]),
         "rows": rows,
     }
@@ -369,7 +377,8 @@ def carrier_power_diagnostic_from_summary(
     groups = launch_summary.get("coherence_groups")
     if not isinstance(groups, Sequence):
         return _not_applicable("coherence-group metadata is unavailable")
-    return carrier_power_diagnostic(
+    physical_launch = launch_summary.get("field_normalization") == "physical_irradiance_carrier_cosine_v1"
+    result = carrier_power_diagnostic(
         A_initial,
         A_final,
         dx_um=float(grid_summary["dx_um"]),
@@ -377,7 +386,19 @@ def carrier_power_diagnostic_from_summary(
         coherence_groups=groups,
         carrier_channels=channels,
         physical_total_power_mW=launch_summary.get("physical_total_power_mW"),
+        power_normalization=launch_summary.get("power_normalization"),
     )
+    result["power_normalization"] = launch_summary.get("power_normalization")
+    if physical_launch:
+        result["physical_power_availability"] = "unavailable"
+        result["physical_power_unavailable_reason"] = (
+            "The existing carrier partition measures unweighted field norm. "
+            "Physical irradiance launch requires angular flux weighting; "
+            "endpoint norm ratios retain their existing definition."
+        )
+        result["normalized_power_unit"] = "unweighted field norm"
+    return result
+
 
 
 __all__ = [

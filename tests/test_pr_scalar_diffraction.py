@@ -161,7 +161,7 @@ def test_real_workflows_and_replays_accumulate_scalar_phase(path, substeps):
     x=np.arange(12)
     kx,ky=2*np.pi/12,4*np.pi/12
     initial=np.exp(1j*(kx*x[:,None]+ky*x[None,:]))[None]
-    common=dict(grid=grid,beams=BeamStack(channels=(BeamChannel(wavelength_um=1,waist_x_um=3,waist_y_um=3),)),
+    common=dict(grid=grid,beams=BeamStack(channels=(BeamChannel(wavelength_um=1, w1_um=3, w2_um=3),)),
         material=PRMaterialSpec(refractive_index=1,gain_length_product=0,applied_field=0,dark_intensity=0.2,
                                 characteristic_wavenumber_per_um_override=0.2),
         backend=BackendSpec(backend='numpy',precision='float64',verbose=False),initial_A=initial)
@@ -216,7 +216,7 @@ def test_reduced_workflow_honors_optical_precision(precision,tol):
     dtype=np.complex64 if precision=='float32' else np.complex128
     a=np.ones((1,8,8),dtype=dtype)
     request=PRRunRequest(grid=GridSpec(Nx=8,Ny=8,x_aperture_um=16,y_aperture_um=16,z_length_um=1,dz_um=0.5),
-        beams=BeamStack(channels=(BeamChannel(wavelength_um=0.9,waist_x_um=3,waist_y_um=3),)),
+        beams=BeamStack(channels=(BeamChannel(wavelength_um=0.9, w1_um=3, w2_um=3),)),
         material=PRMaterialSpec(refractive_index=1.2,gain_length_product=0,applied_field=0),
         solver=PRSolverOptions(Nt=1,optical_substeps=3),
         backend=BackendSpec(backend='numpy',precision=precision,verbose=False),initial_A=a)

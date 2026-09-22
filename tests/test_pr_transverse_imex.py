@@ -34,9 +34,9 @@ def _request(*, steps: int):
         grid=grid,
         beams=BeamStack(channels=(BeamChannel(
             wavelength_um=0.633,
-            waist_x_um=10.0,
-            waist_y_um=8.0,
-            coherence_group="transverse-pr-imex",
+            coherence_group='transverse-pr-imex',
+            w1_um=10.0,
+            w2_um=8.0,
         ),)),
         material=PRMaterialSpec(
             dark_intensity=0.2,

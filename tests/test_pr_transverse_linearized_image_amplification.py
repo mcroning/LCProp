@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 
 from dataclasses import replace
 
@@ -75,20 +76,22 @@ def _experiment(
     beams = BeamStack(
         channels=(
             BeamChannel(
-                name="pump",
+                name='pump',
                 power_mW=1.0,
-                waist_x_um=waist,
-                waist_y_um=waist,
-                tilt_x_rad_per_um=carrier,
-                coherence_group="linearized-ia-validation",
+                coherence_group='linearized-ia-validation',
+                w1_um=waist,
+                w2_um=waist,
+                theta_ext_rad=math.asin(math.hypot(carrier, 0.0) * 0.633 / (2 * math.pi)),
+                phi_rad=math.atan2(0.0, carrier) % (2 * math.pi),
             ),
             BeamChannel(
-                name="signal",
+                name='signal',
                 power_mW=signal_power,
-                waist_x_um=waist,
-                waist_y_um=waist,
-                tilt_x_rad_per_um=-carrier,
-                coherence_group="linearized-ia-validation",
+                coherence_group='linearized-ia-validation',
+                w1_um=waist,
+                w2_um=waist,
+                theta_ext_rad=math.asin(math.hypot(-carrier, 0.0) * 0.633 / (2 * math.pi)),
+                phi_rad=math.atan2(0.0, -carrier) % (2 * math.pi),
             ),
         )
     )

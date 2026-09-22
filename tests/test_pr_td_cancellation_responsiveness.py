@@ -42,8 +42,8 @@ request = PRRunRequest(
         channels=(
             BeamChannel(
                 wavelength_um=0.633,
-                waist_x_um=40.0,
-                waist_y_um=40.0,
+                w1_um=40.0,
+                w2_um=40.0,
             ),
         ),
     ),

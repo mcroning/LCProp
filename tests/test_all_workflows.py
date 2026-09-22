@@ -34,12 +34,7 @@ def make_base_static_request(power_mW=0.05):
         bias=BiasSpec(theta_bc=0.0),
         beams=BeamStack(
             channels=(
-                BeamChannel(
-                    wavelength_um=0.633,
-                    power_mW=power_mW,
-                    waist_x_um=3.0,
-                    waist_y_um=3.0,
-                ),
+                BeamChannel(wavelength_um=0.633, power_mW=power_mW, w1_um=3.0, w2_um=3.0),
             )
         ),
         solver=StaticSolverOptions(),

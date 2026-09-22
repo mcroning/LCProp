@@ -1,4 +1,5 @@
 from __future__ import annotations
+from lcprop.optics.launch import OpticalLaunchContext
 
 import math
 
@@ -69,9 +70,9 @@ def _request(*, steps: int = 2, precision: str = "float64"):
         grid=grid,
         beams=BeamStack(channels=(BeamChannel(
             wavelength_um=0.633,
-            waist_x_um=10.0,
-            waist_y_um=8.0,
-            coherence_group="transverse-pr",
+            coherence_group='transverse-pr',
+            w1_um=10.0,
+            w2_um=8.0,
         ),)),
         material=PRMaterialSpec(
             dark_intensity=0.2,
@@ -268,7 +269,7 @@ def test_workflow_is_deterministic_finite_and_power_conserving(precision):
     assert first.completed_steps == 2
     assert first.resolved_profile["physics_profile_id"] == PR_FULL_TRANSVERSE_PROFILE_V1
     assert first.resolved_profile["material"]["dark_intensity"] == 0.2
-    assert first.resolved_profile["beam_request"]["channels"][0]["waist_y_um"] == 8.0
+    assert first.resolved_profile["beam_request"]["channels"][0]["w2_um"] == 8.0
     np.testing.assert_array_equal(first.psi_final, second.psi_final)
     np.testing.assert_array_equal(first.A_final, second.A_final)
     assert first.diagnostics["finite_material_state"] is True
@@ -354,12 +355,12 @@ def test_cancellation_after_progress_preserves_one_complete_accepted_step():
 def test_declarative_launch_screen_is_applied_once_to_selected_channel():
     request = _request(steps=0)
     second = BeamChannel(
-        name="screened signal",
+        name='screened signal',
         wavelength_um=0.633,
         power_mW=0.4,
-        waist_x_um=9.0,
-        waist_y_um=7.0,
-        coherence_group="transverse-pr",
+        coherence_group='transverse-pr',
+        w1_um=9.0,
+        w2_um=7.0,
     )
     beams = BeamStack(
         channels=(request.beams.channels[0], second),
@@ -388,11 +389,13 @@ def test_declarative_launch_screen_is_applied_once_to_selected_channel():
         grid,
         complex_dtype=np.complex128,
         launch_elements=elements,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
     ).A0
     unscreened = build_launch(
         beams,
         grid,
         complex_dtype=np.complex128,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
     ).A0
 
     np.testing.assert_array_equal(result.A_initial, expected)

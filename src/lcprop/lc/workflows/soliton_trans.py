@@ -36,6 +36,7 @@ from lcprop.lc.workflows.soliton import (
     _sym_y_even,
     _sym_y_odd,
     _target_power,
+    _validate_stationary_launch,
     apply_optical_eigen_operator,
     cn_trapezoid_picard_step,
     intensity_metrics,
@@ -165,6 +166,7 @@ def run_soliton(
 ) -> SolitonResult:
     """Solve the coupled stationary transverse LC/optical problem."""
     request.validate()
+    _validate_stationary_launch(request)
 
     eig_tol = float(_request_value(request, "eig_tol", 1e-9))
     eig_maxiter = int(_request_value(request, "eig_maxiter", 500))

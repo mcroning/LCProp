@@ -16,7 +16,7 @@ def make_base_static_request() -> StaticRunRequest:
         grid=GridSpec(Nx=24, Ny=24, dz_um=20.0, x_aperture_um=24.0, y_aperture_um=24.0, z_length_um=80.0),
         material=LCMaterial(),
         bias=BiasSpec(V_bias=0.9144),
-        beams=BeamStack(channels=(BeamChannel(power_mW=0.05, waist_x_um=3.0, waist_y_um=3.0),)),
+        beams=BeamStack(channels=(BeamChannel(power_mW=0.05, w1_um=3.0, w2_um=3.0),)),
         solver=StaticSolverOptions(max_iterations=1),
         output=OutputOptions(),
     )

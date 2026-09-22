@@ -21,7 +21,7 @@ def test_gui_builds_static_request():
 
     assert req.grid.Nx == 64
     assert req.grid.z_length_um == 3000.0
-    assert req.beams.channels[0].waist_x_um == 3.0
+    assert req.beams.channels[0].w1_um == 3.0
     assert req.beams.channels[0].power_mW == 1.0
 
 

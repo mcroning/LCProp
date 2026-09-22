@@ -34,11 +34,7 @@ def _static_request(*, Nz=2, initial_A=None, gain_length_product=0.2):
     )
     beams = BeamStack(
         channels=(
-            BeamChannel(
-                wavelength_um=0.633,
-                waist_x_um=8.0,
-                waist_y_um=7.0,
-            ),
+            BeamChannel(wavelength_um=0.633, w1_um=8.0, w2_um=7.0),
         )
     )
     material = PRMaterialSpec(
@@ -296,7 +292,7 @@ def test_stale_fixed_source_root_cannot_establish_coupled_convergence(monkeypatc
             z_length_um=1.0,
         ),
         beams=BeamStack(
-            channels=(BeamChannel(waist_x_um=2.0, waist_y_um=2.0),)
+            channels=(BeamChannel(w1_um=2.0, w2_um=2.0),)
         ),
         material=PRMaterialSpec(
             dark_intensity=0.2,
@@ -344,7 +340,7 @@ def test_long_time_td_workflow_approaches_coupled_static_plane_wave():
         z_length_um=2.0,
     )
     beams = BeamStack(
-        channels=(BeamChannel(waist_x_um=2.0, waist_y_um=2.0),)
+        channels=(BeamChannel(w1_um=2.0, w2_um=2.0),)
     )
     material = PRMaterialSpec(
         dark_intensity=0.2,

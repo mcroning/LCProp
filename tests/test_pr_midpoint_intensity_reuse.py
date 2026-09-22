@@ -1,4 +1,6 @@
 from __future__ import annotations
+import math
+from lcprop.optics.launch import OpticalLaunchContext
 
 import numpy as np
 import pytest
@@ -29,14 +31,15 @@ def _case(*, xp, nz: int, optical_substeps: int, groups: tuple[str, ...]):
     beams = BeamStack(
         channels=tuple(
             BeamChannel(
-                name=f"beam-{index}",
+                name=f'beam-{index}',
                 wavelength_um=0.633,
                 power_mW=1.0 + index,
-                waist_x_um=5.0 + index,
-                waist_y_um=4.0,
                 x0_um=-2.0 + 2.0 * index,
-                tilt_x_rad_per_um=0.03 * (index + 1),
                 coherence_group=group,
+                w1_um=5.0 + index,
+                w2_um=4.0,
+                theta_ext_rad=math.asin(math.hypot(0.03 * (index + 1), 0.0) * 0.633 / (2 * math.pi)),
+                phi_rad=math.atan2(0.0, 0.03 * (index + 1)) % (2 * math.pi),
             )
             for index, group in enumerate(groups)
         ),
@@ -66,7 +69,12 @@ def _case(*, xp, nz: int, optical_substeps: int, groups: tuple[str, ...]):
         ),
     )
     grid = make_grid(grid_spec, xp=xp, real_dtype=real_dtype)
-    launch = build_launch(beams, grid, complex_dtype=complex_dtype)
+    launch = build_launch(
+        beams,
+        grid,
+        complex_dtype=complex_dtype,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
+    )
     A0 = launch.A0.copy()
     peak_reference = channel_peak_intensity_reference(A0, xp=xp)
     kernel = scalar_angular_spectrum_kernel(

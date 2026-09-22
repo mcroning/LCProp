@@ -207,12 +207,12 @@ def test_pr_labels_and_spin_presentation_do_not_change_request(app):
 def test_launchplane_selector_full_text_and_original_guidance_accessible(app):
     from lcprop.gui.panels.beam_panel import BeamPanel
     w=BeamPanel();selectors=w.launch_plane_widget.findChildren(QComboBox)
-    profile=next(x for x in selectors if x.findData('legacy_gaussian')>=0)
-    index=profile.findData('legacy_gaussian');profile.setCurrentIndex(index)
-    assert profile.itemData(index,Qt.ToolTipRole)=='Legacy entrance Gaussian'
-    assert profile.currentText() in profile.toolTip()
-    mode=next(x for x in selectors if x.findData('transverse_wavevector')>=0)
-    assert 'External angles are measured' in mode.toolTip()
+    laser = w.launch_plane_widget.laser_combo
+    assert 'same Laser name interfere coherently' in laser.toolTip()
+    assert 'different Laser names are mutually incoherent' in laser.toolTip()
+    assert not any(x.findData('focused_gaussian') >= 0 for x in selectors)
+    assert 'External polar angle' in w.launch_plane_widget.theta_spin.toolTip()
+    assert not any(x.findData('transverse_wavevector') >= 0 for x in selectors)
     assert w.minimumSizeHint().width()<1200
     w.close()
 

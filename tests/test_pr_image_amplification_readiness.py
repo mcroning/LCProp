@@ -22,7 +22,7 @@ def test_readiness_request_is_coherent_periodic_and_uses_production_integrator()
 
 
 def test_readiness_case_clears_numerical_gate_before_image_benchmark():
-    result = run_image_amplification_readiness()
+    result = run_image_amplification_readiness(PRImageAmplificationReadinessSpec(Nt=1500))
 
     assert result.run_result.status == "completed"
     assert (

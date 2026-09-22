@@ -72,8 +72,8 @@ def test_pr_checkpoint_disk_round_trip_preserves_physical_state_and_request(
         assert document["workflow"] == PR_TIMEDEPENDENT_WORKFLOW
         assert document["schema_version"] == PR_CHECKPOINT_SCHEMA_VERSION
     assert request_document["request"]["beams"]["channels"][0][
-        "tilt_y_rad_per_um"
-    ] == result.checkpoint.request.beams.channels[0].tilt_y_rad_per_um
+        "phi_rad"
+    ] == result.checkpoint.request.beams.channels[0].phi_rad
     assert (
         "theta_weight"
         not in request_document["request"]["beams"]["channels"][0]

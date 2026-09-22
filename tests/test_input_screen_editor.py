@@ -1,4 +1,5 @@
 from __future__ import annotations
+from lcprop.optics.launch import OpticalLaunchContext
 
 from dataclasses import replace
 import hashlib
@@ -55,6 +56,12 @@ def _enabled_panel(*, Nx=24, Ny=12, x_aperture=24.0, y_aperture=12.0):
     )
 
 
+def _default_capture(panel):
+    grid = panel._screen_preview_grid()
+    return float(np.sum(2/(np.pi*9)*np.exp(-2*(grid.x_um[:,None]/3)**2
+                                         -2*(grid.y_um[None,:]/3)**2))*grid.dx_um*grid.dy_um)
+
+
 def test_lc_remains_disabled_while_ordinary_pr_host_is_enabled(app):
     lc_window = LCPropMainWindow()
     pr_window = PRMainWindow()
@@ -89,8 +96,8 @@ def test_none_and_absorbing_image_emit_declarative_plan_and_actual_power(app):
     assert editor.channel.currentText() == "2: selected"
     assert panel.launch_elements() == ()
     assert float(editor.incident_power.text()) == pytest.approx(1.0)
-    assert float(editor.transmitted_power.text()) == pytest.approx(1.0)
-    assert float(editor.throughput.text()) == pytest.approx(1.0)
+    assert float(editor.transmitted_power.text()) == pytest.approx(_default_capture(panel), rel=2e-8)
+    assert float(editor.throughput.text()) == pytest.approx(_default_capture(panel), rel=2e-8)
 
     source = np.ones((6, 10), dtype=float)
     source[1:5, 3:7] = 0.0
@@ -100,12 +107,18 @@ def test_none_and_absorbing_image_emit_declarative_plan_and_actual_power(app):
     assignments = panel.launch_elements()
     beams, configuration = panel.launch_configuration()
     grid = panel._screen_preview_grid()
-    incident = build_launch(beams, grid, complex_dtype=np.complex128)
+    incident = build_launch(
+        beams,
+        grid,
+        complex_dtype=np.complex128,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
+    )
     transformed = build_launch(
         beams,
         grid,
         complex_dtype=np.complex128,
         launch_elements=configuration,
+        context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
     )
 
     assert assignments == configuration
@@ -114,7 +127,10 @@ def test_none_and_absorbing_image_emit_declarative_plan_and_actual_power(app):
     assert not np.array_equal(transformed.A0[1], incident.A0[1])
     expected = float(transformed.channel_throughput_fractions[1])
     assert 0.0 < expected < 1.0
-    assert float(editor.throughput.text()) == pytest.approx(expected, rel=2e-8)
+    if transformed.power_metadata["post_screen_spectral_qualification"][1]["narrow_band_available"]:
+        assert float(editor.throughput.text()) == pytest.approx(expected, rel=2e-8)
+    else:
+        assert editor.throughput.text() == "Unavailable"
     assert not editor.transmission_preview.pixmap().isNull()
     assert not editor.transformed_preview.pixmap().isNull()
     panel.close()
@@ -143,7 +159,7 @@ def test_add_replace_remove_and_explicit_rectangular_placement(app):
 
     editor.screen_type.setCurrentIndex(editor.screen_type.findData(NO_SCREEN))
     assert panel.launch_elements() == ()
-    assert float(editor.throughput.text()) == pytest.approx(1.0)
+    assert float(editor.throughput.text()) == pytest.approx(_default_capture(panel), rel=2e-8)
     panel.close()
 
 
@@ -166,7 +182,7 @@ def test_binding_tracks_reordered_enabled_beam_and_drops_disabled_target(app):
     assert panel.launch_elements()[0].channel_index == 0
     assert editor.channel.currentText() == "1: target"
 
-    edited_target = replace(target, power_mW=1.5, waist_x_um=4.0)
+    edited_target = replace(target, power_mW=1.5, w1_um=4.0)
     edited_stack = BeamStackDefinition(beams=(edited_target, disabled, first))
     panel.launch_plane_widget.set_beam_stack(edited_stack, selected_index=0)
     panel.launch_plane_widget.beamStackChanged.emit(edited_stack)
@@ -269,7 +285,7 @@ def test_preview_uses_optical_launch_only_and_never_material_propagation(
     panel.close()
 
 
-def test_focused_beam_input_screen_preview_uses_material_neutral_context(app):
+def test_physical_beam_input_screen_preview_uses_material_neutral_context(app):
     panel = _enabled_panel()
     panel.set_optical_context(n_ref=2.3, interaction_length_um=80.0)
     panel.set_beam_stack_definition(
@@ -277,10 +293,7 @@ def test_focused_beam_input_screen_preview_uses_material_neutral_context(app):
             beams=(
                 BeamDefinition(
                     name="focused",
-                    profile="focused_gaussian",
-                    waist_x_at_focus_um=4.0,
-                    waist_y_at_focus_um=7.0,
-                    focus_z_um=-20.0,
+                    theta_ext_rad=.03, w1_um=4.0, w2_um=7.0,
                 ),
             )
         )
@@ -290,7 +303,7 @@ def test_focused_beam_input_screen_preview_uses_material_neutral_context(app):
 
     editor.refresh_preview()
 
-    assert editor.status.text() == ""
+    assert "flux" in editor.status.text() or "spectrum" in editor.status.text()
     assert not editor.transmission_preview.pixmap().isNull()
     assert not editor.transformed_preview.pixmap().isNull()
     panel.close()

@@ -24,7 +24,7 @@ def make_base_request():
         bias=BiasSpec(theta_bc=0.0),
         beams=BeamStack(
             channels=(
-                BeamChannel(power_mW=1.0, waist_x_um=3.0, waist_y_um=3.0),
+                BeamChannel(power_mW=1.0, w1_um=3.0, w2_um=3.0),
             )
         ),
         solver=StaticSolverOptions(),

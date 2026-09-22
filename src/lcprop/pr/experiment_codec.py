@@ -67,7 +67,7 @@ from lcprop.pr.transverse.static_workflow import (
 )
 
 
-PR_EXPERIMENT_REQUEST_SCHEMA_VERSION = 6
+PR_EXPERIMENT_REQUEST_SCHEMA_VERSION = 7
 _PR_LEGACY_EXPERIMENT_REQUEST_SCHEMA_VERSION = 1
 _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION = 2
 _PR_MATERIAL_RESPONSE_EXPERIMENT_REQUEST_SCHEMA_VERSION = 3
@@ -269,14 +269,7 @@ def _payload(
 ) -> dict[str, Any]:
     payload = require_mapping(value, name="PR request_payload")
     version = payload.get("schema_version")
-    if type(version) is not int or version not in (
-        _PR_LEGACY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-        _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-        _PR_MATERIAL_RESPONSE_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-        _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-        _PR_REDUCED_TD_MATERIAL_RESPONSE_SCHEMA_VERSION,
-        PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-    ):
+    if type(version) is not int or version != PR_EXPERIMENT_REQUEST_SCHEMA_VERSION:
         raise ExperimentSchemaError(
             f"unsupported PR experiment request schema version: {version!r}"
         )
@@ -462,14 +455,7 @@ def decode_pr_transverse_static_request(
 ) -> PRTransverseStaticRunRequest:
     payload = require_mapping(value, name="PR transverse-static request_payload")
     version = payload.get("schema_version")
-    if type(version) is not int or version not in (
-        _PR_LEGACY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-        _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-        _PR_MATERIAL_RESPONSE_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-        _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-        _PR_REDUCED_TD_MATERIAL_RESPONSE_SCHEMA_VERSION,
-        PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-    ):
+    if type(version) is not int or version != PR_EXPERIMENT_REQUEST_SCHEMA_VERSION:
         raise ExperimentSchemaError(
             "unsupported PR transverse-static experiment request schema "
             f"version: {version!r}"
@@ -651,13 +637,7 @@ def decode_pr_transverse_timedependent_request(
     version = payload.get("schema_version")
     if (
         type(version) is not int
-        or version not in (
-            _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-            _PR_MATERIAL_RESPONSE_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-            _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-            _PR_REDUCED_TD_MATERIAL_RESPONSE_SCHEMA_VERSION,
-            PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-        )
+        or version != PR_EXPERIMENT_REQUEST_SCHEMA_VERSION
     ):
         raise ExperimentSchemaError(
             "unsupported PR transverse-TD experiment request schema version: "
@@ -874,12 +854,7 @@ def decode_pr_image_amplification_request(
         name="PR Image Amplification request_payload",
     )
     version = payload["schema_version"]
-    if type(version) is not int or version not in (
-        _PR_MATERIAL_RESPONSE_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-        _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-        _PR_REDUCED_TD_MATERIAL_RESPONSE_SCHEMA_VERSION,
-        PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-    ):
+    if type(version) is not int or version != PR_EXPERIMENT_REQUEST_SCHEMA_VERSION:
         raise ExperimentSchemaError(
             "unsupported PR Image Amplification experiment request schema "
             f"version: {version!r}"

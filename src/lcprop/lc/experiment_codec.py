@@ -32,7 +32,7 @@ from lcprop.persistence.experiments import (
 )
 
 
-LC_EXPERIMENT_REQUEST_SCHEMA_VERSION = 2
+LC_EXPERIMENT_REQUEST_SCHEMA_VERSION = 3
 _LC_PREVIOUS_EXPERIMENT_REQUEST_SCHEMA_VERSION = 1
 
 
@@ -143,10 +143,7 @@ def encode_lc_timedependent_request(request: TimeDependentRunRequest) -> dict:
 def _payload(value: Any) -> dict[str, Any]:
     payload = require_mapping(value, name="LC request_payload")
     version = payload.get("schema_version")
-    if type(version) is not int or version not in (
-        _LC_PREVIOUS_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-        LC_EXPERIMENT_REQUEST_SCHEMA_VERSION,
-    ):
+    if type(version) is not int or version != LC_EXPERIMENT_REQUEST_SCHEMA_VERSION:
         raise ExperimentSchemaError(
             f"unsupported LC experiment request schema version: {version!r}"
         )

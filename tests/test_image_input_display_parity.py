@@ -1,4 +1,5 @@
 """Physical [x, y] parity across Qt previews, PR launch and Results."""
+from lcprop.optics.launch import OpticalLaunchContext
 
 from dataclasses import replace
 
@@ -51,7 +52,7 @@ def test_qt_adapter_has_explicit_axis_and_vertical_direction(app, xy_axes):
     np.testing.assert_array_equal(values, original)
 
 
-@pytest.mark.parametrize("profile", ["uniform", "legacy_gaussian"])
+@pytest.mark.parametrize("profile", ["collimated_gaussian"])
 @pytest.mark.parametrize("invert", [False, True])
 def test_asymmetric_raster_preview_launch_results_and_volume_parity(
     app, tmp_path, monkeypatch, invert, profile,
@@ -78,9 +79,15 @@ def test_asymmetric_raster_preview_launch_results_and_volume_parity(
     pane = ImagePane()
     try:
         panel.set_beam_stack_definition(BeamStackDefinition(beams=(
-            BeamDefinition(name="calibration", profile=profile, power_mW=3.0,
-                           x_um=2.0, y_um=1.5,
-                           waist_x_um=3.0, waist_y_um=5.0),
+            BeamDefinition(
+                name='calibration',
+                profile=profile,
+                power_mW=3.0,
+                x_um=2.0,
+                y_um=1.5,
+                w1_um=3.0,
+                w2_um=5.0,
+            ),
         )))
         editor = panel.input_screen_editor
         editor.set_source(decoded.source)
@@ -95,10 +102,20 @@ def test_asymmetric_raster_preview_launch_results_and_volume_parity(
         beams, assignments = panel.launch_configuration()
         grid = panel._screen_preview_grid()
         transmission = prepare_intensity_raster_screen(screen, grid)
-        launch = build_launch(beams, grid, complex_dtype=np.complex128,
-                              launch_elements=assignments)
+        launch = build_launch(
+            beams,
+            grid,
+            complex_dtype=np.complex128,
+            launch_elements=assignments,
+            context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
+        )
         intensity = np.abs(launch.A0[0]) ** 2
-        incident = build_launch(beams, grid, complex_dtype=np.complex128)
+        incident = build_launch(
+            beams,
+            grid,
+            complex_dtype=np.complex128,
+            context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um),
+        )
         incident_intensity = np.abs(incident.A0[0]) ** 2
         # Independent index-by-index oracle: pad the raster, then place its
         # columns left-to-right and rows top-to-bottom in physical coordinates.
@@ -188,15 +205,18 @@ def test_asymmetric_raster_preview_launch_results_and_volume_parity(
         measured = float(launch.post_element_physical_powers_mW[0])
         assert measured - 3 * old_throughput == pytest.approx(3 * overlap_delta, abs=1e-14)
         np.testing.assert_array_equal(launch.physical_powers_mW, incident.physical_powers_mW)
-        assert np.sum(incident_intensity) * area == pytest.approx(1.0)
-        if profile == "legacy_gaussian":
-            assert abs(overlap_delta) > 1e-3
-        else:
-            assert overlap_delta == pytest.approx(0.0, abs=1e-15)
+        analytic = 2/(np.pi*3*5)*np.exp(-2*((grid.x_um[:,None]-2)/3)**2
+                                                -2*((grid.y_um[None,:]-1.5)/5)**2)
+        np.testing.assert_allclose(incident_intensity, analytic, rtol=1e-13, atol=1e-16)
+        assert abs(overlap_delta) > 1e-3
         assert float(editor.incident_power.text()) == pytest.approx(3.0)
-        assert float(editor.transmitted_power.text()) == pytest.approx(
-            3 * expected_throughput, rel=2e-8)
-        assert float(editor.throughput.text()) == pytest.approx(expected_throughput, rel=2e-8)
+        qualified = launch.power_metadata["post_screen_spectral_qualification"][0]["narrow_band_available"]
+        if qualified:
+            assert float(editor.transmitted_power.text()) == pytest.approx(3*expected_throughput, rel=2e-8)
+            assert float(editor.throughput.text()) == pytest.approx(expected_throughput, rel=2e-8)
+        else:
+            assert editor.transmitted_power.text() == "Unavailable"
+            assert editor.throughput.text() == "Unavailable"
     finally:
         pane.close()
         panel.close()

@@ -328,7 +328,7 @@ def run_static(
         )
 
     minimum_y_waist_samples = min(
-        float(channel.waist_y_um) / float(grid.dy_um)
+        float(channel.w2_um) / float(grid.dy_um)
         for channel in request.beams.channels
     )
     if minimum_y_waist_samples < 3.0:
