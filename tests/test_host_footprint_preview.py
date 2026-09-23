@@ -81,7 +81,7 @@ def test_oblique_external_ellipse_orientation_and_material_independence(host, ph
                                1., atol=1e-12)
     arrow = widget.scene.beam_items[0].tilt_tip_offset()
     np.testing.assert_allclose([arrow.x(), -arrow.y()],
-                               80*math.sin(math.pi/4)*u, atol=1e-12)
+                               100*math.sin(math.pi/4)/math.sqrt(2**2-math.sin(math.pi/4)**2)*u, atol=1e-12)
     before = xy.copy()
     panel.set_optical_context(n_ref=2.4, interaction_length_um=100.)
     np.testing.assert_allclose(points(widget), before, atol=1e-12)

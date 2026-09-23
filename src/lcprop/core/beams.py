@@ -91,8 +91,8 @@ class BeamChannel:
             raise ValueError("power_mW must be nonnegative")
         if self.w1_um <= 0 or self.w2_um <= 0:
             raise ValueError("external beam-normal radii must be positive")
-        if not 0 <= self.theta_ext_rad < math.pi/2:
-            raise ValueError("theta_ext_rad must be in [0, pi/2); grazing launch is unsupported")
+        if not -math.pi/2 < self.theta_ext_rad < math.pi/2:
+            raise ValueError("theta_ext_rad must be in (-pi/2, pi/2); grazing launch is unsupported")
         if not isinstance(self.coherence_group, str) or not self.coherence_group.strip():
             raise ValueError("coherence_group must be non-empty")
         if self.profile != "collimated_gaussian":

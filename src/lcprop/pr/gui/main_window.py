@@ -331,6 +331,10 @@ class PRMainWindow(QWidget):
             self._estimate_current_resources
         )
 
+        self.beam_panel.bind_aperture_controls(self.grid_panel)
+        self.grid_panel.z_length_um.valueChanged.connect(self._sync_beam_optical_context)
+        self.material_panel.refractive_index.valueChanged.connect(self._sync_beam_optical_context)
+        self._sync_beam_optical_context()
         self.grid_panel.x_aperture_um.valueChanged.connect(
             self._sync_beam_aperture
         )
@@ -352,6 +356,12 @@ class PRMainWindow(QWidget):
         self.evolution_panel.set_image_amplification_mode(image_mode)
         if hasattr(self, "checkpoint_compatibility_reason"):
             self._refresh_checkpoint_controls()
+
+    def _sync_beam_optical_context(self) -> None:
+        self.beam_panel.set_optical_context(
+            n_ref=self.material_panel.refractive_index.value(),
+            interaction_length_um=self.grid_panel.z_length_um.value(),
+        )
 
     def _sync_beam_aperture(self) -> None:
         self.beam_panel.set_aperture(

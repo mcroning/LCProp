@@ -211,7 +211,9 @@ def test_launchplane_selector_full_text_and_original_guidance_accessible(app):
     assert 'same Laser name interfere coherently' in laser.toolTip()
     assert 'different Laser names are mutually incoherent' in laser.toolTip()
     assert not any(x.findData('focused_gaussian') >= 0 for x in selectors)
-    assert 'External polar angle' in w.launch_plane_widget.theta_spin.toolTip()
+    assert 'Signed external tilt' in w.launch_plane_widget.theta_spin.toolTip()
+    assert 'fixed phi' in w.launch_plane_widget.theta_spin.toolTip()
+    assert 'grazing incidence is unsupported' in w.launch_plane_widget.theta_spin.toolTip()
     assert not any(x.findData('transverse_wavevector') >= 0 for x in selectors)
     assert w.minimumSizeHint().width()<1200
     w.close()

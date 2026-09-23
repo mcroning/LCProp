@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
+    QLabel,
     QSpinBox,
     QSplitter,
     QTabWidget,
@@ -24,6 +26,7 @@ from lcprop.optics.launch_configuration import LaunchConfiguration
 from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.optics.launch import OpticalLaunchContext, build_launch
 from lcprop.optics.screens import ChannelLaunchElements
+from lcprop.optics.physical_launch import external_direction_for_exit
 
 try:
     from launchplane.launchpane import LaunchPlaneWidget
@@ -33,12 +36,14 @@ try:
         LaunchPlaneDefinition,
     )
     from launchplane.serialization import SCHEMA_VERSION as LAUNCHPANE_SCHEMA_VERSION
-    if LAUNCHPANE_SCHEMA_VERSION != 4 or not hasattr(LaunchPlaneWidget, "set_resolved_preview"):
-        raise ImportError("LaunchPlane schema 4 with host-resolved preview support is required")
+    if (LAUNCHPANE_SCHEMA_VERSION != 4
+            or not getattr(LaunchPlaneWidget, "supports_resolved_internal_rays", False)
+            or not hasattr(LaunchPlaneWidget, "set_inverse_resolver")):
+        raise ImportError("LaunchPlane schema 4 with host-resolved ray preview and inverse editing support is required")
 except ImportError as exc:
     raise ImportError(
         "The LCProp Beam tab requires coordinated LaunchPlane schema 4 with "
-        "host-resolved preview support. Install the reviewed LCProp/LaunchPlane "
+        "host-resolved ray preview and inverse editing support. Install the reviewed LCProp/LaunchPlane "
         "pair together before starting the GUI; obsolete packages are incompatible."
     ) from exc
 
@@ -47,6 +52,14 @@ class BeamPanel(QWidget):
     """LCProp Beam tab backed by the independent LaunchPlane widget."""
 
     beamStackChanged = Signal(object)
+
+    def _direction_for_exit(self, beam, x_um: float, y_um: float):
+        if not self._has_optical_context:
+            raise ValueError("material-aware optical context is unavailable")
+        channel = beam_stack_definition_to_lcprop(
+            BeamStackDefinition(beams=(beam,))).channels[0]
+        return external_direction_for_exit(channel, self._preview_n_ref,
+                                           self._interaction_length_um, x_um, y_um)
 
     def __init__(
         self,
@@ -68,6 +81,7 @@ class BeamPanel(QWidget):
         self._preview_n_ref = 1.0
         self._interaction_length_um = 1.0
         self._propagation_sign = 1
+        self._has_optical_context = False
 
         launch_plane = LaunchPlaneDefinition(
             x_aperture_um=x_aperture_um,
@@ -96,6 +110,7 @@ class BeamPanel(QWidget):
             launch_plane=launch_plane,
             parent=self,
         )
+        self.launch_plane_widget.set_inverse_resolver(self._direction_for_exit)
         self.launch_plane_widget.set_beam_stack(default_stack, selected_index=0)
         # Keep embedded choices accessible even when native selectors elide text.
         for selector in self.launch_plane_widget.findChildren(QComboBox):
@@ -179,6 +194,26 @@ class BeamPanel(QWidget):
             signal.connect(self._boundary_changed)
         self._boundary_changed()
 
+    def bind_aperture_controls(self, grid_panel) -> None:
+        """Expose the existing Grid aperture on Input face; no second grid state."""
+        row = QHBoxLayout()
+        for axis in ("x", "y"):
+            canonical = getattr(grid_panel, f"{axis}_aperture_um")
+            editor = QDoubleSpinBox(self)
+            editor.setRange(canonical.minimum(), canonical.maximum())
+            editor.setDecimals(canonical.decimals())
+            editor.setSingleStep(canonical.singleStep())
+            editor.setKeyboardTracking(canonical.keyboardTracking())
+            editor.setSuffix(" µm")
+            editor.setValue(canonical.value())
+            editor.setToolTip("Full input-face width; shared with Grid and saved in the experiment.")
+            setattr(self, f"{axis}_aperture_control", editor)
+            row.addWidget(QLabel(f"{axis} full width", self))
+            row.addWidget(editor)
+            editor.valueChanged.connect(canonical.setValue)
+            canonical.valueChanged.connect(editor.setValue)
+        self.launch_plane_widget.canvas_panel.layout().insertLayout(1, row)
+
     def optical_boundary(self) -> TransverseBoundarySpec:
         return TransverseBoundarySpec(
             mode=str(self.boundary_mode.currentData()),
@@ -209,6 +244,7 @@ class BeamPanel(QWidget):
     def set_optical_context(
         self, *, n_ref: float, interaction_length_um: float, propagation_sign: int = 1
     ) -> None:
+        self._has_optical_context = True
         self._preview_n_ref = float(n_ref)
         self._interaction_length_um = float(interaction_length_um)
         self._propagation_sign = int(propagation_sign)
@@ -225,7 +261,10 @@ class BeamPanel(QWidget):
 
     def _boundary_changed(self, _value=None) -> None:
         contours = []
+        endpoints = [None] * len(self.beam_stack_definition.beams)
         try:
+            if not self._has_optical_context:
+                raise ValueError("material index and interaction length are not yet supplied")
             grid = self._screen_preview_grid()
             beams = beam_stack_definition_to_lcprop(self.beam_stack_definition)
             launch = build_launch(beams, grid, complex_dtype=np.complex128,
@@ -233,23 +272,31 @@ class BeamPanel(QWidget):
             descriptions = []
             angles = np.linspace(0, 2*np.pi, 65)
             circle = np.stack((np.cos(angles), np.sin(angles)))
+            enabled_indices = [i for i, b in enumerate(self.beam_stack_definition.beams) if b.enabled]
             for index, (beam, geometry) in enumerate(zip(beams.channels, launch.resolved_geometry)):
                 eigenvalues, axes = np.linalg.eigh(geometry.interface_quadratic)
                 points = (axes @ (circle/np.sqrt(eigenvalues)[:, None])).T
                 points += [beam.x0_um, beam.y0_um]
                 contours.append(points.tolist())
+                endpoints[enabled_indices[index]] = (
+                    beam.x0_um + self._interaction_length_um * geometry.kx / geometry.kz_internal,
+                    beam.y0_um + self._interaction_length_um * geometry.ky / geometry.kz_internal,
+                )
                 capture = launch.power_metadata["capture_fraction"][index]
                 descriptions.append(
                     f"{beam.name}: internal angle {np.degrees(geometry.theta_internal):.3g}°, "
                     f"captured entrance flux estimate {capture:.2%}"
                 )
             description = (
-                "Host-resolved 1/e field footprints (dashed). " + "; ".join(descriptions)
+                "Host-resolved 1/e field footprints (dashed); rays: internal crystal exit. " + "; ".join(descriptions)
                 + ". Scalar ideal interface; spectral/sampling qualification applies."
             )
         except (ValueError, TypeError) as exc:
+            contours = []
+            endpoints = [None] * len(self.beam_stack_definition.beams)
             description = f"Resolved preview unavailable: {exc}"
-        self.launch_plane_widget.set_resolved_preview(contours, description=description)
+        self.launch_plane_widget.set_resolved_preview(
+            contours, description=description, ray_endpoints=endpoints)
 
     def showEvent(self, event) -> None:
         """Fit once after Qt has assigned the embedded view its real size."""

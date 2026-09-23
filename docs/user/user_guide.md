@@ -487,4 +487,32 @@ previous location. LCProp does not impose a developer experiment directory.
 **Beam → Beams** gives the LaunchPlane editor the workspace. Secondary controls
 remain available in **Optical edge treatment**, and in PR **Input Screen**.
 LC does not support input screens and does not allocate a permanent disabled pane.
-Beam-center and tilt-handle dragging remain LaunchPlane's existing interactions.
+The Input face has center and physical-exit arrowhead handles, described below.
+
+## Input-face controls and physical ray preview
+
+The Beam tab exposes x/y **full width** controls linked to Grid. A -100 to
++100 µm extent is 200 µm wide. `Fit` shows all footprints and physical ray
+endpoints; `Full Aperture` returns to the complete input face. Neither changes
+beam power, centers, or aperture capture.
+
+External theta can be positive or negative at fixed crystal-frame phi; numeric
+signed theta/phi are the exact adjustment route. Drag the center to position the
+beam without changing direction. Drag the arrowhead to approximately set its
+physical exit/direction through Product's material-aware inverse resolver.
+Arrowheads win over centers where their hit regions overlap, even across beams.
+At zero tilt, grab the coincident arrowhead and drag it away to expose the center.
+Both handles retain usable device sizes under zoom and Fit.
+
+Click a handle, then use arrow keys for one-screen-pixel nudges, or Shift+arrow
+for ten pixels. Spinbox arrow keys still edit that spinbox. Objects-list selection
+helps identify beams but is not needed between canvas drags. For reciprocal
+crossing, drag each beam's arrowhead onto the other beam's entrance. This edits
+directions; it creates no persistent target constraint. Unreachable exits leave
+the direction unchanged and show a reason. Missing host geometry/inverse support
+is explicitly unavailable.
+
+The ray is the physical internal prediction `(x0 + L*kx/kz_int, y0 + L*ky/kz_int)`;
+Fit never shortens it. Changing material index or interaction length recomputes
+the exit without changing external intent. This central-ray prediction is not a
+simulation of nonlinear bending or broad-spectrum propagation.

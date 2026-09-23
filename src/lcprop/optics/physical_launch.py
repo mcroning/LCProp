@@ -89,6 +89,44 @@ def resolve_beam_geometry(channel, n_internal: float) -> ResolvedBeamGeometry:
                                 math.cos(theta), kz/kint, frame, qface, qint)
 
 
+def external_direction_for_exit(channel, n_internal: float, length_um: float,
+                                exit_x_um: float, exit_y_um: float) -> tuple[float, float]:
+    """Invert the scalar interface for a requested forward physical ray endpoint.
+
+    Choose the equivalent signed-theta branch with azimuth closest to the
+    current azimuth; ties retain the current theta sign (positive at +0).
+    At zero displacement retain phi and signed zero. Thus crossing zero along
+    the current meridian changes theta sign rather than jumping phi by pi.
+    An unreachable/grazing external direction is rejected, never clamped.
+    """
+    channel.validate()
+    if not all(math.isfinite(v) for v in (n_internal, length_um, exit_x_um, exit_y_um)):
+        raise ValueError("inverse ray geometry must be finite")
+    if n_internal <= 0 or length_um <= 0:
+        raise ValueError("inverse ray requires positive internal index and interaction length")
+    sx = (exit_x_um-channel.x0_um)/length_um
+    sy = (exit_y_um-channel.y0_um)/length_um
+    if not math.isfinite(sx) or not math.isfinite(sy):
+        raise ValueError("inverse ray slopes must be finite")
+    norm = math.hypot(1., sx, sy)
+    k0 = 2*math.pi/channel.wavelength_um
+    kx, ky = n_internal*k0*sx/norm, n_internal*k0*sy/norm
+    sine = math.hypot(kx, ky)/(channel.n_ext*k0)
+    if sine >= 1 or math.sqrt(max(0., 1-sine*sine)) <= MINIMUM_FORWARD_COSINE:
+        raise ValueError("requested exit requires unreachable or grazing external incidence")
+    if 1/norm <= MINIMUM_FORWARD_COSINE:
+        raise ValueError("numerically grazing internal launch is unsupported")
+    if sine == 0:
+        return math.copysign(0., channel.theta_ext_rad), channel.phi_rad
+    theta = math.asin(sine)
+    phi = math.atan2(ky, kx) % (2*math.pi)
+    alternatives = ((theta, phi), (-theta, (phi+math.pi) % (2*math.pi)))
+    distances = [abs(math.remainder(p-channel.phi_rad, 2*math.pi)) for _, p in alternatives]
+    if math.isclose(*distances, abs_tol=1e-12, rel_tol=0):
+        return alternatives[1 if math.copysign(1., channel.theta_ext_rad) < 0 else 0]
+    return alternatives[0 if distances[0] < distances[1] else 1]
+
+
 def sample_resolved_beam(channel, geometry, grid, power_fraction, complex_dtype):
     """Analytic infinite-plane normalization, followed by finite-grid sampling."""
     xp = grid.xp

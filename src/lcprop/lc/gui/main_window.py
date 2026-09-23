@@ -285,6 +285,10 @@ class LCPropMainWindow(QWidget):
         self.sweep_tab_index = self.tabs.addTab(self.sweep_panel, "Sweep")
         self.tabs.addTab(self.results_panel, "Results")
         self.experiment_panel.experimentChanged.connect(self.update_run_button)
+        self.beam_panel.bind_aperture_controls(self.grid_panel)
+        self.grid_panel.z_length_um.valueChanged.connect(self._sync_beam_optical_context)
+        self.physics_panel.no.valueChanged.connect(self._sync_beam_optical_context)
+        self._sync_beam_optical_context()
         self.grid_panel.x_aperture_um.valueChanged.connect(
             self._sync_beam_aperture
         )
@@ -300,6 +304,12 @@ class LCPropMainWindow(QWidget):
         )
         self.update_run_button()
         self.resize(1450, 900)
+
+    def _sync_beam_optical_context(self) -> None:
+        self.beam_panel.set_optical_context(
+            n_ref=self.physics_panel.no.value(),
+            interaction_length_um=self.grid_panel.z_length_um.value(),
+        )
 
     def _sync_beam_aperture(self) -> None:
         self.beam_panel.set_aperture(
