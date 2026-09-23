@@ -6,6 +6,8 @@ from lcprop.gui.layout import FlowLayout, application_layout
 from dataclasses import replace
 from functools import partial
 
+from lcprop.optics.sampling import qualify_launch_sampling
+
 import traceback
 
 import numpy as np
@@ -960,6 +962,11 @@ class LCPropMainWindow(QWidget):
             raise ValueError(f"unsupported TD initial-condition mode: {mode}")
         return req
 
+    def _launch_sampling(self, request):
+        base = self._base_static_request(request)
+        return qualify_launch_sampling(base.beams, base.grid, base.material.no,
+                                       boundary=base.optical_boundary)
+
     def _validate_execution_request(self, request) -> None:
         base = self._base_static_request(request)
         for name in ("grid", "material", "bias", "beams", "runtime", "optical_boundary"):
@@ -979,6 +986,11 @@ class LCPropMainWindow(QWidget):
         error = self._lc_slurm_resource_error()
         if error:
             raise ValueError(error)
+        if isinstance(request, (StaticRunRequest, TimeDependentRunRequest)):
+            sampling = self._launch_sampling(request)
+            sampling.require_valid()
+            for warning in sampling.warnings:
+                self.results_panel.append_console(f"WARNING: {warning}")
         source_preflight(self)
 
     def build_soliton_request(self) -> SolitonRequest:
@@ -1104,6 +1116,8 @@ class LCPropMainWindow(QWidget):
             if powers is not None:
                 lines.append("Powers: " + ", ".join(f"{p:g} mW" for p in powers))
 
+        if isinstance(req, (StaticRunRequest, TimeDependentRunRequest)):
+            lines.append(self._launch_sampling(req).summary())
         return "\n".join(lines) + "\n" + execution_summary(self, req)
 
     def _experiment_dispatch(self):

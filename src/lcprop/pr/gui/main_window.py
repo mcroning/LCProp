@@ -872,6 +872,7 @@ class PRMainWindow(QWidget):
         workflow_id = self._workflow_id_for_request(request)
         lines = [
             "Material: photorefractive",
+            "Launch sampling: central carriers representable; Gaussian margins and boundary risks qualified below.",
             f"Workflow: {workflow_id}",
             f"Runner: {runner.name}",
             (

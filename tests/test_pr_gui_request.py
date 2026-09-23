@@ -353,8 +353,8 @@ def test_pr_gui_preflight_reports_sampling_boundary_and_grating_risks(app):
         first,
         name='second',
         x0_um=0.0,
-        theta_ext_rad=math.asin(math.hypot(5.0, first.tilt_y_rad_per_um) * first.wavelength_um / (2 * math.pi * first.n_ext)),
-        phi_rad=math.atan2(first.tilt_y_rad_per_um, 5.0) % (2 * math.pi),
+        theta_ext_rad=math.asin(math.hypot(1.5, first.tilt_y_rad_per_um) * first.wavelength_um / (2 * math.pi * first.n_ext)),
+        phi_rad=math.atan2(first.tilt_y_rad_per_um, 1.5) % (2 * math.pi),
     )
     risky = replace(
         request,

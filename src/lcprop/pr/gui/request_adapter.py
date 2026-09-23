@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -10,6 +10,7 @@ from lcprop.adapters.launchplane import beam_stack_to_launchplane
 from lcprop.core.backend import dtype_pair
 from lcprop.core.grid import make_grid
 from lcprop.pr.evolution import validate_timestep
+from lcprop.optics.sampling import qualify_launch_sampling
 from lcprop.pr.geometry import (
     PRBeamStackApertureReport,
     analyze_beam_stack_aperture,
@@ -77,19 +78,26 @@ def _validate_pr_gui_common(request) -> PRBeamStackApertureReport:
     if any(wavelength != wavelengths[0] for wavelength in wavelengths[1:]):
         raise ValueError("minimal PR workflow requires one shared wavelength")
 
+    sampling = qualify_launch_sampling(
+        request.beams, request.grid, request.material.refractive_index,
+        boundary=request.optical_boundary, launch_elements=request.launch_elements)
+    sampling.require_valid()
     real_dtype, _ = dtype_pair(request.backend.precision)
     grid = make_grid(
         request.grid,
         xp=np,
         real_dtype=real_dtype,
     )
-    return analyze_beam_stack_aperture(
+    aperture = analyze_beam_stack_aperture(
         grid,
         request.beams,
         refractive_index=request.material.refractive_index,
         boundary_mode=request.optical_boundary.mode,
         strict=False,
     )
+
+    return replace(
+        aperture, warnings=tuple(dict.fromkeys((*aperture.warnings, *sampling.warnings))))
 
 
 def validate_pr_gui_request(request: PRRunRequest) -> PRRequestPreflight:

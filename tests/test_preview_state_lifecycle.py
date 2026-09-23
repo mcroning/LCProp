@@ -19,8 +19,8 @@ def host():
     app = QApplication.instance() or QApplication([])
     window = PRMainWindow()
     window.resize(1200, 850)
-    window.grid_panel.Nx.setValue(16)
-    window.grid_panel.Ny.setValue(16)
+    window.grid_panel.Nx.setValue(512)  # Resolve high-angle reciprocal-ray carriers.
+    window.grid_panel.Ny.setValue(256)
     window.grid_panel.dz_um.setValue(50)
     window.grid_panel.z_length_um.setValue(100)
     window.grid_panel.x_aperture_um.setValue(200)

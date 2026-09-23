@@ -25,6 +25,7 @@ from lcprop.optics.physical_launch import (
     NONPROPAGATING_NORM_TOLERANCE, NYQUIST_EDGE_NORM_TOLERANCE,
     resolve_beam_geometry, sample_resolved_beam, scalar_flux_diagnostic,
 )
+from lcprop.optics.sampling import qualify_launch_sampling
 from lcprop.core.grid import RuntimeGrid
 from lcprop.optics.screens import (
     ChannelLaunchElements,
@@ -177,6 +178,8 @@ def build_launch(
         context.validate()
         if context.grid is not grid:
             raise ValueError("OpticalLaunchContext grid must be the launch grid")
+    qualify_launch_sampling(beams, grid, context.n_ref,
+                            launch_elements=launch_elements).require_valid()
     xp = grid.xp
 
     physical_powers_mW = xp.asarray(

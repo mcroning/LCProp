@@ -46,6 +46,33 @@ launch elements.
 
 ## Grid and optical edge treatment
 
+**A physically valid launch angle is not necessarily numerically representable
+on the selected transverse grid.** Run and Inspect Request reject any enabled
+beam whose resolved carrier satisfies `abs(kx) >= pi*Nx/Lx` or
+`abs(ky) >= pi*Ny/Ly`. Equality is rejected: opposite physical directions cannot
+be distinguished at Nyquist. Correct the indicated axis in Grid. Increasing the
+aperture width at fixed N makes spectral sampling coarser.
+
+Errors give the carrier-only minimum integer count and a separate Gaussian
+four-sigma margin recommendation; neither requires a power of two. For 0.633 µm,
+external index 1, 30° along x and a 200 µm full width, Nx=128/256 aliases;
+Nx=512 represents the carrier. Ny=256 can remain sufficient when ky=0.
+
+Spectral-margin warnings estimate the unscreened, untruncated Gaussian spectrum:
+four marginal standard deviations leave about 0.006334% power outside the
+interval on each axis. Screens and aperture truncation may broaden that spectrum.
+Warnings do not certify propagation accuracy or override the carrier hard gate.
+
+Boundary warnings are independent. An unwrapped central ray plus a rigid
+two-radius entrance-envelope estimate warns of approach to the aperture or
+absorber region; diffraction and nonlinear evolution may change the envelope.
+Periodic operation may wrap content to the opposite side; sponge/Tukey edges
+may attenuate it. Both remain permitted when sampling is valid.
+
+Beam intent owns kx/ky, Grid owns the sampling limits, and edge treatment owns
+boundary behavior. Edge controls remain in Beam for this milestone.
+
+
 `Nx` and `Ny` set transverse samples. Apertures set the physical periodic FFT
 cell. `dz` is the optical/material longitudinal sampling interval; optical
 substeps further subdivide propagation within it where supported. These are

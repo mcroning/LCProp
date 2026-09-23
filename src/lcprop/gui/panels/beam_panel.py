@@ -24,6 +24,8 @@ from lcprop.gui.panels.input_screen_editor import InputScreenEditor
 from lcprop.optics.launch_configuration import LaunchConfiguration
 from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.optics.launch import OpticalLaunchContext, build_launch
+from lcprop.optics.physical_launch import resolve_beam_geometry
+from lcprop.optics.sampling import qualify_launch_sampling
 from lcprop.optics.screens import ChannelLaunchElements
 from lcprop.optics.physical_launch import external_direction_for_exit
 
@@ -268,13 +270,16 @@ class BeamPanel(QWidget):
                 raise ValueError("material index and interaction length are not yet supplied")
             grid = self._screen_preview_grid()
             beams = beam_stack_definition_to_lcprop(self.beam_stack_definition)
-            launch = build_launch(beams, grid, complex_dtype=np.complex128,
-                                  context=self._preview_launch_context(grid))
+            sampling = qualify_launch_sampling(beams, grid, self._preview_n_ref)
+            launch = (None if sampling.errors else
+                      build_launch(beams, grid, complex_dtype=np.complex128,
+                                   context=self._preview_launch_context(grid)))
+            geometries = tuple(resolve_beam_geometry(b, self._preview_n_ref) for b in beams.channels)
             descriptions = []
             angles = np.linspace(0, 2*np.pi, 65)
             circle = np.stack((np.cos(angles), np.sin(angles)))
             enabled_indices = [i for i, b in enumerate(self.beam_stack_definition.beams) if b.enabled]
-            for index, (beam, geometry) in enumerate(zip(beams.channels, launch.resolved_geometry)):
+            for index, (beam, geometry) in enumerate(zip(beams.channels, geometries)):
                 eigenvalues, axes = np.linalg.eigh(geometry.interface_quadratic)
                 points = (axes @ (circle/np.sqrt(eigenvalues)[:, None])).T
                 points += [beam.x0_um, beam.y0_um]
@@ -283,10 +288,11 @@ class BeamPanel(QWidget):
                     beam.x0_um + self._interaction_length_um * geometry.kx / geometry.kz_internal,
                     beam.y0_um + self._interaction_length_um * geometry.ky / geometry.kz_internal,
                 )
-                capture = launch.power_metadata["capture_fraction"][index]
+                capture_text = ("capture estimate unavailable on preview sampling grid" if launch is None
+                                else f"captured entrance flux estimate {launch.power_metadata['capture_fraction'][index]:.2%}")
                 descriptions.append(
                     f"{beam.name}: internal angle {np.degrees(geometry.theta_internal):.3g}°, "
-                    f"captured entrance flux estimate {capture:.2%}"
+                    f"{capture_text}"
                 )
             description = (
                 "Host-resolved 1/e field footprints (dashed); rays: internal crystal exit. " + "; ".join(descriptions)

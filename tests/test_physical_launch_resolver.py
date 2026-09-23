@@ -161,11 +161,7 @@ def test_oblique_screen_overlap_and_coherent_groups_are_not_renormalized():
 def test_aliased_carrier_cannot_receive_physical_power_qualification():
     grid = make_grid(GridSpec(Nx=16, Ny=16, x_aperture_um=80., y_aperture_um=80.))
     b = BeamChannel(theta_ext_rad=.8, w1_um=10., w2_um=10.)
-    result = build_launch(BeamStack(channels=(b,)), grid, context=OpticalLaunchContext(grid, 2., 1.))
-    qualification = result.power_metadata['post_screen_spectral_qualification'][0]
-    assert not qualification['narrow_band_available']
-    assert any('aliased' in reason for reason in qualification['reasons'])
-    assert result.summary()['post_element_channel_powers_mW'] == [None]
-    assert result.summary()['post_element_total_power_mW'] is None
-    assert result.summary()['channel_throughput_fractions'] == [None]
-    assert result.power_metadata['post_screen_central_direction_estimate_mW'][0] > 0
+    # An unresolved carrier is now rejected before a misleading field is built.
+    with pytest.raises(ValueError, match="Optical launch sampling invalid"):
+        build_launch(BeamStack(channels=(b,)), grid,
+                     context=OpticalLaunchContext(grid, 2., 1.))
