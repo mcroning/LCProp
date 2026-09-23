@@ -340,6 +340,9 @@ class BeamPanel(QWidget):
             selected_index=selected_index,
         )
         self.launch_plane_widget.view.fit_aperture()
+        # Replacing the scene invalidates derived contours; redeliver the
+        # current host geometry after the final stack/scene replacement.
+        self._boundary_changed()
         self.input_screen_editor.refresh_preview()
 
     def set_preview_grid(self, Nx: int, Ny: int) -> None:
