@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QAbstractSpinBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -38,12 +37,13 @@ try:
     from launchplane.serialization import SCHEMA_VERSION as LAUNCHPANE_SCHEMA_VERSION
     if (LAUNCHPANE_SCHEMA_VERSION != 4
             or not getattr(LaunchPlaneWidget, "supports_resolved_internal_rays", False)
-            or not hasattr(LaunchPlaneWidget, "set_inverse_resolver")):
-        raise ImportError("LaunchPlane schema 4 with host-resolved ray preview and inverse editing support is required")
+            or not hasattr(LaunchPlaneWidget, "set_inverse_resolver")
+            or not hasattr(LaunchPlaneWidget, "commit_pending_edits")):
+        raise ImportError("LaunchPlane schema 4 with host-resolved ray preview, inverse editing and pending-edit synchronization support is required")
 except ImportError as exc:
     raise ImportError(
         "The LCProp Beam tab requires coordinated LaunchPlane schema 4 with "
-        "host-resolved ray preview and inverse editing support. Install the reviewed LCProp/LaunchPlane "
+        "host-resolved ray preview, inverse editing and pending-edit synchronization support. Install the reviewed LCProp/LaunchPlane "
         "pair together before starting the GUI; obsolete packages are incompatible."
     ) from exc
 
@@ -124,7 +124,8 @@ class BeamPanel(QWidget):
 
         self.input_screen_editor = InputScreenEditor(
             beam_definitions=lambda: self.beam_stack_definition,
-            beams=self.beams,
+            # Preview is a read of committed intent, not a request boundary.
+            beams=lambda: beam_stack_definition_to_lcprop(self.beam_stack_definition),
             runtime_grid=self._screen_preview_grid,
             launch_context=self._preview_launch_context,
             enabled=input_screens_enabled,
@@ -418,27 +419,10 @@ class BeamPanel(QWidget):
     def beams(self) -> BeamStack:
         """Return enabled LaunchPlane beams adapted to LCProp channels."""
 
-        # LaunchPlane disables keyboard tracking on its numerical editors.  A
-        # value typed into the active editor therefore may not yet have
-        # reached its immutable BeamDefinition (notably when a platform does
-        # not move keyboard focus to the Run button).  Commit every pending
-        # numerical edit before taking the request snapshot.
-        # LaunchPlane retains both the angle and transverse-wavevector editors
-        # and hides the inactive pair.  Interpreting an inactive editor would
-        # switch the beam back to that editor's input mode, so only commit the
-        # controls belonging to the currently displayed inspector state.
-        editors = [
-            editor
-            for editor in self.launch_plane_widget.findChildren(QAbstractSpinBox)
-            if not editor.isHidden()
-        ]
-        pending_text = [(editor, editor.lineEdit().text()) for editor in editors]
-        for editor, text in pending_text:
-            # Committing one field makes LaunchPlane refresh the whole
-            # inspector, so restore each captured text immediately before it
-            # is interpreted or a preceding commit can erase it.
-            editor.lineEdit().setText(text)
-            editor.interpretText()
+        # Run, Save and both material request builders share this boundary.
+        # The editor validates and commits once; its synchronous stack signal
+        # redelivers the host preview before this request snapshot is returned.
+        self.launch_plane_widget.commit_pending_edits()
 
         return beam_stack_definition_to_lcprop(
             self.launch_plane_widget.beam_stack
