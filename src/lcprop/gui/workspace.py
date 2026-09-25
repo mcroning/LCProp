@@ -102,6 +102,8 @@ class Workspace(QWidget):
         self.longitudinal_pane.zPlaneChanged.connect(
             self.image_pane.set_z_index
         )
+        self.longitudinal_pane.guidesChanged.connect(self._sync_physical_guides)
+        self.image_pane.fieldChanged.connect(self._sync_physical_guides)
         self.image_pane.sourceVolumeSelected.connect(
             self.longitudinal_pane.select_volume
         )
@@ -226,16 +228,34 @@ class Workspace(QWidget):
         self.longitudinal_pane.set_cut_indices(ix, iy)
 
     def _longitudinal_cut_changed(self, ix: int, iy: int) -> None:
-        self.image_pane.set_crosshair(ix, iy)
+        self._sync_physical_guides()
 
     def _guides_visibility_changed(self, visible: bool) -> None:
-        if visible:
-            self.image_pane.set_crosshair(
-                self.longitudinal_pane.x_cut_slider.value(),
-                self.longitudinal_pane.y_cut_slider.value(),
-            )
+        self._sync_physical_guides()
+
+    def _sync_physical_guides(self):
+        view = self.image_pane.image_view
+        coords = self.longitudinal_pane.guide_coordinates()
+        if (coords is not None and self.longitudinal_pane.show_guides.isChecked()
+                and view._field is not None and view._field.axes == ("x", "y")):
+            pane = self.longitudinal_pane
+            if (not pane._is_fixed_cut_selection()
+                    and view._field.source_volume_key == pane.field_selector.currentData()):
+                # A genuinely linked volume retains the established index API.
+                view.set_crosshair(pane._ix, pane._iy)
+            else:
+                view.set_crosshair_coordinates(*coords[:2])
         else:
-            self.image_pane.clear_crosshair()
+            view.clear_crosshair()
+
+    def invalidate_products(self):
+        """Drop rendered arrays at execution start, retaining saved results elsewhere."""
+        from lcprop.products.data_model import RunData, Geometry
+        self.set_run_data(RunData(workflow="pending", geometry=Geometry()),
+                          state="Waiting for current result")
+        self._displayed_attempt = None
+        self._displayed_request = ""
+        self._refresh_request_text()
 
     def set_run_data(self, run_data, *, state: str | None = None) -> None:
         # Publish ownership only after every pane has accepted the product.
@@ -343,7 +363,14 @@ class Workspace(QWidget):
             for key, field in run_data.fields.items()
         ]))
         self.image_pane.set_run_data(view_data)
+        selected_image = self.image_pane.field_selector.currentData()
         self.longitudinal_pane.set_run_data(view_data)
+        # A volume's automatic default must not replace an independent selected
+        # output/angular product during live -> completed publication.
+        if selected_image is not None:
+            self.image_pane.field_selector.setCurrentIndex(
+                self.image_pane.field_selector.findData(selected_image))
+        self._sync_physical_guides()
         self.curve_pane.set_run_data(run_data)
         self.table_pane.set_run_data(run_data)
         selected = self.convergence_selector.currentData()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lcprop.pr.far_field import completed_far_field
+
 from copy import deepcopy
 
 import numpy as np
@@ -762,6 +764,9 @@ def pr_transverse_result_to_run_data(result: PRTransverseRunResult) -> RunData:
             "transverse_pr", "Transverse PR Diagnostics", deepcopy(result.diagnostics)
         )),
     ])
+    far_field = completed_far_field(result)
+    if far_field is not None:
+        fields.add(far_field.key, far_field)
     _add_carrier_power_diagnostic(diagnostics, result)
     return RunData(
         workflow=PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,

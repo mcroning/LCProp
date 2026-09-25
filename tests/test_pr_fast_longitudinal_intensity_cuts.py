@@ -90,7 +90,14 @@ def test_gui_displays_retained_fast_cuts_without_transverse_sliders():
     assert pane.field_selector.currentText() == "Retained Fast Optical Intensity"
     assert pane.x_cut_slider.isHidden()
     assert pane.y_cut_slider.isHidden()
-    assert pane.show_guides.isHidden()
+    assert not pane.show_guides.isHidden()
+    assert pane.show_guides.isChecked()
+    x, y, z = pane.guide_coordinates()
+    assert x == y == -0.5
+    np.testing.assert_array_equal(pane.xz_view._vline.get_xdata(), [z, z])
+    np.testing.assert_array_equal(pane.xz_view._hline.get_ydata(), [x, x])
+    np.testing.assert_array_equal(pane.yz_view._vline.get_xdata(), [z, z])
+    np.testing.assert_array_equal(pane.yz_view._hline.get_ydata(), [y, y])
     assert pane.xz_view.image is not None
     assert pane.yz_view.image is not None
     assert pane.y_cut_label.text() == "Retained Fast x-z cut at y = -0.5 µm"

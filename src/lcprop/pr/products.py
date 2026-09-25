@@ -7,6 +7,8 @@ shared, material-neutral ``RunData`` presentation model.
 
 from __future__ import annotations
 
+from lcprop.pr.far_field import completed_far_field
+
 from copy import deepcopy
 from dataclasses import asdict
 from typing import Any
@@ -753,6 +755,9 @@ def pr_result_to_run_data(result: PRRunResult) -> RunData:
         ),
     ])
 
+    far_field = completed_far_field(result)
+    if far_field is not None:
+        fields.add(far_field.key, far_field)
     _add_carrier_power_diagnostic(diagnostics, result)
     return RunData(
         workflow=PR_TIMEDEPENDENT_WORKFLOW,

@@ -25,6 +25,7 @@ class LongitudinalPane(QWidget):
     zPlaneChanged = Signal(int)
     volumeSelectionChanged = Signal(str)
     guidesVisibilityChanged = Signal(bool)
+    guidesChanged = Signal()
     """Viewer for longitudinal x-z and y-z cuts from 3-D fields.
 
     Assumes fields with axes ("z", "x", "y").
@@ -149,6 +150,7 @@ class LongitudinalPane(QWidget):
         self._iz = int(iz)
         self._set_z_slider(self._iz)
         if self._is_fixed_cut_selection():
+            self._update_fixed_cut_views()
             self.zPlaneChanged.emit(self._iz)
             return
         self.set_cut_indices(ix, self._iy)
@@ -159,6 +161,7 @@ class LongitudinalPane(QWidget):
         self._iz = int(iz)
         self._set_z_slider(self._iz)
         if self._is_fixed_cut_selection():
+            self._update_fixed_cut_views()
             self.zPlaneChanged.emit(self._iz)
             return
         self.set_cut_indices(self._ix, iy)
@@ -182,7 +185,8 @@ class LongitudinalPane(QWidget):
         ))
 
     def set_run_data(self, run_data) -> None:
-        previous_key = self.field_selector.currentData()
+        previous_key = self.field_selector.currentData() or getattr(self, "_preferred_key", None)
+        self._preferred_key = previous_key
         previous_data = self._run_data
         previous_position = (getattr(self, "_ix", 0), getattr(self, "_iy", 0),
                              getattr(self, "_iz", 0))
@@ -263,6 +267,8 @@ class LongitudinalPane(QWidget):
         self.no_data_label.setVisible(not has_fields)
 
         if not has_fields:
+            self.xz_view.clear_field()
+            self.yz_view.clear_field()
             self._current_vmin = None
             self._current_vmax = None
             self.field_selector.blockSignals(False)
@@ -349,11 +355,8 @@ class LongitudinalPane(QWidget):
 
         self._current_vmin, self._current_vmax = volume_limits(data)
 
-        if not self.show_guides.isChecked():
-            self.show_guides.setChecked(True)
-        else:
-            self._show_guides = True
-            self.guidesVisibilityChanged.emit(True)
+        self._show_guides = self.show_guides.isChecked()
+        self.guidesVisibilityChanged.emit(self._show_guides)
 
         self.x_cut_slider.blockSignals(True)
         self.y_cut_slider.blockSignals(True)
@@ -397,6 +400,9 @@ class LongitudinalPane(QWidget):
 
     def set_cut_indices(self, ix: int, iy: int, *, emit: bool = True) -> None:
         """Set longitudinal cut indices in LCProp field order: x index, y index."""
+        if self._is_fixed_cut_selection():
+            self._update_fixed_cut_views()
+            return
         ix = min(max(int(ix), self.x_cut_slider.minimum()), self.x_cut_slider.maximum())
         iy = min(max(int(iy), self.y_cut_slider.minimum()), self.y_cut_slider.maximum())
 
@@ -534,7 +540,7 @@ class LongitudinalPane(QWidget):
         )
         self.x_cut_slider.hide()
         self.y_cut_slider.hide()
-        self.show_guides.hide()
+        self.show_guides.show()
         self.position_label.setText(
             f"{prefix} cuts: x={format_number(x_cut_um, quantity='coordinate')}, y={format_number(y_cut_um, quantity='coordinate')} µm"
         )
@@ -562,13 +568,18 @@ class LongitudinalPane(QWidget):
             vmin=limits[0],
             vmax=limits[1],
         )
-        self.xz_view.clear_crosshair()
-        self.yz_view.clear_crosshair()
+        self._apply_guides()
+        self.guidesChanged.emit()
 
     def _apply_guides(self) -> None:
         if self._is_fixed_cut_selection():
-            self.xz_view.clear_crosshair()
-            self.yz_view.clear_crosshair()
+            if self._show_guides:
+                x, y, z = self.guide_coordinates()
+                self.xz_view.set_crosshair_coordinates(z, x)
+                self.yz_view.set_crosshair_coordinates(z, y)
+            else:
+                self.xz_view.clear_crosshair()
+                self.yz_view.clear_crosshair()
             return
         if self._show_guides:
             self.xz_view.set_crosshair(self._iz, self._ix)
@@ -576,6 +587,18 @@ class LongitudinalPane(QWidget):
         else:
             self.xz_view.clear_crosshair()
             self.yz_view.clear_crosshair()
+
+    def guide_coordinates(self):
+        key = self.field_selector.currentData()
+        if self._run_data is None or key is None:
+            return None
+        if self._is_fixed_cut_selection():
+            field = self._run_data.fields[self._fixed_cut_fields[key][0]]
+            return (float(field.coordinates["x_cut_um"]), float(field.coordinates["y_cut_um"]),
+                    self._coord_value(field, "z", self._iz))
+        field = self._run_data.fields[key]
+        return tuple(self._coord_value(field, axis, i)
+                     for axis, i in zip(("x", "y", "z"), (self._ix, self._iy, self._iz)))
 
     def select_volume(self, key: str) -> None:
         index = self.field_selector.findData(key)

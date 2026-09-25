@@ -1587,6 +1587,7 @@ class PRMainWindow(QWidget):
         execution_runner=None,
     ) -> None:
         execution_runner = self.runner if execution_runner is None else execution_runner
+        self.results_panel.workspace.invalidate_products()
         self.results_panel.reset_field_color_scales()
         self.results_panel.set_request_summary(summary)
         workflow_id = self._workflow_id_for_request(request)

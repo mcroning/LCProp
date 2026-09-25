@@ -59,6 +59,7 @@ class ImagePane(QWidget):
 
     positionSelected = Signal(int, int)
     sourceVolumeSelected = Signal(str)
+    fieldChanged = Signal()
 
     def __init__(self, scales=None):
         super().__init__()
@@ -114,7 +115,8 @@ class ImagePane(QWidget):
         self.image_view.fit_full_aperture()
 
     def set_run_data(self, run_data) -> None:
-        previous_key = self.field_selector.currentData()
+        previous_key = self.field_selector.currentData() or getattr(self, "_preferred_key", None)
+        self._preferred_key = previous_key
         self._run_data = run_data
         self._z_index = None
         self.field_selector.blockSignals(True)
@@ -127,6 +129,8 @@ class ImagePane(QWidget):
 
         self.field_selector.blockSignals(False)
 
+        if not self.field_selector.count():
+            self.image_view.clear_field()
         self.image_view.setVisible(self.field_selector.count() > 0)
         self.scale_controls.setEnabled(self.field_selector.count() > 0)
         if self.field_selector.count() > 0:
@@ -177,6 +181,7 @@ class ImagePane(QWidget):
         source_key = getattr(self._run_data.fields[key], "source_volume_key", None)
         if source_key is not None:
             self.sourceVolumeSelected.emit(str(source_key))
+        self.fieldChanged.emit()
 
     def _field_extent(self, field):
         if len(field.axes) != 2:

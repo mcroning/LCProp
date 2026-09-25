@@ -10,6 +10,8 @@ import numpy as np
 
 from lcprop.core.backend import asnumpy
 from lcprop.optics.splitstep import total_intensity
+from lcprop.optics.farfield import direction_cosine_spectrum
+from lcprop.pr.far_field import far_field_product
 from lcprop.products.data_model import (
     CurveCollection, DiagnosticCollection, DiagnosticData, FieldCollection,
     Geometry, RunData, make_field,
@@ -35,9 +37,9 @@ class PRLivePreviewPolicy:
 
     @property
     def maximum_array_bytes(self):
-        # Four float64 images plus three float64 coordinate vectors.
+        # Five float64 images plus five float64 coordinate vectors.
         x, y, z = self.max_x, self.max_y, self.max_z
-        return 8 * (2*x*y + z*x + z*y + x + y + z)
+        return 8 * (3*x*y + z*x + z*y + 2*x + 2*y + z)
 
 
 @dataclass(frozen=True)
@@ -58,13 +60,17 @@ class PRLiveSnapshot:
     time_normalized: float
     scalar_values: dict
     material_response: str
+    far_field_intensity: np.ndarray | None = None
+    s_x: np.ndarray | None = None
+    s_y: np.ndarray | None = None
 
     @property
     def array_bytes(self):
         return sum(value.nbytes for value in (
             self.output_intensity, self.material_plane, self.optical_xz,
             self.optical_yz, self.x_um, self.y_um, self.z_um,
-        ))
+            self.far_field_intensity, self.s_x, self.s_y,
+        ) if value is not None)
 
 
 def _indices(size, maximum):
@@ -80,7 +86,8 @@ def _detached(value):
 def reduced_pr_live_snapshot(*, E, A, source, grid, groups, peak_reference,
                              background, policy, completed_steps,
                              segment_completed_steps, requested_steps,
-                             time_normalized, scalar_values, material_response):
+                             time_normalized, scalar_values, material_response,
+                             wavelength_um=None, refractive_index=None):
     """Slice on the compute backend before any host transfer.
 
     Source cuts retain the existing PR slice-average optical-intensity convention.
@@ -99,13 +106,22 @@ def reduced_pr_live_snapshot(*, E, A, source, grid, groups, peak_reference,
                                 coherence_groups=groups, xp=xp)
     xz = (source[bz[:, None], bx[None, :], cy] - background) * peak_reference
     yz = (source[bz[:, None], cx, by[None, :]] - background) * peak_reference
+    far = sx = sy = None
+    if wavelength_um is not None and refractive_index is not None:
+        # FFT the actual full output plane BEFORE bounded spectral sampling.
+        # Never FFT decimated A or near-field intensity. No volume is transferred.
+        spectrum = direction_cosine_spectrum(
+            A, dx_um=grid.dx_um, dy_um=grid.dy_um, wavelength_um=wavelength_um,
+            refractive_index=refractive_index, coherence_groups=groups, xp=xp)
+        far = _detached(spectrum.intensity[bx[:, None], by[None, :]])
+        sx, sy = _detached(spectrum.s_x[bx]), _detached(spectrum.s_y[by])
     return PRLiveSnapshot(
         _detached(intensity), _detached(E[cz, bx[:, None], by[None, :]]),
         _detached(xz), _detached(yz), _detached(x[ix]), _detached(y[iy]),
         _detached(iz * grid.dz_um), float(cz * grid.dz_um),
         float(x[cx]), float(y[cy]), int(completed_steps),
         int(segment_completed_steps), int(requested_steps), float(time_normalized),
-        dict(scalar_values), str(material_response),
+        dict(scalar_values), str(material_response), far, sx, sy,
     )
 
 
@@ -140,6 +156,10 @@ def reduced_pr_live_to_run_data(snapshot: PRLiveSnapshot) -> RunData:
                          "y_cut_um": s.y_cut_um, "z": s.z_um,
                          "x": s.x_um, "y": s.y_um},
         ))
+    if s.far_field_intensity is not None:
+        fields.add("far_field_intensity", far_field_product(
+            s.far_field_intensity, s.s_x, s.s_y,
+            observation="accepted output plane; sampled full-grid spectrum"))
     summary = dict(s.scalar_values, material_time_normalized=s.time_normalized,
                    completed_material_steps=s.completed_steps,
                    segment_completed_steps=s.segment_completed_steps,

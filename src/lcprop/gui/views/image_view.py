@@ -63,6 +63,7 @@ class ImageView(FigureCanvasQTAgg):
         self._vline = None
         self._hline = None
         self._crosshair_index = None
+        self._crosshair_coordinates = None
         self._button_press_cid = self.mpl_connect("button_press_event", self._on_mouse_press)
         self._button_release_cid = self.mpl_connect(
             "button_release_event", self._on_mouse_release
@@ -142,10 +143,36 @@ class ImageView(FigureCanvasQTAgg):
         value_unit = getattr(field, "value_unit", "")
         self.colorbar.set_label(value_unit, fontsize=9)
 
-        if self._crosshair_index is not None:
+        self.image.set_visible(True)
+        if self._crosshair_coordinates is not None:
+            self.set_crosshair_coordinates(*self._crosshair_coordinates)
+        elif self._crosshair_index is not None:
             ix, iy = self._crosshair_index
             self.set_crosshair(ix, iy, emit=False)
 
+        self.draw_idle()
+
+    def clear_field(self) -> None:
+        """Release old scientific arrays; an unavailable view is not a zero field."""
+        self.clear_crosshair()
+        self._field = self._raw_shape = self._extent = None
+        self._axis_coordinates = (None, None)
+        self._full_display_extent = self._default_display_extent = None
+        self.image.set_data(np.empty((0, 0)))
+        self.image.set_visible(False)
+        self.ax.set_title("No current product")
+        self.draw_idle()
+
+    def set_crosshair_coordinates(self, x_value, y_value) -> None:
+        """Draw exact physical cut coordinates, including between preview samples."""
+        self._crosshair_index = None
+        self._crosshair_coordinates = (float(x_value), float(y_value))
+        if self._vline is None:
+            self._vline = self.ax.axvline(x_value, linewidth=1)
+            self._hline = self.ax.axhline(y_value, linewidth=1)
+        else:
+            self._vline.set_xdata([x_value, x_value])
+            self._hline.set_ydata([y_value, y_value])
         self.draw_idle()
 
     def fit_default(self) -> None:
@@ -174,6 +201,7 @@ class ImageView(FigureCanvasQTAgg):
             self._crosshair_index = (int(ix), int(iy))
             return
 
+        self._crosshair_coordinates = None
         nx, ny = self._raw_shape
         ix = min(max(int(ix), 0), nx - 1)
         iy = min(max(int(iy), 0), ny - 1)
@@ -194,6 +222,7 @@ class ImageView(FigureCanvasQTAgg):
             self.positionSelected.emit(ix, iy)
 
     def clear_crosshair(self) -> None:
+        self._crosshair_coordinates = None
         self._crosshair_index = None
         if self._vline is not None:
             self._vline.remove()

@@ -405,6 +405,30 @@ availability; those checks remain part of remote execution.
 
 ## Results and numerical transparency
 
+### PR time-dependent live and completed fields
+
+When a new PR execution starts, Results clears previous displayed products and
+shows **Waiting for current result** until the new run supplies data. Saved
+results remain intact. Invalid requests that never start can retain an explicitly
+identified previous result.
+
+Live fixed cuts keep selection guides at their recorded physical x/y coordinates,
+even between downsampled preview pixels. The z marker follows the labeled z
+sample; fixed live output planes do not become arbitrary z slices. Completed
+volume products retain movable cut sliders. Spatial guides are hidden on angular
+far-field axes.
+
+**Output Far-Field Intensity** is available in completed PR TD Results, including
+Full reduced and full-transverse results. Reduced Local TD also presents a bounded
+live spectrum from the accepted state's complex output plane. Full-transverse
+live support is not added. The canonical transform uses absolute in-medium
+`s_x=lambda0*f_x/n_ref` and `s_y=lambda0*f_y/n_ref`, without extra windowing or
+carrier recentering. Values are coherence-aware normalized field-norm density,
+not physical mW or a fanning metric. Live spectra are point-sampled previews and
+may miss narrow peaks; use completed full-resolution spectra for quantitative
+inspection. Far-field visibility alone does not establish fanning success.
+
+
 ### Solitons and existence sweeps
 
 **Solver converged within configured limits** means the applicable strict

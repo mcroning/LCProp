@@ -170,14 +170,14 @@ def snapshot_fixture(monkeypatch=None):
         groups=('g',), peak_reference=2., background=2., policy=policy,
         completed_steps=2, segment_completed_steps=2, requested_steps=4,
         time_normalized=.02, scalar_values={'material_state_change_rms': .5},
-        material_response='nonlinear')
+        material_response='nonlinear', wavelength_um=.633, refractive_index=2.4)
     return snap, policy, E, source
 
 
 def test_backend_sampling_before_host_transfer_and_byte_bound(monkeypatch):
     snap, policy, E, source = snapshot_fixture(monkeypatch)
     assert snap.array_bytes == policy.maximum_array_bytes
-    assert PRLivePreviewPolicy().maximum_array_bytes == 790528
+    assert PRLivePreviewPolicy().maximum_array_bytes == 923648
     for field in fields(snap):
         value = getattr(snap, field.name)
         if isinstance(value, np.ndarray):
@@ -202,7 +202,7 @@ def test_products_selection_scaling_ownership_and_failure(app, monkeypatch):
     assert w.result_ownership.text() == 'Current accepted state'
     assert w.tabs.currentWidget() is w.console
     xy, long = w.image_pane, w.longitudinal_pane
-    assert xy.field_selector.count() == 2
+    assert xy.field_selector.count() == 3
     xy.field_selector.setCurrentIndex(xy.field_selector.findData('live_material_plane'))
     long.z_plane_slider.setValue(1)
     xy.scale_controls.lower.setText('0'); xy.scale_controls.upper.setText('100')
@@ -479,7 +479,7 @@ def test_real_worker_run_and_continue_render_intermediate_accepted_state(app, mo
             assert first['thread'] == gui_thread
             assert observed[-1]['snapshot'].completed_steps == total
         assert deliveries
-        assert all(len(data.fields) == 4 and attempt == owner
+        assert all(len(data.fields) == 5 and attempt == owner
                    for data, attempt, owner in deliveries)
         assert len({attempt for _, attempt, _ in deliveries}) == 2
     finally:

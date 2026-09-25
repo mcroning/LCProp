@@ -728,6 +728,8 @@ def run_pr_timedependent(
                         requested_steps=requested_steps, time_normalized=material_time,
                         scalar_values=scalar_row,
                         material_response=request.material_response.model,
+                        wavelength_um=request.beams.channels[0].wavelength_um,
+                        refractive_index=request.material.refractive_index,
                     )
                     last_preview_step, last_preview_at = completed_steps, now
             progress_callback(
@@ -773,6 +775,8 @@ def run_pr_timedependent(
             segment_completed_steps=segment_completed_steps,
             requested_steps=requested_steps, time_normalized=material_time,
             scalar_values=scalar_row, material_response=request.material_response.model,
+            wavelength_um=request.beams.channels[0].wavelength_um,
+            refractive_index=request.material.refractive_index,
         )
         progress_callback(RunProgress(
             workflow=PR_TIMEDEPENDENT_WORKFLOW, status="running",
