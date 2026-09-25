@@ -2341,10 +2341,18 @@ def test_image_experiment_reduced_td_matches_direct_completed_result_bit_for_bit
     assert tuple(composite.run_data.fields) == tuple(direct_run_data.fields)
     assert tuple(composite.run_data.diagnostics) == tuple(direct_run_data.diagnostics)
     for key in direct_run_data.fields:
-        assert np.array_equal(
-            composite.run_data.fields[key].data,
-            direct_run_data.fields[key].data,
-        )
+        if key == "far_field_zero_order_masked":
+            # NaN is intentional unavailable-pixel metadata. Preserve the
+            # bit-for-bit contract, including NaN positions and payloads.
+            actual = composite.run_data.fields[key].data
+            expected = direct_run_data.fields[key].data
+            assert actual.shape == expected.shape and actual.dtype == expected.dtype
+            assert actual.tobytes() == expected.tobytes()
+        else:
+            assert np.array_equal(
+                composite.run_data.fields[key].data,
+                direct_run_data.fields[key].data,
+            )
     for key in direct_run_data.diagnostics:
         composite_values = composite.run_data.diagnostics[key].values
         direct_values = direct_run_data.diagnostics[key].values

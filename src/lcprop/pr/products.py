@@ -8,6 +8,7 @@ shared, material-neutral ``RunData`` presentation model.
 from __future__ import annotations
 
 from lcprop.pr.far_field import completed_far_field
+from lcprop.pr.far_field_mask import add_completed_mask
 
 from copy import deepcopy
 from dataclasses import asdict
@@ -306,6 +307,8 @@ def _fast_optical_run_data(result: Any, *, workflow: str, geometry: Geometry) ->
                 deepcopy(result_diagnostics)
             )),
         ])
+    if workflow == PR_TIMEDEPENDENT_WORKFLOW:
+        add_completed_mask(fields, diagnostics, result)
     _add_carrier_power_diagnostic(diagnostics, result)
     return RunData(
         workflow=workflow,
@@ -758,6 +761,7 @@ def pr_result_to_run_data(result: PRRunResult) -> RunData:
     far_field = completed_far_field(result)
     if far_field is not None:
         fields.add(far_field.key, far_field)
+    add_completed_mask(fields, diagnostics, result)
     _add_carrier_power_diagnostic(diagnostics, result)
     return RunData(
         workflow=PR_TIMEDEPENDENT_WORKFLOW,

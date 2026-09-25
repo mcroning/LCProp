@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from lcprop.pr.far_field import completed_far_field
+from lcprop.pr.far_field_mask import add_completed_mask
 
 from copy import deepcopy
 
@@ -280,6 +281,8 @@ def _fast_optical_run_data(result, *, workflow: str, geometry: Geometry) -> RunD
             "replay", "Independent Replay", deepcopy(result.replay_diagnostics)
         )))
     diagnostics = DiagnosticCollection(diagnostic_items)
+    if workflow == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
+        add_completed_mask(fields, diagnostics, result)
     _add_carrier_power_diagnostic(diagnostics, result)
     return RunData(
         workflow=workflow, geometry=geometry, fields=fields,
@@ -767,6 +770,7 @@ def pr_transverse_result_to_run_data(result: PRTransverseRunResult) -> RunData:
     far_field = completed_far_field(result)
     if far_field is not None:
         fields.add(far_field.key, far_field)
+    add_completed_mask(fields, diagnostics, result)
     _add_carrier_power_diagnostic(diagnostics, result)
     return RunData(
         workflow=PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,

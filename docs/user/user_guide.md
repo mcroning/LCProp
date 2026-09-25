@@ -429,6 +429,23 @@ may miss narrow peaks; use completed full-resolution spectra for quantitative
 inspection. Far-field visibility alone does not establish fanning success.
 
 
+### Completed PR zero-order exclusion
+
+Completed PR TD Results offer **Output Far-Field Intensity — zero-order masked**
+alongside the unchanged canonical spectrum. Each enabled incident carrier is
+excluded by its resolved unperturbed Gaussian spectral ellipse at four standard
+deviations; tilted beams are masked at their actual carriers, not at the origin.
+Overlapping exclusions form a union. Excluded pixels are unavailable (NaN), not
+measured zeros; Auto ignores them and manual limits remain available.
+
+Diagnostics report off-carrier field norm/fraction and mask centers, covariance,
+width and coordinate provenance. These are discrete field-norm diagnostics,
+not physical mW or proof of fanning. Finite aperture, screens and coarse spectral
+sampling limit the ideal Gaussian interpretation. Missing historical launch
+geometry is reported as unavailable. Masking is completed-only; live snapshots
+do not retain the required per-beam geometry, and their sampled spectra must
+not be integrated for these metrics. A new run never reuses a previous mask.
+
 ### Solitons and existence sweeps
 
 **Solver converged within configured limits** means the applicable strict
