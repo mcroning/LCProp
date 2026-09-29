@@ -53,7 +53,7 @@ configured command rather than treating it as untrusted data. Cluster-profile
 files must therefore be protected and reviewed like shell configuration; do
 not place passwords, tokens, private keys, or other credentials in them.
 
-Normal profile-driven Slurm execution automatically resolves the exact local
+For a source checkout, profile-driven Slurm execution resolves the exact local
 Git `HEAD`, builds a deterministic archive containing committed `src/` and
 `pyproject.toml` content, and stages it beneath the selected cluster's
 `source_root`. Both branch and detached clean checkouts are supported. Changes
@@ -70,9 +70,50 @@ mistaken for finalized snapshots.
 
 `LCPROP_SLURM_SOURCE_PATH` and `LCPROP_SLURM_SOURCE_SHA` remain a paired
 advanced override for CI, commissioning, and deliberately pre-staged sources,
-but ordinary configured users no longer need them. Automatic deployment from
-an installed package without a Git checkout remains deferred and fails with an
-actionable request to use that explicit override.
+but ordinary configured users do not need them.
+
+For a normal non-editable pure-Python installation, automatic deployment resolves
+the distribution owning the **active LCProp import**, verifies installed package
+and metadata bytes against its wheel `RECORD`, and archives only LCProp code,
+supported resources, runtime distribution metadata and license notices. It does
+not need the original wheel or a checkout. Caches, entry-point scripts, installer
+metadata, environment files and dependencies are not deployed. Missing, modified,
+unowned or unsupported package files fail closed. Native/platform wheels and
+unresolved LFS resources are unsupported. Git validation failures never trigger
+an installed-distribution fallback.
+Automatic Git selection additionally requires the active imported package to be
+the checkout's `src/lcprop`: its package directory, effective `__path__` and
+module-spec search locations must identify that same physical tree. A linked
+initializer alone does not establish ownership. An unowned `.venv` or `build/lib`
+copy, or a mixed package search path, cannot deploy the enclosing source tree.
+
+The installed artifact uses a canonical content SHA-256 and the separate
+`dist-sha256-<digest>` namespace; name/version are descriptive metadata, never a
+substitute for byte identity. Each preflight creates a submission binding and
+staging rechecks that identity. The runner consumes the binding once, including
+on failure. A fresh preflight starts a new attempt; an unused attempt can also be
+explicitly abandoned. Managers do not pin a source identity for their lifetime.
+Both fresh and reused remote snapshots are checked against the complete content
+manifest. Installed-artifact jobs use `python -I -S -c` with a small verified
+bootstrap, then `runpy.run_module('lcprop.transport.executor', run_name='__main__')`
+in that same process, preserving the headless executor's module/CLI semantics.
+The bootstrap resolves the physical snapshot, verifies content, and excludes
+user-site, environment Python paths and startup hooks. It adds configured
+interpreter dependency directories without executing `.pth` files. Immediately
+before dispatch the executor rechecks content, submission identity and loaded
+LCProp module/search-path ownership. A raw unbound invocation cannot execute an
+installed-artifact request. Git jobs retain their existing `python -m` path. Result
+provenance records artifact identity, import path, interpreter and dependency
+versions. No Git SHA is invented for installed artifacts.
+
+Remote Python and scientific dependencies remain site-provided: deployment does
+not install, upgrade or bundle them. Identical LCProp bytes do not imply identical
+NumPy/CuPy/CUDA versions or numerical results. `RECORD` validates installation
+consistency, not publisher authenticity: a party able to replace both files and
+RECORD can create a different valid artifact. Local environments and remote cache
+ownership remain part of the trust boundary.
+Installed-artifact execution requires ordinary installed remote dependencies;
+dependencies available only through editable `.pth`/startup hooks are unsupported.
 
 Both material GUIs provide **Configure Remote Execution…** beside the
 independent Local/Slurm execution selector. The shared dialog accepts a profile

@@ -352,11 +352,14 @@ class SlurmRunner:
             raise ValueError("duplicate operation registration")
         self._transport = SubprocessRemoteTransport() if transport is None else transport
         self._source_deployment_manager = source_deployment_manager
+        self._pending_source_submission = None
         self._registry = registry
         self._sleep = sleep
 
     def preflight_source(self) -> None:
         """Check automatic source locally, without staging or remote probes."""
+        # A fresh GUI preflight begins a new attempt, abandoning any unused one.
+        self.abandon_source_submission()
         from lcprop.runners.source_deployment import (
             SourceDeploymentError, resolve_git_source,
         )
@@ -370,20 +373,28 @@ class SlurmRunner:
         if local_source is None:
             return  # A custom deployment manager owns its source contract.
         try:
-            resolve_git_source(local_source)
+            if hasattr(manager, "preflight"):
+                self._pending_source_submission = manager.preflight()
+            else:
+                resolve_git_source(local_source)
         except SourceDeploymentError as exc:
             if exc.category == "source_not_git_checkout":
                 raise SourceDeploymentError(
                     exc.category,
-                    "Automatic Slurm source deployment needs a clean LCProp Git "
-                    "checkout. A normal installed package supports Local execution, "
-                    "but is not a deployable checkout. Use a runner configured with "
+                    "This source provider needs a clean LCProp Git checkout. "
+                    "Automatic installed-package deployment requires a supported "
+                    "non-editable distribution owning the active LCProp import. "
+                    "For an explicitly selected source, use a runner configured with "
                     "local_source pointing to a clean checkout, or the supported "
                     "pre-staged LCPROP_SLURM_SOURCE_PATH and "
                     "LCPROP_SLURM_SOURCE_SHA pair. The profile's Remote source root "
                     "is a destination, not a local checkout selector.",
                 ) from exc
             raise
+
+    def abandon_source_submission(self) -> None:
+        """Explicitly discard an attempt that never entered run_registered."""
+        self._pending_source_submission = None
 
     @property
     def registered_operations(self) -> tuple[WorkflowOperation, ...]:
@@ -417,6 +428,7 @@ class SlurmRunner:
         profile: SlurmResourceProfile,
         *,
         remote_source_path: str | None = None,
+        artifact_digest: str | None = None,
     ) -> str:
         source_path = remote_source_path or self.config.remote_source_path
         if source_path is None:
@@ -439,6 +451,15 @@ class SlurmRunner:
         lines.append("set -euo pipefail")
         lines.extend(profile.setup_commands)
         lines.append(f"export PYTHONPATH={source_path}/src")
+        if artifact_digest is not None:
+            from lcprop.runners.distribution_deployment import VERIFY_PROGRAM
+            lines.append("export PYTHONDONTWRITEBYTECODE=1")
+            lines.append(f"cd {source_path}")
+            lines.append(
+                f"{self.config.remote_python} -I -S -c {shlex.quote(VERIFY_PROGRAM)} "
+                f"{source_path} {artifact_digest}"
+            )
+
         if profile.gpus:
             minimum = profile.minimum_device_count or profile.gpus
             pattern = profile.expected_device_pattern
@@ -458,14 +479,26 @@ class SlurmRunner:
                 preflight_parts[-1:-1] = _device_pattern_preflight(pattern)
             preflight_parts.append("print(json.dumps(record,sort_keys=True))")
             preflight = ";".join(preflight_parts)
-            lines.append(
-                f"{self.config.remote_python} -c {shlex.quote(preflight)} "
-                f"> {remote_run}/execution_provenance.json"
-            )
+            if artifact_digest is not None:
+                from lcprop.runners.distribution_deployment import BOOTSTRAP_PROGRAM
+                command = (
+                    f"{self.config.remote_python} -I -S -c "
+                    f"{shlex.quote(BOOTSTRAP_PROGRAM + chr(10) + preflight)} "
+                    f"{source_path} {artifact_digest}"
+                )
+            else:
+                command = f"{self.config.remote_python} -c {shlex.quote(preflight)}"
+            lines.append(f"{command} > {remote_run}/execution_provenance.json")
         executor = (
             f"{self.config.remote_python} -m lcprop.transport.executor "
             f"--run-dir {remote_run}"
         )
+        if artifact_digest is not None:
+            from lcprop.runners.distribution_deployment import LAUNCH_PROGRAM
+            executor = (
+                f"{self.config.remote_python} -I -S -c {shlex.quote(LAUNCH_PROGRAM)} "
+                f"{source_path} {artifact_digest} {remote_run}"
+            )
         if profile.gpus:
             lines.extend([
                 "(while true; do nvidia-smi --query-compute-apps=used_gpu_memory "
@@ -488,6 +521,23 @@ class SlurmRunner:
         self, material_id: str, workflow_id: str, request, *,
         resource_profile: str | None = None, progress_callback=None,
         cancellation_token=None, result_policy: str = FULL_RESULT_POLICY,
+        **_ignored,
+    ) -> RunnerResult:
+        # Consume the binding exactly once, even if validation/staging later fails.
+        binding = self._pending_source_submission
+        self._pending_source_submission = None
+        return self._run_registered_attempt(
+            material_id, workflow_id, request, source_submission=binding,
+            resource_profile=resource_profile, progress_callback=progress_callback,
+            cancellation_token=cancellation_token, result_policy=result_policy,
+            **_ignored,
+        )
+
+    def _run_registered_attempt(
+        self, material_id: str, workflow_id: str, request, *,
+        resource_profile: str | None = None, progress_callback=None,
+        cancellation_token=None, result_policy: str = FULL_RESULT_POLICY,
+        source_submission=None,
         **_ignored,
     ) -> RunnerResult:
         key = (material_id, workflow_id)
@@ -555,7 +605,11 @@ class SlurmRunner:
                         f"expected {source.source_git_sha}, got {actual_remote_sha}",
                     )
             elif self._source_deployment_manager is not None:
-                source = self._source_deployment_manager.resolve_or_stage()
+                from lcprop.runners.source_deployment import SourceSubmissionBinding
+                if isinstance(source_submission, SourceSubmissionBinding):
+                    source = self._source_deployment_manager.resolve_or_stage(binding=source_submission)
+                else:
+                    source = self._source_deployment_manager.resolve_or_stage()
             else:
                 raise SourceDeploymentError(
                     "source_identity_failed",
@@ -590,6 +644,7 @@ class SlurmRunner:
                 remote_run,
                 profile,
                 remote_source_path=source.remote_source_path,
+                artifact_digest=source.provenance.get("source_content_sha256"),
             ),
             encoding="utf-8",
         )

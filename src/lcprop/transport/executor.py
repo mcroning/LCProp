@@ -18,13 +18,27 @@ from lcprop.transport.envelopes import FailureEnvelope
 from lcprop.transport.io import read_request_package, write_failure_package, write_result_package
 
 
-def _provenance() -> dict[str, str]:
-    return {
+def _provenance(source=None) -> dict[str, object]:
+    import sys
+    import lcprop
+    from importlib import metadata
+
+    value = {
         "executor": "lcprop.transport.executor",
         "python": platform.python_version(),
         "platform": platform.platform(),
         "completed_at": datetime.now(timezone.utc).isoformat(),
     }
+    if source and source.get("source_kind") == "installed_distribution":
+        dependencies = {}
+        for name in ("numpy", "scipy", "tomli", "cupy-cuda12x", "cupy"):
+            try:
+                dependencies[name] = metadata.version(name)
+            except metadata.PackageNotFoundError:
+                pass
+        value.update(source_artifact=dict(source), python_executable=sys.executable,
+                     lcprop_import_origin=lcprop.__file__, dependencies=dependencies)
+    return value
 
 
 def _write_progress(run_dir: Path, progress: RunProgress | dict) -> bool:
@@ -80,6 +94,8 @@ def execute_run_directory(run_directory: str | Path, *, registry=None, operation
             "message": "Running — initialization",
         })
         decoded = read_request_package(run_dir, registry=registry)
+        from lcprop.runners.distribution_deployment import verify_execution_binding
+        verify_execution_binding(decoded.envelope.provenance)
         runner = LocalRunner(operations)
         completed = runner.run_registered(
             decoded.envelope.material_id,
@@ -102,7 +118,7 @@ def execute_run_directory(run_directory: str | Path, *, registry=None, operation
             codec=decoded.codec,
             result=completed.result,
             request_envelope=decoded.envelope,
-            provenance=_provenance(),
+            provenance=_provenance(decoded.envelope.provenance),
             output_directory=temporary,
         )
         temporary.rename(run_dir / "output")
@@ -129,7 +145,7 @@ def execute_run_directory(run_directory: str | Path, *, registry=None, operation
             message=str(exc) or type(exc).__name__,
             exception_type=type(exc).__name__,
             traceback=traceback.format_exc(),
-            provenance=_provenance(),
+            provenance=_provenance(None if decoded is None else decoded.envelope.provenance),
         )
         failure_directory = run_dir / f"output.incomplete.{uuid.uuid4().hex}"
         write_failure_package(run_dir, failure, output_directory=failure_directory)

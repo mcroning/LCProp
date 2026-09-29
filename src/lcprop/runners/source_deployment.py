@@ -51,11 +51,19 @@ class GitSourceIdentity:
 @dataclass(frozen=True)
 class ResolvedSourceDeployment:
     source_kind: str
-    source_git_sha: str
+    source_git_sha: str | None
     remote_source_path: str
     source_checksum: str | None
     reused_existing_snapshot: bool
     provenance: dict[str, object]
+
+
+@dataclass(frozen=True)
+class SourceSubmissionBinding:
+    """Immutable local identity owned by one submission attempt."""
+
+    kind: str
+    identity: object
 
 
 def _git(repository: Path, *arguments: str, text: bool = True):
@@ -261,6 +269,9 @@ class SourceDeploymentManager:
             transport = SubprocessRemoteTransport()
         self._transport = transport
 
+    def preflight(self):
+        return SourceSubmissionBinding("git", resolve_git_source(self.local_source))
+
     @staticmethod
     def snapshot_name(git_sha: str) -> str:
         if not _FULL_SHA.fullmatch(git_sha):
@@ -345,6 +356,8 @@ class SourceDeploymentManager:
         git_sha: str,
         remote_snapshot: str,
         marker_directory: Path,
+        marker_names=(".lcprop-source-sha", ".lcprop-source-checksum", ".lcprop-source.json"),
+        verify_snapshot=None,
     ) -> bool:
         token = uuid4().hex
         staging = validate_remote_path(f"{self.source_root}/.staging-{token}")
@@ -354,21 +367,9 @@ class SourceDeploymentManager:
             self._transport.ssh(self.host, "mkdir", "-p", self.source_root)
             self._transport.ssh(self.host, "mkdir", staging)
             self._transport.upload(self.host, archive, remote_archive)
-            self._transport.upload(
-                self.host,
-                marker_directory / ".lcprop-source-sha",
-                f"{staging}/.lcprop-source-sha",
-            )
-            self._transport.upload(
-                self.host,
-                marker_directory / ".lcprop-source-checksum",
-                f"{staging}/.lcprop-source-checksum",
-            )
-            self._transport.upload(
-                self.host,
-                marker_directory / ".lcprop-source.json",
-                f"{staging}/.lcprop-source.json",
-            )
+            for name in marker_names:
+                self._transport.upload(self.host, marker_directory / name,
+                                       f"{staging}/{name}")
             failure_category = "source_checksum_failed"
             actual = self._transport.ssh(
                 self.host, "sha256sum", remote_archive
@@ -386,6 +387,8 @@ class SourceDeploymentManager:
                 self.host, "test", "-d", f"{staging}/src/lcprop"
             )
             self._transport.ssh(self.host, "rm", "-f", remote_archive)
+            if verify_snapshot is not None and not verify_snapshot(staging):
+                raise SourceDeploymentError("snapshot_identity_mismatch", "staging disappeared")
             failure_category = "snapshot_finalize_failed"
             self._transport.ssh(self.host, "chmod", "-R", "a-w", staging)
             try:
@@ -397,9 +400,8 @@ class SourceDeploymentManager:
                     remote_snapshot,
                 )
             except Exception:
-                if self._verify_existing(
-                    remote_snapshot, git_sha=git_sha, checksum=checksum
-                ):
+                if (verify_snapshot(remote_snapshot) if verify_snapshot is not None
+                    else self._verify_existing(remote_snapshot, git_sha=git_sha, checksum=checksum)):
                     self._cleanup_staging(staging)
                     return True
                 raise
@@ -411,8 +413,11 @@ class SourceDeploymentManager:
             raise SourceDeploymentError(failure_category, str(exc)) from exc
         return False
 
-    def resolve_or_stage(self) -> ResolvedSourceDeployment:
-        identity = resolve_git_source(self.local_source)
+    def resolve_or_stage(self, *, binding=None) -> ResolvedSourceDeployment:
+        current = self.preflight()
+        if binding is not None and current != binding:
+            raise SourceDeploymentError("source_changed", "Git source changed after preflight")
+        identity = current.identity
         remote_snapshot = validate_remote_path(
             f"{self.source_root}/{self.snapshot_name(identity.git_sha)}"
         )

@@ -67,16 +67,18 @@ def make_slurm_runner(
             "remote_source_path and source_git_sha must be supplied together"
         )
     if remote_source_path is None and source_deployment_manager is None:
-        source_deployment_manager = SourceDeploymentManager(
-            host=cluster.host,
-            source_root=cluster.source_root,
-            local_source=(
-                Path(__file__).resolve().parents[3]
-                if local_source is None
-                else Path(local_source)
-            ),
-            transport=transport,
-        )
+        if local_source is None:
+            from lcprop.runners.distribution_deployment import automatic_deployment_manager
+            source_deployment_manager = automatic_deployment_manager(
+                host=cluster.host, source_root=cluster.source_root,
+                remote_python=cluster.remote_python, transport=transport,
+            )
+        else:
+            source_deployment_manager = SourceDeploymentManager(
+                host=cluster.host, source_root=cluster.source_root,
+                local_source=Path(local_source), transport=transport,
+            )
+
 
     config = SlurmExecutionConfig(
         host=cluster.host,
