@@ -37,6 +37,7 @@ def nearest_carrier_partition(
     dy_um: float,
     centers_k_rad_per_um: Sequence[CarrierCenter],
     tie_policy: TiePolicy = "half",
+    xp=np,
 ) -> CarrierPartition:
     """Partition FFT samples by the perpendicular bisector of two carriers.
 
@@ -67,8 +68,8 @@ def nearest_carrier_partition(
         raise ValueError("tie_policy must be 'half', 'first', or 'second'")
 
     nx, ny = (int(value) for value in shape)
-    kx = 2.0 * math.pi * np.fft.fftfreq(nx, d=float(dx_um))[:, None]
-    ky = 2.0 * math.pi * np.fft.fftfreq(ny, d=float(dy_um))[None, :]
+    kx = 2.0 * math.pi * xp.fft.fftfreq(nx, d=float(dx_um))[:, None]
+    ky = 2.0 * math.pi * xp.fft.fftfreq(ny, d=float(dy_um))[None, :]
     first_distance = (kx - centers[0][0]) ** 2 + (ky - centers[0][1]) ** 2
     second_distance = (kx - centers[1][0]) ** 2 + (ky - centers[1][1]) ** 2
     first_closer = first_distance < second_distance
@@ -79,14 +80,14 @@ def nearest_carrier_partition(
         first = (first_closer | ties).astype(float)
     else:
         first = first_closer.astype(float)
-    weights = np.stack((first, 1.0 - first), axis=0)
+    weights = xp.stack((first, 1.0 - first), axis=0)
     return CarrierPartition(
         weights=weights,
         kx_rad_per_um=kx[:, 0],
         ky_rad_per_um=ky[0],
         centers_k_rad_per_um=(centers[0], centers[1]),
         tie_policy=tie_policy,
-        tie_pixel_count=int(np.count_nonzero(ties)),
+        tie_pixel_count=int(xp.count_nonzero(ties)),
     )
 
 
@@ -96,16 +97,32 @@ def _spectral_power(
     *,
     dx_um: float,
     dy_um: float,
+    xp=np,
+    bounded=False,
 ) -> np.ndarray:
-    transformed = np.fft.fft2(field)
+    transformed = xp.fft.fft2(field)
     scale = float(dx_um) * float(dy_um) / field.size
-    density = np.abs(transformed) ** 2 * scale
-    return np.sum(weights * density[None, ...], axis=(-2, -1), dtype=np.float64)
+    if bounded:
+        power = xp.zeros(weights.shape[0], dtype=xp.float64)
+        rows = max(1, 262144 // field.shape[-1])
+        for start in range(0, field.shape[0], rows):
+            stop = min(start + rows, field.shape[0])
+            density = xp.abs(transformed[start:stop]) ** 2 * scale
+            power += xp.sum(weights[:, start:stop] * density[None], axis=(-2, -1), dtype=xp.float64)
+        return np.asarray(asnumpy(power))
+    density = xp.abs(transformed) ** 2 * scale
+    return np.asarray(asnumpy(xp.sum(weights * density[None, ...], axis=(-2, -1), dtype=xp.float64)))
 
 
-def _spatial_power(field: np.ndarray, *, dx_um: float, dy_um: float) -> float:
+def _spatial_power(field: np.ndarray, *, dx_um: float, dy_um: float, xp=np, bounded=False) -> float:
+    if bounded:
+        power = xp.zeros((), dtype=xp.float64)
+        rows = max(1, 262144 // field.shape[-1])
+        for start in range(0, field.shape[0], rows):
+            power += xp.sum(xp.abs(field[start:start + rows]) ** 2, dtype=xp.float64)
+        return float(power) * float(dx_um) * float(dy_um)
     return float(
-        np.sum(np.abs(field) ** 2, dtype=np.float64)
+        xp.sum(xp.abs(field) ** 2, dtype=xp.float64)
         * float(dx_um)
         * float(dy_um)
     )
@@ -114,7 +131,7 @@ def _spatial_power(field: np.ndarray, *, dx_um: float, dy_um: float) -> float:
 def _input_power_relative_threshold(field: np.ndarray) -> float:
     """Return a deterministic, dtype-aware relative gain-stability floor."""
 
-    real_dtype = np.asarray(field.real).dtype
+    real_dtype = field.real.dtype
     epsilon = (
         float(np.finfo(real_dtype).eps)
         if np.issubdtype(real_dtype, np.floating)
@@ -160,6 +177,8 @@ def carrier_power_diagnostic(
     carrier_channels: Sequence[Mapping[str, Any]],
     physical_total_power_mW: float | None = None,
     power_normalization: Mapping[str, Any] | None = None,
+    xp=np,
+    bounded=False,
 ) -> dict[str, Any]:
     """Measure two coherent input-carrier regions at input and output.
 
@@ -168,8 +187,8 @@ def carrier_power_diagnostic(
     combined group field, so they do not measure channel-lineage norms.
     """
 
-    initial = np.asarray(asnumpy(A_initial))
-    final = np.asarray(asnumpy(A_final))
+    initial = np.asarray(asnumpy(A_initial)) if xp is np else xp.asarray(A_initial)
+    final = np.asarray(asnumpy(A_final)) if xp is np else xp.asarray(A_final)
     if initial.ndim != 3 or final.shape != initial.shape:
         raise ValueError("A_initial and A_final must share shape (Nch, Nx, Ny)")
     if initial.shape[0] != 2:
@@ -203,19 +222,19 @@ def carrier_power_diagnostic(
         dx_um=dx_um,
         dy_um=dy_um,
         centers_k_rad_per_um=centers,
-        tie_policy="half",
+        tie_policy="half", xp=xp,
     )
     combined_initial = initial[0] + initial[1]
     combined_final = final[0] + final[1]
     input_power = _spectral_power(
-        combined_initial, partition.weights, dx_um=dx_um, dy_um=dy_um
+        combined_initial, partition.weights, dx_um=dx_um, dy_um=dy_um, xp=xp, bounded=bounded
     )
     output_power = _spectral_power(
-        combined_final, partition.weights, dx_um=dx_um, dy_um=dy_um
+        combined_final, partition.weights, dx_um=dx_um, dy_um=dy_um, xp=xp, bounded=bounded
     )
     delta_power = output_power - input_power
-    total_input = _spatial_power(combined_initial, dx_um=dx_um, dy_um=dy_um)
-    total_output = _spatial_power(combined_final, dx_um=dx_um, dy_um=dy_um)
+    total_input = _spatial_power(combined_initial, dx_um=dx_um, dy_um=dy_um, xp=xp, bounded=bounded)
+    total_output = _spatial_power(combined_final, dx_um=dx_um, dy_um=dy_um, xp=xp, bounded=bounded)
     input_partition_error = float(np.sum(input_power) - total_input)
     output_partition_error = float(np.sum(output_power) - total_output)
     input_power_relative_threshold = _input_power_relative_threshold(initial)
@@ -227,7 +246,7 @@ def carrier_power_diagnostic(
             initial[index],
             partition.weights,
             dx_um=dx_um,
-            dy_um=dy_um,
+            dy_um=dy_um, xp=xp, bounded=bounded,
         )
         for index in range(2)
     ])
@@ -368,6 +387,8 @@ def carrier_power_diagnostic_from_summary(
     *,
     grid_summary: Mapping[str, Any],
     launch_summary: Mapping[str, Any],
+    xp=np,
+    bounded=False,
 ) -> dict[str, Any]:
     """Build the diagnostic from compact result endpoint metadata."""
 
@@ -386,7 +407,7 @@ def carrier_power_diagnostic_from_summary(
         coherence_groups=groups,
         carrier_channels=channels,
         physical_total_power_mW=launch_summary.get("physical_total_power_mW"),
-        power_normalization=launch_summary.get("power_normalization"),
+        power_normalization=launch_summary.get("power_normalization"), xp=xp, bounded=bounded,
     )
     result["power_normalization"] = launch_summary.get("power_normalization")
     if physical_launch:

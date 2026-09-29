@@ -143,6 +143,7 @@ def test_pr_window_dispatches_exact_registered_operation_in_worker(app):
 def test_pr_window_dispatches_static_and_presents_registered_run_data(app):
     window = _tiny_window(app)
     window.evolution_panel.set_workflow_id(PR_STATIC_WORKFLOW)
+    window._set_product_policy("full")  # This test inspects full material volumes.
     gui_thread = QThread.currentThread()
     calls = []
     worker_threads = []

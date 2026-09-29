@@ -63,7 +63,7 @@ PR_STATIC_REQUEST_CODEC_ID = "pr.static.request"
 PR_STATIC_RESULT_CODEC_ID = "pr.static.result"
 PR_STATIC_TRANSPORT_CODEC_VERSION = 3
 _PR_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION = 1
-PR_STATIC_RESULT_CODEC_VERSION = 3
+PR_STATIC_RESULT_CODEC_VERSION = 4
 
 
 def _validate_request(request: PRStaticRunRequest) -> None:
@@ -183,74 +183,86 @@ def encode_pr_static_transport_result(
     if not isinstance(result, PRStaticRunResult):
         raise TypeError("result must be a PRStaticRunResult")
     policy = normalize_result_policy(result_policy)
-    if policy == FULL_RESULT_POLICY and result.retention_summary.get("policy") == FAST_RESULT_POLICY:
-        raise TransportCodecError("Cannot encode a Fast-constructed result as Full")
-    arrays: dict[str, np.ndarray] = {}
-    omitted = _FAST_OMITTED_FIELDS if policy == FAST_RESULT_POLICY else ()
-    if omitted:
-        if result.source_intensity_stack is None:
-            try:
-                cuts = retained_longitudinal_intensity_cuts(result)
-            except ValueError:
-                cuts = None
-        elif np.asarray(result.source_intensity_stack).shape[0] == 0:
-            cuts = None
-        else:
-            cuts = extract_longitudinal_optical_intensity_cuts(
-                result.source_intensity_stack,
-                grid_summary=result.grid_summary,
-                peak_intensity_reference=channel_peak_intensity_reference(
-                    np.asarray(result.A_initial), xp=np
-                ),
-                background_intensity=float(
-                    result.material_response_summary.get(
-                        "background_intensity", 0.0
-                    )
-                ),
-            )
-        preview_data = result.intensity_preview
-        preview_metadata = result.intensity_preview_metadata
-        if (
-            result.source_intensity_stack is not None
-            and np.asarray(result.source_intensity_stack).shape[0] > 0
-        ):
-            preview = make_fast_intensity_preview(
-                result.source_intensity_stack,
-                grid_summary=result.grid_summary,
-                peak_intensity_reference=channel_peak_intensity_reference(
-                    np.asarray(result.A_initial), xp=np
-                ),
-                background_intensity=float(
-                    result.material_response_summary.get(
-                        "background_intensity", 0.0
-                    )
-                ),
-            )
-            preview_data = preview.intensity
-            preview_metadata = preview.metadata
-        projected = replace(
-            result,
-            **{name: None for name in omitted},
-            longitudinal_intensity_xz=None if cuts is None else cuts.xz,
-            longitudinal_intensity_yz=None if cuts is None else cuts.yz,
-            x_cut_um=None if cuts is None else cuts.x_cut_um,
-            y_cut_um=None if cuts is None else cuts.y_cut_um,
-            intensity_preview=preview_data,
-            intensity_preview_metadata=preview_metadata,
-        )
+    if result.selected_products is not None:
+        from lcprop.transport.result_policy import static_product_selection
+        kind, selection = static_product_selection(policy)
+        if (kind != result.selected_products["policy"] or
+                list(selection) != result.selected_products["selection"]):
+            raise TransportCodecError("Cannot encode selected products under a different policy")
+        arrays = {}
+        values = asdict(result)
+        _validate_result(values)
     else:
-        cuts = None
-        projected = result
-    values = asdict(projected)
-    values["retention_summary"] = (
-        fast_retention_summary(
-            omitted,
-            cuts,
-            intensity_preview_metadata=projected.intensity_preview_metadata,
+        if policy not in (FAST_RESULT_POLICY, FULL_RESULT_POLICY):
+            raise TransportCodecError("Selected products must be constructed before encoding")
+        if policy == FULL_RESULT_POLICY and result.retention_summary.get("policy") == FAST_RESULT_POLICY:
+            raise TransportCodecError("Cannot encode a Fast-constructed result as Full")
+        arrays: dict[str, np.ndarray] = {}
+        omitted = _FAST_OMITTED_FIELDS if policy == FAST_RESULT_POLICY else ()
+        if omitted:
+            if result.source_intensity_stack is None:
+                try:
+                    cuts = retained_longitudinal_intensity_cuts(result)
+                except ValueError:
+                    cuts = None
+            elif np.asarray(result.source_intensity_stack).shape[0] == 0:
+                cuts = None
+            else:
+                cuts = extract_longitudinal_optical_intensity_cuts(
+                    result.source_intensity_stack,
+                    grid_summary=result.grid_summary,
+                    peak_intensity_reference=channel_peak_intensity_reference(
+                        np.asarray(result.A_initial), xp=np
+                    ),
+                    background_intensity=float(
+                        result.material_response_summary.get(
+                            "background_intensity", 0.0
+                        )
+                    ),
+                )
+            preview_data = result.intensity_preview
+            preview_metadata = result.intensity_preview_metadata
+            if (
+                result.source_intensity_stack is not None
+                and np.asarray(result.source_intensity_stack).shape[0] > 0
+            ):
+                preview = make_fast_intensity_preview(
+                    result.source_intensity_stack,
+                    grid_summary=result.grid_summary,
+                    peak_intensity_reference=channel_peak_intensity_reference(
+                        np.asarray(result.A_initial), xp=np
+                    ),
+                    background_intensity=float(
+                        result.material_response_summary.get(
+                            "background_intensity", 0.0
+                        )
+                    ),
+                )
+                preview_data = preview.intensity
+                preview_metadata = preview.metadata
+            projected = replace(
+                result,
+                **{name: None for name in omitted},
+                longitudinal_intensity_xz=None if cuts is None else cuts.xz,
+                longitudinal_intensity_yz=None if cuts is None else cuts.yz,
+                x_cut_um=None if cuts is None else cuts.x_cut_um,
+                y_cut_um=None if cuts is None else cuts.y_cut_um,
+                intensity_preview=preview_data,
+                intensity_preview_metadata=preview_metadata,
+            )
+        else:
+            cuts = None
+            projected = result
+        values = asdict(projected)
+        values["retention_summary"] = (
+            fast_retention_summary(
+                omitted,
+                cuts,
+                intensity_preview_metadata=projected.intensity_preview_metadata,
+            )
+            if policy == FAST_RESULT_POLICY
+            else {"policy": policy, "omitted_fields": list(omitted)}
         )
-        if policy == FAST_RESULT_POLICY
-        else {"policy": policy, "omitted_fields": list(omitted)}
-    )
     metadata = pack_portable(values, arrays, "result")
     backend = str(result.backend_summary.get("backend", "unknown"))
     termination = (
@@ -311,7 +323,27 @@ def _validate_result(values: Mapping[str, Any]) -> None:
         policy = normalize_result_policy(retention.get("policy", FULL_RESULT_POLICY))
     except ValueError as exc:
         raise TransportCodecError(str(exc)) from exc
-    expected_omitted = set(_FAST_OMITTED_FIELDS if policy == FAST_RESULT_POLICY else ())
+    selected_products = values.get("selected_products")
+    if selected_products is not None:
+        from lcprop.pr.selected_products import validate_selected_products
+        try:
+            validate_selected_products(selected_products, shape=(nx, ny), policy=policy)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise TransportCodecError(f"invalid selected products: {exc}") from exc
+        observation = selected_products.get("observation", {})
+        if (observation.get("completed_slices") != completed or
+                observation.get("z_reached_um") != completed * float(grid["dz_um"]) or
+                observation.get("longitudinal_products") != ("available" if completed else "unavailable_no_completed_interval")):
+            raise TransportCodecError("selected product observation disagrees with completion")
+        selected = selected_products["selection"]
+        expected_omitted = set(_FAST_OMITTED_FIELDS)
+        expected_omitted.update(name for name, key in (("A_initial", "complex_input"), ("A_final", "complex_output")) if key not in selected)
+        if completed and (values.get("intensity_preview") is None or values.get("longitudinal_intensity_xz") is None or values.get("longitudinal_intensity_yz") is None):
+            raise TransportCodecError("selected result missing completed longitudinal products")
+    else:
+        if policy not in (FAST_RESULT_POLICY, FULL_RESULT_POLICY):
+            raise TransportCodecError("selected policy lacks selected products")
+        expected_omitted = set(_FAST_OMITTED_FIELDS if policy == FAST_RESULT_POLICY else ())
     omitted = retention.get("omitted_fields", [])
     if not isinstance(omitted, (tuple, list)) or set(omitted) != expected_omitted:
         raise TransportCodecError("PR static omitted fields disagree with result policy")
@@ -358,7 +390,7 @@ def _validate_result(values: Mapping[str, Any]) -> None:
         ("longitudinal_intensity_yz", (completed, ny)),
     ):
         array = values.get(name)
-        if policy == FAST_RESULT_POLICY:
+        if policy != FULL_RESULT_POLICY:
             if not cuts_present:
                 continue
             if (
@@ -374,7 +406,7 @@ def _validate_result(values: Mapping[str, Any]) -> None:
                 f"PR static Full result unexpectedly retained {name}"
             )
     summaries = values.get("slice_summaries")
-    if not isinstance(summaries, list) or len(summaries) != completed:
+    if not isinstance(summaries, (list, tuple)) or len(summaries) != completed:
         raise TransportCodecError(
             "PR static slice summaries must match completed_slices"
         )
@@ -407,6 +439,7 @@ def decode_pr_static_transport_result(
         values = unpack_portable(dict(metadata), arrays)
         _validate_result(values)
         result = PRStaticRunResult(
+            selected_products=values.get("selected_products"),
             A_initial=values["A_initial"],
             A_final=values["A_final"],
             E_initial=values["E_initial"],
@@ -476,6 +509,7 @@ PR_STATIC_TRANSPORT_CODEC = TransportCodec(
         2,
     ),
     compatible_result_codec_versions=(
+        3,
         _PR_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION,
         2,
     ),

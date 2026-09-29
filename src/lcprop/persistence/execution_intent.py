@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass
 from collections.abc import Mapping
 
 from lcprop.core.backend import BackendSpec
+from lcprop.transport.result_policy import normalize_result_policy
 
 
 @dataclass(frozen=True)
@@ -18,8 +19,7 @@ class ExecutionIntent:
         if self.target not in ("local", "slurm"):
             raise ValueError("execution intent target must be local or slurm")
         BackendSpec(backend=self.requested_backend, precision=self.precision).validate()
-        if self.retrieval_policy not in ("fast", "full"):
-            raise ValueError("invalid execution intent retrieval policy")
+        normalize_result_policy(self.retrieval_policy)
         for value in (self.cluster_profile, self.resource_profile):
             if value is not None and (not isinstance(value, str) or not value.strip()):
                 raise ValueError("execution profile identity must be a nonempty name")

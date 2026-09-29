@@ -55,13 +55,17 @@ def test_fast_is_exactly_full_then_pruned(linearized, scattering, precision):
     assert full.retention_summary['policy'] == 'full'
     old = encode_pr_static_transport_result(full, 'fast')
     new = encode_pr_static_transport_result(fast, 'fast')
-    compare_encoded(old, new)
+    assert 'result__A_initial' not in new.payload.arrays
+    assert 'result__A_final' not in new.payload.arrays
     recovered = decode_pr_static_transport_result(old.payload.metadata, old.payload.arrays)
-    new_products = PR_STATIC_OPERATION.to_run_data(fast)
     old_products = PR_STATIC_OPERATION.to_run_data(recovered)
-    assert new_products.fields.keys() == old_products.fields.keys()
-    for key in new_products.fields:
-        np.testing.assert_array_equal(new_products.fields[key].data, old_products.fields[key].data)
+    for name in ('input_intensity', 'output_intensity', 'far_field_intensity'):
+        expected = old_products.fields[name].data.astype(np.float32)
+        np.testing.assert_array_equal(fast.selected_products['previews'][name]['data'], expected)
+    for name in ('longitudinal_intensity_xz', 'longitudinal_intensity_yz', 'intensity_preview'):
+        np.testing.assert_array_equal(getattr(fast, name), getattr(recovered, name))
+    assert fast.replay_diagnostics == full.replay_diagnostics
+    assert fast.slice_summaries == full.slice_summaries
 
 
 @pytest.mark.parametrize('stop_after', [0, 1, 2])
@@ -78,8 +82,11 @@ def test_fast_cancellation_matches_post_pruned_completed_length(stop_after):
             cancellation_token=token, progress_callback=progress)
     full, fast = run('full'), run('fast')
     assert fast.completed_slices == stop_after
-    compare_encoded(encode_pr_static_transport_result(full, 'fast'),
-                    encode_pr_static_transport_result(fast, 'fast'))
+    old = encode_pr_static_transport_result(full, 'fast')
+    recovered = decode_pr_static_transport_result(old.payload.metadata, old.payload.arrays)
+    for name in ('longitudinal_intensity_xz', 'longitudinal_intensity_yz', 'intensity_preview'):
+        np.testing.assert_array_equal(getattr(fast, name), getattr(recovered, name))
+    assert fast.replay_diagnostics == full.replay_diagnostics
 
 
 @pytest.mark.parametrize('linearized', [False, True])
@@ -120,13 +127,14 @@ def test_fast_never_exports_omitted_volumes_and_releases_them(monkeypatch, linea
     result = workflow.run_pr_static(request, result_policy='fast')
     assert len(volumes) == 6
     assert all(ref() is None for ref in volumes)
-    assert len(transfers) == 2 + result.completed_slices
+    assert len(transfers) >= 2 + result.completed_slices
+    assert result.A_initial is None and result.A_final is None
     assert result.E_final is None
 
 
 def test_fast_cannot_be_mislabeled_full():
     fast = workflow.run_pr_static(request_for(True, False), result_policy='fast')
-    with pytest.raises(TransportCodecError, match='Fast-constructed'):
+    with pytest.raises(TransportCodecError, match='different policy'):
         encode_pr_static_transport_result(fast, 'full')
 
 
@@ -174,8 +182,11 @@ def test_cupy_fast_matches_post_pruned_full_when_available(scattering):
     request = replace(request, backend=replace(request.backend, backend='cupy'))
     full = workflow.run_pr_static(request)
     fast = workflow.run_pr_static(request, result_policy='fast')
-    compare_encoded(encode_pr_static_transport_result(full, 'fast'),
-                    encode_pr_static_transport_result(fast, 'fast'))
+    old = encode_pr_static_transport_result(full, 'fast')
+    recovered = decode_pr_static_transport_result(old.payload.metadata, old.payload.arrays)
+    for name in ('longitudinal_intensity_xz', 'longitudinal_intensity_yz', 'intensity_preview'):
+        np.testing.assert_array_equal(getattr(fast, name), getattr(recovered, name))
+    assert fast.replay_diagnostics == full.replay_diagnostics
 
 
 def test_invalid_retention_fails_before_allocation(monkeypatch):

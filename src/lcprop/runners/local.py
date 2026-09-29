@@ -50,6 +50,10 @@ class LocalRunner:
 
         if not isinstance(operation, WorkflowOperation):
             raise TypeError("operation must be a WorkflowOperation")
+        if _result_policy is not None and not operation.supports_result_policy:
+            from lcprop.transport.result_policy import normalize_result_policy
+            if normalize_result_policy(_result_policy) not in ("fast", "full"):
+                raise ValueError("operation does not support selected result products")
         if _result_policy is not None and operation.supports_result_policy:
             if "result_policy" in kwargs and kwargs["result_policy"] != _result_policy:
                 raise ValueError("conflicting execution result policies")

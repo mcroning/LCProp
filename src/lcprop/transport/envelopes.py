@@ -93,6 +93,7 @@ class RequestEnvelope:
     transport_schema_version: int = TRANSPORT_SCHEMA_VERSION
 
     def to_dict(self) -> dict[str, Any]:
+        self._validate_product_scope(self.material_id, self.workflow_id, self.result_policy)
         return {
             "format": REQUEST_FORMAT,
             "transport_schema_version": self.transport_schema_version,
@@ -109,6 +110,11 @@ class RequestEnvelope:
             "provenance": dict(self.provenance),
             "result_policy": _result_policy(self.result_policy),
         }
+
+    @staticmethod
+    def _validate_product_scope(material_id, workflow_id, policy):
+        if _result_policy(policy) not in ("fast", "full") and (material_id, workflow_id) != ("pr", "pr_static"):
+            raise TransportFormatError("selected result products are supported only by reduced PR Static")
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "RequestEnvelope":
@@ -138,6 +144,7 @@ class RequestEnvelope:
         backend = value["scientific_backend_requested"]
         if backend not in {"numpy", "auto", "cupy"}:
             raise TransportFormatError("invalid requested scientific backend")
+        cls._validate_product_scope(value["material_id"], value["workflow_id"], value.get("result_policy", FULL_RESULT_POLICY))
         return cls(
             run_id=_identifier("run_id", value["run_id"]),
             material_id=_identifier("material_id", value["material_id"]),

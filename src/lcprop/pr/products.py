@@ -57,7 +57,7 @@ _FAST_VOLUME_MESSAGE = (
 
 
 def _is_fast_result(result: Any) -> bool:
-    return result.retention_summary.get("policy", "full") == "fast"
+    return result.retention_summary.get("policy", "full") in {"fast", "interactive", "analysis"}
 
 
 def _td_scalar_curves(result: Any) -> CurveCollection:
@@ -112,6 +112,10 @@ def _add_carrier_power_diagnostic(
     diagnostics: DiagnosticCollection,
     result: Any,
 ) -> None:
+    selected = getattr(result, "selected_products", None)
+    if selected is not None:
+        diagnostics.add("carrier_power", DiagnosticData("carrier_power", "Carrier-Resolved Optical Power", deepcopy(selected["carrier_power"])))
+        return
     launch_summary = deepcopy(result.launch_summary)
     checkpoint = getattr(result, "checkpoint", None)
     if "carrier_channels" not in launch_summary and checkpoint is not None:
@@ -136,28 +140,33 @@ def _add_carrier_power_diagnostic(
 def _fast_optical_run_data(result: Any, *, workflow: str, geometry: Geometry) -> RunData:
     """Present retained optical endpoints and compact center cuts."""
 
-    A_initial = _copied_array(result.A_initial)
-    A_final = _copied_array(result.A_final)
+    selected = getattr(result, "selected_products", None)
+    A_initial = _copied_array(result.A_initial) if selected is None else None
+    A_final = _copied_array(result.A_final) if selected is None else None
     launch_summary = deepcopy(result.launch_summary)
     result_diagnostics = getattr(result, "diagnostics", {})
     backend_summary = getattr(
         result, "backend_summary", result_diagnostics.get("backend", {})
     )
     fields = FieldCollection()
-    for key, title, value in (
-        ("input_intensity", "Input Plane Intensity", A_initial),
-        ("output_intensity", "Output Plane Intensity", A_final),
-    ):
-        fields.add(key, make_field(
-            key,
-            title,
-            _optical_intensity(value, launch_summary),
-            ("x", "y"),
-            "intensity",
-            {"x": "um", "y": "um"},
-            quantity="normalized_intensity",
-            value_unit="1/µm²",
-        ))
+    if selected is not None:
+        from lcprop.pr.selected_products import add_selected_fields
+        add_selected_fields(fields, selected)
+    else:
+        for key, title, value in (
+            ("input_intensity", "Input Plane Intensity", A_initial),
+            ("output_intensity", "Output Plane Intensity", A_final),
+        ):
+            fields.add(key, make_field(
+                key,
+                title,
+                _optical_intensity(value, launch_summary),
+                ("x", "y"),
+                "intensity",
+                {"x": "um", "y": "um"},
+                quantity="normalized_intensity",
+                value_unit="1/µm²",
+            ))
     has_longitudinal_cuts = (
         result.longitudinal_intensity_xz is not None
         and result.longitudinal_intensity_yz is not None
@@ -230,7 +239,7 @@ def _fast_optical_run_data(result: Any, *, workflow: str, geometry: Geometry) ->
             ))
     wavelengths = launch_summary.get("wavelengths_um", [])
     refractive_index = launch_summary.get("refractive_index")
-    if wavelengths and refractive_index is not None:
+    if selected is None and wavelengths and refractive_index is not None:
         spectrum = direction_cosine_spectrum(
             A_final,
             dx_um=float(geometry.dx()),

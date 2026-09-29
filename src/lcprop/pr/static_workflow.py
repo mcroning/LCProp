@@ -183,8 +183,8 @@ class PRCoupledStaticSliceSummary:
 class PRStaticRunResult:
     """Static PR state, optical fields, and strict replay diagnostics."""
 
-    A_initial: np.ndarray
-    A_final: np.ndarray
+    A_initial: np.ndarray | None
+    A_final: np.ndarray | None
     E_initial: np.ndarray | None
     E_final: np.ndarray | None
     source_intensity_stack: np.ndarray | None
@@ -216,6 +216,7 @@ class PRStaticRunResult:
     y_cut_um: float | None = None
     intensity_preview: np.ndarray | None = None
     intensity_preview_metadata: dict[str, Any] | None = None
+    selected_products: dict[str, Any] | None = None
 
 
 def _backend_scalar(value) -> float:
@@ -514,6 +515,8 @@ def run_pr_static(
     """
 
     policy = normalize_result_policy(result_policy)
+    from lcprop.transport.result_policy import static_product_selection
+    product_kind, selected = static_product_selection(policy)
     started_at = perf_counter()
     request.grid.validate()
     request.beams.validate()
@@ -1005,18 +1008,41 @@ def run_pr_static(
     # GPU memory may remain cached; no free_all_blocks() is needed or used.
     cuts = preview = None
     retention = {"policy": FULL_RESULT_POLICY, "omitted_fields": []}
-    if policy == FAST_RESULT_POLICY:
+    result_launch_summary = {**launch.summary(), "refractive_index": float(request.material.refractive_index),
+                             "carrier_channels": carrier_channels_from_beams(request.beams)}
+    selected_products = None
+    initial_power, final_power = normalized_power(A0, grid), normalized_power(replay_A, grid)
+    if product_kind != FULL_RESULT_POLICY:
         del E_initial, E_stack, completed_E
         del source_stack, completed_source, residual_stack, completed_residual
         del replay_residual
-        host_initial = _owned_host_result(A0)
-        host_final = _owned_host_result(replay_A)
+        from lcprop.pr.selected_products import construct_selected_products
+        resolved_launch = result_launch_summary
+        # Trial aliases and the launch wrapper otherwise keep endpoint-sized
+        # allocations live through packaging. All diagnostics have completed.
+        launch = sequential_A = A_slice_in = A_trial = candidate_A = trial_A = None
+        selected_products = construct_selected_products(
+            A0, replay_A, policy=policy, grid=grid.summary(), launch=resolved_launch,
+            xp=xp, asnumpy=asnumpy,
+        )
+        from lcprop.pr.carrier_power import carrier_power_diagnostic_from_summary
+        selected_products["observation"] = {
+            "completed_slices": completed_slices,
+            "z_reached_um": completed_slices * float(grid.dz_um),
+            "output_plane": "accepted replay endpoint" if completed_slices else "unpropagated executed launch",
+            "longitudinal_products": "available" if completed_slices else "unavailable_no_completed_interval",
+        }
+        selected_products["carrier_power"] = carrier_power_diagnostic_from_summary(
+            A0, replay_A, grid_summary=grid.summary(), launch_summary=resolved_launch, xp=xp, bounded=True,
+        )
+        reference = peak_reference
+        host_initial = _owned_host_result(A0) if "complex_input" in selected else None
+        host_final = _owned_host_result(replay_A) if "complex_output" in selected else None
+        del A0, replay_A, A
         if completed_slices:
             product_options = dict(
                 grid_summary=grid.summary(),
-                peak_intensity_reference=channel_peak_intensity_reference(
-                    host_initial, xp=np,
-                ),
+                peak_intensity_reference=reference,
                 background_intensity=float(request.material.background_intensity),
                 asnumpy=asnumpy,
             )
@@ -1038,7 +1064,13 @@ def run_pr_static(
         host_source = _owned_host_result(replay_source)
         host_residual = _owned_host_result(replay_residual)
 
+    if selected_products is not None:
+        retention["retained_fields"].append("selected_products")
+        retention["policy"] = product_kind
+        retention["omitted_fields"] += [name for name, value in (("A_initial", host_initial), ("A_final", host_final)) if value is None]
+
     return PRStaticRunResult(
+        selected_products=selected_products,
         A_initial=host_initial,
         A_final=host_final,
         E_initial=host_E_initial,
@@ -1052,18 +1084,14 @@ def run_pr_static(
         y_cut_um=None if cuts is None else cuts.y_cut_um,
         intensity_preview=None if preview is None else preview.intensity,
         intensity_preview_metadata=None if preview is None else preview.metadata,
-        power_initial=normalized_power(A0, grid),
-        power_final=normalized_power(replay_A, grid),
+        power_initial=initial_power,
+        power_final=final_power,
         converged=converged,
         completed_slices=completed_slices,
         iteration_records=tuple(records),
         slice_summaries=tuple(summaries),
         grid_summary=grid.summary(),
-        launch_summary={
-            **launch.summary(),
-            "refractive_index": float(request.material.refractive_index),
-            "carrier_channels": carrier_channels_from_beams(request.beams),
-        },
+        launch_summary=result_launch_summary,
         backend_summary=backend.summary(),
         tolerance_provenance=(
             {

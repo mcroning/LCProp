@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QMenu,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -253,14 +254,28 @@ class PRMainWindow(QWidget):
         header.addWidget(self.execution_target_selector)
         header.addWidget(QLabel("Result retrieval:"))
         self.result_policy_selector = QComboBox()
-        self.result_policy_selector.addItem("Fast / Exploratory", FAST_RESULT_POLICY)
+        self.result_policy_selector.addItem("Interactive", FAST_RESULT_POLICY)
+        self.result_policy_selector.addItem("Analysis", "analysis")
         self.result_policy_selector.addItem("Full", FULL_RESULT_POLICY)
         self.result_policy_selector.setEnabled(False)
         self.result_policy_selector.setToolTip(
-            "Fast retrieves optical endpoints and compact diagnostics; Full also "
-            "retrieves longitudinal material volumes."
+            "Reduced Static: Interactive returns bounded display products; Analysis "
+            "returns explicitly selected exact products; Full retains complete state. "
+            "Other workflows retain their existing Fast/Full behavior."
         )
         header.addWidget(self.result_policy_selector)
+        from lcprop.transport.result_policy import ANALYSIS_PRODUCTS
+        self.analysis_products_button = QPushButton("Analysis products…")
+        menu = QMenu(self.analysis_products_button)
+        self._analysis_actions = {}
+        for name in ANALYSIS_PRODUCTS:
+            action = menu.addAction(name.replace("_", " ").title())
+            action.setCheckable(True)
+            action.toggled.connect(self._analysis_selection_changed)
+            self._analysis_actions[name] = action
+        self.analysis_products_button.setMenu(menu)
+        self.analysis_products_button.setToolTip("Reduced x-only Static only; select before execution. Unselected exact products will not be retrievable later.")
+        header.addWidget(self.analysis_products_button)
         self.runner_label = RuntimeStatusLabel(f"Runner: {self.runner.name}", preferred_width=160)
         header.addWidget(self.runner_label)
         self.status_label = RuntimeStatusLabel("Idle", preferred_width=280)
@@ -364,6 +379,7 @@ class PRMainWindow(QWidget):
         )
         self._input_mode_changed(self.input_panel.mode_id())
         self._connect_checkpoint_compatibility_signals()
+        self._update_product_controls()
 
     @Slot(str)
     def _input_mode_changed(self, mode_id: str) -> None:
@@ -412,6 +428,8 @@ class PRMainWindow(QWidget):
 
     @Slot()
     def _configuration_changed(self, *_args) -> None:
+        if hasattr(self, "analysis_products_button"):
+            self._update_product_controls()
         if (
             self._hydrating_checkpoint
             or self._hydrating_experiment
@@ -607,6 +625,47 @@ class PRMainWindow(QWidget):
             text += " — UNAVAILABLE/UNRESOLVED: explicitly select an execution target before running"
         self.execution_intent_label.setText(text)
 
+    def _update_product_controls(self, *, policy=None):
+        from lcprop.transport.result_policy import static_product_selection
+        supported = self.evolution_panel.workflow_id() == PR_STATIC_WORKFLOW
+        current = policy or self.result_policy_selector.currentData() or "fast"
+        kind, _ = static_product_selection(current)
+        names = sorted(name for name, action in self._analysis_actions.items() if action.isChecked())
+        analysis = "analysis:" + ",".join(names) if names else "analysis"
+        if supported:
+            interactive = current if kind == "interactive" else "fast"
+            items = [("Interactive", interactive), ("Analysis", analysis), ("Full", "full")]
+            selected = analysis if kind == "analysis" else ("full" if kind == "full" else interactive)
+        else:
+            items = [("Fast / Exploratory", "fast"), ("Full", "full")]
+            selected = "full" if kind == "full" else "fast"
+        # One path for construction, loading, and workflow switches. Unsupported
+        # policies are absent, not merely disabled entries with stale payloads.
+        with QSignalBlocker(self.result_policy_selector):
+            previous = [(self.result_policy_selector.itemText(i), self.result_policy_selector.itemData(i))
+                        for i in range(self.result_policy_selector.count())]
+            if previous != items:
+                self.result_policy_selector.clear()
+                for label, value in items:
+                    self.result_policy_selector.addItem(label, value)
+            self.result_policy_selector.setCurrentIndex(self.result_policy_selector.findData(selected))
+        self.analysis_products_button.setEnabled(supported)
+        self.result_policy_selector.setEnabled(supported or self.execution_target_selector.currentData() == "slurm")
+
+    def _analysis_selection_changed(self, *_):
+        self._update_product_controls()
+        if hasattr(self, "resource_estimator_panel"):
+            self.resource_estimator_panel.mark_stale()
+
+    def _set_product_policy(self, policy):
+        from lcprop.transport.result_policy import normalize_result_policy, static_product_selection
+        normalized = normalize_result_policy(policy)
+        _, selection = static_product_selection(normalized)
+        for name, action in self._analysis_actions.items():
+            with QSignalBlocker(action):
+                action.setChecked(name in selection)
+        self._update_product_controls(policy=normalized)
+
     def _capture_execution_controls(self):
         controls = self.remote_execution_controls
         item = self.execution_target_selector.model().item(1)
@@ -617,6 +676,7 @@ class PRMainWindow(QWidget):
             backend=self.evolution_panel.backend_spec(),
             backend_origin=self.evolution_panel.backend_origin,
             retrieval=self.result_policy_selector.currentData(),
+            analysis_selection=tuple(name for name, action in self._analysis_actions.items() if action.isChecked()),
             retrieval_enabled=self.result_policy_selector.isEnabled(),
             unresolved=self._saved_unresolved_intent,
             was_saved=self.execution_intent_was_saved,
@@ -631,7 +691,11 @@ class PRMainWindow(QWidget):
         with QSignalBlocker(controls), QSignalBlocker(self.execution_target_selector), QSignalBlocker(self.result_policy_selector):
             controls.select_profile_identity(state["cluster"], state["resource"])
             self.execution_target_selector.setCurrentIndex(self.execution_target_selector.findData(state["target"]))
-            self.result_policy_selector.setCurrentIndex(self.result_policy_selector.findData(state["retrieval"]))
+            self._set_product_policy(state["retrieval"])
+            for name, action in self._analysis_actions.items():
+                with QSignalBlocker(action):
+                    action.setChecked(name in state["analysis_selection"])
+            self._analysis_selection_changed()
             self.result_policy_selector.setEnabled(state["retrieval_enabled"])
             self.evolution_panel.set_backend_spec(state["backend"])
             self.evolution_panel._backend_origin = state["backend_origin"]
@@ -679,9 +743,7 @@ class PRMainWindow(QWidget):
         if intent.target == "slurm":
             controls.select_profile_identity(intent.cluster_profile, intent.resource_profile)
             available = self._remote_identity_available()
-        self.result_policy_selector.setCurrentIndex(
-            self.result_policy_selector.findData(intent.retrieval_policy)
-        )
+        self._set_product_policy(intent.retrieval_policy)
         if available:
             self._saved_unresolved_intent = None
         self._execution_target_changed()
@@ -841,6 +903,14 @@ class PRMainWindow(QWidget):
             + "\n" + self._execution_summary(request, runner=runner)
         )
         if self.input_panel.requests_optional_image_analysis():
+            from lcprop.transport.result_policy import static_product_selection
+            kind, products = static_product_selection(self.result_policy_selector.currentData())
+            if isinstance(request, PRStaticRunRequest) and kind != "full" and not {
+                "complex_input", "complex_output"
+            }.issubset(products):
+                summary += ("\nOptional image analysis: NOT SELECTED — requires complex_input "
+                            "and complex_output. Select both Analysis products or Full before Run; "
+                            "propagation will still complete without this analysis.")
             summary += (
                 "\nOn Run: optional specialized image analysis; ordinary PR "
                 "propagation remains authoritative. Analysis may be unavailable."
@@ -1288,7 +1358,7 @@ class PRMainWindow(QWidget):
             self.runner = self.local_runner
             self.execution_target_selector.setCurrentIndex(0)
         self.runner_label.setText(f"Runner: {self.runner.name}")
-        self.result_policy_selector.setEnabled(target == "slurm")
+        self.result_policy_selector.setEnabled(target == "slurm" or self.evolution_panel.workflow_id() == PR_STATIC_WORKFLOW)
         if target != "slurm":
             self.evolution_panel.apply_execution_backend_context(target="local")
             return
@@ -1309,6 +1379,9 @@ class PRMainWindow(QWidget):
 
     def _run_registered(self, request, **kwargs):
         self._require_execution_intent_resolved()
+        policy = str(self.result_policy_selector.currentData())
+        if policy.startswith("analysis") and not isinstance(request, PRStaticRunRequest):
+            raise ValueError("Analysis product selection is supported only by reduced Static")
         if isinstance(
             request,
             (
@@ -1384,6 +1457,8 @@ class PRMainWindow(QWidget):
             kwargs["_before_product_conversion"] = before_product_conversion
         if self.runner is self.slurm_runner:
             kwargs.update(self._remote_runner_kwargs())
+        elif isinstance(request, PRStaticRunRequest):
+            kwargs["_result_policy"] = policy
         elif isinstance(request, PRRunRequest):
             kwargs["live_preview_policy"] = PRLivePreviewPolicy()
         return self.runner.run_registered(

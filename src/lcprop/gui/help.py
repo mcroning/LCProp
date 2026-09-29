@@ -136,14 +136,21 @@ sensitive to continuation and convergence.
 """,
     ),
     HelpTopic(
-        "fast_full", "Fast vs Full",
-        """PR Slurm **Fast** retrieval keeps optical endpoints, compact diagnostics,
-exact full-resolution longitudinal cuts nearest x=0 and y=0, and a bounded
-visualization-only preview for linked orthogonal slices. **Full** retains the
-supported complete scientific volumes. Fast TD retains the final 3-D preview
-and a compact material-time movie, not a full time history of 3-D volumes.
-Choose Full when you need the supported volume data for quantitative analysis;
-Full output alone is not a remote-continuation contract.
+        "fast_full", "Result products",
+        """Reduced PR Static **Interactive** returns bounded previews of the executed
+input, output and far field, exact longitudinal cuts nearest x=0/y=0, a bounded
+MPR preview, and diagnostics. It does not return complex endpoints. **Analysis**
+adds explicitly selected exact intensity planes or complex endpoints; choose
+these products before execution. Preview values are display reductions, not
+full-resolution measurements. Historical `fast` execution intent maps to
+Interactive for new reduced-Static runs; old Fast artifacts remain readable.
+
+**Full** retains the supported complete scientific volumes. Other PR workflows
+retain their existing Fast/Full policies: Fast TD retains optical endpoints,
+a final 3-D preview and a compact material-time movie, not a full time history.
+Selected products are retrieved and verified locally before normal remote
+cleanup. There is no deferred cluster archive. Full output alone is not a
+remote-continuation contract.
 """,
     ),
     HelpTopic(

@@ -90,7 +90,7 @@ class Workspace(QWidget):
         self.fields_splitter.setSizes([420, 560])
         self.tabs.addTab(self.fields_splitter, "Fields")
 
-        self.image_pane.positionSelected.connect(
+        self.image_pane.physicalPositionSelected.connect(
             self._image_position_selected
         )
         self.longitudinal_pane.cutChanged.connect(
@@ -224,8 +224,8 @@ class Workspace(QWidget):
         self.image_pane.reset_color_scales()
         self.longitudinal_display_scales.reset_locks()
 
-    def _image_position_selected(self, ix: int, iy: int) -> None:
-        self.longitudinal_pane.set_cut_indices(ix, iy)
+    def _image_position_selected(self, x: float, y: float) -> None:
+        self.longitudinal_pane.set_cut_coordinates(x, y)
 
     def _longitudinal_cut_changed(self, ix: int, iy: int) -> None:
         self._sync_physical_guides()

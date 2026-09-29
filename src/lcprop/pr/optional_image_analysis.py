@@ -37,6 +37,11 @@ def add_optional_image_analysis(
             reason = "Base propagation did not complete successfully."
         elif cancellation_token is not None and cancellation_token.is_cancelled():
             status, reason = "cancelled", "Image analysis cancelled after propagation."
+        elif (getattr(base.result, "A_initial", None) is None
+              or getattr(base.result, "A_final", None) is None):
+            status = "not_selected"
+            reason = ("Optional image analysis requires complex_input and complex_output. "
+                      "Select both in Analysis, or select Full, before running.")
         elif (selection.pump_channel_index is None
               or selection.signal_channel_index is None):
             reason = "Select Pump and Signal roles to request specialized image analysis."

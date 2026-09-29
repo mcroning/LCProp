@@ -27,6 +27,8 @@ class ImageView(FigureCanvasQTAgg):
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
+        self._display_source = None
+        self._display_data = None
         self._field = None
         self._raw_shape = None
         self._extent = None
@@ -89,7 +91,20 @@ class ImageView(FigureCanvasQTAgg):
 
         # LCProp field convention is data[x, y]. Matplotlib imshow expects
         # image[row, column] = image[y, x], so transpose at the display boundary.
-        data = raw.T
+        revision = (field.key, field.content_revision, field.axes, field.kind,
+                    field.quantity, field.value_unit, field.colormap,
+                    repr(extent), repr(default_display_extent), vmin, vmax)
+        if self._display_source is not raw or getattr(self, "_display_revision", None) != revision:
+            if max(raw.shape) > 1024:
+                from lcprop.pr.selected_products import reduce_rows
+                reduced, _, _ = reduce_rows(raw.shape, lambda a, b: raw[a:b],
+                                             xp=np, asnumpy=np.asarray)
+                self._display_data = reduced.astype(np.float32)
+            else:
+                self._display_data = raw
+            self._display_source = raw
+            self._display_revision = revision
+        data = self._display_data.T
 
         self._field = field
         self._raw_shape = raw.shape
@@ -130,7 +145,7 @@ class ImageView(FigureCanvasQTAgg):
         self.ax.set_xlim(initial_limits[0], initial_limits[1])
         self.ax.set_ylim(initial_limits[2], initial_limits[3])
 
-        self.ax.set_title(field.display_name, fontsize=10, pad=4)
+        self.ax.set_title(field.display_name + (" — display reduced; exact data retained" if self._display_data.shape != raw.shape else ""), fontsize=10, pad=4)
 
         if len(field.axes) >= 2:
             self.ax.set_xlabel(_label_with_unit(field.axes[0], field.units))
@@ -155,6 +170,7 @@ class ImageView(FigureCanvasQTAgg):
     def clear_field(self) -> None:
         """Release old scientific arrays; an unavailable view is not a zero field."""
         self.clear_crosshair()
+        self._display_source = self._display_data = None
         self._field = self._raw_shape = self._extent = None
         self._axis_coordinates = (None, None)
         self._full_display_extent = self._default_display_extent = None

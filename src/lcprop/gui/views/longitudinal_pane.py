@@ -398,6 +398,17 @@ class LongitudinalPane(QWidget):
         self.z_plane_slider.setValue(int(value))
         self.z_plane_slider.blockSignals(False)
 
+    def set_cut_coordinates(self, x: float, y: float) -> None:
+        """Map physical positions independently onto the selected volume grid."""
+        key = self.field_selector.currentData()
+        if self._run_data is None or key is None or self._is_fixed_cut_selection():
+            return
+        field = self._run_data.fields[key]
+        self.set_cut_indices(
+            self._nearest_index(field, "x", x, self.x_cut_slider.maximum() + 1),
+            self._nearest_index(field, "y", y, self.y_cut_slider.maximum() + 1),
+        )
+
     def set_cut_indices(self, ix: int, iy: int, *, emit: bool = True) -> None:
         """Set longitudinal cut indices in LCProp field order: x index, y index."""
         if self._is_fixed_cut_selection():

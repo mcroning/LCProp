@@ -40,7 +40,7 @@ def test_execution_intent_roundtrip(window, tmp_path, target, backend, precision
     w = window
     w.execution_target_selector.setCurrentIndex(0 if target == "local" else 1)
     w.remote_execution_controls.resource_selector.setCurrentIndex(1)
-    w.result_policy_selector.setCurrentIndex(1)
+    w.result_policy_selector.setCurrentIndex(w.result_policy_selector.findData("full"))
     w.evolution_panel.set_backend_spec(BackendSpec(backend=backend, precision=precision))
     scientific = w.build_request()
     intent = w._current_execution_intent()
@@ -215,7 +215,7 @@ def test_late_load_failure_restores_complete_execution_transaction(window, tmp_p
                     presentation_payload=loaded.presentation_payload)
     controls.select_profile_identity(a.name, "H200")
     w.execution_target_selector.setCurrentIndex(0)
-    w.result_policy_selector.setCurrentIndex(1)
+    w.result_policy_selector.setCurrentIndex(w.result_policy_selector.findData("full"))
     w.evolution_panel.set_backend_spec(BackendSpec(backend="numpy", precision="float32"))
     if unresolved:
         intent = ExecutionIntent("slurm", a.name, "missing", "numpy", "float32", "full")
@@ -247,3 +247,39 @@ def test_late_load_failure_restores_complete_execution_transaction(window, tmp_p
     assert controls.selected_cluster().name == b.name
     assert controls.selected_resource_name() == "CPU"
     assert w._saved_unresolved_intent is None
+
+
+def test_fresh_td_policy_is_initialized_before_any_configuration_change(window):
+    w = window
+    assert w.evolution_panel.workflow_id() == 'pr_timedependent'
+    def check():
+        combo = w.result_policy_selector
+        assert [combo.itemData(i) for i in range(combo.count())] == ['fast', 'full']
+        assert combo.itemText(0) == 'Fast / Exploratory'
+        assert combo.itemText(1) == 'Full'
+        assert not w.analysis_products_button.isEnabled()
+    check()
+    before = w.build_request()
+    w.execution_target_selector.setCurrentIndex(w.execution_target_selector.findData('slurm'))
+    check()
+    assert w.build_request() == before
+    for policy in ('fast', 'full'):
+        w.result_policy_selector.setCurrentIndex(w.result_policy_selector.findData(policy))
+        assert w._remote_runner_kwargs()['result_policy'] == policy
+        assert w._current_execution_intent().retrieval_policy == policy
+        assert 'Slurm' in w.describe_request(w.build_request())
+
+
+@pytest.mark.parametrize('policy', ['fast', 'full'])
+def test_td_policy_load_preserves_supported_combo(window, tmp_path, policy):
+    w = window
+    w._set_product_policy(policy)
+    path = tmp_path/'td-policy.json'
+    w.save_experiment_to(path)
+    w.evolution_panel.set_workflow_id('pr_static')
+    w._set_product_policy('analysis:complex_input')
+    w.load_experiment_from(path)
+    assert w.evolution_panel.workflow_id() == 'pr_timedependent'
+    combo = w.result_policy_selector
+    assert [combo.itemData(i) for i in range(combo.count())] == ['fast', 'full']
+    assert combo.currentData() == policy

@@ -130,6 +130,17 @@ def execute_run_directory(run_directory: str | Path, *, registry=None, operation
         })
         return 0
     except Exception as exc:
+        # Only the exact UUID directory owned by this attempt. No globbing,
+        # no traversal into links, no deletion of other attempts or run data.
+        import shutil
+        cleanup_error = None
+        try:
+            if temporary.is_symlink():
+                temporary.unlink()
+            elif temporary.is_dir():
+                shutil.rmtree(temporary)
+        except OSError as cleanup_exc:
+            cleanup_error = str(cleanup_exc)
         _write_progress(run_dir, {
             "status": "failed",
             "phase": "failed",
@@ -143,7 +154,7 @@ def execute_run_directory(run_directory: str | Path, *, registry=None, operation
             material_id=material_id,
             workflow_id=workflow_id,
             failure_category="scientific_process_failed",
-            message=str(exc) or type(exc).__name__,
+            message=(str(exc) or type(exc).__name__) + (f"; incomplete-result cleanup failed: {cleanup_error}" if cleanup_error else ""),
             exception_type=type(exc).__name__,
             traceback=traceback.format_exc(),
             provenance=_provenance(None if decoded is None else decoded.envelope.provenance),

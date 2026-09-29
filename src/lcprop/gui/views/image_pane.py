@@ -58,6 +58,7 @@ class ImagePane(QWidget):
     """Field browser for 2-D image fields."""
 
     positionSelected = Signal(int, int)
+    physicalPositionSelected = Signal(float, float)
     sourceVolumeSelected = Signal(str)
     fieldChanged = Signal()
 
@@ -188,6 +189,9 @@ class ImagePane(QWidget):
             return None
         horizontal, vertical = field.axes
         coordinates = getattr(field, "coordinates", {}) or {}
+        preview = coordinates.get("preview_metadata", {})
+        if "original_extent" in preview:
+            return preview["original_extent"]
         h = coordinates.get(horizontal)
         v = coordinates.get(vertical)
         if h is not None and v is not None:
@@ -203,11 +207,22 @@ class ImagePane(QWidget):
         """Start deterministic autoscaling for a fresh run."""
 
         self._scale_limits.clear()
+        self._display_limits_cache = {}
         self.scales.reset_locks()
 
     def _limits_for_field(self, field) -> tuple[float, float]:
         kind = str(getattr(field, "kind", "field"))
-        limits = self.scales.limits(scale_key(field), display_limits(field))
+        if not hasattr(self, "_display_limits_cache"):
+            self._display_limits_cache = {}
+        import weakref
+        key = field.key
+        cached = self._display_limits_cache.get(key)
+        semantics = (field.content_revision, field.kind, field.quantity, field.value_unit,
+                     ROBUST_INTENSITY_PERCENTILE)
+        if cached is None or cached[0]() is not field.data or cached[2] != semantics:
+            cached = (weakref.ref(field.data), display_limits(field), semantics)
+            self._display_limits_cache[key] = cached
+        limits = self.scales.limits(scale_key(field), cached[1])
         self.scale_controls.show_scale(scale_key(field), limits)
         self._scale_limits[kind] = limits
         return limits
@@ -257,3 +272,5 @@ class ImagePane(QWidget):
         field = self._field_at_selected_z(self._run_data.fields[key])
         if field.axes == ("x", "y"):
             self.positionSelected.emit(ix, iy)
+            x, y = self.image_view._index_to_display_coordinates(ix, iy)
+            self.physicalPositionSelected.emit(x, y)

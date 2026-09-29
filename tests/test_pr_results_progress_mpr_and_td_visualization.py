@@ -68,7 +68,7 @@ def test_preview_uses_block_means_actual_z_planes_and_bounded_float32():
 
 def test_visualization_result_codec_versions_advance_and_accept_predecessors():
     expected = (
-        (PR_STATIC_TRANSPORT_CODEC, 3, 2),
+        (PR_STATIC_TRANSPORT_CODEC, 4, 3),
         (PR_TIMEDEPENDENT_TRANSPORT_CODEC, 4, 3),
         (PR_TRANSVERSE_STATIC_TRANSPORT_CODEC, 4, 3),
         (PR_TRANSVERSE_TIMEDEPENDENT_TRANSPORT_CODEC, 3, 2),
@@ -257,3 +257,56 @@ def test_workspace_exposes_clean_open_action_for_td_mp4(monkeypatch):
     workspace.open_td_preview.click()
     assert len(opened) == 1
     assert opened[0].toLocalFile().endswith("preview.mp4")
+
+
+def test_static_v4_packages_and_v3_full_fast_predecessors(tmp_path):
+    from dataclasses import replace
+    from tests.test_pr_static_fast_construction import request_for
+    from lcprop.pr.static_workflow import run_pr_static
+    from lcprop.pr.static_transport_codec import encode_pr_static_transport_result
+    from lcprop.transport.defaults import default_transport_registry
+    from lcprop.transport.io import (
+        write_request_package, read_request_package,
+        write_result_package, read_result_package,
+    )
+
+    registry = default_transport_registry()
+    request = request_for(True, False)
+    full = run_pr_static(request)
+    interactive = run_pr_static(request, result_policy='interactive')
+
+    def predecessor_projection(result, policy):
+        encoded = encode_pr_static_transport_result(result, policy)
+        metadata = dict(encoded.payload.metadata)
+        metadata.pop('selected_products', None)  # Field did not exist in v3.
+        return replace(encoded, payload=replace(encoded.payload, metadata=metadata))
+
+    predecessor = replace(PR_STATIC_TRANSPORT_CODEC, result_codec_version=3,
+                          compatible_result_codec_versions=(1, 2),
+                          encode_result_projection=predecessor_projection)
+    for policy, result, writer in (
+        ('interactive', interactive, PR_STATIC_TRANSPORT_CODEC),
+        ('full', full, predecessor),
+        ('fast', full, predecessor),
+    ):
+        directory = tmp_path / policy
+        write_request_package(directory, registry=registry, material_id='pr',
+                              workflow_id='pr_static', request=request,
+                              run_id=policy, execution_target='local', result_policy=policy)
+        envelope = read_request_package(directory, registry=registry).envelope
+        write_result_package(directory, codec=writer, result=result, request_envelope=envelope)
+        decoded = read_result_package(directory, registry=registry)
+        assert decoded.envelope.codec_version == (4 if policy == 'interactive' else 3)
+        if policy == 'interactive':
+            assert decoded.result.selected_products['policy'] == 'interactive'
+            assert decoded.result.A_initial is None
+        else:
+            assert 'selected_products' not in decoded.envelope.result_payload
+            assert decoded.result.selected_products is None
+            assert decoded.result.retention_summary['policy'] == policy
+            np.testing.assert_array_equal(decoded.result.A_initial, full.A_initial)
+            np.testing.assert_array_equal(decoded.result.A_final, full.A_final)
+            if policy == 'full':
+                np.testing.assert_array_equal(decoded.result.E_final, full.E_final)
+            else:
+                assert decoded.result.E_final is None

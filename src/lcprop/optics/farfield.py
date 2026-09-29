@@ -28,6 +28,7 @@ def direction_cosine_spectrum(
     refractive_index: float,
     coherence_groups: tuple[str, ...] | list[str] | None = None,
     xp: Any = np,
+    density_reducer=None,
 ) -> DirectionCosineSpectrum:
     """Return coherence-aware far-field power density versus ``s_x,s_y``.
 
@@ -57,7 +58,8 @@ def direction_cosine_spectrum(
         grouped.setdefault(name, []).append(index)
 
     nx, ny = A.shape[-2:]
-    density = xp.zeros((nx, ny), dtype=xp.abs(A[0]).dtype)
+    density = (xp.zeros((nx, ny), dtype=xp.abs(A[0]).dtype)
+               if density_reducer is None else None)
     transform_scale = float(dx_um) * float(dy_um)
     density_scale = (float(refractive_index) / float(wavelength_um)) ** 2
     for indices in grouped.values():
@@ -65,7 +67,14 @@ def direction_cosine_spectrum(
         transformed = (
             xp.fft.fftshift(xp.fft.fft2(group_field)) * transform_scale
         )
-        density += xp.abs(transformed) ** 2 * density_scale
+        if density_reducer is None:
+            density += xp.abs(transformed) ** 2 * density_scale
+        else:
+            contribution = density_reducer(transformed, density_scale)
+            if density is None:
+                density = contribution
+            else:
+                density += contribution
 
     angular_scale = float(wavelength_um) / float(refractive_index)
     s_x = xp.fft.fftshift(xp.fft.fftfreq(nx, d=float(dx_um))) * angular_scale

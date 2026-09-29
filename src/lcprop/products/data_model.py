@@ -95,6 +95,8 @@ class FieldData:
     coordinates: dict[str, Any] = field(default_factory=dict)
     default_display_extent: tuple[float, float, float, float] | None = None
     initially_selected: bool = False
+    # Increment after in-place data or coordinate/normalization metadata changes.
+    content_revision: int = 0
 
 
 @dataclass(frozen=True)
