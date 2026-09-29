@@ -336,6 +336,134 @@ def _residual_metrics(residual, *, xp: Any) -> tuple[float, float]:
     )
 
 
+# Diagnostic work arrays are capped at 2 MiB per float64 chunk, independently
+# of Nz/Nx/Ny. Slicing (including noncontiguous inputs) never flattens/copies a
+# complete volume. Physics/trial reductions intentionally retain their old path.
+_COMPLETION_CHUNK_ELEMENTS = 262144
+
+
+def _completion_slices(shape):
+    def split(bounds):
+        sizes = [stop - start for start, stop in bounds]
+        if math.prod(sizes) <= _COMPLETION_CHUNK_ELEMENTS:
+            yield tuple(slice(start, stop) for start, stop in bounds)
+            return
+        axis = next(i for i, size in enumerate(sizes) if size > 1)
+        start, stop = bounds[axis]
+        mid = (start + stop) // 2
+        for interval in ((start, mid), (mid, stop)):
+            child = list(bounds)
+            child[axis] = interval
+            yield from split(child)
+    yield from split([(0, int(size)) for size in shape])
+
+
+# Finite binary64 squares occupy bits 0..4195 in units of 2**-2148.
+# 264 base-2**16 bins include the final shifted digit (no sample export).
+_EXACT_SQUARE_BINS = 264
+
+
+def _exact_square_summary(chunk, *, xp):
+    """Exact sum-of-squares digits, reduced on the array's backend.
+
+    Each weighted bincount sums nonnegative 16-bit integers. With <=2**18
+    samples, each bin sum is <2**34; summing the fourteen histograms stays
+    <2**38, hence every float64 histogram addition is exact. Integer products
+    of the four 16-bit significand limbs fit uint64 before carry propagation.
+    """
+    bits = xp.asarray(chunk, dtype=xp.float64).view(xp.uint64)
+    exponent = (bits >> 52) & 2047
+    mantissa = (bits & ((1 << 52) - 1)) | ((exponent != 0).astype(xp.uint64) << 52)
+    # x = mantissa * 2**-1074 for subnormals; otherwise multiply by
+    # 2**(exponent-1). Squaring doubles that nonnegative shift.
+    shift = 2 * xp.maximum(exponent.astype(xp.int64) - 1, 0)
+    bins = shift // 16
+    remainder = (shift % 16).astype(xp.uint64)
+    limbs = [(mantissa >> (16 * i)) & 65535 for i in range(4)]
+    summary = xp.zeros(_EXACT_SQUARE_BINS, dtype=xp.float64)
+    carry = xp.zeros_like(mantissa)
+    for digit in range(7):
+        coefficient = carry.copy()
+        for i in range(max(0, digit - 3), min(3, digit) + 1):
+            coefficient += limbs[i] * limbs[digit - i]
+        carry = coefficient >> 16
+        shifted = (coefficient & 65535) << remainder
+        # ravel may copy a strided CHUNK, never the residual volume.
+        for offset, weights in ((0, shifted & 65535), (1, shifted >> 16)):
+            summary += xp.bincount(
+                (bins + digit + offset).ravel(),
+                weights=weights.ravel().astype(xp.float64),
+                minlength=_EXACT_SQUARE_BINS,
+            )
+    return summary
+
+
+def _exact_rms_within(residual, tolerance, *, xp):
+    numerator, denominator = float(tolerance).as_integer_ratio()
+    limit = (numerator * numerator * int(residual.size)) << (
+        2148 - 2 * (denominator.bit_length() - 1)
+    )
+    total = 0
+    for index in _completion_slices(residual.shape):
+        summary = np.asarray(asnumpy(_exact_square_summary(residual[index], xp=xp)))
+        # Fixed 264-bin Python work per chunk, independent of sample count.
+        total += sum(int(value) << (16 * i) for i, value in enumerate(summary))
+        if total > limit:
+            return False
+    return total <= limit
+
+
+def _completion_residual_metrics(residual, *, xp, rms_tolerance):
+    """Scaled float64 RMS with exact backend-reduced boundary decisions.
+
+    Chunk sums use backend float64 reduction; math.fsum combines scalar sums.
+    A conservative linear-summation forward-error envelope identifies boundary
+    cases, resolved by exact binary64 square histograms, never sample export.
+    """
+    maximum = 0.0
+    for index in _completion_slices(residual.shape):
+        maximum = float(np.maximum(maximum, _backend_scalar(
+            xp.max(xp.abs(residual[index])))))
+    if not math.isfinite(maximum):
+        return maximum, maximum, False
+    if maximum == 0.0:
+        return 0.0, 0.0, 0.0 <= rms_tolerance
+
+    def sums():
+        for index in _completion_slices(residual.shape):
+            scaled = xp.asarray(residual[index], dtype=xp.float64) / maximum
+            yield _backend_scalar(xp.sum(scaled * scaled, dtype=xp.float64))
+    rms = maximum * math.sqrt(min(1.0, math.fsum(sums()) / residual.size))
+    within = rms <= rms_tolerance
+    # Division, square, sum, final division/sqrt: deliberately conservative.
+    error = (8 * (_COMPLETION_CHUNK_ELEMENTS + 8)
+             * np.finfo(np.float64).eps * max(rms, rms_tolerance))
+    if abs(rms - rms_tolerance) <= error:
+        within = _exact_rms_within(residual, rms_tolerance, xp=xp)
+    return rms, maximum, within
+
+
+def _completion_comparison(actual, expected, *, xp, rtol, atol):
+    """Preserve elementwise isclose semantics, including NaN/Inf behavior."""
+    maximum = 0.0
+    consistent = True
+    for index in _completion_slices(actual.shape):
+        a, b = actual[index], expected[index]
+        maximum = float(np.maximum(maximum, _backend_scalar(
+            xp.max(xp.abs(a - b)))))
+        close = bool(_backend_scalar(xp.all(xp.isclose(a, b, rtol=rtol, atol=atol))))
+        consistent = consistent and close
+    return maximum, consistent
+
+
+def _owned_host_result(value):
+    # CuPy conversion already owns its new host allocation. NumPy still needs
+    # a copy so the returned scientific arrays do not alias solver inputs.
+    if isinstance(value, np.ndarray):
+        return value.copy()
+    return np.asarray(asnumpy(value))
+
+
 def _update_metrics(new_state, old_state, *, xp: Any) -> tuple[float, float]:
     delta = new_state - old_state
     return (
@@ -812,51 +940,32 @@ def run_pr_static(
         message="Validating replay consistency...",
     )
     if completed_slices:
-        replay_rms, replay_max = _residual_metrics(replay_residual, xp=xp)
+        replay_rms, replay_max, replay_rms_converged = _completion_residual_metrics(
+            replay_residual, xp=xp,
+            rms_tolerance=tolerances.residual_rms_tolerance,
+        )
     else:
-        replay_rms = 0.0
-        replay_max = 0.0
-    field_max_abs = _backend_scalar(xp.max(xp.abs(replay_A - sequential_A)))
+        replay_rms, replay_max, replay_rms_converged = 0.0, 0.0, True
+    comparison_options = dict(
+        xp=xp, rtol=tolerances.replay_rtol, atol=tolerances.replay_atol,
+    )
+    field_max_abs, field_consistent = _completion_comparison(
+        replay_A, sequential_A, **comparison_options,
+    )
     if completed_slices:
-        source_max_abs = _backend_scalar(
-            xp.max(xp.abs(replay_source - completed_source))
+        source_max_abs, source_consistent = _completion_comparison(
+            replay_source, completed_source, **comparison_options,
         )
-        residual_max_abs = _backend_scalar(
-            xp.max(xp.abs(replay_residual - completed_residual))
+        residual_max_abs, residual_consistent = _completion_comparison(
+            replay_residual, completed_residual, **comparison_options,
         )
     else:
-        source_max_abs = 0.0
-        residual_max_abs = 0.0
-    field_consistent = not _array_has_true(
-        ~xp.isclose(
-            replay_A,
-            sequential_A,
-            rtol=tolerances.replay_rtol,
-            atol=tolerances.replay_atol,
-        ),
-        xp=xp,
-    )
-    source_consistent = not _array_has_true(
-        ~xp.isclose(
-            replay_source,
-            completed_source,
-            rtol=tolerances.replay_rtol,
-            atol=tolerances.replay_atol,
-        ),
-        xp=xp,
-    )
-    residual_consistent = not _array_has_true(
-        ~xp.isclose(
-            replay_residual,
-            completed_residual,
-            rtol=tolerances.replay_rtol,
-            atol=tolerances.replay_atol,
-        ),
-        xp=xp,
-    )
+        source_max_abs, residual_max_abs = 0.0, 0.0
+        source_consistent, residual_consistent = True, True
     replay_converged = bool(
         completed_slices == grid.Nz
-        and _criteria_met(replay_rms, replay_max, tolerances)
+        and replay_rms_converged
+        and replay_max <= tolerances.residual_max_tolerance
     )
     converged = bool(
         not cancelled
@@ -876,12 +985,12 @@ def run_pr_static(
     )
 
     return PRStaticRunResult(
-        A_initial=np.asarray(asnumpy(A0)).copy(),
-        A_final=np.asarray(asnumpy(replay_A)).copy(),
-        E_initial=np.asarray(asnumpy(E_initial[:completed_slices])).copy(),
-        E_final=np.asarray(asnumpy(completed_E)).copy(),
-        source_intensity_stack=np.asarray(asnumpy(replay_source)).copy(),
-        residual_stack=np.asarray(asnumpy(replay_residual)).copy(),
+        A_initial=_owned_host_result(A0),
+        A_final=_owned_host_result(replay_A),
+        E_initial=_owned_host_result(E_initial[:completed_slices]),
+        E_final=_owned_host_result(completed_E),
+        source_intensity_stack=_owned_host_result(replay_source),
+        residual_stack=_owned_host_result(replay_residual),
         power_initial=normalized_power(A0, grid),
         power_final=normalized_power(replay_A, grid),
         converged=converged,
