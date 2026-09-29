@@ -309,11 +309,14 @@ class InstalledDeploymentManager(SourceDeploymentManager):
         )
 
     def _snapshot_exists_checked(self, path):
-        """Only a quiet POSIX test false result establishes snapshot absence."""
+        """Interpret the exit status of this specific POSIX existence probe."""
         try:
             self._transport.ssh(self.host, "test", "-e", path)
         except subprocess.CalledProcessError as exc:
-            if exc.returncode == 1 and not exc.stderr and not exc.stdout:
+            # SSH can emit banners/warnings even when remote test completes
+            # normally. Its false status is 1 regardless of those streams.
+            # This rule applies only to test -e, never to the verifier.
+            if exc.returncode == 1:
                 return False
             raise
         return True

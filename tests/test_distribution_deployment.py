@@ -150,7 +150,7 @@ def test_concurrent_publisher_verified(installed,tmp_path):
     assert manager(installed,remote).resolve_or_stage().reused_existing_snapshot
 
 
-@pytest.mark.parametrize('failure', ['ssh', 'command', 'diagnostic-status-one', 'os-error', 'timeout', 'absent'])
+@pytest.mark.parametrize('failure', ['ssh', 'command', 'command-not-found', 'os-error', 'timeout', 'absent'])
 def test_staging_existence_probe_preserves_unknown_vs_absent(installed, tmp_path, failure):
     class ProbeRemote(Remote):
         probed_after_extraction = False
@@ -172,7 +172,7 @@ def test_staging_existence_probe_preserves_unknown_vs_absent(installed, tmp_path
                 elif failure == 'timeout':
                     error = subprocess.TimeoutExpired(args, 10, stderr=b'probe timed out')
                 else:
-                    code = {'ssh': 255, 'command': 2, 'diagnostic-status-one': 1}[failure]
+                    code = {'ssh': 255, 'command': 2, 'command-not-found': 127}[failure]
                     error = subprocess.CalledProcessError(code, args, stderr='probe execution failed')
                 self.original_error = error
                 raise error
@@ -205,6 +205,71 @@ def test_checked_snapshot_absence_still_allows_first_stage(installed, tmp_path):
     result = deployment.resolve_or_stage()
     assert not result.reused_existing_snapshot
     assert deployment.resolve_or_stage().reused_existing_snapshot
+
+
+@pytest.mark.parametrize(('stdout', 'stderr'), [
+    ('', ''),
+    ('', '** WARNING: connection is not using a post-quantum key exchange algorithm.\n'
+         '** This session may be vulnerable to "store now, decrypt later" attacks.\n'
+         '** The server may need to be upgraded. See https://openssh.com/pq.html\n'),
+    ('site login banner\n', ''),
+    ('site login banner\n', 'Warning: SSH connection diagnostic\n'),
+])
+def test_first_distribution_deployment_cache_miss_publishes(installed, tmp_path, stdout, stderr):
+    class FirstDeploymentRemote(Remote):
+        cache_misses = 0
+        staging_checks = 0
+
+        def ssh(self, host, *args):
+            if args[:2] == ('test', '-e'):
+                path = self._path(args[2])
+                if path.name.startswith('dist-sha256-') and not path.exists():
+                    self.cache_misses += 1
+                    self.commands.append((host, args))
+                    raise subprocess.CalledProcessError(1, args, output=stdout, stderr=stderr)
+                if path.name.startswith('.staging-'):
+                    assert (path / 'src/lcprop/__init__.py').is_file()
+                    self.staging_checks += 1
+            return super().ssh(host, *args)
+
+    remote = FirstDeploymentRemote(tmp_path / 'remote')
+    deployment = manager(installed, remote)
+    result = deployment.resolve_or_stage()
+    assert remote.cache_misses == 1
+    assert remote.upload_count == 2  # archive and manifest
+    assert remote.staging_checks == 1
+    commands = [args for _, args in remote.commands]
+    assert any(args[0] == 'tar' for args in commands)
+    assert any(args[0] == sys.executable and '/.staging-' in args[-2] for args in commands)
+    assert any(args[0] == 'ln' for args in commands)
+    published = remote._path(result.remote_source_path)
+    assert published.is_symlink() and (published / 'src/lcprop/__init__.py').is_file()
+    assert not result.reused_existing_snapshot
+    uploads = remote.upload_count
+    assert deployment.resolve_or_stage().reused_existing_snapshot
+    assert remote.upload_count == uploads
+
+
+@pytest.mark.parametrize('failure', ['ssh', 'command', 'os-error', 'timeout'])
+def test_published_cache_probe_failure_never_stages(installed, tmp_path, failure):
+    class FailedCacheRemote(Remote):
+        def ssh(self, host, *args):
+            assert args[:2] == ('test', '-e')
+            assert '/dist-sha256-' in args[2]
+            if failure == 'os-error':
+                raise OSError('cache probe could not start')
+            if failure == 'timeout':
+                raise subprocess.TimeoutExpired(args, 10, stderr='cache probe timed out')
+            raise subprocess.CalledProcessError(
+                255 if failure == 'ssh' else 2, args, stderr='cache probe execution failed')
+
+    remote = FailedCacheRemote(tmp_path / 'remote')
+    with pytest.raises(SourceDeploymentError) as caught:
+        manager(installed, remote).resolve_or_stage()
+    assert caught.value.category == 'snapshot_verification_failed'
+    assert 'cache probe' in str(caught.value)
+    assert caught.value.__cause__ is not None
+    assert remote.upload_count == 0
 
 
 def test_git_identity_bound_and_never_falls_back(tmp_path):
