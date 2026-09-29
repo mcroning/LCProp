@@ -102,6 +102,7 @@ def execute_run_directory(run_directory: str | Path, *, registry=None, operation
             decoded.envelope.workflow_id,
             decoded.request,
             _prepare_products=False,
+            _result_policy=decoded.envelope.result_policy,
             progress_callback=lambda progress: _write_progress(run_dir, progress),
         )
         _write_progress(run_dir, {

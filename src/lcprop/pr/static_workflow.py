@@ -41,6 +41,15 @@ from lcprop.pr.transverse.specs import (
     PR_MATERIAL_RESPONSE_NONLINEAR,
     PRTransverseMaterialResponseSpec,
 )
+from lcprop.pr.longitudinal_cuts import (
+    extract_backend_longitudinal_optical_intensity_cuts,
+    fast_retention_summary,
+)
+from lcprop.pr.visualization import make_fast_intensity_preview
+from lcprop.transport.result_policy import (
+    FAST_RESULT_POLICY, FULL_RESULT_POLICY, normalize_result_policy,
+)
+
 from lcprop.pr.scattering import PRCanonicalScatteringSpec, canonical_scattering_provenance
 from lcprop.pr.workflow import (
     advance_pr_slice_with_midpoint_source,
@@ -54,6 +63,11 @@ PR_STATIC_WORKFLOW = "pr_static"
 
 
 ProgressCallback = Callable[[RunProgress], None]
+
+
+PR_STATIC_FAST_OMITTED_FIELDS = (
+    "E_initial", "E_final", "source_intensity_stack", "residual_stack",
+)
 
 
 @dataclass(frozen=True)
@@ -488,6 +502,7 @@ def run_pr_static(
     *,
     cancellation_token: CancellationToken | None = None,
     progress_callback: ProgressCallback | None = None,
+    result_policy: str = FULL_RESULT_POLICY,
 ) -> PRStaticRunResult:
     """Solve the self-consistent static PR problem by a local coupled z-march.
 
@@ -498,6 +513,7 @@ def run_pr_static(
     intensity. A final independent replay verifies the assembled state.
     """
 
+    policy = normalize_result_policy(result_policy)
     started_at = perf_counter()
     request.grid.validate()
     request.beams.validate()
@@ -984,13 +1000,58 @@ def run_pr_static(
         message="Preparing scientific results...",
     )
 
+    # Retention is execution policy, applied only after unchanged diagnostics.
+    # Drop solver-owned volume references before Fast transfers. Pool-reserved
+    # GPU memory may remain cached; no free_all_blocks() is needed or used.
+    cuts = preview = None
+    retention = {"policy": FULL_RESULT_POLICY, "omitted_fields": []}
+    if policy == FAST_RESULT_POLICY:
+        del E_initial, E_stack, completed_E
+        del source_stack, completed_source, residual_stack, completed_residual
+        del replay_residual
+        host_initial = _owned_host_result(A0)
+        host_final = _owned_host_result(replay_A)
+        if completed_slices:
+            product_options = dict(
+                grid_summary=grid.summary(),
+                peak_intensity_reference=channel_peak_intensity_reference(
+                    host_initial, xp=np,
+                ),
+                background_intensity=float(request.material.background_intensity),
+                asnumpy=asnumpy,
+            )
+            cuts = extract_backend_longitudinal_optical_intensity_cuts(
+                replay_source, **product_options,
+            )
+            preview = make_fast_intensity_preview(replay_source, **product_options)
+        del replay_source
+        host_E_initial = host_E_final = host_source = host_residual = None
+        retention = fast_retention_summary(
+            PR_STATIC_FAST_OMITTED_FIELDS, cuts,
+            intensity_preview_metadata=None if preview is None else preview.metadata,
+        )
+    else:
+        host_initial = _owned_host_result(A0)
+        host_final = _owned_host_result(replay_A)
+        host_E_initial = _owned_host_result(E_initial[:completed_slices])
+        host_E_final = _owned_host_result(completed_E)
+        host_source = _owned_host_result(replay_source)
+        host_residual = _owned_host_result(replay_residual)
+
     return PRStaticRunResult(
-        A_initial=_owned_host_result(A0),
-        A_final=_owned_host_result(replay_A),
-        E_initial=_owned_host_result(E_initial[:completed_slices]),
-        E_final=_owned_host_result(completed_E),
-        source_intensity_stack=_owned_host_result(replay_source),
-        residual_stack=_owned_host_result(replay_residual),
+        A_initial=host_initial,
+        A_final=host_final,
+        E_initial=host_E_initial,
+        E_final=host_E_final,
+        source_intensity_stack=host_source,
+        residual_stack=host_residual,
+        retention_summary=retention,
+        longitudinal_intensity_xz=None if cuts is None else cuts.xz,
+        longitudinal_intensity_yz=None if cuts is None else cuts.yz,
+        x_cut_um=None if cuts is None else cuts.x_cut_um,
+        y_cut_um=None if cuts is None else cuts.y_cut_um,
+        intensity_preview=None if preview is None else preview.intensity,
+        intensity_preview_metadata=None if preview is None else preview.metadata,
         power_initial=normalized_power(A0, grid),
         power_final=normalized_power(replay_A, grid),
         converged=converged,

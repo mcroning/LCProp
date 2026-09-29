@@ -40,6 +40,7 @@ class LocalRunner:
         request,
         *args,
         _prepare_products: bool = True,
+        _result_policy: str | None = None,
         _before_product_conversion: (
             Callable[[WorkflowOperation, Any], None] | None
         ) = None,
@@ -49,6 +50,10 @@ class LocalRunner:
 
         if not isinstance(operation, WorkflowOperation):
             raise TypeError("operation must be a WorkflowOperation")
+        if _result_policy is not None and operation.supports_result_policy:
+            if "result_policy" in kwargs and kwargs["result_policy"] != _result_policy:
+                raise ValueError("conflicting execution result policies")
+            kwargs["result_policy"] = _result_policy
         result = operation.run(request, *args, **kwargs)
         if _prepare_products and _before_product_conversion is not None:
             _before_product_conversion(operation, result)

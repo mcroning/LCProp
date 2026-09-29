@@ -14,6 +14,7 @@ class WorkflowOperation:
     workflow_id: str
     run: RunCallable
     to_run_data: ProductAdapter
+    supports_result_policy: bool = False
 
     def __post_init__(self) -> None:
         for name in ("material_id", "workflow_id"):

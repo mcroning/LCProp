@@ -37,6 +37,7 @@ PR_STATIC_OPERATION = WorkflowOperation(
     workflow_id=PR_STATIC_WORKFLOW,
     run=run_pr_static,
     to_run_data=pr_static_result_to_run_data,
+    supports_result_policy=True,
 )
 
 

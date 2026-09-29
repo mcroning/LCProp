@@ -37,6 +37,7 @@ from lcprop.pr.static import PRStaticSolverOptions
 from lcprop.pr.static_workflow import (
     PRCoupledStaticIterationRecord,
     PRCoupledStaticSliceSummary,
+    PR_STATIC_FAST_OMITTED_FIELDS,
     PRStaticRunRequest,
     PRStaticRunResult,
     PRStaticWorkflowOptions,
@@ -170,12 +171,7 @@ def decode_pr_static_transport_request(
         ) from exc
 
 
-_FAST_OMITTED_FIELDS = (
-    "E_initial",
-    "E_final",
-    "source_intensity_stack",
-    "residual_stack",
-)
+_FAST_OMITTED_FIELDS = PR_STATIC_FAST_OMITTED_FIELDS
 
 
 def encode_pr_static_transport_result(
@@ -187,6 +183,8 @@ def encode_pr_static_transport_result(
     if not isinstance(result, PRStaticRunResult):
         raise TypeError("result must be a PRStaticRunResult")
     policy = normalize_result_policy(result_policy)
+    if policy == FULL_RESULT_POLICY and result.retention_summary.get("policy") == FAST_RESULT_POLICY:
+        raise TransportCodecError("Cannot encode a Fast-constructed result as Full")
     arrays: dict[str, np.ndarray] = {}
     omitted = _FAST_OMITTED_FIELDS if policy == FAST_RESULT_POLICY else ()
     if omitted:
