@@ -576,3 +576,145 @@ def test_coupled_workflow_does_not_call_dense_newton_direction(monkeypatch):
     result = run_pr_static(_static_request(Nz=1))
 
     assert result.converged
+
+
+def _canonical_spec(algorithm="canonical_phase_slabs_v1"):
+    from lcprop.pr.scattering import PRCanonicalScatteringSpec
+    return PRCanonicalScatteringSpec(
+        epsilon=0.02, transverse_correlation_um=0.4,
+        realization_seed=127, canonical_dz_um=1.0,
+        algorithm_version=algorithm,
+    )
+
+
+@pytest.mark.parametrize("model", ["nonlinear", "linearized"])
+def test_static_disabled_scattering_is_bitwise_unchanged(model, monkeypatch):
+    import lcprop.pr.static_workflow as workflow
+    from lcprop.pr.transverse.specs import PRTransverseMaterialResponseSpec
+    request = replace(_static_request(), material_response=PRTransverseMaterialResponseSpec(
+        model=model, reference_intensity=1.0 if model == "linearized" else None))
+    normal = run_pr_static(request)
+    # The pre-scattering optical path: no after-slice application at all.
+    monkeypatch.setattr(workflow, "_apply_canonical_scattering_after_slice", lambda *a, **k: None)
+    def forbidden(*args, **kwargs):
+        pytest.fail("disabled scattering generated a phase")
+    monkeypatch.setattr(workflow, "_canonical_scattering_phase_for_slice", forbidden)
+    original_path = run_pr_static(replace(request, scattering=None))
+    for name in ("A_final", "E_final", "source_intensity_stack", "residual_stack"):
+        np.testing.assert_array_equal(getattr(normal, name), getattr(original_path, name))
+    assert normal.replay_diagnostics == original_path.replay_diagnostics
+
+
+@pytest.mark.parametrize("algorithm", ["canonical_phase_slabs_v1", "canonical_phase_slabs_v2_cross_backend"])
+@pytest.mark.parametrize("substeps", [1, 3])
+def test_static_canonical_trials_replay_and_substeps_share_screens(algorithm, substeps, monkeypatch):
+    import lcprop.pr.static_workflow as workflow
+    from lcprop.pr.workflow import _canonical_scattering_phase_for_slice
+    request = _static_request()
+    request = replace(request, scattering=_canonical_spec(algorithm),
+                      solver=replace(request.solver, optical_substeps=substeps))
+    generated, applications = [], []
+    original_generate = workflow._canonical_scattering_phase_for_slice
+    original_apply = workflow._apply_canonical_scattering_after_slice
+    def generate(spec, **kwargs):
+        phase = original_generate(spec, **kwargs)
+        # Same generator/geometry as production TD, not a second reference formula.
+        np.testing.assert_array_equal(phase, _canonical_scattering_phase_for_slice(spec, **kwargs))
+        generated.append((kwargs["z_index"], phase.copy()))
+        return phase
+    def apply(A, **kwargs):
+        applications.append((kwargs["z_index"], kwargs["phase"].copy()))
+        original_apply(A, **kwargs)
+    monkeypatch.setattr(workflow, "_canonical_scattering_phase_for_slice", generate)
+    monkeypatch.setattr(workflow, "_apply_canonical_scattering_after_slice", apply)
+    first = run_pr_static(request)
+    assert first.converged
+    assert [k for k, _ in generated] == [0, 1, 0, 1]
+    assert len(applications) > len(generated)  # genuine nonlinear trials reuse the cache
+    for k, phase in applications:
+        np.testing.assert_array_equal(phase, generated[k][1])
+    second = run_pr_static(request)
+    np.testing.assert_array_equal(first.A_final, second.A_final)
+    np.testing.assert_array_equal(first.E_final, second.E_final)
+    assert first.replay_diagnostics["field_consistent"]
+    assert first.replay_diagnostics == second.replay_diagnostics
+
+
+@pytest.mark.parametrize("policy", ["fast", "full"])
+def test_static_scattering_provenance_survives_result_transport(policy):
+    from lcprop.pr.static_transport_codec import (
+        encode_pr_static_transport_result, decode_pr_static_transport_result,
+    )
+    result = run_pr_static(replace(_static_request(), scattering=_canonical_spec()))
+    encoded = encode_pr_static_transport_result(result, policy)
+    restored = decode_pr_static_transport_result(encoded.payload.metadata, encoded.payload.arrays)
+    provenance = restored.replay_diagnostics["canonical_scattering"]
+    assert provenance == result.replay_diagnostics["canonical_scattering"]
+    assert provenance["realization_seed"] == 127
+    assert provenance["canonical_slab_count"] == 10
+    assert provenance["configuration_sha256"]
+
+
+@pytest.mark.parametrize("changes", [
+    {"canonical_dz_um": 3.0}, {"epsilon": -1.0},
+    {"transverse_correlation_um": 0.0}, {"realization_seed": -1},
+    {"algorithm_version": "unknown"},
+])
+def test_static_scattering_rejects_invalid_specs_in_workflow_and_codecs(changes):
+    from lcprop.pr.experiment_codec import encode_pr_static_request
+    from lcprop.pr.static_transport_codec import encode_pr_static_transport_request
+    request = replace(_static_request(), scattering=replace(_canonical_spec(), **changes))
+    for operation in (run_pr_static, encode_pr_static_request, encode_pr_static_transport_request):
+        with pytest.raises(ValueError):
+            operation(request)
+
+
+def test_static_v2_cupy_matches_numpy_when_available():
+    cp = pytest.importorskip("cupy")
+    try:
+        cp.arange(1)
+    except Exception as exc:
+        pytest.skip(f"CuPy device unavailable: {exc}")
+    request = replace(_static_request(), scattering=_canonical_spec("canonical_phase_slabs_v2_cross_backend"))
+    cpu = run_pr_static(request)
+    gpu = run_pr_static(replace(request, backend=BackendSpec(backend="cupy", precision="float64")))
+    assert cpu.converged and gpu.converged
+    np.testing.assert_allclose(cpu.A_final, gpu.A_final, rtol=3e-11, atol=3e-12)
+    assert cpu.replay_diagnostics["canonical_scattering"]["canonical_seed_sha256_le_u32"] == gpu.replay_diagnostics["canonical_scattering"]["canonical_seed_sha256_le_u32"]
+
+
+def test_linearized_static_canonical_scattering_replays():
+    from lcprop.pr.transverse.specs import PRTransverseMaterialResponseSpec
+    request = replace(_static_request(), scattering=_canonical_spec(),
+                      material_response=PRTransverseMaterialResponseSpec(
+                          model="linearized", reference_intensity=1.0))
+    first, second = run_pr_static(request), run_pr_static(request)
+    assert first.converged and first.replay_diagnostics["field_consistent"]
+    np.testing.assert_array_equal(first.A_final, second.A_final)
+    assert not np.array_equal(first.A_final, run_pr_static(replace(request, scattering=None)).A_final)
+
+
+def test_static_and_td_dispatch_use_identical_canonical_planes(monkeypatch):
+    import lcprop.pr.static_workflow as static
+    import lcprop.pr.workflow as td
+    spec = _canonical_spec("canonical_phase_slabs_v2_cross_backend")
+    request = replace(_static_request(), scattering=spec)
+    original = td._canonical_scattering_phase_for_slice
+    static_planes, td_planes = {}, {}
+    def capture(target):
+        def generate(scattering, **kwargs):
+            phase = original(scattering, **kwargs)
+            target[kwargs["z_index"]] = phase.copy()
+            return phase
+        return generate
+    monkeypatch.setattr(static, "_canonical_scattering_phase_for_slice", capture(static_planes))
+    monkeypatch.setattr(td, "_canonical_scattering_phase_for_slice", capture(td_planes))
+    run_pr_static(request)
+    run_pr_timedependent(PRRunRequest(
+        grid=request.grid, beams=request.beams, material=request.material,
+        backend=request.backend, scattering=spec,
+        solver=PRSolverOptions(Nt=0, dt_normalized=1e-5),
+    ))
+    assert static_planes.keys() == td_planes.keys() == {0, 1}
+    for index in static_planes:
+        np.testing.assert_array_equal(static_planes[index], td_planes[index])

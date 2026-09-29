@@ -270,9 +270,15 @@ def test_request_result_roundtrip_and_product_regeneration(tmp_path, kind):
         _assert_nested_equal(transported_diagnostic.values, original_diagnostic.values)
 
 
-def test_pr_static_request_result_roundtrip_and_product_regeneration(tmp_path):
+@pytest.mark.parametrize("scattering_enabled", [False, True])
+def test_pr_static_request_result_roundtrip_and_product_regeneration(tmp_path, scattering_enabled):
     registry = default_transport_registry()
     request = _pr_static_request()
+    if scattering_enabled:
+        from lcprop.pr.scattering import PRCanonicalScatteringSpec
+        request = replace(request, scattering=PRCanonicalScatteringSpec(
+            0.02, 0.4, 127, request.grid.dz_um,
+        ))
     run_dir = tmp_path / "pr-static"
     write_request_package(
         run_dir,

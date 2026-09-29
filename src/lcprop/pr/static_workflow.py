@@ -41,7 +41,13 @@ from lcprop.pr.transverse.specs import (
     PR_MATERIAL_RESPONSE_NONLINEAR,
     PRTransverseMaterialResponseSpec,
 )
-from lcprop.pr.workflow import advance_pr_slice_with_midpoint_source
+from lcprop.pr.scattering import PRCanonicalScatteringSpec, canonical_scattering_provenance
+from lcprop.pr.workflow import (
+    advance_pr_slice_with_midpoint_source,
+    _apply_canonical_scattering_after_slice,
+    _canonical_scattering_phase_for_slice,
+    _validate_canonical_scattering_for_grid,
+)
 
 
 PR_STATIC_WORKFLOW = "pr_static"
@@ -124,6 +130,7 @@ class PRStaticRunRequest:
         default_factory=PRTransverseMaterialResponseSpec
     )
     optical_boundary: TransverseBoundarySpec = TransverseBoundarySpec()
+    scattering: PRCanonicalScatteringSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -371,6 +378,9 @@ def run_pr_static(
     request.solver.validate()
     request.backend.validate()
     request.optical_boundary.validate()
+    _validate_canonical_scattering_for_grid(
+        request.scattering, grid=request.grid, z_length_um=request.grid.z_length_um
+    )
     LaunchConfiguration(request.beams, request.launch_elements)
     reject_prepared_launch_conflict(request.initial_A, request.launch_elements)
     wavelengths = tuple(
@@ -462,8 +472,21 @@ def run_pr_static(
     cancelled = False
     material_response_calls = 0
 
-    def advance_slice(A_in, state):
-        return advance_pr_slice_with_midpoint_source(
+    # One phase plane only: reuse within all trials of a slice; regenerate
+    # deterministically by coordinate for the final replay, never by trial count.
+    cached_z_index = None
+    cached_phase = None
+
+    def advance_slice(A_in, state, z_index):
+        nonlocal cached_z_index, cached_phase
+        if request.scattering is not None and cached_z_index != z_index:
+            cached_phase = None
+            cached_phase = _canonical_scattering_phase_for_slice(
+                request.scattering, z_index=z_index, grid=grid,
+                z_length_um=request.grid.z_length_um, xp=xp,
+            )
+            cached_z_index = z_index
+        A_out, source = advance_pr_slice_with_midpoint_source(
             A_in,
             state,
             kernel=kernel,
@@ -479,6 +502,11 @@ def run_pr_static(
             optical_boundary=request.optical_boundary,
             boundary_grid=grid,
         )
+        _apply_canonical_scattering_after_slice(
+            A_out, scattering=request.scattering, z_index=z_index, grid=grid,
+            z_length_um=request.grid.z_length_um, xp=xp, phase=cached_phase,
+        )
+        return A_out, source
 
     def residual_at(state, intensity):
         if linearized:
@@ -534,7 +562,7 @@ def run_pr_static(
         else:
             state = E_stack[k - 1].copy()
 
-        A_trial, intensity = advance_slice(A_slice_in, state)
+        A_trial, intensity = advance_slice(A_slice_in, state, k)
         residual = residual_at(state, intensity)
         residual_rms, residual_max = _residual_metrics(residual, xp=xp)
         converged = _criteria_met(residual_rms, residual_max, tolerances)
@@ -605,7 +633,7 @@ def run_pr_static(
             for _ in range(int(request.solver.max_backtracks) + 1):
                 trial_state = state + step_scale * direction
                 trial_A, trial_intensity = advance_slice(
-                    A_slice_in, trial_state
+                    A_slice_in, trial_state, k
                 )
                 trial_residual = residual_at(trial_state, trial_intensity)
                 trial_rms, trial_max = _residual_metrics(
@@ -760,7 +788,7 @@ def run_pr_static(
     )
     replay_progress_cadence = max(1, math.ceil(completed_slices / 100))
     for k in range(completed_slices):
-        replay_A, replay_source[k] = advance_slice(replay_A, E_stack[k])
+        replay_A, replay_source[k] = advance_slice(replay_A, E_stack[k], k)
         replay_residual[k] = residual_at(E_stack[k], replay_source[k])
         replay_completed = k + 1
         if (
@@ -878,6 +906,13 @@ def run_pr_static(
             else tolerances.provenance()
         ),
         replay_diagnostics={
+            **({"canonical_scattering": canonical_scattering_provenance(
+                request.scattering, z_length_um=request.grid.z_length_um,
+                Nx=grid.Nx, Ny=grid.Ny,
+                x_aperture_um=request.grid.x_aperture_um,
+                y_aperture_um=request.grid.y_aperture_um,
+                real_dtype=grid.real_dtype, xp=xp,
+            )} if request.scattering is not None else {}),
             "performed_slices": completed_slices,
             "requested_slices": grid.Nz,
             "residual_rms": replay_rms,

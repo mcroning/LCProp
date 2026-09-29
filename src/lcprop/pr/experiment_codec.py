@@ -45,6 +45,7 @@ from lcprop.pr.static_workflow import (
     PR_STATIC_WORKFLOW,
 )
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
+from lcprop.pr.workflow import _validate_canonical_scattering_for_grid
 from lcprop.pr.transverse.specs import (
     PR_FULL_TRANSVERSE_PROFILE_V1,
     PRTransverseBoundaryProfile,
@@ -119,6 +120,9 @@ def _validate_common(request: PRRunRequest | PRStaticRunRequest) -> None:
     request.optical_boundary.validate()
     if isinstance(request, PRStaticRunRequest):
         request.material_response.validate()
+        _validate_canonical_scattering_for_grid(
+            request.scattering, grid=request.grid, z_length_um=request.grid.z_length_um
+        )
     elif isinstance(request, PRRunRequest):
         validate_pr_timedependent_configuration(request)
         if request.scattering is not None:
@@ -155,6 +159,7 @@ def encode_pr_static_request(request: PRStaticRunRequest) -> dict:
     if not isinstance(request, PRStaticRunRequest):
         raise TypeError("request must be a PRStaticRunRequest")
     payload = _encode_common(request)
+    payload["scattering"] = None if request.scattering is None else asdict(request.scattering)
     payload["material_response"] = asdict(request.material_response)
     return payload
 
@@ -301,7 +306,8 @@ def _payload(
             else set()
         ),
         optional=(
-            (
+            ({"scattering"} if reduced_static else set())
+            | (
                 {"launch_elements"}
                 if version
                 >= _PR_LAUNCH_ELEMENTS_EXPERIMENT_REQUEST_SCHEMA_VERSION
@@ -426,6 +432,17 @@ def decode_pr_static_request(value: Any) -> PRStaticRunRequest:
     try:
         request = PRStaticRunRequest(
             **_decode_common(payload),
+            scattering=(
+                None
+                if payload.get("scattering") is None
+                else PRCanonicalScatteringSpec(
+                    **dataclass_values(
+                        PRCanonicalScatteringSpec,
+                        payload["scattering"],
+                        name="PR request_payload.scattering",
+                    )
+                )
+            ),
             solver=PRStaticWorkflowOptions(
                 material_solver=material_solver,
                 **solver_values,

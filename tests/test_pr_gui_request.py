@@ -403,3 +403,46 @@ def test_pr_gui_controls_reject_request_owned_initial_arrays(app):
 
     with pytest.raises(ValueError, match="load a PR checkpoint"):
         _apply(with_initial_state, controls)
+
+
+@pytest.mark.parametrize("algorithm", ["canonical_phase_slabs_v1", "canonical_phase_slabs_v2_cross_backend"])
+def test_reduced_static_scattering_gui_experiment_transport_roundtrip(app, algorithm, tmp_path):
+    from lcprop.pr.scattering import PRCanonicalScatteringSpec
+    from lcprop.pr.experiment_codec import encode_pr_static_request, decode_pr_static_request
+    from lcprop.pr.static_transport_codec import encode_pr_static_transport_request, decode_pr_static_transport_request
+    controls = _controls(app)
+    controls[-1].set_workflow_id(PR_STATIC_WORKFLOW)
+    spec = PRCanonicalScatteringSpec(0.02, 0.4, 304001242, 1.0, algorithm)
+    controls[-1].set_scattering_spec(spec)
+    assert not controls[-1].scattering_enabled.isHidden()
+    request = _build(controls)
+    assert request.scattering == spec
+    encoded = encode_pr_static_request(request)
+    restored = decode_pr_static_request(encoded)
+    from lcprop.persistence import save_experiment, load_experiment
+    path = tmp_path / "scattering.json"
+    from lcprop.pr.specs import PR_MATERIAL_ID
+    save_experiment(restored, path, material_id=PR_MATERIAL_ID, workflow_id=PR_STATIC_WORKFLOW)
+    restored = load_experiment(path).request
+    transport = encode_pr_static_transport_request(restored)
+    restored = decode_pr_static_transport_request(transport.payload.metadata, transport.payload.arrays)
+    assert restored.scattering == spec
+    _apply(restored, controls)
+    assert _build(controls).scattering == spec
+    # Existing saved experiments and transport requests decode as disabled.
+    encoded.pop("scattering")
+    assert decode_pr_static_request(encoded).scattering is None
+    transport.payload.metadata.pop("scattering")
+    assert decode_pr_static_transport_request(transport.payload.metadata, transport.payload.arrays).scattering is None
+
+
+def test_reduced_static_gui_rejects_non_aligned_scattering(app):
+    from lcprop.pr.scattering import PRCanonicalScatteringSpec
+    controls = _controls(app)
+    controls[-1].set_workflow_id(PR_STATIC_WORKFLOW)
+    request = _build(controls)
+    request = replace(request, scattering=PRCanonicalScatteringSpec(
+        0.02, 0.4, 127, request.grid.z_length_um * 2,
+    ))
+    with pytest.raises(ValueError, match="align"):
+        validate_pr_static_gui_request(request)

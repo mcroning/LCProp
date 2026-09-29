@@ -388,7 +388,7 @@ class PREvolutionPanel(QWidget):
                 if is_transverse_static
                 else "Maximum coupled passes per slice"
             )
-        supports_scattering = workflow_id != PR_STATIC_WORKFLOW
+        supports_scattering = True
         scattering_details = (
             self.scattering_epsilon,
             self.scattering_correlation_um,
@@ -524,10 +524,7 @@ class PREvolutionPanel(QWidget):
         )
 
     def scattering_spec(self) -> PRCanonicalScatteringSpec | None:
-        if (
-            not self.scattering_enabled.isChecked()
-            or self.workflow_id() == PR_STATIC_WORKFLOW
-        ):
+        if not self.scattering_enabled.isChecked():
             return None
         spec = PRCanonicalScatteringSpec(
             epsilon=self.scattering_epsilon.value(),

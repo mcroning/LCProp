@@ -203,8 +203,8 @@ def test_scattering_controls_round_trip_where_production_supports_them(app):
     assert _build(restored) == request
 
     panel.evolution.setCurrentIndex(panel.evolution.findData("static"))
-    assert panel.scattering_enabled.isHidden()
-    assert not hasattr(_build(source), "scattering")
+    assert not panel.scattering_enabled.isHidden()
+    assert _build(source).scattering == scattering
 
 
 def test_legacy_full_linearized_td_integrator_token_round_trips(app):

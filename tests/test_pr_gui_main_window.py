@@ -617,3 +617,20 @@ def test_pr_window_rejects_checkpoint_from_another_material(
     assert window.last_checkpoint is None
     assert not window.continue_button.isEnabled()
     window.close()
+
+
+def test_reduced_static_inspection_reports_canonical_scattering(app):
+    from lcprop.pr.scattering import PRCanonicalScatteringSpec
+    window = _tiny_window(app)
+    try:
+        window.evolution_panel.set_workflow_id(PR_STATIC_WORKFLOW)
+        assert "Canonical volume scattering: disabled" in window.describe_request(window.build_request())
+        window.evolution_panel.set_scattering_spec(PRCanonicalScatteringSpec(
+            0.02, 0.4, 127, 1.0, "canonical_phase_slabs_v2_cross_backend"))
+        summary = window.describe_request(window.build_request())
+        for text in ("Canonical volume scattering: enabled", "Scattering strength ε: 0.02",
+                     "Scattering correlation length: 0.4 µm", "Scattering seed: 127",
+                     "Scattering canonical slab Δz: 1 µm", "canonical_phase_slabs_v2_cross_backend"):
+            assert text in summary
+    finally:
+        window.close()

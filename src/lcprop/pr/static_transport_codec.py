@@ -25,6 +25,8 @@ from lcprop.pr.longitudinal_cuts import (
     retained_longitudinal_intensity_cuts,
     validate_longitudinal_cut_coordinates,
 )
+from lcprop.pr.scattering import PRCanonicalScatteringSpec
+from lcprop.pr.workflow import _validate_canonical_scattering_for_grid
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.visualization import (
     make_fast_intensity_preview,
@@ -58,7 +60,7 @@ from lcprop.transport.result_policy import (
 
 PR_STATIC_REQUEST_CODEC_ID = "pr.static.request"
 PR_STATIC_RESULT_CODEC_ID = "pr.static.result"
-PR_STATIC_TRANSPORT_CODEC_VERSION = 2
+PR_STATIC_TRANSPORT_CODEC_VERSION = 3
 _PR_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION = 1
 PR_STATIC_RESULT_CODEC_VERSION = 3
 
@@ -71,6 +73,9 @@ def _validate_request(request: PRStaticRunRequest) -> None:
     request.backend.validate()
     request.material_response.validate()
     request.optical_boundary.validate()
+    _validate_canonical_scattering_for_grid(
+        request.scattering, grid=request.grid, z_length_um=request.grid.z_length_um
+    )
     validate_channel_launch_elements(
         request.launch_elements, n_channels=len(request.beams.channels)
     )
@@ -97,6 +102,7 @@ def encode_pr_static_transport_request(
     _validate_request(request)
     arrays: dict[str, np.ndarray] = {}
     metadata = {
+        "scattering": None if request.scattering is None else asdict(request.scattering),
         "grid": asdict(request.grid),
         "beams": encode_beam_stack(request.beams),
         "material": asdict(request.material),
@@ -129,6 +135,10 @@ def decode_pr_static_transport_request(
         )
         beams = decode_beam_stack(values["beams"])
         request = PRStaticRunRequest(
+            scattering=(
+                None if values.get("scattering") is None
+                else PRCanonicalScatteringSpec(**values["scattering"])
+            ),
             grid=GridSpec(**values["grid"]),
             beams=beams,
             material=PRMaterialSpec(**values["material"]),
@@ -465,10 +475,11 @@ PR_STATIC_TRANSPORT_CODEC = TransportCodec(
     encode_result_projection=encode_pr_static_transport_result,
     compatible_request_codec_versions=(
         _PR_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION,
+        2,
     ),
     compatible_result_codec_versions=(
         _PR_STATIC_PREVIOUS_TRANSPORT_CODEC_VERSION,
-        PR_STATIC_TRANSPORT_CODEC_VERSION,
+        2,
     ),
 )
 

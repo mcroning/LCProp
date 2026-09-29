@@ -205,3 +205,22 @@ integrated scattering realization.
 ---
 
 End of design record.
+
+## Reduced x-only production Static integration
+
+Reduced Static accepts the same optional `PRCanonicalScatteringSpec` as TD and
+transverse Static, for both nonlinear and linearized material responses. The
+existing shared GUI controls populate it without changing their defaults or
+algorithm identities. Missing scattering fields in older saved Static requests
+mean disabled. Static transport request codec v3 carries the specification and
+continues to read v1/v2 requests; result codec compatibility is unchanged.
+
+The workflow applies the summed canonical interval phase after the complete
+optical material-interval advance. Optical substeps do not introduce screens.
+One backend phase plane is cached across all trials/backtracks of the current
+slice. Replay regenerates by physical coordinate using the same generator; no
+full host or device scattering volume is retained. Disabled requests do not
+generate phases. Canonical provenance is retained under
+`replay_diagnostics.canonical_scattering`, including in Fast/Full transport and
+product replay metadata. This feature does not add entrance perturbations,
+legacy per-material-slice scattering, or historical reference operations.

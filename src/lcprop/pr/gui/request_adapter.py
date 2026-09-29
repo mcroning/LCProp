@@ -20,6 +20,7 @@ from lcprop.pr.specs import (
     PR_TIMEDEPENDENT_WORKFLOW,
     validate_pr_timedependent_configuration,
 )
+from lcprop.pr.workflow import _validate_canonical_scattering_for_grid
 from lcprop.pr.static_workflow import (
     PRStaticRunRequest,
     PR_STATIC_WORKFLOW,
@@ -136,6 +137,9 @@ def validate_pr_static_gui_request(
     if not isinstance(request, PRStaticRunRequest):
         raise TypeError("request must be a PRStaticRunRequest")
     request.material_response.validate()
+    _validate_canonical_scattering_for_grid(
+        request.scattering, grid=request.grid, z_length_um=request.grid.z_length_um
+    )
     return PRStaticRequestPreflight(
         aperture=_validate_pr_gui_common(request),
     )
@@ -265,6 +269,7 @@ def build_pr_request(
         request = PRStaticRunRequest(
             **common,
             solver=evolution_panel.static_solver(),
+            scattering=scattering,
             material_response=evolution_panel.transverse_material_response(),
         )
     elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
