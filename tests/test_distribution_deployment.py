@@ -63,7 +63,7 @@ class Remote(LocalRemoteTransport):
     def ssh(self, host, *args):
         if args[0] == sys.executable:
             self.commands.append((host, args))
-            return subprocess.check_output([sys.executable, '-B', '-c', args[args.index('-c')+1], str(self._path(args[-2])), args[-1]], text=True)
+            return subprocess.run([sys.executable, '-B', '-c', args[args.index('-c')+1], str(self._path(args[-2])), args[-1]], text=True, capture_output=True, check=True).stdout
         return super().ssh(host, *args)
 
 
@@ -148,6 +148,63 @@ def test_failed_distribution_staging_never_publishes(installed,tmp_path,failure)
 def test_concurrent_publisher_verified(installed,tmp_path):
     remote=Remote(tmp_path/'remote');remote.simulate_winning_finalizer=True
     assert manager(installed,remote).resolve_or_stage().reused_existing_snapshot
+
+
+@pytest.mark.parametrize('failure', ['ssh', 'command', 'diagnostic-status-one', 'os-error', 'timeout', 'absent'])
+def test_staging_existence_probe_preserves_unknown_vs_absent(installed, tmp_path, failure):
+    class ProbeRemote(Remote):
+        probed_after_extraction = False
+        original_error = None
+
+        def ssh(self, host, *args):
+            if args[:2] == ('test', '-e') and '/.staging-' in args[2]:
+                # Exercise resolve_or_stage -> _stage -> verifier, after real
+                # local archive extraction. Do not stub either existence helper.
+                path = self._path(args[2])
+                assert (path / 'src/lcprop/__init__.py').is_file()
+                assert any(command[0] == 'tar' for _, command in self.commands)
+                self.probed_after_extraction = True
+                if failure == 'absent':
+                    shutil.rmtree(path)
+                    return super().ssh(host, *args)
+                if failure == 'os-error':
+                    error = OSError('probe transport could not start')
+                elif failure == 'timeout':
+                    error = subprocess.TimeoutExpired(args, 10, stderr=b'probe timed out')
+                else:
+                    code = {'ssh': 255, 'command': 2, 'diagnostic-status-one': 1}[failure]
+                    error = subprocess.CalledProcessError(code, args, stderr='probe execution failed')
+                self.original_error = error
+                raise error
+            return super().ssh(host, *args)
+
+    remote = ProbeRemote(tmp_path / 'remote')
+    with pytest.raises(SourceDeploymentError) as caught:
+        manager(installed, remote).resolve_or_stage()
+    assert remote.probed_after_extraction
+    assert not list((tmp_path / 'remote/sources').glob('dist-sha256-*'))
+    if failure == 'absent':
+        assert caught.value.category == 'snapshot_identity_mismatch'
+        assert 'staging disappeared' in str(caught.value)
+    else:
+        assert caught.value.category == 'snapshot_verification_failed'
+        assert caught.value.__cause__ is remote.original_error
+        assert 'probe' in str(caught.value)
+        stderr = getattr(remote.original_error, 'stderr', None)
+        if stderr:
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode()
+            assert stderr in str(caught.value)
+
+
+def test_checked_snapshot_absence_still_allows_first_stage(installed, tmp_path):
+    remote = Remote(tmp_path / 'remote')
+    deployment = manager(installed, remote)
+    assert deployment._verify_distribution('/sources/missing', resolve(installed).digest) is False
+    assert remote.upload_count == 0
+    result = deployment.resolve_or_stage()
+    assert not result.reused_existing_snapshot
+    assert deployment.resolve_or_stage().reused_existing_snapshot
 
 
 def test_git_identity_bound_and_never_falls_back(tmp_path):

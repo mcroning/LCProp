@@ -3,7 +3,6 @@ from __future__ import annotations
 import inspect
 import os
 from pathlib import Path
-import shlex
 import subprocess
 import sys
 from threading import Event, Timer
@@ -436,8 +435,8 @@ def test_connection_cupy_probe_preserves_login_setup_and_python_code_quoting():
     _host, arguments = next(
         call for call in transport.calls if "import cupy" in " ".join(call[1])
     )
-    assert len(arguments) == 1
-    shell_arguments = shlex.split(arguments[0])
+    assert len(arguments) == 5
+    shell_arguments = list(arguments)
     assert shell_arguments[:4] == [
         "bash",
         "-lc",
@@ -471,8 +470,8 @@ def test_connection_setup_command_arguments_remain_in_one_bounded_payload():
     _host, arguments = next(
         call for call in transport.calls if "import cupy" in " ".join(call[1])
     )
-    shell_arguments = shlex.split(arguments[0])
-    assert len(arguments) == 1
+    shell_arguments = list(arguments)
+    assert len(arguments) == 5
     assert shell_arguments[4].startswith(setup + "; module load cuda/12.9.0; ")
 
 

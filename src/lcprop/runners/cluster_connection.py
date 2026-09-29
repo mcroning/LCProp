@@ -98,7 +98,7 @@ class ConnectionTestRemoteTransport(SubprocessRemoteTransport):
         """Run one cancellable SSH probe with an operation-specific timeout."""
 
         return self._run_bounded(
-            ["ssh", "-o", "BatchMode=yes", host, *arguments],
+            self._ssh_command(host, *arguments),
             timeout_seconds=timeout_seconds,
             cancellation_check=cancellation_check,
         )
@@ -141,18 +141,16 @@ def _failure_detail(exc: Exception) -> str:
     return text or type(exc).__name__
 
 
-def _login_shell_command(commands: tuple[str, ...]) -> str:
-    """Return one SSH command with the trusted payload isolated in ``$1``."""
+def _login_shell_command(commands: tuple[str, ...]) -> tuple[str, ...]:
+    """Return remote argv with the trusted shell payload isolated in ``$1``."""
 
     payload = "; ".join(commands)
-    return shlex.join(
-        (
-            "bash",
-            "-lc",
-            'eval "$1"',
-            "lcprop-connection-test",
-            payload,
-        )
+    return (
+        "bash",
+        "-lc",
+        'eval "$1"',
+        "lcprop-connection-test",
+        payload,
     )
 
 
@@ -331,7 +329,7 @@ class ClusterConnectionTester:
                         self._check(
                             "CuPy import",
                             cluster.host,
-                            _login_shell_command((*profile.setup_commands, probe)),
+                            *_login_shell_command((*profile.setup_commands, probe)),
                             timeout_seconds=_ENVIRONMENT_PROBE_TIMEOUT_SECONDS,
                             cancellation_check=cancelled,
                         )

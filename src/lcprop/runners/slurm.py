@@ -212,7 +212,15 @@ class RemoteTransport(Protocol):
 
 
 class SubprocessRemoteTransport:
-    """Small SSH/SCP adapter; no shell interpolation or credential storage."""
+    """Small SSH/SCP adapter with literal remote argv and no credential storage."""
+
+    @staticmethod
+    def _ssh_command(host: str, *arguments: str) -> list[str]:
+        # OpenSSH joins command arguments for the remote POSIX shell; it does
+        # not transmit argv boundaries. Serialize once at this boundary.
+        if not arguments or not arguments[0] or any("\0" in arg for arg in arguments):
+            raise ValueError("SSH requires a nonempty command and NUL-free arguments")
+        return ["ssh", "-o", "BatchMode=yes", host, shlex.join(arguments)]
 
     @staticmethod
     def _run(arguments: list[str]) -> str:
@@ -222,7 +230,7 @@ class SubprocessRemoteTransport:
         return completed.stdout.strip()
 
     def ssh(self, host: str, *arguments: str) -> str:
-        return self._run(["ssh", "-o", "BatchMode=yes", host, *arguments])
+        return self._run(self._ssh_command(host, *arguments))
 
     def upload(self, host: str, local: Path, remote: str) -> None:
         self._run(["scp", "-q", "-r", str(local), f"{host}:{remote}"])

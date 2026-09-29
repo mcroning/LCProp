@@ -115,6 +115,13 @@ ownership remain part of the trust boundary.
 Installed-artifact execution requires ordinary installed remote dependencies;
 dependencies available only through editable `.pth`/startup hooks are unsupported.
 
+SSH transports serialize remote argument vectors with POSIX shell quoting;
+callers pass literal arguments, not prequoted command strings. Intentional shell
+programs use explicit shell arguments (for example, `bash -lc` plus its payload).
+Installed-snapshot verification reports `snapshot_identity_mismatch` only for an
+explicit verifier identity failure. Launch, transport and unexpected verifier
+failures report `snapshot_verification_failed`, retaining stderr for diagnosis.
+
 Both material GUIs provide **Configure Remote Execution…** beside the
 independent Local/Slurm execution selector. The shared dialog accepts a profile
 name, SSH username and login host, remote run/Python/source paths, polling

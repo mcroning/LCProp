@@ -191,8 +191,10 @@ def _resolve_installed_distribution(package_file, distributions=None):
 # Manifest digest is supplied independently by the request/launcher, not trusted from disk.
 VERIFY_PROGRAM = r'''
 import hashlib,json,pathlib,sys
+class ArtifactIdentityError(RuntimeError):
+    pass
 def require(condition,message='invalid artifact'):
-    if not condition: raise RuntimeError(message)
+    if not condition: raise ArtifactIdentityError(message)
 root=pathlib.Path(_artifact_root if '_artifact_root' in globals() else sys.argv[1]).resolve()
 expected=_artifact_digest if '_artifact_digest' in globals() else sys.argv[2]
 m=json.loads((root/'.lcprop-artifact.json').read_text())
@@ -220,6 +222,17 @@ for p in (root/'src').rglob('*'):
 require(actual==names, 'unexpected payload files')
 if not globals().get('_quiet',False): print(expected)
 '''
+
+# Only a completed identity assertion emits this protocol signal. SSH, shell,
+# Python startup, I/O and unexpected verifier errors remain execution failures.
+_IDENTITY_FAILURE_MARKER = "LCPROP_ARTIFACT_IDENTITY_FAILURE: "
+_IDENTITY_FAILURE_EXIT = 65
+REMOTE_VERIFY_PROGRAM = (
+    f"try:\n    exec({VERIFY_PROGRAM!r})\n"
+    "except ArtifactIdentityError as exc:\n"
+    f"    print({_IDENTITY_FAILURE_MARKER!r} + str(exc), file=sys.stderr)\n"
+    f"    sys.exit({_IDENTITY_FAILURE_EXIT})\n"
+)
 
 
 # -I -S prevents PYTHONPATH, user site, .pth and sitecustomize from selecting code
@@ -295,16 +308,39 @@ class InstalledDeploymentManager(SourceDeploymentManager):
             "distribution", resolve_installed_distribution(self.package_file, self.distributions)
         )
 
-    def _verify_distribution(self, remote_snapshot, digest):
-        if not self._exists(remote_snapshot):
-            return False
+    def _snapshot_exists_checked(self, path):
+        """Only a quiet POSIX test false result establishes snapshot absence."""
         try:
+            self._transport.ssh(self.host, "test", "-e", path)
+        except subprocess.CalledProcessError as exc:
+            if exc.returncode == 1 and not exc.stderr and not exc.stdout:
+                return False
+            raise
+        return True
+
+    def _verify_distribution(self, remote_snapshot, digest):
+        verifier_started = False
+        try:
+            if not self._snapshot_exists_checked(remote_snapshot):
+                return False
+            verifier_started = True
             result = self._transport.ssh(self.host, self.remote_python, "-I", "-S", "-c",
-                                         VERIFY_PROGRAM, remote_snapshot, digest)
+                                         REMOTE_VERIFY_PROGRAM, remote_snapshot, digest)
             if result.strip() != digest:
                 raise ValueError("unexpected verification response")
         except Exception as exc:
-            raise SourceDeploymentError("snapshot_identity_mismatch", str(exc)) from exc
+            stderr = getattr(exc, "stderr", None) or ""
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            identity_failure = (
+                verifier_started
+                and isinstance(exc, subprocess.CalledProcessError)
+                and exc.returncode == _IDENTITY_FAILURE_EXIT
+                and any(line.startswith(_IDENTITY_FAILURE_MARKER) for line in stderr.splitlines())
+            )
+            category = "snapshot_identity_mismatch" if identity_failure else "snapshot_verification_failed"
+            detail = str(exc) + (f"\nstderr:\n{stderr}" if stderr else "")
+            raise SourceDeploymentError(category, detail) from exc
         return True
 
     def resolve_or_stage(self, *, binding=None):
