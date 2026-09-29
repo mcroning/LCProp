@@ -8,6 +8,10 @@ from lcprop.core.context import GridSpec
 from lcprop.gui.panels.helpers import double_spin_box, spin_box
 
 
+# QSpinBox uses a signed C++ int. This is a representation limit only.
+PR_GUI_MAX_TRANSVERSE_SAMPLES = 2**31 - 1
+
+
 PR_DEFAULT_GRID = GridSpec(
     Nx=128,
     Ny=128,
@@ -26,8 +30,13 @@ class PRGridPanel(QWidget):
         layout = QVBoxLayout(self)
         form = readable_form(QFormLayout())
 
-        self.Nx = spin_box(2, 4096, PR_DEFAULT_GRID.Nx)
-        self.Ny = spin_box(2, 4096, PR_DEFAULT_GRID.Ny)
+        self.Nx = spin_box(2, PR_GUI_MAX_TRANSVERSE_SAMPLES, PR_DEFAULT_GRID.Nx)
+        self.Ny = spin_box(2, PR_GUI_MAX_TRANSVERSE_SAMPLES, PR_DEFAULT_GRID.Ny)
+        for widget in (self.Nx, self.Ny):
+            widget.setToolTip(
+                "Qt integer representation limit only; this range does not establish that the "
+                "grid fits the selected execution resource."
+            )
         self.dz_um = double_spin_box(0.001, 1000.0, PR_DEFAULT_GRID.dz_um)
         self.z_length_um = double_spin_box(
             0.001,
@@ -66,6 +75,11 @@ class PRGridPanel(QWidget):
 
     def set_grid(self, grid: GridSpec) -> None:
         grid.validate()
+        if any(value > PR_GUI_MAX_TRANSVERSE_SAMPLES for value in (grid.Nx, grid.Ny)):
+            raise ValueError(
+                f"PR GUI integer controls cannot represent Nx or Ny above "
+                f"{PR_GUI_MAX_TRANSVERSE_SAMPLES}; this is not a scientific grid limit"
+            )
         self.Nx.setValue(grid.Nx)
         self.Ny.setValue(grid.Ny)
         self.dz_um.setValue(grid.dz_um)
@@ -74,4 +88,4 @@ class PRGridPanel(QWidget):
         self.y_aperture_um.setValue(grid.y_aperture_um)
 
 
-__all__ = ["PR_DEFAULT_GRID", "PRGridPanel"]
+__all__ = ["PR_DEFAULT_GRID", "PR_GUI_MAX_TRANSVERSE_SAMPLES", "PRGridPanel"]

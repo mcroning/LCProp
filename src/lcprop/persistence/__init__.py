@@ -119,6 +119,7 @@ def save_experiment(
     material_id,
     workflow_id,
     presentation_payload=None,
+    execution_intent=None,
 ):
     """Save one request through the registered material/workflow codec."""
 
@@ -129,6 +130,7 @@ def save_experiment(
         workflow_id=workflow_id,
         registry=EXPERIMENT_CODECS,
         presentation_payload=presentation_payload,
+        execution_intent=execution_intent,
     )
 
 

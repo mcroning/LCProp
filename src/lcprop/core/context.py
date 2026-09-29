@@ -6,6 +6,8 @@ compatibility; new LC code should import them from :mod:`lcprop.lc`.
 """
 
 from dataclasses import dataclass
+import math
+from numbers import Integral, Real
 from importlib import import_module
 
 
@@ -21,16 +23,19 @@ class GridSpec:
     z_length_um: float = 3000.0
 
     def validate(self) -> None:
-        if self.Nx <= 1 or self.Ny <= 1:
-            raise ValueError("Nx and Ny must be > 1")
-        if self.dz_um <= 0.0:
-            raise ValueError("dz_um must be positive")
-        if self.x_aperture_um <= 0.0:
-            raise ValueError("x_aperture_um must be positive")
-        if self.y_aperture_um <= 0.0:
-            raise ValueError("y_aperture_um must be positive")
-        if self.z_length_um <= 0.0:
-            raise ValueError("z_length_um must be positive")
+        for name in ("Nx", "Ny"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, Integral) or value <= 1:
+                raise ValueError("Nx and Ny must be integers > 1")
+        for name in ("dz_um", "x_aperture_um", "y_aperture_um", "z_length_um"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Real)
+                or not math.isfinite(value)
+                or value <= 0.0
+            ):
+                raise ValueError(f"{name} must be finite and positive")
 
 
 _LC_COMPATIBILITY_EXPORTS = {"BiasSpec", "LCContext", "LCMaterial"}

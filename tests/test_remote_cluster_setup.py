@@ -373,7 +373,7 @@ def test_main_windows_keep_local_default_and_show_profile_controls(
 
 
 @pytest.mark.parametrize("window_type", (LCPropMainWindow, PRMainWindow))
-def test_deleting_active_cluster_falls_back_to_local(
+def test_deleting_active_cluster_preserves_pr_intent_and_lc_behavior(
     tmp_path, monkeypatch, window_type
 ):
     _app()
@@ -384,10 +384,17 @@ def test_deleting_active_cluster_falls_back_to_local(
     window.execution_target_selector.setCurrentIndex(1)
     assert window.runner is window.slurm_runner
     window.remote_execution_controls._catalog_saved(ClusterCatalog(config_path=path))
-    assert window.execution_target_selector.currentData() == "local"
-    assert window.runner is window.local_runner
-    assert window.remote_execution_controls.cluster_selector.count() == 0
-    assert window.remote_execution_controls.resource_selector.count() == 0
+    if window_type is PRMainWindow:
+        assert window.execution_target_selector.currentData() == "slurm"
+        assert window._saved_unresolved_intent.cluster_profile == "alpha"
+        with pytest.raises(ValueError, match="explicitly select"):
+            window._require_execution_intent_resolved()
+    else:
+        assert window.execution_target_selector.currentData() == "local"
+        assert window.runner is window.local_runner
+    expected_count = 1 if window_type is PRMainWindow else 0
+    assert window.remote_execution_controls.cluster_selector.count() == expected_count
+    assert window.remote_execution_controls.resource_selector.count() == expected_count
     assert "no cluster profile" in (
         window.remote_execution_controls.availability_label.text()
     )

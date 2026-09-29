@@ -14,9 +14,12 @@ from typing import Any
 
 from lcprop.core.beams import BeamChannel, BeamStack
 
+from .execution_intent import ExecutionIntent, validate_execution_intent
+
 
 EXPERIMENT_FORMAT = "lcprop-experiment"
-EXPERIMENT_SCHEMA_VERSION = 2
+
+EXPERIMENT_SCHEMA_VERSION = 3
 EXPERIMENT_FILE_EXTENSION = ".lcprop.json"
 
 
@@ -245,6 +248,7 @@ class LoadedExperiment:
     request: Any
     presentation_payload: dict[str, Any]
     schema_version: int = EXPERIMENT_SCHEMA_VERSION
+    execution_intent: ExecutionIntent | None = None
 
 
 def _validate_launchplane_presentation(
@@ -312,6 +316,7 @@ def write_experiment_file(
     workflow_id: str,
     registry: ExperimentCodecRegistry,
     presentation_payload: Mapping[str, Any] | None = None,
+    execution_intent: ExecutionIntent | None = None,
 ) -> Path:
     """Encode one request and atomically write its experiment JSON file."""
 
@@ -332,6 +337,7 @@ def write_experiment_file(
         raise
     except (TypeError, ValueError) as exc:
         raise ExperimentPayloadError(f"could not encode request: {exc}") from exc
+    intent = validate_execution_intent(execution_intent, request)
     presentation = _validated_presentation(request, presentation_payload)
     document = {
         "format": EXPERIMENT_FORMAT,
@@ -340,6 +346,7 @@ def write_experiment_file(
         "workflow_id": workflow_id,
         "request_payload": request_payload,
         "presentation_payload": presentation,
+        "execution_intent": None if intent is None else intent.to_payload(),
     }
     output = Path(path)
     temporary = output.with_suffix(output.suffix + ".tmp")
@@ -376,7 +383,7 @@ def _read_document(path: Path) -> dict[str, Any]:
         "workflow_id",
         "request_payload",
     }
-    optional = {"presentation_payload"}
+    optional = {"presentation_payload", "execution_intent"}
     actual = set(document)
     if required - actual:
         raise ExperimentFormatError(
@@ -393,7 +400,7 @@ def _read_document(path: Path) -> dict[str, Any]:
             f"invalid experiment format marker: {document['format']!r}"
         )
     version = document["schema_version"]
-    if type(version) is not int or version != EXPERIMENT_SCHEMA_VERSION:
+    if type(version) is not int or version not in (2, EXPERIMENT_SCHEMA_VERSION):
         raise ExperimentSchemaError(
             f"unsupported experiment schema version: {version!r}"
         )
@@ -446,11 +453,17 @@ def read_experiment_file(
         request,
         document.get("presentation_payload"),
     )
+    try:
+        intent = validate_execution_intent(document.get("execution_intent"), request)
+    except (TypeError, ValueError) as exc:
+        raise ExperimentPayloadError(f"invalid execution intent: {exc}") from exc
     return LoadedExperiment(
         material_id=material_id,
         workflow_id=workflow_id,
         request=request,
         presentation_payload=presentation,
+        execution_intent=intent,
+        schema_version=document["schema_version"],
     )
 
 

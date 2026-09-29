@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QThread, QSignalBlocker, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -612,11 +612,13 @@ class RemoteExecutionControls(QWidget):
     selectionChanged = Signal()
 
     def __init__(
-        self, discovery=None, *, config_path=None, runner_factory=None, parent=None
+        self, discovery=None, *, config_path=None, runner_factory=None, parent=None,
+        preserve_selection_on_refresh=False
     ) -> None:
         super().__init__(parent)
         self.discovery = discovery or discover_remote_execution(config_path)
         self.runner_factory = runner_factory
+        self.preserve_selection_on_refresh = preserve_selection_on_refresh
         layout = FlowLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.cluster_selector, self.resource_selector = QComboBox(), QComboBox()
@@ -650,8 +652,39 @@ class RemoteExecutionControls(QWidget):
             return "Slurm unavailable — no cluster profile configured. Choose Configure Remote Execution to create your first user-local profile."
         return ""
 
+    def select_profile_identity(self, cluster_name, resource_name):
+        """Restore named controls atomically, retaining unavailable identities."""
+        with QSignalBlocker(self), QSignalBlocker(self.cluster_selector), QSignalBlocker(self.resource_selector):
+            self.cluster_selector.clear()
+            for cluster in self.discovery.catalog.clusters:
+                self.cluster_selector.addItem(cluster.name, cluster.name)
+            if cluster_name is not None and self.cluster_selector.findData(cluster_name) < 0:
+                self.cluster_selector.addItem(f"{cluster_name} (unavailable)", cluster_name)
+            self.cluster_selector.setCurrentIndex(self.cluster_selector.findData(cluster_name))
+            self.resource_selector.clear()
+            cluster = self.selected_cluster()
+            if cluster is not None:
+                for profile in cluster.resource_profiles:
+                    self.resource_selector.addItem(profile.name, profile.name)
+                if resource_name is None:
+                    resource_name = cluster.default_resource_profile or cluster.resource_profiles[0].name
+            if resource_name is not None and self.resource_selector.findData(resource_name) < 0:
+                self.resource_selector.addItem(f"{resource_name} (unavailable)", resource_name)
+            self.resource_selector.setCurrentIndex(self.resource_selector.findData(resource_name))
+        self.selectionChanged.emit()
+
     def refresh(self, discovery) -> None:
         old = self.cluster_selector.currentData()
+        if self.preserve_selection_on_refresh:
+            resource = self.resource_selector.currentData()
+            self.discovery = discovery
+            initial = discovery.catalog.default_cluster
+            if initial is None and discovery.catalog.clusters:
+                initial = discovery.catalog.clusters[0].name
+            self.select_profile_identity(old or initial, resource if old else None)
+            self.availability_label.setText("Slurm profile configured" if self.slurm_available else self.unavailable_reason)
+            self.availability_label.setToolTip(self.unavailable_reason or "Connectivity is tested explicitly.")
+            return
         self.discovery = discovery
         self.cluster_selector.blockSignals(True)
         self.cluster_selector.clear()
@@ -696,7 +729,10 @@ class RemoteExecutionControls(QWidget):
 
     def selected_cluster(self):
         name = self.cluster_selector.currentData()
-        return self.discovery.catalog[name] if name else None
+        try:
+            return self.discovery.catalog[name] if name else None
+        except KeyError:
+            return None
 
     def selected_resource_name(self):
         return self.resource_selector.currentData()

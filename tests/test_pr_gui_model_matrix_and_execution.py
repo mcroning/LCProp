@@ -245,6 +245,8 @@ class _Profile:
 
 
 class _Cluster:
+    name = "test-cluster"
+
     def profile(self, name):
         return {
             "GPU": _Profile(gpus=1, require_cupy=True),

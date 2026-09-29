@@ -55,6 +55,33 @@ def round_nz(z_length_um: float, dz_um: float) -> int:
     return max(1, int(round(float(z_length_um) / float(dz_um))))
 
 
+@dataclass(frozen=True)
+class GridMetadata:
+    """Scalar geometry only; no coordinate, frequency, or scientific arrays."""
+
+    spec: GridSpec
+    Nx: int
+    Ny: int
+    Nz: int
+    dx_um: float
+    dy_um: float
+    dz_um: float
+
+
+def grid_metadata(spec: GridSpec) -> GridMetadata:
+    """Derive presentation/runtime geometry using the existing z convention."""
+
+    spec.validate()
+    nx, ny = int(spec.Nx), int(spec.Ny)
+    return GridMetadata(
+        spec=spec, Nx=nx, Ny=ny,
+        Nz=round_nz(spec.z_length_um, spec.dz_um),
+        dx_um=float(spec.x_aperture_um) / nx,
+        dy_um=float(spec.y_aperture_um) / ny,
+        dz_um=float(spec.dz_um),
+    )
+
+
 def make_grid(
     spec: GridSpec,
     *,
@@ -63,15 +90,9 @@ def make_grid(
 ) -> RuntimeGrid:
     """Build a runtime grid from GridSpec."""
 
-    spec.validate()
-
-    Nx = int(spec.Nx)
-    Ny = int(spec.Ny)
-    Nz = round_nz(spec.z_length_um, spec.dz_um)
-
-    dx_um = float(spec.x_aperture_um) / Nx
-    dy_um = float(spec.y_aperture_um) / Ny
-    dz_um = float(spec.dz_um)
+    metadata = grid_metadata(spec)
+    Nx, Ny, Nz = metadata.Nx, metadata.Ny, metadata.Nz
+    dx_um, dy_um, dz_um = metadata.dx_um, metadata.dy_um, metadata.dz_um
 
     x_um = (
         (xp.arange(Nx, dtype=real_dtype) - Nx / 2) * dx_um + 0.5 * dx_um
@@ -123,4 +144,4 @@ def __dir__() -> list[str]:
     return sorted(set(globals()) | _LC_COMPATIBILITY_EXPORTS)
 
 
-__all__ = ["RuntimeGrid", "from_cell", "make_grid", "round_nz"]
+__all__ = ["GridMetadata", "grid_metadata", "RuntimeGrid", "from_cell", "make_grid", "round_nz"]

@@ -9,11 +9,12 @@ from lcprop.gui.runtime_status import RuntimeStatusLabel, reserve_button_text
 
 from lcprop.gui.layout import FlowLayout, application_layout
 
+from dataclasses import replace
 from functools import partial
 from time import monotonic
 import traceback
 
-from PySide6.QtCore import QCoreApplication, QThread, QTimer, Qt, Slot
+from PySide6.QtCore import QCoreApplication, QThread, QTimer, QSignalBlocker, Qt, Slot
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QFileDialog,
@@ -58,6 +59,7 @@ from lcprop.persistence import (
     save_experiment,
     save_run_checkpoint,
 )
+from lcprop.persistence.execution_intent import ExecutionIntent
 from lcprop.pr.checkpoint import (
     PRTimeDependentCheckpoint,
     validate_pr_continuation,
@@ -184,6 +186,10 @@ def _continue_pr_operation(
     )
 
 
+class _UnresolvedExecutionRunner:
+    name = "Slurm (saved target unavailable/unresolved)"
+
+
 class PRMainWindow(QWidget):
     """Focused GUI for the registered PR workflow operations."""
 
@@ -198,8 +204,10 @@ class PRMainWindow(QWidget):
                 PR_STATIC_OPERATION,
             )
         )
+        self._saved_unresolved_intent = None
+        self.execution_intent_was_saved = False
         self._explicit_slurm_runner = slurm_runner
-        self.remote_execution_controls = RemoteExecutionControls()
+        self.remote_execution_controls = RemoteExecutionControls(preserve_selection_on_refresh=True)
         self.slurm_runner = (
             slurm_runner
             if slurm_runner is not None
@@ -300,6 +308,15 @@ class PRMainWindow(QWidget):
         reserve_button_text(self.stop_button, ["Stop", "Stopping…"], retain_hidden=True)
         root.addLayout(header)
         root.addWidget(self.remote_execution_controls)
+        self.execution_intent_label = QLabel("Execution intent: current selection (not loaded from file)")
+        self.execution_intent_label.setWordWrap(True)
+        root.addWidget(self.execution_intent_label)
+        for selector in (
+            self.execution_target_selector,
+            self.remote_execution_controls.cluster_selector,
+            self.remote_execution_controls.resource_selector,
+        ):
+            selector.activated.connect(self._accept_execution_selection)
         self.remote_execution_controls.selectionChanged.connect(
             self._remote_profile_changed
         )
@@ -415,11 +432,16 @@ class PRMainWindow(QWidget):
         except Exception as exc:
             self.resource_estimator_panel.set_error(str(exc))
             return
-        self.resource_estimator_panel.set_estimate(
-            "Configured execution:\n" + execution_summary(self, configured_request)
+        text = (
+            "Configured execution:\n" + self._execution_summary(configured_request)
             + "\n\nComparison estimates (not the selected execution plan):\n"
             + format_pr_resource_estimate(estimate)
         )
+        if isinstance(configured_request, PRRunRequest):
+            preflight = validate_pr_gui_workflow_request(configured_request)
+            if preflight.timestep_assessment == "pending":
+                text += "\n" + "\n".join(preflight.warnings)
+        self.resource_estimator_panel.set_estimate(text)
 
     def _refresh_checkpoint_controls(self) -> None:
         checkpoint = self.last_checkpoint
@@ -493,6 +515,7 @@ class PRMainWindow(QWidget):
         else:
             solver = self.evolution_panel.solver()
         return {
+            "execution_controls": self._capture_execution_controls(),
             "input_mode": self.input_panel.mode_id(),
             "workflow_id": workflow_id,
             "grid": self.grid_panel.grid(),
@@ -555,6 +578,127 @@ class PRMainWindow(QWidget):
                 state["signal_channel_index"],
             )
 
+    def _execution_summary(self, request, *, runner=None):
+        text = execution_summary(self, request, runner=runner)
+        intent = self._saved_unresolved_intent
+        if intent is not None and runner in (None, self.runner):
+            text = text.replace("Execution target: Local", "Execution target: Slurm (unavailable/unresolved)")
+            text += (f"\nSaved cluster: {intent.cluster_profile}"
+                     f"\nSaved resource: {intent.resource_profile}"
+                     "\nExplicit execution target selection required before running.")
+        return text
+
+    def _remote_identity_available(self):
+        controls = self.remote_execution_controls
+        cluster = controls.selected_cluster()
+        if not controls.slurm_available or cluster is None:
+            return False
+        try:
+            cluster.profile(controls.selected_resource_name())
+        except KeyError:
+            return False
+        return True
+
+    def _display_current_execution_intent(self, prefix="Current execution intent"):
+        intent = self._current_execution_intent()
+        text = (f"{prefix}: {intent.target}; cluster={intent.cluster_profile}; "
+                f"resource={intent.resource_profile}; retrieval={intent.retrieval_policy}")
+        if self._saved_unresolved_intent is not None:
+            text += " — UNAVAILABLE/UNRESOLVED: explicitly select an execution target before running"
+        self.execution_intent_label.setText(text)
+
+    def _capture_execution_controls(self):
+        controls = self.remote_execution_controls
+        item = self.execution_target_selector.model().item(1)
+        return dict(
+            target=self.execution_target_selector.currentData(),
+            cluster=controls.cluster_selector.currentData(),
+            resource=controls.resource_selector.currentData(),
+            backend=self.evolution_panel.backend_spec(),
+            backend_origin=self.evolution_panel.backend_origin,
+            retrieval=self.result_policy_selector.currentData(),
+            retrieval_enabled=self.result_policy_selector.isEnabled(),
+            unresolved=self._saved_unresolved_intent,
+            was_saved=self.execution_intent_was_saved,
+            label=self.execution_intent_label.text(),
+            runner_label=self.runner_label.text(),
+            runner=self.runner, slurm_runner=self.slurm_runner,
+            slurm_enabled=item.isEnabled(), slurm_tooltip=item.toolTip(),
+        )
+
+    def _restore_execution_controls(self, state):
+        controls = self.remote_execution_controls
+        with QSignalBlocker(controls), QSignalBlocker(self.execution_target_selector), QSignalBlocker(self.result_policy_selector):
+            controls.select_profile_identity(state["cluster"], state["resource"])
+            self.execution_target_selector.setCurrentIndex(self.execution_target_selector.findData(state["target"]))
+            self.result_policy_selector.setCurrentIndex(self.result_policy_selector.findData(state["retrieval"]))
+            self.result_policy_selector.setEnabled(state["retrieval_enabled"])
+            self.evolution_panel.set_backend_spec(state["backend"])
+            self.evolution_panel._backend_origin = state["backend_origin"]
+            self._saved_unresolved_intent = state["unresolved"]
+            self.execution_intent_was_saved = state["was_saved"]
+            self.runner, self.slurm_runner = state["runner"], state["slurm_runner"]
+            self.execution_intent_label.setText(state["label"])
+            self.runner_label.setText(state["runner_label"])
+            item = self.execution_target_selector.model().item(1)
+            item.setEnabled(state["slurm_enabled"])
+            item.setToolTip(state["slurm_tooltip"])
+
+    def _current_execution_intent(self):
+        backend = self.evolution_panel.backend_spec()
+        if self._saved_unresolved_intent is not None:
+            return replace(self._saved_unresolved_intent,
+                           requested_backend=backend.backend, precision=backend.precision,
+                           retrieval_policy=str(self.result_policy_selector.currentData()))
+        target = str(self.execution_target_selector.currentData())
+        controls = self.remote_execution_controls
+        return ExecutionIntent(
+            target, controls.cluster_selector.currentData() if target == "slurm" else None,
+            controls.selected_resource_name() if target == "slurm" else None,
+            backend.backend, backend.precision,
+            str(self.result_policy_selector.currentData()),
+        )
+
+    def _restore_execution_intent(self, intent):
+        self.execution_intent_was_saved = intent is not None
+        self._saved_unresolved_intent = None
+        if intent is None:
+            self._execution_target_changed()
+            self.execution_intent_label.setText(
+                "Execution intent: absent in this file; current/default selection retained"
+            )
+            return
+        controls = self.remote_execution_controls
+        backend = self.evolution_panel.backend_spec()
+        # Keep the saved selection pinned while profile signals rebuild controls.
+        self._saved_unresolved_intent = intent
+        self.execution_target_selector.setCurrentIndex(
+            self.execution_target_selector.findData(intent.target)
+        )
+        available = intent.target == "local"
+        if intent.target == "slurm":
+            controls.select_profile_identity(intent.cluster_profile, intent.resource_profile)
+            available = self._remote_identity_available()
+        self.result_policy_selector.setCurrentIndex(
+            self.result_policy_selector.findData(intent.retrieval_policy)
+        )
+        if available:
+            self._saved_unresolved_intent = None
+        self._execution_target_changed()
+        # Execution context suggestions must never rewrite saved science.
+        self.evolution_panel.set_backend_spec(backend)
+        self.execution_intent_label.setText(
+            f"Saved execution intent: {intent.target}; cluster={intent.cluster_profile}; "
+            f"resource={intent.resource_profile}; retrieval={intent.retrieval_policy}"
+            + ("" if available else " — UNAVAILABLE/UNRESOLVED: explicitly select an execution target before running")
+        )
+
+    @Slot()
+    def _accept_execution_selection(self):
+        self._saved_unresolved_intent = None
+        self._execution_target_changed()
+        self._display_current_execution_intent("Explicit execution intent")
+
     @staticmethod
     def _validate_experiment_request_representable(request) -> None:
         if isinstance(request, PRImageAmplificationExperimentRequest):
@@ -587,6 +731,7 @@ class PRMainWindow(QWidget):
             path,
             material_id=PR_MATERIAL_ID,
             workflow_id=self._workflow_id_for_request(request),
+            execution_intent=self._current_execution_intent(),
             presentation_payload=launchplane_presentation_payload(
                 self.beam_panel
             ),
@@ -636,6 +781,7 @@ class PRMainWindow(QWidget):
                     loaded.request.pump_channel_index,
                     loaded.request.signal_channel_index,
                 )
+            self._restore_execution_intent(loaded.execution_intent)
             rebuilt = self.build_request()
             if rebuilt != loaded.request:
                 raise ValueError(
@@ -643,6 +789,7 @@ class PRMainWindow(QWidget):
                 )
         except Exception:
             self._restore_experiment_gui_state(prior)
+            self._restore_execution_controls(prior["execution_controls"])
             raise
         finally:
             self._hydrating_experiment = False
@@ -691,7 +838,7 @@ class PRMainWindow(QWidget):
     def describe_request(self, request, *, runner=None) -> str:
         summary = (
             self._describe_scientific_request(request, runner=runner)
-            + "\n" + execution_summary(self, request, runner=runner)
+            + "\n" + self._execution_summary(request, runner=runner)
         )
         if self.input_panel.requests_optional_image_analysis():
             summary += (
@@ -854,7 +1001,9 @@ class PRMainWindow(QWidget):
                 f"Normalized timestep: {request.solver.dt_normalized:g}",
                 (
                     "Conservative normalized timestep limit: "
-                    f"{preflight.conservative_dt_limit:.8g}"
+                    + ("execution timestep assessment pending"
+                       if preflight.conservative_dt_limit is None
+                       else f"{preflight.conservative_dt_limit:.8g}")
                 ),
                 f"Optical substeps per z slice: {request.solver.optical_substeps}",
                 (
@@ -961,7 +1110,9 @@ class PRMainWindow(QWidget):
                 f"Normalized timestep: {request.solver.dt_normalized:g}",
                 (
                     "Conservative normalized timestep limit: "
-                    f"{preflight.conservative_dt_limit:.8g}"
+                    + ("execution timestep assessment pending"
+                       if preflight.conservative_dt_limit is None
+                       else f"{preflight.conservative_dt_limit:.8g}")
                 ),
             ])
             if linearized:
@@ -1115,12 +1266,23 @@ class PRMainWindow(QWidget):
             )
         if self.execution_target_selector.currentData() == "slurm":
             self._execution_target_changed()
+            self._display_current_execution_intent()
 
     @Slot()
     def _execution_target_changed(self) -> None:
         if hasattr(self, "resource_estimator_panel"):
             self.resource_estimator_panel.mark_stale()
         target = self.execution_target_selector.currentData()
+        if (target == "slurm" and self._saved_unresolved_intent is None
+                and self.remote_execution_controls.cluster_selector.currentData() is not None
+                and not self._remote_identity_available()):
+            self._saved_unresolved_intent = self._current_execution_intent()
+        if self._saved_unresolved_intent is not None:
+            self.runner = _UnresolvedExecutionRunner()
+            self.runner_label.setText(f"Runner: {self.runner.name}")
+            self.result_policy_selector.setEnabled(True)
+            self._display_current_execution_intent()
+            return
         self.runner = self.slurm_runner if target == "slurm" else self.local_runner
         if self.runner is None:
             self.runner = self.local_runner
@@ -1146,6 +1308,7 @@ class PRMainWindow(QWidget):
         return values
 
     def _run_registered(self, request, **kwargs):
+        self._require_execution_intent_resolved()
         if isinstance(
             request,
             (
@@ -1342,6 +1505,7 @@ class PRMainWindow(QWidget):
         begin_request(self, "Continue")
         checkpoint = self.last_checkpoint
         try:
+            self._require_execution_intent_resolved()
             request = self.build_request()
             validate_pr_continuation(request, checkpoint)
             # Continuation is Local-only; selected Slurm settings apply to Run.
@@ -1410,7 +1574,12 @@ class PRMainWindow(QWidget):
         for warning in preflight.warnings:
             self.results_panel.append_console(f"WARNING: {warning}")
 
+    def _require_execution_intent_resolved(self):
+        if self._saved_unresolved_intent is not None:
+            raise ValueError("Saved execution target is unavailable/unresolved; explicitly select a target before execution")
+
     def _validate_execution_request(self, request) -> None:
+        self._require_execution_intent_resolved()
         self._scientific_preflight(request)
         if self.runner is self.slurm_runner:
             self.remote_execution_controls.validate_backend(

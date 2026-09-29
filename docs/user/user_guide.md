@@ -232,6 +232,44 @@ fine material-z sampling, sufficient optical substeps, and H200 execution. It
 is not a universal preset: each observable requires its own aperture, grid,
 longitudinal-step, timestep, boundary, and model-convergence study.
 
+### PR grid representation and execution intent
+
+Ordinary PR requests are constructed, structurally checked, saved, loaded,
+inspected and planned using scalar grid metadata. Runtime coordinate/frequency
+arrays and solver state are realized for execution. Nx and Ny use Qt's technical
+signed-integer range (2 through 2,147,483,647); this is neither a scientific
+maximum nor a promise that a grid fits a selected resource. Anisotropic values
+such as 8192 × 4096 are preserved without clamping. LaunchPlane's separate,
+bounded 128 × 128 visual preview is unchanged and does not adopt request grid
+sizes. Image-amplification presentation remains outside this guarantee because
+its existing preparation may require scientific fields.
+
+Reduced nonlinear TD presentation performs the existing exact timestep check
+for up to 4096 x modes. Above that presentation work budget it explicitly reports
+**execution timestep assessment pending**; execution still applies the unchanged
+exact acceptance rule. Linearized TD does not run the nonlinear mode scan.
+This budget is not a limit on scientific grid validity. Run Planning retains its
+existing formulas and confidence qualifications. In particular, the reduced TD
+exact-modal estimate exposed by H200 job 4617746 can underestimate memory; it is
+not a hard feasibility certificate. This change does not remediate TD memory.
+
+PR experiment envelope version 3 stores **execution intent** separately from the
+scientific request: Local/Slurm, named cluster/resource profile identities,
+requested backend and precision, and Fast/Full retrieval policy. Profile names
+resolve through the installation's existing local catalog; files do not import
+SSH configuration, setup commands, credentials or dependencies. Catalog policy
+(such as scheduler resources and cleanup) remains owned by those local profiles.
+Backend/precision must agree with the scientific request. Job IDs, device or
+backend observations, connectivity, queue state, available memory and progress
+are never saved as execution intent.
+
+If a saved profile is unavailable, the scientific experiment still loads and
+its saved target is displayed as unavailable/unresolved. Execution is blocked
+until a user explicitly selects a target/profile; the saved intent is retained
+on resave, without substitution by Local or another profile. Version-2 files
+without intent still load with current/default selection, explicitly marked as
+having no saved intent; this differs from an explicit saved Local target.
+
 ## Fast and Full result retention
 
 PR remote execution exposes:

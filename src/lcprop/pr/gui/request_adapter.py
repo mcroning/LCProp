@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-
-import numpy as np
+from typing import Literal
 
 from lcprop.adapters.launchplane import beam_stack_to_launchplane
-from lcprop.core.backend import dtype_pair
-from lcprop.core.grid import make_grid
+from lcprop.core.grid import grid_metadata
 from lcprop.pr.evolution import validate_timestep
 from lcprop.optics.sampling import qualify_launch_sampling
 from lcprop.pr.geometry import (
@@ -45,13 +43,24 @@ from lcprop.pr.transverse.static_workflow import (
 )
 
 
+# Presentation work budget, not a grid-validity or execution-resource limit.
+PR_GUI_TIMESTEP_SCAN_MAX_MODES = 4096
+TIMESTEP_ASSESSMENT_PENDING = (
+    "Execution timestep assessment pending: the exact nonlinear TD mode scan "
+    "is deferred to execution; timestep acceptance has not been established."
+)
+
+
 @dataclass(frozen=True)
 class PRRequestPreflight:
-    conservative_dt_limit: float
+    conservative_dt_limit: float | None
     aperture: PRBeamStackApertureReport
+    timestep_assessment: Literal["passed", "pending", "not_applicable"] = "not_applicable"
 
     @property
     def warnings(self) -> tuple[str, ...]:
+        if self.timestep_assessment == "pending":
+            return (*self.aperture.warnings, TIMESTEP_ASSESSMENT_PENDING)
         return self.aperture.warnings
 
 
@@ -83,12 +92,7 @@ def _validate_pr_gui_common(request) -> PRBeamStackApertureReport:
         request.beams, request.grid, request.material.refractive_index,
         boundary=request.optical_boundary, launch_elements=request.launch_elements)
     sampling.require_valid()
-    real_dtype, _ = dtype_pair(request.backend.precision)
-    grid = make_grid(
-        request.grid,
-        xp=np,
-        real_dtype=real_dtype,
-    )
+    grid = grid_metadata(request.grid)
     aperture = analyze_beam_stack_aperture(
         grid,
         request.beams,
@@ -107,25 +111,22 @@ def validate_pr_gui_request(request: PRRunRequest) -> PRRequestPreflight:
     if not isinstance(request, PRRunRequest):
         raise TypeError("request must be a PRRunRequest")
     aperture = _validate_pr_gui_common(request)
-    real_dtype, _ = dtype_pair(request.backend.precision)
-    grid = make_grid(
-        request.grid,
-        xp=np,
-        real_dtype=real_dtype,
-    )
-    dt_limit = (
-        float("nan")
-        if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
-        else validate_timestep(
-            request.solver.dt_normalized,
-            grid,
-            request.material,
+    grid = grid_metadata(request.grid)
+    if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
+        dt_limit = float("nan")
+        assessment = "not_applicable"
+    elif grid.Nx > PR_GUI_TIMESTEP_SCAN_MAX_MODES:
+        dt_limit = None
+        assessment = "pending"
+    else:
+        dt_limit = validate_timestep(
+            request.solver.dt_normalized, grid, request.material,
             integrator=request.solver.integrator,
         )
-    )
+        assessment = "passed"
     return PRRequestPreflight(
-        conservative_dt_limit=dt_limit,
-        aperture=aperture,
+        conservative_dt_limit=dt_limit, aperture=aperture,
+        timestep_assessment=assessment,
     )
 
 
