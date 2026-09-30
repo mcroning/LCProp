@@ -38,6 +38,7 @@ class RunnerResult:
     message: str = ""
     run_data: Any | None = None
     material_id: str | None = None
+    operational_provenance: dict[str, Any] | None = None
 
 
 class Runner(Protocol):

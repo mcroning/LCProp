@@ -825,12 +825,21 @@ def remote_status_text(status: RemoteRunStatus) -> str:
             )
         elif status.remote_cleanup_succeeded is False:
             parts.append(
-                "Warning: remote cleanup failed; artifacts retained at "
-                f"{status.remote_cleanup_target}"
+                f"Warning: remote cleanup {status.remote_cleanup_outcome or 'failed'}; "
+                + ("artifacts retained at " if status.remote_artifacts_retained is True
+                   else "remote deletion unconfirmed at ")
+                + f"{status.remote_cleanup_target}"
             )
             if status.remote_cleanup_error:
                 parts.append(f"Reason: {status.remote_cleanup_error}")
-    return "; ".join(parts)
+    message = "; ".join(parts)
+    if status.state == RemoteRunState.COMPLETED and status.remote_cleanup_requested is not None:
+        from lcprop.runners.cleanup_process import CLEANUP_ERROR_TEXT_LIMIT
+        if len(message) > CLEANUP_ERROR_TEXT_LIMIT:
+            marker = " … [cleanup message truncated; exact path retained in provenance] … "
+            budget = CLEANUP_ERROR_TEXT_LIMIT - len(marker)
+            message = message[:budget // 2] + marker + message[-(budget - budget // 2):]
+    return message
 
 
 __all__ = [

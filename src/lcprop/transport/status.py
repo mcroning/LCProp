@@ -17,6 +17,7 @@ class RemoteRunState(str, Enum):
     RETRIEVING = "retrieving"
     VERIFYING = "verifying"
     RECONSTRUCTING = "reconstructing"
+    CLEANING = "cleaning"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCEL_REQUESTED = "cancel_requested"
@@ -75,7 +76,11 @@ _ALLOWED_TRANSITIONS = {
         RemoteRunState.RECONSTRUCTING,
         RemoteRunState.FAILED,
     },
+    RemoteRunState.CLEANING: {
+        RemoteRunState.COMPLETED,
+    },
     RemoteRunState.RECONSTRUCTING: {
+        RemoteRunState.CLEANING,
         RemoteRunState.COMPLETED,
         RemoteRunState.FAILED,
     },
@@ -128,6 +133,7 @@ class RemoteRunStatus:
     remote_cleanup_target: str | None = None
     remote_artifacts_retained: bool | None = None
     remote_cleanup_error: str | None = None
+    remote_cleanup_outcome: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.run_id, str) or not self.run_id.strip():

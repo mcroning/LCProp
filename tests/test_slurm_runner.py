@@ -1,3 +1,4 @@
+import subprocess
 import ast
 from dataclasses import replace
 import inspect
@@ -162,6 +163,10 @@ def _pr_transverse_td_request():
 
 
 class FakeTransport:
+    def ssh_with_timeout(self, host, *arguments, timeout):
+        assert timeout == 30.0
+        return self.ssh(host, *arguments)
+
     def __init__(self, *, polls=None):
         self.submissions = 0
         self.polls = iter(
@@ -493,6 +498,7 @@ def test_slurm_runner_submits_exactly_once_and_completes_only_after_reconstructi
         RemoteRunState.RETRIEVING,
         RemoteRunState.VERIFYING,
         RemoteRunState.RECONSTRUCTING,
+        RemoteRunState.CLEANING,
         RemoteRunState.COMPLETED,
     ]
     assert not states[-2].gui_product_ready
@@ -506,6 +512,8 @@ def test_slurm_runner_submits_exactly_once_and_completes_only_after_reconstructi
     assert states[-1].remote_cleanup_target == states[-1].remote_artifact_location
     assert states[-1].remote_artifacts_retained is False
     assert states[-1].remote_cleanup_error is None
+    assert states[-1].remote_cleanup_outcome == "completed"
+    assert completed.operational_provenance["remote_cleanup"]["outcome"] == "completed"
     assert (Path(states[-1].local_artifact_location) / "output").is_dir()
 
 
@@ -986,9 +994,9 @@ def test_cleanup_failure_is_nonblocking_and_preserves_local_result(tmp_path):
     assert completed.gui_product_ready
     assert completed.remote_cleanup_requested is True
     assert completed.remote_cleanup_succeeded is False
-    assert completed.remote_artifacts_retained is True
+    assert completed.remote_artifacts_retained is None
     assert "synthetic cleanup failure" in completed.remote_cleanup_error
-    assert "cleanup failed" in completed.state_message
+    assert "cleanup indeterminate" in completed.state_message
     assert (Path(completed.local_artifact_location) / "output").is_dir()
 
 
@@ -1228,3 +1236,64 @@ def test_unregistered_workflow_is_rejected_without_fallback(tmp_path):
     )
     with pytest.raises(KeyError, match="not registered"):
         runner.run_registered("lc", "timedependent", _request())
+
+
+@pytest.mark.parametrize('failure,expected', [
+    (subprocess.TimeoutExpired('ssh', 30, stderr=b'cleanup connection stalled'), 'timed_out'),
+    (subprocess.CalledProcessError(1, 'ssh', stderr='permission denied'), 'failed'),
+    (subprocess.CalledProcessError(255, 'ssh', stderr='connection lost'), 'indeterminate'),
+    (ConnectionResetError('connection reset'), 'indeterminate'),
+])
+def test_cleanup_outcomes_return_verified_result_without_retry(tmp_path, failure, expected):
+    class CleanupTransport(FakeTransport):
+        def ssh_with_timeout(self, host, *arguments, timeout):
+            assert timeout == 30.0
+            self.commands.append((host, arguments))
+            raise failure
+    transport = CleanupTransport()
+    states = []
+    runner = SlurmRunner(_config(tmp_path), (LC_STATIC_OPERATION,), transport=transport,
+                         registry=default_transport_registry(), sleep=lambda _: None)
+    result = runner.run_registered('lc', 'static', _request(), progress_callback=states.append)
+    assert result.run_data is not None
+    assert states[-1].state == RemoteRunState.COMPLETED
+    assert states[-2].state == RemoteRunState.CLEANING
+    assert states[-1].remote_cleanup_outcome == expected
+    assert states[-1].remote_artifacts_retained is None
+    assert states[-1].remote_cleanup_succeeded is False
+    assert len(_cleanup_commands(transport)) == 1
+    assert _cleanup_commands(transport)[0] == ('rm', '-rf', '--', states[-1].remote_artifact_location)
+    evidence = result.operational_provenance['remote_cleanup']
+    assert evidence['outcome'] == expected
+    assert evidence['target'] == states[-1].remote_artifact_location
+    assert evidence['error'] == states[-1].remote_cleanup_error
+    detail = getattr(failure, 'stderr', None) or str(failure)
+    if isinstance(detail, bytes):
+        detail = detail.decode()
+    assert detail in evidence['error']
+    assert result.result.status not in ('failed', 'timeout')
+    from lcprop.gui.remote_execution import remote_status_text
+    assert 'Cleaning remote artifacts' in remote_status_text(states[-2])
+    assert expected in remote_status_text(states[-1])
+    assert 'remote deletion unconfirmed' in remote_status_text(states[-1])
+    assert 'artifacts retained at' not in remote_status_text(states[-1])
+
+
+def test_bounded_cleanup_transport_kills_and_reaps_local_child(tmp_path, monkeypatch):
+    import os
+    import sys
+    from lcprop.runners.slurm import SubprocessRemoteTransport
+    pidfile = tmp_path/'child.pid'
+    program = ('import os,sys,time; '
+               'open(sys.argv[1],"w").write(str(os.getpid())); '
+               'print("waiting for remote cleanup",file=sys.stderr,flush=True); time.sleep(60)')
+    transport = SubprocessRemoteTransport()
+    monkeypatch.setattr(transport, '_ssh_command', lambda *args: [sys.executable, '-c', program, str(pidfile)])
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        transport.ssh_with_timeout('unused', 'rm', '-rf', '--', '/unused', timeout=1.0)
+    pid = int(pidfile.read_text())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+    with pytest.raises(ChildProcessError):
+        os.waitpid(pid, os.WNOHANG)
+    assert b'waiting for remote cleanup' in caught.value.stderr

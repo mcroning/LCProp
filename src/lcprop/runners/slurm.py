@@ -27,6 +27,9 @@ from lcprop.transport.status import (
 )
 
 
+POST_RESULT_CLEANUP_TIMEOUT_SECONDS = 30.0
+
+
 class RemoteExecutionError(RuntimeError):
     """One categorized remote-execution failure after submission."""
 
@@ -206,6 +209,7 @@ class SlurmExecutionConfig:
 
 
 class RemoteTransport(Protocol):
+    def ssh_with_timeout(self, host: str, *arguments: str, timeout: float) -> str: ...
     def ssh(self, host: str, *arguments: str) -> str: ...
     def upload(self, host: str, local: Path, remote: str) -> None: ...
     def download(self, host: str, remote: str, local: Path) -> None: ...
@@ -231,6 +235,10 @@ class SubprocessRemoteTransport:
 
     def ssh(self, host: str, *arguments: str) -> str:
         return self._run(self._ssh_command(host, *arguments))
+
+    def ssh_with_timeout(self, host: str, *arguments: str, timeout: float) -> str:
+        from lcprop.runners.cleanup_process import run_cleanup_command
+        return run_cleanup_command(self._ssh_command(host, *arguments), timeout=timeout)
 
     def upload(self, host: str, local: Path, remote: str) -> None:
         self._run(["scp", "-q", "-r", str(local), f"{host}:{remote}"])
@@ -419,7 +427,7 @@ class SlurmRunner:
         remote_run_path: str,
         *,
         remote_source_path: str | None = None,
-    ) -> None:
+    ) -> str:
         """Delete exactly one validated per-run tree without following symlinks."""
 
         target = _validated_remote_run_cleanup_target(
@@ -428,7 +436,10 @@ class SlurmRunner:
             remote_run_path=remote_run_path,
             remote_source_path=remote_source_path,
         )
-        self._transport.ssh(self.config.host, "rm", "-rf", "--", target)
+        return self._transport.ssh_with_timeout(
+            self.config.host, "rm", "-rf", "--", target,
+            timeout=POST_RESULT_CLEANUP_TIMEOUT_SECONDS,
+        )
 
     def _script(
         self,
@@ -917,24 +928,40 @@ class SlurmRunner:
         cleanup_completed_at = None
         cleanup_error = None
         remote_artifacts_retained = True
+        cleanup_diagnostics = None
+        cleanup_outcome = "not_requested"
         if cleanup_requested:
+            status = transition_remote_status(
+                status, RemoteRunState.CLEANING,
+                state_message="Cleaning remote artifacts…",
+                remote_cleanup_requested=True, remote_cleanup_target=remote_run,
+                remote_artifacts_retained=None, remote_cleanup_outcome="in_progress",
+            )
+            if progress_callback:
+                progress_callback(status)
             try:
-                self.cleanup_remote_run(
+                cleanup_output = self.cleanup_remote_run(
                     run_id,
                     remote_run,
                     remote_source_path=source.remote_source_path,
                 )
             except Exception as exc:
                 cleanup_succeeded = False
-                detail = " ".join(str(exc).splitlines()).strip() or "unknown error"
-                if len(detail) > 300:
-                    detail = detail[:297] + "..."
-                cleanup_error = f"{type(exc).__name__}: {detail}"
+                remote_artifacts_retained = None
+                cleanup_outcome = (
+                    "timed_out" if isinstance(exc, subprocess.TimeoutExpired)
+                    else "failed" if isinstance(exc, subprocess.CalledProcessError) and exc.returncode != 255
+                    else "indeterminate"
+                )
+                from lcprop.runners.cleanup_process import cleanup_failure_detail
+                cleanup_error, cleanup_diagnostics = cleanup_failure_detail(exc)
                 state_message = (
-                    "Completed; remote artifact cleanup failed; artifacts retained"
+                    f"Completed; remote cleanup {cleanup_outcome}; remote deletion unconfirmed"
                 )
             else:
                 cleanup_succeeded = True
+                cleanup_outcome = "completed"
+                cleanup_diagnostics = getattr(cleanup_output, "cleanup_diagnostics", None)
                 cleanup_completed_at = _utc_now()
                 remote_artifacts_retained = False
                 state_message = "Completed; remote artifacts cleaned up"
@@ -951,10 +978,19 @@ class SlurmRunner:
             remote_cleanup_target=remote_run,
             remote_artifacts_retained=remote_artifacts_retained,
             remote_cleanup_error=cleanup_error,
+            remote_cleanup_outcome=cleanup_outcome,
         )
         if progress_callback:
             progress_callback(status)
-        return runner_result
+        return replace(runner_result, operational_provenance={
+            "remote_cleanup": {
+                "outcome": cleanup_outcome, "target": remote_run,
+                "timeout_seconds": POST_RESULT_CLEANUP_TIMEOUT_SECONDS,
+                "succeeded": cleanup_succeeded, "completed_at": cleanup_completed_at,
+                "remote_artifacts_retained": remote_artifacts_retained,
+                "error": cleanup_error, "diagnostics": cleanup_diagnostics,
+            }
+        })
 
     @staticmethod
     def _failed_status(
