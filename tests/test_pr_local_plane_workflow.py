@@ -478,6 +478,8 @@ def test_observation_exactness_coordinates_and_explicit_copy_lifetime(monkeypatc
         expected.append(tuple(a.tobytes() for a in (cell.A_candidate, cell.source_intensity, cell.E)))
         return cell
     def observe(frame):
+        if frame.kind == 'launch_boundary':
+            return
         k = len(copied)
         assert frame.cell_index == k
         assert frame.z_start_um == 2*k
@@ -566,7 +568,8 @@ def test_native_observation_when_available(precision):
     plain = flow.run_local_intensity_planes(req, retain_boundary_field=True)
     copied = []
     watched = flow.run_local_intensity_planes(req, retain_boundary_field=True,
-        observation_callback=lambda frame: copied.append(frame.source_intensity.copy()))
+        observation_callback=lambda frame: copied.append(frame.source_intensity.copy())
+        if frame.kind == 'cell_candidate' else None)
     assert plain.status == watched.status == 'completed'
     xp = backend.xp
     assert bool(xp.array_equal(plain.boundary_field.view(xp.uint8), watched.boundary_field.view(xp.uint8)))
@@ -574,7 +577,59 @@ def test_native_observation_when_available(precision):
     assert plain.ledger == watched.ledger
     assert len(copied) == req.grid.z_length_um / req.grid.dz_um
     def mutate(frame):
-        frame.material_field[:] = 0
+        if frame.kind == 'cell_candidate':
+            frame.material_field[:] = 0
     failed = flow.run_local_intensity_planes(req, observation_callback=mutate)
     assert failed.status == 'failed' and failed.completed_cells == 0
     assert failed.failure['stage'] == 'cell_observation'
+
+
+@pytest.mark.parametrize('cancel', [False, True])
+def test_owned_launch_observation_precedes_any_cell(monkeypatch, cancel):
+    req = request()
+    expected = req.initial_A.copy()
+    token = CancellationToken()
+    seen = []
+    primitive = flow.step_local_intensity_cell
+    def step(*a, **kw):
+        assert seen and seen[0] == 'launch_boundary'
+        return primitive(*a, **kw)
+    def observe(frame):
+        seen.append(frame.kind)
+        if frame.kind == 'launch_boundary':
+            assert frame.cell_index is None and frame.material_plane_um is None
+            assert frame.source_intensity is None and frame.material_field is None
+            assert frame.z_end_um == 0.0
+            assert frame.boundary_field.tobytes() == expected.tobytes()
+            req.initial_A[:] = 123
+            if cancel:
+                token.cancel()
+    monkeypatch.setattr(flow, 'step_local_intensity_cell', step)
+    out = flow.run_local_intensity_planes(req, observation_callback=observe,
+        cancellation_token=token, retain_boundary_field=True)
+    if cancel:
+        assert out.status == 'cancelled' and out.completed_cells == 0
+        assert seen == ['launch_boundary']
+        assert out.boundary_field.tobytes() == expected.tobytes()
+    else:
+        plain = flow.run_local_intensity_planes(replace(req, initial_A=expected), retain_boundary_field=True)
+        assert out.boundary_field.tobytes() == plain.boundary_field.tobytes()
+
+
+@pytest.mark.parametrize('fault', ['raise', 'mutate', 'launch'])
+def test_launch_observation_failure_stops_before_science(monkeypatch, fault):
+    seen = []
+    monkeypatch.setattr(flow, 'step_local_intensity_cell', lambda *a, **k: pytest.fail('science started'))
+    if fault == 'launch':
+        def fail(*a, **kw):
+            raise ValueError('injected launch failure')
+        monkeypatch.setattr(flow, 'build_launch', fail)
+    def observe(frame):
+        seen.append(frame)
+        if fault == 'raise':
+            raise ValueError('injected observer failure')
+        frame.boundary_field[:] = 0
+    out = flow.run_local_intensity_planes(request(), observation_callback=observe)
+    assert out.status == 'failed' and out.completed_cells == 0
+    assert out.failure['stage'] == ('launch' if fault == 'launch' else 'launch_observation')
+    assert len(seen) == (0 if fault == 'launch' else 1)

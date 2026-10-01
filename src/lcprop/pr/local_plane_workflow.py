@@ -62,19 +62,23 @@ class LocalPlaneProgress:
 
 @dataclass(frozen=True)
 class LocalPlaneObservation:
-    """Borrowed candidate-cell observation, valid only during the callback.
+    """Borrowed launch/boundary or candidate-cell data, valid during callback.
 
     Arrays are isolated backend copies, not mutable scientific buffers. Copy
     explicitly inside the callback to retain data; retaining borrowed arrays
     or using them asynchronously after return is unsupported. Mutation fails
     the cell transaction. Coordinates describe a qualified *candidate*, whose
     acceptance is subsequently announced by scalar progress, not by this hook.
+    The launch_boundary event has z_end_um=0, no cell/start/center, and None
+    source/material arrays. It precedes cancellation checks and all cell calls.
+    Initial progress confirms successful launch observation/identity checks.
     """
-    cell_index: int
-    z_start_um: float
+    cell_index: int | None
+    z_start_um: float | None
     z_end_um: float
-    material_plane_um: float
-    _arrays: tuple[Any, Any, Any] | None = field(repr=False)
+    material_plane_um: float | None
+    _arrays: tuple[Any, Any | None, Any | None] | None = field(repr=False)
+    kind: str = "cell_candidate"
 
     def _get(self, index):
         if self._arrays is None:
@@ -99,12 +103,18 @@ class LocalPlaneObservation:
 
 def _observe_cell(callback, cell, record, xp):
     originals = (cell.A_candidate, cell.source_intensity, cell.E)
-    copies = tuple(value.copy(order="C") for value in originals)
-    observation = LocalPlaneObservation(record['cell_index'], record['z_start_um'],
-        record['z_end_um'], record['material_plane_um'], copies)
+    _observe_arrays(callback, originals, xp, record['cell_index'],
+        record['z_start_um'], record['z_end_um'], record['material_plane_um'], "cell_candidate")
+
+
+def _observe_arrays(callback, originals, xp, index, start, end, center, kind):
+    copies = tuple(value.copy(order="C") if value is not None else None for value in originals)
+    observation = LocalPlaneObservation(index, start, end, center, copies, kind)
     try:
         callback(observation)  # Return value never participates in acceptance.
         for original, observed in zip(originals, copies):
+            if original is None:
+                continue
             if (observed.shape != original.shape or observed.dtype != original.dtype
                     or not bool(xp.array_equal(
                         xp.ascontiguousarray(original).view(xp.uint8),
@@ -223,8 +233,9 @@ def run_local_intensity_planes(
     accepted boundaries only, and never contains arrays. Caller mutation of a
     supplied launch after the initial progress event cannot affect this run.
 
-    Optional synchronous observation runs before acceptance, while center and
-    boundary data remain live. Its return value is ignored. It uses bounded
+    Optional synchronous launch observation precedes cell 0. Cell observation
+    runs before acceptance, while center and boundary data remain live. Its
+    return value is ignored. It uses bounded
     transverse backend copies and exact byte comparison (including signed
     zeros); no observation arrays survive the callback unless the caller
     explicitly copies them. No-hook execution makes no observation copies.
@@ -317,6 +328,10 @@ def run_local_intensity_planes(
             backend=backend.name)
         accepted = initial
         del initial
+        if observation_callback is not None:
+            stage = "launch_observation"
+            _observe_arrays(observation_callback, (accepted, None, None), xp,
+                            None, None, 0.0, None, "launch_boundary")
 
         def progress():
             if progress_callback is not None:
