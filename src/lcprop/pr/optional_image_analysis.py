@@ -64,7 +64,7 @@ def add_optional_image_analysis(
                     c.validation_status for c in image_amplification_base_capabilities()
                     if c.workflow_id == base.kind
                 )
-                if request.material_response.model == "linearized":
+                if request.material_response.model in ("linearized", "field_linear_local_intensity"):
                     validation = "compatible_validation_pending"
                 # Reuse the existing two-carrier applicability/quality decision;
                 # do not invent an N-carrier algorithm or alter historical IA.

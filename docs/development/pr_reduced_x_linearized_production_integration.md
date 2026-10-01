@@ -1,4 +1,9 @@
-# Reduced x-only linearized PR production integration
+# Historical development record: reduced uniform-reference tangent integration
+
+**Superseded for reduced production:** normal reduced Static now uses local-intensity
+paper Eq. (5); reduced TD supports nonlinear hopping only. The fixed-reference
+integration and measurements below describe the earlier development state.
+See `docs/science/pr_model_contracts.md` for the current contract.
 
 ## Scope and status
 

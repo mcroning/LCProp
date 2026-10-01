@@ -13,7 +13,6 @@ from lcprop.pr.persistence import (
 from lcprop.pr.specs import (
     PRMaterialSpec,
     PR_EULER_INTEGRATOR,
-    PR_EXACT_MODAL_INTEGRATOR,
     PR_INTEGRATORS,
     PR_MATERIAL_ID,
     PRRunRequest,
@@ -22,13 +21,12 @@ from lcprop.pr.specs import (
     PR_SEMI_IMPLICIT_INTEGRATOR,
     validate_pr_timedependent_configuration,
 )
-from lcprop.pr.reduced_linearized_timedependent import (
-    PR_REDUCED_LINEARIZED_TIMEDEPENDENT_V1,
-    PRReducedLinearizedTimeDependentResult,
-    reduced_linearized_timedependent_coefficients,
-    reduced_linearized_timedependent_rhs,
-    solve_pr_reduced_linearized_timedependent,
+from lcprop.pr.reduced_field_linear import (
+    PRReducedFieldLinearSpec,
+    solve_pr_reduced_field_linear_intensity,
+    reduced_field_linear_residual,
 )
+
 from lcprop.pr.scattering import (
     PR_CANONICAL_SCATTERING_ALGORITHM,
     PRCanonicalScatteringSpec,
@@ -113,21 +111,21 @@ from lcprop.pr.workflow import (
 )
 
 __all__ = [
+    "PRReducedFieldLinearSpec",
+    "solve_pr_reduced_field_linear_intensity",
+    "reduced_field_linear_residual",
     "PR_IMAGE_AMPLIFICATION_WORKFLOW",
     "PR_IMAGE_PREPROCESSING_POLICY_V1",
     "PRBeamPanelImageAmplificationRunRequest",
     "PRImageAmplificationRunRequest",
     "PRMaterialSpec",
     "PR_EULER_INTEGRATOR",
-    "PR_EXACT_MODAL_INTEGRATOR",
     "PR_INTEGRATORS",
     "PR_MATERIAL_ID",
     "PRRunRequest",
     "PRRunResult",
     "PRSolverOptions",
     "PR_SEMI_IMPLICIT_INTEGRATOR",
-    "PR_REDUCED_LINEARIZED_TIMEDEPENDENT_V1",
-    "PRReducedLinearizedTimeDependentResult",
     "PR_CANONICAL_SCATTERING_ALGORITHM",
     "PRCanonicalScatteringSpec",
     "PRStaticResult",
@@ -195,8 +193,5 @@ __all__ = [
     "volume_noise_seed_for_slice",
     "continue_pr_timedependent",
     "run_pr_timedependent",
-    "reduced_linearized_timedependent_coefficients",
-    "reduced_linearized_timedependent_rhs",
-    "solve_pr_reduced_linearized_timedependent",
     "validate_pr_timedependent_configuration",
 ]

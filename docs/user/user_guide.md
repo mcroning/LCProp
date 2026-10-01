@@ -137,26 +137,31 @@ PR choice has three independent physical axes:
 Evolution × Transport × Material response
 ```
 
-All eight combinations are production model choices. “Linearized” describes a
-material approximation; it does not mean “Experimental.” Validation and H200
+Seven combinations are supported. Reduced Static uses the paper local-intensity
+field-linear approximation; the full-transverse tangent is a distinct model. Validation and H200
 commissioning are separate evidence and are not uniform across the matrix.
 
 | Evolution | Transport | Response | Applicable material update | Local guidance | Validation/commissioning note |
 | --- | --- | --- | --- | --- | --- |
 | Static | Reduced x-only | Fully nonlinear | Coupled damped-Newton static solve | Local-friendly to moderate | Production; extensive local regression coverage |
-| Static | Reduced x-only | Linearized | Analytic reduced Fourier response inside coupled passes | Local-friendly | Production; local float32/float64 coverage |
+| Static | Reduced x-only | Field-linear (local intensity) | Analytic reduced Fourier response inside coupled passes | Local-friendly | Production; local float32/float64 coverage |
 | Static | Full transverse | Fully nonlinear | Zero-flux Newton/Krylov solve with coupled globalization | Small smoke cases only | Production; selected GPU/static paths commissioned, convergence remains problem-dependent |
-| Static | Full transverse | Linearized | Analytic full-transverse Fourier response inside coupled iterations | Moderate local grids | Production; isolated operator commissioned and coupled path locally validated |
+| Static | Full transverse | Uniform-reference tangent | Analytic full-transverse Fourier response inside coupled iterations | Moderate local grids | Production; isolated operator commissioned and coupled path locally validated |
 | Time dependent | Reduced x-only | Fully nonlinear | Semi-implicit trapezoidal or explicit Euler reference | Local-friendly to moderate | Production; longstanding local regression coverage |
-| Time dependent | Reduced x-only | Linearized | Exact modal evolution | Local-friendly | Production; local float32/float64 coverage, GPU conditional |
 | Time dependent | Full transverse | Fully nonlinear | Spectral IMEX Euler or explicit Euler reference | Slurm recommended | Production; bounded H200/CuPy commissioning exists |
-| Time dependent | Full transverse | Linearized | Exact modal evolution | Moderate local grids; Slurm for scale | Production; bounded H200/CuPy commissioning exists |
+| Time dependent | Full transverse | Uniform-reference tangent | Exact modal evolution | Moderate local grids; Slurm for scale | Production; bounded H200/CuPy commissioning exists |
 
 Static selections do not use a material-time integrator. Exact-modal TD cells
 do not expose a fake Euler choice. Full-transverse linearized requests require
 an explicit positive complete-transport reference intensity `I₀`. The
 full-transverse periodic biased mean field belongs to its electrical boundary
 profile; the reduced material applied field is a different parameter.
+
+Reduced Static field-linear has no I₀ control. Its denominator is the existing
+normalized optical intensity plus dark and uniform background, and must be
+strictly positive. Reduced field-linear TD is not yet defined/integrated; TD
+offers nonlinear reduced hopping only. Saved reduced fixed-I₀ requests fail
+clearly and require explicit model selection; they are not silently migrated.
 
 ## PR material and scattering
 
@@ -428,8 +433,11 @@ keeps its existing compatibility checks and Local-only execution; optional
 analysis is requested on fresh Run, not on Continue. Historical Image
 Amplification still has no Continue action.
 
-Linearized PR remains a uniform-reference tangent model. Support for finite
-beams/screens does not imply validity for every illumination in that approximation.
+The full-transverse tangent remains a uniform-reference small-perturbation model.
+Reduced Static field-linear instead retains the local total intensity denominator
+of paper Eq. (5). Neither is the full nonlinear reduced hopping equation.
+Support for finite beams/screens does not establish approximation accuracy for
+every illumination.
 
 Automatic Slurm source deployment requires a clean deployable LCProp Git
 checkout. A normal non-editable installation remains suitable for Local runs.

@@ -38,6 +38,18 @@ def carrier_ellipses(launch, *, sigmas=MASK_SIGMAS):
     return ellipses
 
 
+def ellipse_exclusion(sx, sy, ellipses, *, sigmas=MASK_SIGMAS):
+    """Shared authoritative ellipse union, usable on a row or bounded tile."""
+    excluded = np.zeros((len(sx), len(sy)), dtype=bool)
+    for ellipse in ellipses:
+        x = np.asarray(sx)[:, None] - ellipse["center_s"][0]
+        y = np.asarray(sy)[None, :] - ellipse["center_s"][1]
+        inverse = np.linalg.inv(ellipse["covariance_s"])
+        distance = inverse[0, 0]*x*x + 2*inverse[0, 1]*x*y + inverse[1, 1]*y*y
+        excluded |= distance <= sigmas**2
+    return excluded
+
+
 def mask_diagnostic(field, launch, *, sigmas=MASK_SIGMAS):
     """Exclude the union of Mahalanobis-radius ellipses on the canonical FFT grid.
 
@@ -58,13 +70,7 @@ def mask_diagnostic(field, launch, *, sigmas=MASK_SIGMAS):
         spacings.append(float(d[0]))
     if not np.isfinite(data).all() or np.any(data < 0):
         raise ValueError("finite nonnegative canonical intensity is required")
-    excluded = np.zeros(data.shape, dtype=bool)
-    for ellipse in ellipses:
-        x = sx[:, None] - ellipse["center_s"][0]
-        y = sy[None, :] - ellipse["center_s"][1]
-        inverse = np.linalg.inv(ellipse["covariance_s"])
-        distance = inverse[0, 0]*x*x + 2*inverse[0, 1]*x*y + inverse[1, 1]*y*y
-        excluded |= distance <= sigmas**2
+    excluded = ellipse_exclusion(sx, sy, ellipses, sigmas=sigmas)
     cell = spacings[0]*spacings[1]
     total = float(np.sum(data, dtype=np.float64)*cell)
     off = float(np.sum(data[~excluded], dtype=np.float64)*cell)

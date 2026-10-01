@@ -106,7 +106,7 @@ def test_workflow_matches_old_direct_completion(monkeypatch, linearized):
         from dataclasses import replace
         from lcprop.pr.transverse.specs import PRTransverseMaterialResponseSpec
         request = replace(request, material_response=PRTransverseMaterialResponseSpec(
-            model="linearized", reference_intensity=1.0))
+            model="field_linear_local_intensity"))
     monkeypatch.setattr(workflow, '_COMPLETION_CHUNK_ELEMENTS', 7)
     bounded = workflow.run_pr_static(request)
 

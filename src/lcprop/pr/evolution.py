@@ -165,13 +165,7 @@ def legacy_mode_timestep_rule(k_normalized: float) -> float:
     return 1.0 / (4.0 * k * k)
 
 
-def periodic_derivatives_x(field, *, dx_normalized: float, xp: Any):
-    """Return centered first/second x derivatives with periodic boundaries.
-
-    LCProp arrays use x on the penultimate axis for both ``(Nx, Ny)`` and
-    ``(Nz, Nx, Ny)`` fields.
-    """
-
+def _periodic_x_neighbors(field, *, dx_normalized: float, xp: Any):
     dx = float(dx_normalized)
     if not math.isfinite(dx) or dx <= 0.0:
         raise ValueError("dx_normalized must be finite and positive")
@@ -179,7 +173,27 @@ def periodic_derivatives_x(field, *, dx_normalized: float, xp: Any):
         raise ValueError("field must include x and y axes")
     forward = xp.roll(field, -1, axis=-2)
     backward = xp.roll(field, 1, axis=-2)
-    first = (forward - backward) / (2.0 * dx)
+    return dx, forward, backward
+
+
+def _centered_first_difference(forward, backward, dx):
+    return (forward - backward) / (2.0 * dx)
+
+
+def periodic_first_derivative_x(field, *, dx_normalized: float, xp: Any):
+    """Return only centered D_x, without constructing a D_xx output.
+
+    Uses normalized spacing and the penultimate x axis for 2D/batched fields.
+    The periodic centered difference annihilates the even-grid Nyquist mode.
+    """
+    dx, forward, backward = _periodic_x_neighbors(field, dx_normalized=dx_normalized, xp=xp)
+    return _centered_first_difference(forward, backward, dx)
+
+
+def periodic_derivatives_x(field, *, dx_normalized: float, xp: Any):
+    """Return centered first/second periodic x derivatives on axis -2."""
+    dx, forward, backward = _periodic_x_neighbors(field, dx_normalized=dx_normalized, xp=xp)
+    first = _centered_first_difference(forward, backward, dx)
     second = (forward - 2.0 * field + backward) / (dx * dx)
     return first, second
 

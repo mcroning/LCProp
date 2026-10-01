@@ -87,14 +87,17 @@ reopened. Checkpoints are the mechanism for numerical continuation.
    incoherently.
 3. In **Grid**, start with `Nx=64`, `Ny=64`, `Optical dz=10 µm`, and a short
    interaction length such as `20 µm`.
-4. In **Evolution**, choose the three physical axes independently:
-   **Static** or **Time dependent**, **Reduced x-only** or **Full transverse**,
-   and **Fully nonlinear** or **Linearized**.
-5. For a quick local run, select **Reduced x-only**. Linearized material
-   response requires an explicit positive reference intensity `I₀`.
+4. In **Evolution**, choose **Static** or **Time dependent** and **Reduced
+   x-only** or **Full transverse**. Material choices follow the supported
+   seven-choice matrix in the User Guide.
+5. For a quick local run, select **Reduced x-only**. Static offers **Nonlinear
+   reduced hopping** and **Field-linear (local intensity)**, the paper Eq. (5)
+   approximation with no `I₀` control. Reduced TD supports nonlinear hopping
+   only. The distinct full-transverse **Uniform-reference tangent** requires
+   an explicit positive reference intensity `I₀`.
 6. A nonlinear time-dependent reduced run presents **Semi-implicit
-   trapezoidal** and **Explicit Euler (reference)**. Linearized TD presents the
-   exact modal update. Static selections hide material-time controls.
+   trapezoidal** and **Explicit Euler (reference)**. Full-transverse tangent TD
+   presents the exact modal update. Static selections hide material-time controls.
 7. Keep **Backend=numpy**, **Precision=float64**, and **Execution=Local** for
    the first run. Click **Estimate current request** in **Run Planning** before
    launching a larger request.

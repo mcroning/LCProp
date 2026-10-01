@@ -1,4 +1,4 @@
-"""Direct linearized material response for reduced x-only PR transport."""
+"""Research uniform-reference tangent response; not a reduced production model."""
 
 from __future__ import annotations
 
@@ -100,6 +100,27 @@ def _resolve_backend(spec: BackendSpec | str) -> tuple[Backend, str]:
     return resolved, requested
 
 
+def centered_derivative_symbols(nx: int, *, dx_normalized: float, backend=_DEFAULT_BACKEND):
+    """Trusted periodic centered symbols, shared by tangent and paper responses."""
+    if int(nx) < 3 or not math.isfinite(float(dx_normalized)) or dx_normalized <= 0:
+        raise ValueError("nx >= 3 and finite positive dx_normalized required")
+    resolved, _ = _resolve_backend(backend)
+    xp = resolved.xp
+    phase = (
+        2.0
+        * math.pi
+        * xp.fft.fftfreq(int(nx))
+    ).astype(resolved.real_dtype, copy=False)
+    dx = float(dx_normalized)
+    k1 = (xp.sin(phase) / dx).astype(resolved.real_dtype, copy=False)
+    if int(nx) % 2 == 0:
+        k1[int(nx) // 2] = 0.0
+    k2_squared = (
+        4.0 * xp.sin(0.5 * phase) ** 2 / (dx * dx)
+    ).astype(resolved.real_dtype, copy=False)
+    return k1, k2_squared
+
+
 def reduced_linearized_symbol(
     nx: int,
     *,
@@ -112,19 +133,9 @@ def reduced_linearized_symbol(
     if int(nx) < 3:
         raise ValueError("nx must be at least 3")
     resolved, _ = _resolve_backend(backend)
-    xp = resolved.xp
-    phase = (
-        2.0
-        * math.pi
-        * xp.fft.fftfreq(int(nx))
-    ).astype(resolved.real_dtype, copy=False)
-    dx = float(spec.dx_normalized)
-    k1 = (xp.sin(phase) / dx).astype(resolved.real_dtype, copy=False)
-    if int(nx) % 2 == 0:
-        k1[int(nx) // 2] = 0.0
-    k2_squared = (
-        4.0 * xp.sin(0.5 * phase) ** 2 / (dx * dx)
-    ).astype(resolved.real_dtype, copy=False)
+    k1, k2_squared = centered_derivative_symbols(
+        nx, dx_normalized=spec.dx_normalized, backend=backend
+    )
     equilibrium = float(spec.equilibrium_field)
     denominator = (
         1.0 + k2_squared + 1j * equilibrium * k1

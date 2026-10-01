@@ -101,11 +101,10 @@ def test_gain_pair_completed_full_fast_and_transverse(no_movie_encoder):
     from tests.test_pr_execution import _request
     from lcprop.pr.workflow import run_pr_timedependent
     from lcprop.pr.scattering import PRCanonicalScatteringSpec,PR_CANONICAL_SCATTERING_V2
-    from lcprop.pr.specs import PR_EXACT_MODAL_INTEGRATOR
+    from lcprop.pr.specs import PR_EULER_INTEGRATOR
     r=_request(steps=2)
     r=replace(r,initial_A=None,scattering=PRCanonicalScatteringSpec(.02,.4,0,1.,PR_CANONICAL_SCATTERING_V2),
-              solver=replace(r.solver,integrator=PR_EXACT_MODAL_INTEGRATOR),
-              material_response=replace(r.material_response,model='linearized',reference_intensity=1.))
+              solver=replace(r.solver,integrator=PR_EULER_INTEGRATOR))
     previous=None
     for gain in (0.,10.):
         result=run_pr_timedependent(replace(r,material=replace(r.material,gain_length_product=gain)))

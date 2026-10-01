@@ -21,9 +21,11 @@ PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1 = (
 )
 PR_MATERIAL_RESPONSE_NONLINEAR = "nonlinear"
 PR_MATERIAL_RESPONSE_LINEARIZED = "linearized"
+PR_MATERIAL_RESPONSE_FIELD_LINEAR = "field_linear_local_intensity"
 PR_MATERIAL_RESPONSE_MODELS = (
     PR_MATERIAL_RESPONSE_NONLINEAR,
     PR_MATERIAL_RESPONSE_LINEARIZED,
+    PR_MATERIAL_RESPONSE_FIELD_LINEAR,
 )
 PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW = "pr_transverse_timedependent"
 PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE = "explicit_euler_reference"
@@ -112,8 +114,9 @@ class PRTransverseMaterialResponseSpec:
 
     The nonlinear default preserves the established reduced and transverse
     workflows.
-    Linearized execution requires an explicit uniform total transport
-    reference intensity; no background or beam-derived value is inferred.
+    Full-transverse tangent execution requires an explicit uniform total
+    reference intensity. Reduced Static paper Eq. (5) instead uses local I,
+    forbids reference_intensity, and has a distinct persistent model identity.
     """
 
     model: str = PR_MATERIAL_RESPONSE_NONLINEAR
@@ -125,10 +128,10 @@ class PRTransverseMaterialResponseSpec:
                 "material response must be one of "
                 + ", ".join(PR_MATERIAL_RESPONSE_MODELS)
             )
-        if self.model == PR_MATERIAL_RESPONSE_NONLINEAR:
+        if self.model in (PR_MATERIAL_RESPONSE_NONLINEAR, PR_MATERIAL_RESPONSE_FIELD_LINEAR):
             if self.reference_intensity is not None:
                 raise ValueError(
-                    "nonlinear material response does not use reference_intensity"
+                    f"{self.model} material response does not use reference_intensity"
                 )
             return
         value = self.reference_intensity
@@ -137,6 +140,21 @@ class PRTransverseMaterialResponseSpec:
                 "linearized material response requires a finite positive "
                 "reference_intensity"
             )
+
+    def validate_reduced_static(self) -> None:
+        self.validate()
+        if self.model == PR_MATERIAL_RESPONSE_LINEARIZED:
+            raise ValueError(
+                "Reduced fixed-I0 'linearized' requests are retired; explicitly select "
+                "field_linear_local_intensity (paper Eq. 5) or nonlinear. "
+                "Saved fixed-reference requests are not reinterpreted."
+            )
+
+    def to_payload(self) -> dict:
+        """No inapplicable I0 in new local-intensity requests."""
+        if self.model == PR_MATERIAL_RESPONSE_FIELD_LINEAR:
+            return {"model": self.model}
+        return {"model": self.model, "reference_intensity": self.reference_intensity}
 
     def validate_configuration(
         self,
@@ -150,6 +168,8 @@ class PRTransverseMaterialResponseSpec:
         """Validate profile identity and the single transverse bias owner."""
 
         self.validate()
+        if self.model == PR_MATERIAL_RESPONSE_FIELD_LINEAR:
+            raise ValueError("paper Eq. 5 field-linear response requires reduced x-only Static")
         if float(material_applied_field) != 0.0:
             raise ValueError(
                 "full-transverse workflows require zero normalized applied "
@@ -269,6 +289,7 @@ __all__ = [
     "PR_FULL_TRANSVERSE_PROFILE_V1",
     "PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1",
     "PR_MATERIAL_RESPONSE_LINEARIZED",
+    "PR_MATERIAL_RESPONSE_FIELD_LINEAR",
     "PR_MATERIAL_RESPONSE_MODELS",
     "PR_MATERIAL_RESPONSE_NONLINEAR",
     "PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE",

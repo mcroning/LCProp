@@ -112,10 +112,7 @@ def validate_pr_gui_request(request: PRRunRequest) -> PRRequestPreflight:
         raise TypeError("request must be a PRRunRequest")
     aperture = _validate_pr_gui_common(request)
     grid = grid_metadata(request.grid)
-    if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
-        dt_limit = float("nan")
-        assessment = "not_applicable"
-    elif grid.Nx > PR_GUI_TIMESTEP_SCAN_MAX_MODES:
+    if grid.Nx > PR_GUI_TIMESTEP_SCAN_MAX_MODES:
         dt_limit = None
         assessment = "pending"
     else:
@@ -137,7 +134,7 @@ def validate_pr_static_gui_request(
 
     if not isinstance(request, PRStaticRunRequest):
         raise TypeError("request must be a PRStaticRunRequest")
-    request.material_response.validate()
+    request.material_response.validate_reduced_static()
     _validate_canonical_scattering_for_grid(
         request.scattering, grid=request.grid, z_length_um=request.grid.z_length_um
     )

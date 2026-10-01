@@ -1,3 +1,4 @@
+"""Retained uniform-reference research oracles; no fixed-I0 production dispatch."""
 from dataclasses import replace
 import math
 import os
@@ -259,28 +260,6 @@ def test_float32_reduced_linearized_matches_float64_and_bias_mapping():
     np.testing.assert_allclose(uniform_result.E, expected, rtol=0.0, atol=2e-16)
 
 
-def test_numpy_float32_reduced_linearized_production_converges_with_own_defaults():
-    request64 = _base_request(linearized=True)
-    request64 = replace(
-        request64,
-        solver=PRStaticWorkflowOptions(max_coupled_passes=12),
-    )
-    request32 = replace(
-        request64,
-        backend=BackendSpec("numpy", "float32", False),
-    )
-    result64 = run_pr_static(request64)
-    result32 = run_pr_static(request32)
-
-    assert result64.converged and result32.converged
-    assert result32.A_final.dtype == np.complex64
-    assert result32.E_final.dtype == np.float32
-    np.testing.assert_allclose(
-        result32.E_final, result64.E_final, rtol=2e-5, atol=2e-6
-    )
-    assert result32.tolerance_provenance[
-        "coupled_residual_rms_tolerance"
-    ]["value"] == 5e-6
 
 
 def test_reduced_linearized_requires_explicit_positive_reference_intensity():
@@ -329,170 +308,14 @@ def test_old_reduced_static_positional_request_keeps_every_existing_binding():
     assert positional.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR
 
 
-def test_reduced_linearized_persistence_and_transport_round_trip():
-    request = _base_request(linearized=True)
-    persisted = replace(request, initial_A=None)
-    encoded = encode_pr_static_request(persisted)
-    assert encoded["material_response"] == {
-        "model": "linearized",
-        "reference_intensity": 21.0,
-    }
-    assert decode_pr_static_request(encoded) == persisted
-
-    legacy = encode_pr_static_request(persisted)
-    legacy.pop("material_response")
-    assert (
-        decode_pr_static_request(legacy).material_response.model
-        == PR_MATERIAL_RESPONSE_NONLINEAR
-    )
-
-    portable = encode_pr_static_transport_request(request)
-    decoded = decode_pr_static_transport_request(
-        portable.payload.metadata, portable.payload.arrays
-    )
-    assert decoded.material_response == request.material_response
-    np.testing.assert_array_equal(decoded.initial_A, request.initial_A)
-
-    result = run_pr_static(request)
-    encoded_result = encode_pr_static_transport_result(result)
-    decoded_result = decode_pr_static_transport_result(
-        encoded_result.payload.metadata, encoded_result.payload.arrays
-    )
-    assert decoded_result.material_response_summary == (
-        result.material_response_summary
-    )
-    fast = encode_pr_static_transport_result(
-        result, result_policy=FAST_RESULT_POLICY
-    )
-    fast_result = decode_pr_static_transport_result(
-        fast.payload.metadata, fast.payload.arrays
-    )
-    run_data = pr_static_result_to_run_data(fast_result)
-    assert run_data.diagnostics["summary"].values[
-        "material_response"
-    ] == result.material_response_summary
 
 
-def test_reduced_linearized_gui_selection_and_experimental_status(app):
-    from lcprop.pr.gui.evolution_panel import PREvolutionPanel
-    from lcprop.pr.gui.main_window import PRMainWindow
-
-    panel = PREvolutionPanel()
-    panel.set_workflow_id("pr_static")
-    assert not panel.material_response.isHidden()
-    linearized_index = panel.material_response.findData(
-        PR_MATERIAL_RESPONSE_LINEARIZED
-    )
-    panel.material_response.setCurrentIndex(linearized_index)
-    panel.reference_intensity.setValue(3.25)
-
-    assert panel.material_response.isEnabled()
-    assert not panel.reference_intensity.isHidden()
-    assert panel.transverse_applied_field.isHidden()
-    assert panel.material_response.currentText() == "Linearized"
-    assert "Production model selection" in panel.algorithm_status.text()
-    assert panel.transverse_material_response() == PRTransverseMaterialResponseSpec(
-        model=PR_MATERIAL_RESPONSE_LINEARIZED,
-        reference_intensity=3.25,
-    )
-    panel.set_image_amplification_mode(True)
-    assert panel.image_amplification_validation_status() == (
-        "compatible_validation_pending"
-    )
-    assert "Experimental" in panel.algorithm_status.text()
-
-    window = PRMainWindow()
-    window.evolution_panel.set_workflow_id("pr_static")
-    response_index = window.evolution_panel.material_response.findData(
-        PR_MATERIAL_RESPONSE_LINEARIZED
-    )
-    window.evolution_panel.material_response.setCurrentIndex(response_index)
-    window.evolution_panel.reference_intensity.setValue(3.25)
-    request = window.build_request()
-    summary = window.describe_request(request)
-    assert request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
-    assert request.material_response.reference_intensity == 3.25
-    assert "Reduced x-only PR transport" in summary
-    assert "Static material model: Linearized material response" in summary
-    assert "Software status: Production model selection" in summary
-    window.close()
 
 
-def test_reduced_linearized_cost_is_lower_than_reduced_nonlinear():
-    nonlinear = _base_request()
-    linearized = replace(
-        nonlinear,
-        material_response=PRTransverseMaterialResponseSpec(
-            model=PR_MATERIAL_RESPONSE_LINEARIZED,
-            reference_intensity=21.0,
-        ),
-    )
-    nonlinear_cost = classify_pr_run_cost(nonlinear, execution_target="local")
-    linearized_cost = classify_pr_run_cost(linearized, execution_target="local")
-
-    assert linearized_cost.work_score < nonlinear_cost.work_score
-    assert "Linearized" in linearized_cost.model_label
-    assert "one-dimensional FFT" in linearized_cost.rationale
 
 
-def test_pre_cancelled_reduced_linearized_run_stops_at_outer_safe_boundary():
-    token = CancellationToken()
-    token.cancel()
-    result = run_pr_static(
-        _base_request(linearized=True), cancellation_token=token
-    )
-
-    assert result.status == "cancelled"
-    assert result.completed_slices == 0
-    assert result.material_response_summary["material_response_calls"] == 0
 
 
-def test_weak_and_strong_reduced_nonlinear_vs_linearized_production_comparison():
-    weak_nonlinear = run_pr_static(_base_request(background=20.0))
-    weak_linearized = run_pr_static(
-        _base_request(background=20.0, linearized=True)
-    )
-    strong_nonlinear = run_pr_static(
-        _base_request(background=0.2, gain_length_product=0.08)
-    )
-    strong_linearized = run_pr_static(
-        _base_request(
-            background=0.2,
-            gain_length_product=0.08,
-            linearized=True,
-        )
-    )
-
-    assert weak_nonlinear.converged and weak_linearized.converged
-    assert strong_nonlinear.converged and strong_linearized.converged
-    weak_material = _relative_l2(
-        weak_linearized.E_final, weak_nonlinear.E_final
-    )
-    weak_optical = _relative_l2(
-        weak_linearized.A_final, weak_nonlinear.A_final
-    )
-    strong_material = _relative_l2(
-        strong_linearized.E_final, strong_nonlinear.E_final
-    )
-    strong_optical = _relative_l2(
-        strong_linearized.A_final, strong_nonlinear.A_final
-    )
-    assert weak_material < 4e-3
-    assert weak_optical < 2e-4
-    assert strong_material > 5.0 * weak_material
-    assert strong_optical > 5.0 * weak_optical
-    assert weak_linearized.material_response_summary["solver"] == (
-        "analytic_centered_difference_fourier"
-    )
-    assert weak_linearized.tolerance_provenance["material_solver"] == {
-        "source": "not_applicable_direct_linearized_solve"
-    }
-    assert abs(
-        weak_linearized.power_final / weak_linearized.power_initial - 1.0
-    ) < 5e-14
-    assert abs(
-        strong_linearized.power_final / strong_linearized.power_initial - 1.0
-    ) < 5e-14
 
 
 def test_y_independent_reduced_limit_has_expected_discretization_difference():
@@ -576,94 +399,8 @@ def test_y_independent_reduced_full_difference_converges_at_second_order():
     assert np.all((ratios > 3.99) & (ratios < 4.01))
 
 
-def test_y_independent_production_comparison_enforces_i0_equals_ib():
-    reduced_request = _base_request(
-        nx=48,
-        ny=9,
-        background=100.0,
-        applied_field=0.0,
-        gain_length_product=0.02,
-        y_variation=False,
-        linearized=True,
-    )
-    reduced_request = replace(
-        reduced_request,
-        material_response=PRTransverseMaterialResponseSpec(
-            model=PR_MATERIAL_RESPONSE_LINEARIZED,
-            reference_intensity=reduced_request.material.background_intensity,
-        ),
-    )
-    assert (
-        reduced_request.material_response.reference_intensity
-        == reduced_request.material.background_intensity
-    )
-    full_request = _full_linearized_request(reduced_request)
-    reduced = run_pr_static(reduced_request)
-    full = run_pr_transverse_static(full_request)
-    dx_normalized = (
-        full_request.material.characteristic_wavenumber_per_um
-        * full_request.grid.x_aperture_um
-        / full_request.grid.Nx
-    )
-    dy_normalized = (
-        full_request.material.characteristic_wavenumber_per_um
-        * full_request.grid.y_aperture_um
-        / full_request.grid.Ny
-    )
-    full_state = state_from_potential(
-        full.psi_final,
-        dx_normalized=dx_normalized,
-        dy_normalized=dy_normalized,
-        applied_field_x=0.0,
-    )
-
-    assert reduced.converged and full.converged
-    assert _relative_l2(reduced.E_final, full_state.E_x) < 0.025
-    assert _relative_l2(reduced.A_final, full.A_final) < 2e-5
 
 
-def test_genuine_2d_reduced_vs_full_linearized_changes_material_and_optics():
-    reduced_request = _base_request(
-        background=20.0,
-        applied_field=0.0,
-        y_variation=True,
-        linearized=True,
-    )
-    full_request = _full_linearized_request(reduced_request)
-    reduced = run_pr_static(reduced_request)
-    full = run_pr_transverse_static(full_request)
-
-    assert reduced.converged and full.converged
-    dx_normalized = (
-        full_request.material.characteristic_wavenumber_per_um
-        * full_request.grid.x_aperture_um
-        / full_request.grid.Nx
-    )
-    dy_normalized = (
-        full_request.material.characteristic_wavenumber_per_um
-        * full_request.grid.y_aperture_um
-        / full_request.grid.Ny
-    )
-    full_state = state_from_potential(
-        full.psi_final,
-        dx_normalized=dx_normalized,
-        dy_normalized=dy_normalized,
-        applied_field_x=full_request.boundary.applied_field_x,
-    )
-    material_error = _relative_l2(reduced.E_final, full_state.E_x)
-    optical_error = _relative_l2(reduced.A_final, full.A_final)
-    intensity_error = _relative_l2(
-        np.sum(np.abs(reduced.A_final) ** 2, axis=0),
-        np.sum(np.abs(full.A_final) ** 2, axis=0),
-    )
-    far_field_error = _relative_l2(
-        np.fft.fft2(reduced.A_final, axes=(-2, -1)),
-        np.fft.fft2(full.A_final, axes=(-2, -1)),
-    )
-    assert material_error > 1e-5
-    assert optical_error > 1e-8
-    assert intensity_error > 1e-10
-    assert far_field_error > 1e-8
 
 
 @pytest.mark.parametrize("precision", ["float64", "float32"])

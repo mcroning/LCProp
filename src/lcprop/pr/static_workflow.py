@@ -24,11 +24,11 @@ from lcprop.optics.screens import ChannelLaunchElements
 from lcprop.optics.splitstep import scalar_angular_spectrum_kernel
 from lcprop.pr.carrier_power import carrier_channels_from_beams
 from lcprop.pr.evolution import hopping_rhs
-from lcprop.pr.reduced_linearized import (
-    PR_REDUCED_LINEARIZED_RESPONSE_V1,
-    PRReducedLinearizedSpec,
-    reduced_linearized_residual,
-    solve_pr_reduced_linearized_intensity,
+from lcprop.pr.reduced_field_linear import (
+    PR_REDUCED_FIELD_LINEAR_RESPONSE_V1,
+    PRReducedFieldLinearSpec,
+    reduced_field_linear_residual,
+    solve_pr_reduced_field_linear_intensity,
 )
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.specs import PRMaterialSpec
@@ -37,7 +37,7 @@ from lcprop.pr.static import (
     solve_pr_static_intensity_batched,
 )
 from lcprop.pr.transverse.specs import (
-    PR_MATERIAL_RESPONSE_LINEARIZED,
+    PR_MATERIAL_RESPONSE_FIELD_LINEAR,
     PR_MATERIAL_RESPONSE_NONLINEAR,
     PRTransverseMaterialResponseSpec,
 )
@@ -68,6 +68,19 @@ ProgressCallback = Callable[[RunProgress], None]
 PR_STATIC_FAST_OMITTED_FIELDS = (
     "E_initial", "E_final", "source_intensity_stack", "residual_stack",
 )
+
+
+@dataclass(frozen=True)
+class _PRStaticResearchHooks:
+    """Process-local research dependencies; never serialized in requests.
+
+    Post-interval phase runs after acceptance and in independent replay,
+    never during coupled trials or source formation.
+    """
+
+    linear_hop: Callable | None = None
+    real_window: Callable | None = None
+    post_interval: Callable | None = None
 
 
 @dataclass(frozen=True)
@@ -504,6 +517,7 @@ def run_pr_static(
     cancellation_token: CancellationToken | None = None,
     progress_callback: ProgressCallback | None = None,
     result_policy: str = FULL_RESULT_POLICY,
+    _research_hooks: _PRStaticResearchHooks | None = None,
 ) -> PRStaticRunResult:
     """Solve the self-consistent static PR problem by a local coupled z-march.
 
@@ -514,6 +528,8 @@ def run_pr_static(
     intensity. A final independent replay verifies the assembled state.
     """
 
+    if _research_hooks is not None and request.scattering is not None:
+        raise ValueError("research interval hooks cannot be combined with canonical scattering")
     policy = normalize_result_policy(result_policy)
     from lcprop.transport.result_policy import static_product_selection
     product_kind, selected = static_product_selection(policy)
@@ -521,7 +537,7 @@ def run_pr_static(
     request.grid.validate()
     request.beams.validate()
     request.material.validate()
-    request.material_response.validate()
+    request.material_response.validate_reduced_static()
     request.solver.validate()
     request.backend.validate()
     request.optical_boundary.validate()
@@ -537,7 +553,7 @@ def run_pr_static(
         raise ValueError("minimal PR workflow requires one shared wavelength")
 
     linearized = (
-        request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+        request.material_response.model == PR_MATERIAL_RESPONSE_FIELD_LINEAR
     )
     backend = get_backend(request.backend)
     xp = backend.xp
@@ -563,10 +579,7 @@ def run_pr_static(
     )
     linearized_spec = None
     if linearized:
-        linearized_spec = PRReducedLinearizedSpec(
-            reference_intensity=float(
-                request.material_response.reference_intensity
-            ),
+        linearized_spec = PRReducedFieldLinearSpec(
             applied_field=float(request.material.applied_field),
             background_intensity=float(request.material.background_intensity),
             dx_normalized=dx_normalized,
@@ -584,8 +597,6 @@ def run_pr_static(
     E_shape = (grid.Nz, grid.Nx, grid.Ny)
     if request.initial_E is None:
         E_initial = xp.zeros(E_shape, dtype=backend.real_dtype)
-        if linearized:
-            E_initial.fill(linearized_spec.equilibrium_field)
     else:
         E_initial = xp.asarray(
             request.initial_E,
@@ -648,6 +659,9 @@ def run_pr_static(
             xp=xp,
             optical_boundary=request.optical_boundary,
             boundary_grid=grid,
+            **({"_research_linear_hop": _research_hooks.linear_hop,
+                "_research_real_window": _research_hooks.real_window}
+               if _research_hooks is not None else {}),
         )
         _apply_canonical_scattering_after_slice(
             A_out, scattering=request.scattering, z_index=z_index, grid=grid,
@@ -657,7 +671,7 @@ def run_pr_static(
 
     def residual_at(state, intensity):
         if linearized:
-            return reduced_linearized_residual(
+            return reduced_field_linear_residual(
                 state,
                 intensity,
                 spec=linearized_spec,
@@ -725,7 +739,7 @@ def run_pr_static(
                 break
             coupled_passes = coupled_pass
             if linearized:
-                material_result = solve_pr_reduced_linearized_intensity(
+                material_result = solve_pr_reduced_field_linear_intensity(
                     intensity,
                     spec=linearized_spec,
                     backend=request.backend,
@@ -866,6 +880,8 @@ def run_pr_static(
         source_stack[k] = intensity
         residual_stack[k] = residual
         A = A_trial
+        if _research_hooks is not None and _research_hooks.post_interval is not None:
+            _research_hooks.post_interval(A, k, replay=False, grid=grid, xp=xp)
         summaries.append(
             PRCoupledStaticSliceSummary(
                 z_index=k,
@@ -936,6 +952,8 @@ def run_pr_static(
     replay_progress_cadence = max(1, math.ceil(completed_slices / 100))
     for k in range(completed_slices):
         replay_A, replay_source[k] = advance_slice(replay_A, E_stack[k], k)
+        if _research_hooks is not None and _research_hooks.post_interval is not None:
+            _research_hooks.post_interval(replay_A, k, replay=True, grid=grid, xp=xp)
         replay_residual[k] = residual_at(E_stack[k], replay_source[k])
         replay_completed = k + 1
         if (
@@ -1097,7 +1115,7 @@ def run_pr_static(
             {
                 **tolerances.provenance(),
                 "material_solver": {
-                    "source": "not_applicable_direct_linearized_solve"
+                    "source": "not_applicable_direct_field_linear_solve"
                 },
             }
             if linearized
@@ -1130,17 +1148,14 @@ def run_pr_static(
         ),
         material_response_summary=(
             {
-                "model": PR_MATERIAL_RESPONSE_LINEARIZED,
+                "model": PR_MATERIAL_RESPONSE_FIELD_LINEAR,
                 "validation_status": "experimental",
-                "operator": PR_REDUCED_LINEARIZED_RESPONSE_V1,
-                "reference_intensity": float(
-                    request.material_response.reference_intensity
-                ),
+                "operator": PR_REDUCED_FIELD_LINEAR_RESPONSE_V1,
+                "intensity_denominator": "local_total_transport_intensity",
                 "background_intensity": float(
                     request.material.background_intensity
                 ),
                 "applied_field": float(request.material.applied_field),
-                "equilibrium_field": float(linearized_spec.equilibrium_field),
                 "material_response_calls": int(material_response_calls),
                 "solver": "analytic_centered_difference_fourier",
             }

@@ -266,6 +266,8 @@ def advance_prepared_response(
     boundary_grid: Any | None = None,
     propagation_distance_um: float | None = None,
     xp: Any | None = None,
+    _research_linear_hop=None,
+    _research_real_window=None,
 ) -> Array:
     """Advance a channel stack using a prepared material response.
 
@@ -311,6 +313,8 @@ def advance_prepared_response(
 
     boundary = TransverseBoundarySpec() if boundary is None else boundary
     boundary.validate()
+    if _research_real_window is not None and boundary.mode != "periodic":
+        raise ValueError("research real window requires periodic default boundary")
     if boundary.mode != "periodic" and boundary_grid is None:
         raise ValueError("nonperiodic boundary requires boundary_grid")
     sponge_mask = None
@@ -328,10 +332,16 @@ def advance_prepared_response(
 
     for _ in range(int(Nsub)):
         apply_response_screen_inplace(A, response, xp=xp)
-        hop_linear_inplace(A, kernel, xp=xp)
+        if _research_linear_hop is None:
+            hop_linear_inplace(A, kernel, xp=xp)
+        else:
+            _research_linear_hop(A, kernel, xp=xp)
         apply_response_screen_inplace(A, response, xp=xp)
         apply_transverse_boundary_inplace(A, sponge_mask)
-    apply_transverse_boundary_inplace(A, tukey_mask)
+    if _research_real_window is None:
+        apply_transverse_boundary_inplace(A, tukey_mask)
+    else:
+        _research_real_window(A, xp=xp)
 
     return A
 

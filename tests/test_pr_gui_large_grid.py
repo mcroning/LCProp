@@ -52,9 +52,8 @@ def no_runtime_grid(monkeypatch):
 
 @pytest.mark.parametrize("shape", [(8192, 4096), (4096, 8192), (1_000_000, 8192), (2**31 - 1, 2)])
 @pytest.mark.parametrize("workflow,model", [
-    (PR_STATIC_WORKFLOW, "linearized"),
+    (PR_STATIC_WORKFLOW, "field_linear_local_intensity"),
     (PR_STATIC_WORKFLOW, "nonlinear"),
-    (PR_TIMEDEPENDENT_WORKFLOW, "linearized"),
     (PR_TIMEDEPENDENT_WORKFLOW, "nonlinear"),
 ])
 def test_large_grid_request_inspection_persistence_transport_and_planning(
@@ -68,9 +67,13 @@ def test_large_grid_request_inspection_persistence_transport_and_planning(
         window.grid_panel.set_grid(grid)
         panel = window.evolution_panel
         panel.set_workflow_id(workflow)
+        choices = tuple(panel.material_response.itemData(i) for i in range(panel.material_response.count()))
+        assert choices == (("nonlinear", "field_linear_local_intensity")
+                           if workflow == PR_STATIC_WORKFLOW else ("nonlinear",))
         panel.set_transverse_material_response(PRTransverseMaterialResponseSpec(
-            model=model, reference_intensity=1.0 if model == "linearized" else None,
+            model=model,
         ), applied_field_x=0.0)
+        assert panel.reference_intensity.isHidden()
         scattering = PRCanonicalScatteringSpec(
             0.02, 0.4, 0, 1.0, PR_CANONICAL_SCATTERING_V2,
         )
@@ -144,7 +147,7 @@ def test_invalid_or_unrepresentable_grid_is_rejected_without_clamping(app, dimen
     assert panel.grid() == before
 
 
-def test_td_presentation_never_scans_large_nonlinear_or_any_linearized(app, no_runtime_grid, monkeypatch):
+def test_td_presentation_never_scans_large_nonlinear_and_rejects_field_linear(app, no_runtime_grid, monkeypatch):
     import lcprop.pr.gui.request_adapter as adapter
     window = PRMainWindow()
     try:
@@ -153,13 +156,55 @@ def test_td_presentation_never_scans_large_nonlinear_or_any_linearized(app, no_r
             pytest.fail("presentation enumerated nonlinear modes")
         monkeypatch.setattr(adapter, "validate_timestep", forbidden)
         window.evolution_panel.set_workflow_id(PR_TIMEDEPENDENT_WORKFLOW)
-        for model in ("nonlinear", "linearized"):
-            window.evolution_panel.set_transverse_material_response(PRTransverseMaterialResponseSpec(
+        panel = window.evolution_panel
+        assert panel.material_response.count() == 1
+        assert panel.material_response.currentData() == "nonlinear"
+        assert panel.reference_intensity.isHidden()
+        request = window.build_request()
+        assert adapter.validate_pr_gui_request(request).timestep_assessment == "pending"
+        for model in ("linearized", "field_linear_local_intensity"):
+            assert panel.material_response.findData(model) == -1
+            response = PRTransverseMaterialResponseSpec(
                 model=model, reference_intensity=1.0 if model == "linearized" else None,
-            ), applied_field_x=0.0)
-            request = window.build_request()
-            assessment = adapter.validate_pr_gui_request(request)
-            assert assessment.timestep_assessment == ("pending" if model == "nonlinear" else "not_applicable")
+            )
+            with pytest.raises(ValueError, match="unsupported"):
+                panel.set_transverse_material_response(response, applied_field_x=0.0)
+            with pytest.raises(ValueError, match="Reduced TD supports nonlinear hopping only"):
+                adapter.validate_pr_gui_request(replace(request, material_response=response))
+            assert window.build_request() == request
+    finally:
+        window.close()
+
+
+@pytest.mark.parametrize("shape", [(8192, 4096), (4096, 8192), (1_000_000, 8192), (2**31 - 1, 2)])
+def test_large_grid_workflow_switch_preserves_model_boundaries(app, no_runtime_grid, shape):
+    window = PRMainWindow()
+    try:
+        window.grid_panel.set_grid(replace(PR_DEFAULT_GRID, Nx=shape[0], Ny=shape[1]))
+        panel = window.evolution_panel
+        panel.set_workflow_id(PR_STATIC_WORKFLOW)
+        panel.set_transverse_material_response(PRTransverseMaterialResponseSpec(
+            model="field_linear_local_intensity"), applied_field_x=0.)
+        assert window.build_request().material_response.model == "field_linear_local_intensity"
+        assert panel.reference_intensity.isHidden()
+        with pytest.raises(ValueError, match="retired"):
+            panel.set_transverse_material_response(PRTransverseMaterialResponseSpec(
+                model="linearized", reference_intensity=1.), applied_field_x=0.)
+        panel.set_workflow_id(PR_TIMEDEPENDENT_WORKFLOW)
+        assert panel.material_response.count() == 1
+        assert window.build_request().material_response.model == "nonlinear"
+        assert panel.reference_intensity.isHidden()
+        for workflow in ("pr_transverse_static", "pr_transverse_timedependent"):
+            panel.set_workflow_id(workflow)
+            assert tuple(panel.material_response.itemData(i) for i in range(panel.material_response.count())) == ("nonlinear", "linearized")
+            panel.set_transverse_material_response(PRTransverseMaterialResponseSpec(
+                model="linearized", reference_intensity=1.), applied_field_x=0.)
+            assert not panel.reference_intensity.isHidden()
+            assert window.build_request().material_response.model == "linearized"
+        panel.set_workflow_id(PR_STATIC_WORKFLOW)
+        assert panel.material_response.findData("linearized") == -1
+        assert panel.material_response.findData("field_linear_local_intensity") >= 0
+        assert panel.reference_intensity.isHidden()
     finally:
         window.close()
 

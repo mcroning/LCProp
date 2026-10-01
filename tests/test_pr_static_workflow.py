@@ -587,12 +587,12 @@ def _canonical_spec(algorithm="canonical_phase_slabs_v1"):
     )
 
 
-@pytest.mark.parametrize("model", ["nonlinear", "linearized"])
+@pytest.mark.parametrize("model", ["nonlinear", "field_linear_local_intensity"])
 def test_static_disabled_scattering_is_bitwise_unchanged(model, monkeypatch):
     import lcprop.pr.static_workflow as workflow
     from lcprop.pr.transverse.specs import PRTransverseMaterialResponseSpec
     request = replace(_static_request(), material_response=PRTransverseMaterialResponseSpec(
-        model=model, reference_intensity=1.0 if model == "linearized" else None))
+        model=model))
     normal = run_pr_static(request)
     # The pre-scattering optical path: no after-slice application at all.
     monkeypatch.setattr(workflow, "_apply_canonical_scattering_after_slice", lambda *a, **k: None)
@@ -687,7 +687,7 @@ def test_linearized_static_canonical_scattering_replays():
     from lcprop.pr.transverse.specs import PRTransverseMaterialResponseSpec
     request = replace(_static_request(), scattering=_canonical_spec(),
                       material_response=PRTransverseMaterialResponseSpec(
-                          model="linearized", reference_intensity=1.0))
+                          model="field_linear_local_intensity"))
     first, second = run_pr_static(request), run_pr_static(request)
     assert first.converged and first.replay_diagnostics["field_consistent"]
     np.testing.assert_array_equal(first.A_final, second.A_final)

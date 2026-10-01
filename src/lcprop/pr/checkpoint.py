@@ -8,7 +8,7 @@ from typing import Any, Literal
 import numpy as np
 
 from lcprop.core.backend import asnumpy
-from lcprop.pr.specs import PRRunRequest
+from lcprop.pr.specs import PRRunRequest, validate_pr_timedependent_configuration
 
 
 PRCheckpointStatus = Literal["completed", "cancelled"]
@@ -40,6 +40,7 @@ def validate_pr_checkpoint(checkpoint: PRTimeDependentCheckpoint) -> None:
 
     if not isinstance(checkpoint, PRTimeDependentCheckpoint):
         raise TypeError("checkpoint must be a PRTimeDependentCheckpoint")
+    validate_pr_timedependent_configuration(checkpoint.request)
     if checkpoint.status not in ("completed", "cancelled"):
         raise ValueError(f"invalid PR checkpoint status: {checkpoint.status}")
     if int(checkpoint.completed_steps) < 0:

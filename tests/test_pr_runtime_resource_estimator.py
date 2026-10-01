@@ -153,14 +153,12 @@ def test_every_measured_calibration_value_matches_its_exact_committed_source():
     assert set(data) >= {"cases", "derived_scaling", "planning_policy"}
 
 
-@pytest.mark.parametrize("transport", ("reduced", "full"))
-@pytest.mark.parametrize("evolution", ("static", "td"))
-@pytest.mark.parametrize(
-    "response", (PR_MATERIAL_RESPONSE_NONLINEAR, PR_MATERIAL_RESPONSE_LINEARIZED)
-)
-def test_all_eight_production_cells_have_bounded_resource_estimates(
-    transport, evolution, response
-):
+@pytest.mark.parametrize("transport,evolution,response", [
+    (t,e,r) for t in ("reduced", "full") for e in ("static", "td")
+    for r in (("nonlinear", "field_linear_local_intensity") if (t,e)==("reduced","static")
+              else ("nonlinear",) if t=="reduced" else ("nonlinear","linearized"))
+])
+def test_supported_production_cells_have_bounded_resource_estimates(transport, evolution, response):
     estimate = estimate_pr_resources(_request(transport, evolution, response))
     assert estimate.local_runtime is not None
     assert estimate.local_runtime.high >= estimate.local_runtime.low >= 0.0
@@ -170,11 +168,11 @@ def test_all_eight_production_cells_have_bounded_resource_estimates(
     assert estimate.confidence in {"Low", "Medium", "High"}
 
 
-def test_reduced_static_holdout_measurements_fall_within_estimated_ranges():
+def test_reduced_static_timing_proxy_preserves_historical_calibration_range():
     grid = _grid(256, 256, 100)
     for response, measured in (
         (PR_MATERIAL_RESPONSE_NONLINEAR, 5.0429912919935305),
-        (PR_MATERIAL_RESPONSE_LINEARIZED, 2.852051334019052),
+        ("field_linear_local_intensity", 2.852051334019052),
     ):
         request = replace(_request("reduced", "static", response), grid=grid)
         runtime = estimate_pr_resources(request).local_runtime

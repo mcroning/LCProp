@@ -460,8 +460,7 @@ def three_model_results():
         **common,
         solver=PRStaticWorkflowOptions(max_coupled_passes=12),
         material_response=PRTransverseMaterialResponseSpec(
-            model=PR_MATERIAL_RESPONSE_LINEARIZED,
-            reference_intensity=21.0,
+            model="field_linear_local_intensity",
         ),
     )
     linearized = run_pr_static(linearized_request)

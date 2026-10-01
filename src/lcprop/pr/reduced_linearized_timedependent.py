@@ -1,4 +1,4 @@
-"""Exact transient linearization of the reduced x-only PR equation."""
+"""Research-only uniform-reference reduced PR transient; no production dispatch."""
 
 from __future__ import annotations
 

@@ -77,6 +77,12 @@ _PR_REDUCED_TD_MATERIAL_RESPONSE_SCHEMA_VERSION = 5
 _PR_REDUCED_TD_SCATTERING_SCHEMA_VERSION = 6
 
 
+def _material_response_values(value, *, name):
+    values = require_mapping(value, name=name)
+    require_exact_keys(values, required={"model"}, optional={"reference_intensity"}, name=name)
+    return values
+
+
 def _encode_launch_elements(
     assignments: tuple[ChannelLaunchElements, ...],
 ) -> list[dict[str, Any]]:
@@ -119,7 +125,7 @@ def _validate_common(request: PRRunRequest | PRStaticRunRequest) -> None:
     request.backend.validate()
     request.optical_boundary.validate()
     if isinstance(request, PRStaticRunRequest):
-        request.material_response.validate()
+        request.material_response.validate_reduced_static()
         _validate_canonical_scattering_for_grid(
             request.scattering, grid=request.grid, z_length_um=request.grid.z_length_um
         )
@@ -148,7 +154,7 @@ def encode_pr_timedependent_request(request: PRRunRequest) -> dict:
     if not isinstance(request, PRRunRequest):
         raise TypeError("request must be a PRRunRequest")
     payload = _encode_common(request)
-    payload["material_response"] = asdict(request.material_response)
+    payload["material_response"] = request.material_response.to_payload()
     payload["scattering"] = (
         None if request.scattering is None else asdict(request.scattering)
     )
@@ -160,7 +166,7 @@ def encode_pr_static_request(request: PRStaticRunRequest) -> dict:
         raise TypeError("request must be a PRStaticRunRequest")
     payload = _encode_common(request)
     payload["scattering"] = None if request.scattering is None else asdict(request.scattering)
-    payload["material_response"] = asdict(request.material_response)
+    payload["material_response"] = request.material_response.to_payload()
     return payload
 
 
@@ -216,7 +222,7 @@ def encode_pr_transverse_static_request(
         "dielectric": asdict(request.dielectric),
         "boundary": asdict(request.boundary),
         "projection": asdict(request.projection),
-        "material_response": asdict(request.material_response),
+        "material_response": request.material_response.to_payload(),
         "solver": asdict(request.solver),
         "backend": asdict(request.backend),
         "scattering": (
@@ -255,7 +261,7 @@ def encode_pr_transverse_timedependent_request(
         "dielectric": asdict(request.dielectric),
         "boundary": asdict(request.boundary),
         "projection": asdict(request.projection),
-        "material_response": asdict(request.material_response),
+        "material_response": request.material_response.to_payload(),
         "solver": asdict(request.solver),
         "backend": asdict(request.backend),
         "scattering": (
@@ -381,8 +387,7 @@ def decode_pr_timedependent_request(value: Any) -> PRRunRequest:
             ),
             material_response=PRTransverseMaterialResponseSpec(
                 **(
-                    dataclass_values(
-                        PRTransverseMaterialResponseSpec,
+                    _material_response_values(
                         payload["material_response"],
                         name="PR request_payload.material_response",
                     )
@@ -449,8 +454,7 @@ def decode_pr_static_request(value: Any) -> PRStaticRunRequest:
             ),
             material_response=PRTransverseMaterialResponseSpec(
                 **(
-                    dataclass_values(
-                        PRTransverseMaterialResponseSpec,
+                    _material_response_values(
                         payload["material_response"],
                         name="PR request_payload.material_response",
                     )
@@ -572,8 +576,7 @@ def decode_pr_transverse_static_request(
             ),
             material_response=PRTransverseMaterialResponseSpec(
                 **(
-                    dataclass_values(
-                        PRTransverseMaterialResponseSpec,
+                    _material_response_values(
                         payload["material_response"],
                         name=(
                             "PR transverse-static request_payload."
@@ -737,8 +740,7 @@ def decode_pr_transverse_timedependent_request(
             ),
             material_response=PRTransverseMaterialResponseSpec(
                 **(
-                    dataclass_values(
-                        PRTransverseMaterialResponseSpec,
+                    _material_response_values(
                         payload["material_response"],
                         name=(
                             "PR transverse-TD request_payload."

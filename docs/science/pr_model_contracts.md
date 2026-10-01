@@ -80,25 +80,56 @@ must be finite and have strictly positive normalized carrier density
 RMS/Armijo acceptance rule. The gate prevents acceptance of nonphysical states
 but does not guarantee that a physical root can be found.
 
-## Reduced uniform-reference linearization
+## Reduced Static field-linear response: paper Eq. (5)
 
-Let `E = E_bar + e`, `I = I0 + i`, and
-`E_bar = E_app I_b / I0`. To first order,
+The public `field_linear_local_intensity` response solves
+
+```text
+E + E_app D_x E - D_xx E = (E_app I_b + D_x I) / I.
+```
+
+I is the complete local transport intensity defined above. It must be finite
+and strictly positive; there is no intensity floor and no fixed reference I0.
+At zero applied field this is `(1-D_xx)E = D_x I/I`. The direct NumPy/CuPy
+solve forms the local quotient before Fourier inversion. Its denominator is
+`1 + k2_squared + i E_app k1`, using the trusted centered difference symbols.
+At bias, the coefficient is E_app, not an inferred equilibrium E_app I_b/I0.
+The matching residual is the left side minus the complete local quotient.
+
+This implements Cronin-Golomb, Photonics 12, 113 (2025), Eq. (5), with production
+centered discretization. It is linear in the material field for prescribed I,
+but not the complete field-only Taylor expansion about arbitrary nonuniform I.
+For zero bias, the full nonlinear equation additionally retains `(I_x/I)E_x`
+and `-E E_x` on the right. The first of these is itself linear in E at fixed I.
+Do not describe local-I forcing as the full nonlinear hopping equation.
+
+Static keeps production midpoint source, coupled backtracking, canonical
+scattering, optical boundaries and independent replay. No historical Lie march,
+windows or legacy scattering are imported. Full-transverse physics is unchanged.
+
+## Uniform-reference tangent: research reduced operator and transverse model
+
+Writing `E=E_bar+e`, `I=I0+i`, `E_bar=E_app I_b/I0`, joint first-order expansion
+of the full reduced hopping equation gives
 
 ```text
 e_t = -I0 (1 + E_bar d_x - d_xx) e + (d_x - E_bar) i.
 ```
 
-The static response sets the left time derivative to zero. The production
-operator uses the repository's actual discrete derivative symbols; reduced
-centered-difference results need not match a continuum-spectral full-
-transverse reduction at finite resolution. The exact-modal reduced TD update
-evolves the derived discrete equation directly, including its even-grid
-Nyquist behavior.
+This requires small field/intensity perturbations with controlled derivatives.
+For unbiased static response, expanding `I_x/I` gives `i_x/I0 + O(i*i_x)`.
+Thus freezing the intensity denominator is an additional approximation, not
+synonymous with being linear in E. This tangent remains in research reference
+modules and tests, not the reduced production GUI or execution workflows.
+Saved reduced `linearized` requests are rejected, never reinterpreted as Eq. (5).
 
-This is a tangent material model about a declared uniform reference. The
-optical source may still be refreshed self-consistently, so “linearized
-material” does not mean globally linear optical propagation.
+Reduced local-intensity TD is unsupported. A static closure does not uniquely
+specify its transient. A possible extension `E_t=E_app I_b-I E+I_x-I E_app E_x+I E_xx`
+has variable coefficients; Fourier modes couple for nonuniform I. It is neither
+the existing exact-modal uniform-reference update nor the strict field-only
+Taylor equation (which retains I_x E_x). Deriving and validating a particular
+TD approximation and variable-coefficient integrator is separate follow-up.
+Reduced production TD therefore exposes nonlinear hopping only.
 
 ## Full-transverse nonlinear Profile v1
 
@@ -179,7 +210,7 @@ linearized TD integrates the exact modal transient for each frozen source.
 - The full-transverse linearized mean field belongs to the transverse
   electrical boundary profile as `applied_field_x`.
 - Full-transverse nonlinear Profile v1 requires both meanings to be zero.
-- Linearized requests require an explicit finite positive `I0`; it is not
+- Full-transverse tangent requests require an explicit finite positive `I0`; it is not
   inferred from beam peaks, dark intensity, background, or spatial mean.
 - Optical boundary absorption is material-neutral and does not change the
   material electrical profile.
@@ -191,7 +222,7 @@ means the request is an intended supported model choice. Local validation,
 backend coverage, composite-experiment validation, and H200 commissioning are
 separate evidence and must be stated independently.
 
-Linearization requires small field/intensity perturbations and resolved
+Uniform-reference tangent linearization requires small field/intensity perturbations and resolved
 derivatives; small amplitude alone is insufficient at unresolved or extreme
 spatial frequency. Reduced-vs-full comparisons can contain physical model,
 discretization, resolution, normalization, and approximation-regime effects.

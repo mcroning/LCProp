@@ -1768,17 +1768,15 @@ def test_transverse_static_image_experiment_is_functional_and_coherent(app):
     gui.close()
 
 
-def test_reduced_linearized_static_uses_common_image_postprocessor(app):
+def test_reduced_field_linear_static_uses_common_image_postprocessor(app):
     window = _configured_multi_algorithm_image_window(app)
     panel = window.evolution_panel
     panel.set_workflow_id(PR_STATIC_WORKFLOW)
     response_index = panel.material_response.findData(
-        PR_MATERIAL_RESPONSE_LINEARIZED
+        "field_linear_local_intensity"
     )
     panel.material_response.setCurrentIndex(response_index)
-    panel.reference_intensity.setValue(
-        window.material_panel.material().background_intensity + 1.0
-    )
+    assert panel.reference_intensity.isHidden()
     request = window.build_request()
     window.close()
 
@@ -1789,7 +1787,7 @@ def test_reduced_linearized_static_uses_common_image_postprocessor(app):
 
     assert result.status == "converged"
     assert result.analysis_status == "completed"
-    assert result.run_result.material_response_summary["model"] == "linearized"
+    assert result.run_result.material_response_summary["model"] == "field_linear_local_intensity"
     assert result.run_result.material_response_summary[
         "validation_status"
     ] == "experimental"

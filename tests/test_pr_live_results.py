@@ -16,7 +16,6 @@ from lcprop.pr.live_results import (
 )
 from lcprop.pr.specs import (
     PR_TIMEDEPENDENT_WORKFLOW, PR_EULER_INTEGRATOR, PR_SEMI_IMPLICIT_INTEGRATOR,
-    PR_EXACT_MODAL_INTEGRATOR,
 )
 import lcprop.pr.workflow as workflow
 import lcprop.pr.live_results as live
@@ -59,13 +58,11 @@ def request_for(integrator, steps=3):
     r = replace(r, solver=replace(r.solver, integrator=integrator),
                 initial_E=np.broadcast_to(
                     .01*np.sin(np.arange(8)[None, :, None]), (2, 8, 6)).copy())
-    if integrator == PR_EXACT_MODAL_INTEGRATOR:
-        r = replace(r, material_response=replace(r.material_response, model='linearized', reference_intensity=1.))
     return r
 
 
 @pytest.mark.parametrize('integrator', [PR_EULER_INTEGRATOR,
-    PR_SEMI_IMPLICIT_INTEGRATOR, PR_EXACT_MODAL_INTEGRATOR])
+    PR_SEMI_IMPLICIT_INTEGRATOR])
 def test_preview_equivalence_and_identical_optical_call_order(monkeypatch, no_movie_encoder, integrator):
     r = request_for(integrator)
     original = workflow._optical_pass

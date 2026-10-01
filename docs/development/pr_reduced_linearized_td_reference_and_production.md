@@ -1,5 +1,11 @@
 # Reduced x-only linearized PR time dependence
 
+**Historical integration record, superseded for reduced production.** The
+uniform-reference TD operator remains research-only. Reduced production TD now
+supports nonlinear hopping only; a local-intensity Eq. (5) transient and its
+variable-coefficient integrator require separate derivation and validation.
+See `docs/science/pr_model_contracts.md`.
+
 ## Scope and status
 
 This milestone completes the production cell **time dependent × reduced

@@ -17,7 +17,7 @@ is defined by the
 [canonical architecture decision record](../../../docs/architecture/LCProp_Target_Architecture.md).
 The concise current equations and profile boundaries are collected in the
 [PR model contracts](../../../docs/science/pr_model_contracts.md), while the
-[User Guide](../../../docs/user/user_guide.md) explains the eight production
+[User Guide](../../../docs/user/user_guide.md) explains the supported production
 model choices and GUI behavior.
 
 ## State, normalization, and boundaries
@@ -57,6 +57,24 @@ derivatives, especially the first derivative near Nyquist. Frequency-sweep
 tests characterize that tradeoff explicitly. A PR-owned spectral reference
 path can be added later if benchmark work needs it; LC optics does not need to
 change.
+
+## Reduced Static material response
+
+Select **Field-linear (local intensity)** for paper Eq. (5):
+`E + E_app D_x E - D_xx E = (E_app I_b + D_x I)/I`.
+`reduced_field_linear.py` uses the production centered symbols in a direct
+NumPy/CuPy solve. I is exactly the transport source above: positive, finite,
+no floor, no I0. Static midpoint coupling, backtracking, canonical scattering,
+bounded diagnostics and independent replay remain in `static_workflow.py`.
+The other reduced choice is **Nonlinear reduced hopping**, unchanged.
+
+The uniform-reference tangent in `reduced_linearized.py` and its TD module is
+research-only. Reduced fixed-I0 production requests are explicitly rejected.
+Reduced local-I field-linear TD requires a separately derived variable-
+coefficient integrator and is not offered. Full-transverse tangent response
+still uses I0 because it is a distinct model. The stability-analysis reference
+intensity below also remains: it estimates nonlinear TD stability, not a local
+intensity replacement in the nonlinear equation.
 
 ## Integrator timestep guards
 

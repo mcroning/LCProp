@@ -84,17 +84,27 @@ def test_release_installation_and_attribution_contracts_are_explicit():
     assert not (ROOT / "reference/prprop/prprop3d.py").exists()
 
 
-def test_pr_user_matrix_names_all_eight_production_cells_once():
+def test_pr_user_matrix_names_all_seven_supported_cells_once():
     guide = (ROOT / "docs/user/user_guide.md").read_text(encoding="utf-8")
     rows = re.findall(
         r"^\| (Static|Time dependent) \| "
         r"(Reduced x-only|Full transverse) \| "
-        r"(Fully nonlinear|Linearized) \|",
+        r"([^|]+?) \|",
         guide,
         flags=re.MULTILINE,
     )
-    assert len(rows) == 8
-    assert len(set(rows)) == 8
+    expected = {
+        ("Static", "Reduced x-only", "Fully nonlinear"),
+        ("Static", "Reduced x-only", "Field-linear (local intensity)"),
+        ("Time dependent", "Reduced x-only", "Fully nonlinear"),
+        *{(evolution, "Full transverse", model)
+          for evolution in ("Static", "Time dependent")
+          for model in ("Fully nonlinear", "Uniform-reference tangent")},
+    }
+    assert len(rows) == len(expected) == 7
+    assert set(rows) == expected
+    assert "Reduced field-linear TD is not yet defined/integrated" in guide
+    assert "Saved reduced fixed-I₀ requests fail" in guide
 
 
 def test_current_pr_contract_replaces_historical_product_dependencies():

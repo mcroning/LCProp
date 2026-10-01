@@ -200,7 +200,7 @@ def _cell(request) -> tuple[str, bool, bool]:
         )
     if isinstance(request, PRStaticRunRequest):
         return (
-            "reduced_x_static_" + ("linearized" if linearized else "nonlinear"),
+            "reduced_x_static_" + ("field_linear" if request.material_response.model == "field_linear_local_intensity" else "nonlinear"),
             False,
             True,
         )
@@ -309,7 +309,9 @@ def _runtime_ranges(
     ]
 
     if cell.startswith("reduced_x_static_"):
-        suffix = "linearized" if cell.endswith("linearized") else "nonlinear"
+        suffix = "linearized" if cell.endswith("field_linear") else "nonlinear"
+        if cell.endswith("field_linear"):
+            notes.append("Local-intensity response uses tangent timings only as a planning proxy; coupled convergence and H200 commissioning are unmeasured.")
         ref = cases[f"reduced_static_numpy_{suffix}"]
         scale = _reference_scale(shape, ref) * (
             intervals / max(1, int(ref["coupled_passes"]))
@@ -781,7 +783,7 @@ def format_pr_resource_estimate(estimate: PRResourceEstimate) -> str:
 
     nx, ny, nz = estimate.grid_shape
     model_labels = {
-        "reduced_x_static_linearized": "Reduced x-only static — linearized",
+        "reduced_x_static_field_linear": "Reduced x-only static — field-linear (local intensity)",
         "reduced_x_static_nonlinear": "Reduced x-only static — fully nonlinear",
         "reduced_x_td_linearized": "Reduced x-only TD — linearized",
         "reduced_x_td_nonlinear": "Reduced x-only TD — fully nonlinear",

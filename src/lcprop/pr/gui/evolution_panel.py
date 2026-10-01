@@ -20,7 +20,6 @@ from lcprop.pr.image_amplification import image_amplification_base_capabilities
 from lcprop.pr.specs import (
     PRSolverOptions,
     PR_EULER_INTEGRATOR,
-    PR_EXACT_MODAL_INTEGRATOR,
     PR_SEMI_IMPLICIT_INTEGRATOR,
     PR_TIMEDEPENDENT_WORKFLOW,
 )
@@ -35,6 +34,7 @@ from lcprop.pr.static_workflow import (
 )
 from lcprop.pr.transverse.specs import (
     PR_MATERIAL_RESPONSE_LINEARIZED,
+    PR_MATERIAL_RESPONSE_FIELD_LINEAR,
     PR_MATERIAL_RESPONSE_NONLINEAR,
     PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE,
     PR_TRANSVERSE_IMEX_EULER,
@@ -295,7 +295,7 @@ class PREvolutionPanel(QWidget):
         )
         if (
             self.material_response.currentData()
-            == PR_MATERIAL_RESPONSE_LINEARIZED
+            in (PR_MATERIAL_RESPONSE_LINEARIZED, PR_MATERIAL_RESPONSE_FIELD_LINEAR)
         ):
             return "compatible_validation_pending"
         return status
@@ -359,6 +359,27 @@ class PREvolutionPanel(QWidget):
         is_transverse_timedependent = (
             workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
         )
+        # Distinct physics, not aliases: reduced Eq. (5) versus transverse tangent.
+        if is_transverse_static or is_transverse_timedependent:
+            choices = (("Nonlinear transverse hopping", PR_MATERIAL_RESPONSE_NONLINEAR),
+                       ("Uniform-reference tangent", PR_MATERIAL_RESPONSE_LINEARIZED))
+        elif is_time_dependent:
+            choices = (("Nonlinear reduced hopping", PR_MATERIAL_RESPONSE_NONLINEAR),)
+        else:
+            choices = (("Nonlinear reduced hopping", PR_MATERIAL_RESPONSE_NONLINEAR),
+                       ("Field-linear (local intensity)", PR_MATERIAL_RESPONSE_FIELD_LINEAR))
+        current = self.material_response.currentData()
+        if tuple(self.material_response.itemData(i) for i in range(self.material_response.count())) != tuple(v for _, v in choices):
+            self.material_response.blockSignals(True)
+            self.material_response.clear()
+            for label, value in choices:
+                self.material_response.addItem(label, value)
+            index = self.material_response.findData(current)
+            self.material_response.setCurrentIndex(max(index, 0))
+            self.material_response.blockSignals(False)
+        else:
+            for i, (label, _) in enumerate(choices):
+                self.material_response.setItemText(i, label)
         self.material_response.setEnabled(True)
         self._set_row_visible(self.material_response, True)
         is_linearized = (
@@ -453,8 +474,6 @@ class PREvolutionPanel(QWidget):
                     PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE,
                 ),
             )
-        elif workflow_id == PR_TIMEDEPENDENT_WORKFLOW and linearized:
-            choices = (("Exact modal evolution", PR_EXACT_MODAL_INTEGRATOR),)
         else:
             choices = (
                 ("Semi-implicit trapezoidal", PR_SEMI_IMPLICIT_INTEGRATOR),
@@ -562,6 +581,8 @@ class PREvolutionPanel(QWidget):
         applied_field_x: float,
     ) -> None:
         response.validate()
+        if self.workflow_id() == PR_STATIC_WORKFLOW:
+            response.validate_reduced_static()
         index = self.material_response.findData(response.model)
         if index < 0:
             raise ValueError("unsupported transverse material response")

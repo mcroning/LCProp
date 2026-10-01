@@ -272,12 +272,16 @@ def test_other_ordinary_models_keep_dispatch_with_optional_analysis(
     w = general_window(windows, 3, (0, 2))
     w.evolution_panel.set_workflow_id(workflow)
     w._set_product_policy("full")  # This dispatch comparison requires complex endpoints.
-    # Small linearized fixtures exercise the selected production dispatch, not
+    # Small field-linear/tangent fixtures exercise the selected production dispatch, not
     # an assertion of validity for arbitrary finite-envelope illuminations.
     selector = w.evolution_panel.material_response
-    selector.setCurrentIndex(selector.findData("linearized"))
+    model = "field_linear_local_intensity" if workflow == "pr_static" else "linearized"
+    index = selector.findData(model)
+    assert index >= 0
+    selector.setCurrentIndex(index)
     w.material_panel.gain_length_product.setValue(0.)
     request = w.build_request()
+    assert request.material_response.model == model
     calls = []
     dispatch = w.local_runner.run_registered
 

@@ -27,8 +27,7 @@ def request_for(linearized, scattering, precision='float64'):
     return replace(request,
         backend=replace(request.backend, precision=precision),
         material_response=PRTransverseMaterialResponseSpec(
-            model='linearized' if linearized else 'nonlinear',
-            reference_intensity=1. if linearized else None),
+            model='field_linear_local_intensity' if linearized else 'nonlinear'),
         scattering=PRCanonicalScatteringSpec(
             epsilon=.002, transverse_correlation_um=.4, realization_seed=19,
             canonical_dz_um=1., algorithm_version='canonical_phase_slabs_v2_cross_backend',

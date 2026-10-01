@@ -142,11 +142,10 @@ def test_real_worker_A_to_B_invalidates_before_first_progress(app,monkeypatch,no
 
 def test_gain_pair_spectra_have_own_output_and_scattering_provenance(no_movie_encoder):
     from lcprop.pr.scattering import PRCanonicalScatteringSpec,PR_CANONICAL_SCATTERING_V2
-    from lcprop.pr.specs import PR_EXACT_MODAL_INTEGRATOR
+    from lcprop.pr.specs import PR_EULER_INTEGRATOR
     r=_request(steps=2)
     r=replace(r,initial_A=None,scattering=PRCanonicalScatteringSpec(.02,.4,0,1.,PR_CANONICAL_SCATTERING_V2),
-              solver=replace(r.solver,integrator=PR_EXACT_MODAL_INTEGRATOR),
-              material_response=replace(r.material_response,model='linearized',reference_intensity=1.))
+              solver=replace(r.solver,integrator=PR_EULER_INTEGRATOR))
     products=[];provenance=[]
     for gain in (0.,10.):
         events=[]

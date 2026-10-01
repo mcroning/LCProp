@@ -68,7 +68,7 @@ def _build(controls):
     ("evolution", "transport", "response", "request_type"),
     (
         ("static", "reduced_x", PR_MATERIAL_RESPONSE_NONLINEAR, PRStaticRunRequest),
-        ("static", "reduced_x", PR_MATERIAL_RESPONSE_LINEARIZED, PRStaticRunRequest),
+        ("static", "reduced_x", "field_linear_local_intensity", PRStaticRunRequest),
         (
             "static",
             "full_transverse",
@@ -85,12 +85,6 @@ def _build(controls):
             "time_dependent",
             "reduced_x",
             PR_MATERIAL_RESPONSE_NONLINEAR,
-            PRRunRequest,
-        ),
-        (
-            "time_dependent",
-            "reduced_x",
-            PR_MATERIAL_RESPONSE_LINEARIZED,
             PRRunRequest,
         ),
         (
@@ -107,7 +101,7 @@ def _build(controls):
         ),
     ),
 )
-def test_independent_model_axes_build_all_eight_production_cells(
+def test_independent_model_axes_build_supported_production_cells(
     app, evolution, transport, response, request_type
 ):
     controls = _controls()
@@ -143,15 +137,10 @@ def test_integrator_choices_follow_the_selected_td_model(app):
     )
     assert choices() == (PR_SEMI_IMPLICIT_INTEGRATOR, PR_EULER_INTEGRATOR)
 
-    panel.material_response.setCurrentIndex(
-        panel.material_response.findData(PR_MATERIAL_RESPONSE_LINEARIZED)
-    )
-    assert choices() == (PR_EXACT_MODAL_INTEGRATOR,)
-    assert panel.integrator.currentText() == "Exact modal evolution"
-
-    panel.transport_model.setCurrentIndex(
-        panel.transport_model.findData("full_transverse")
-    )
+    assert panel.material_response.findData(PR_MATERIAL_RESPONSE_LINEARIZED) == -1
+    assert panel.material_response.findData("field_linear_local_intensity") == -1
+    panel.transport_model.setCurrentIndex(panel.transport_model.findData("full_transverse"))
+    panel.material_response.setCurrentIndex(panel.material_response.findData(PR_MATERIAL_RESPONSE_LINEARIZED))
     assert choices() == (PR_TRANSVERSE_IMEX_EULER,)
     assert panel.integrator.currentText() == "Exact modal evolution"
 
@@ -167,11 +156,12 @@ def test_integrator_choices_follow_the_selected_td_model(app):
 def test_image_amplification_status_is_mode_specific_not_a_model_label(app):
     panel = PREvolutionPanel()
     panel.set_image_amplification_mode(True)
+    panel.set_workflow_id("pr_static")
     panel.material_response.setCurrentIndex(
-        panel.material_response.findData(PR_MATERIAL_RESPONSE_LINEARIZED)
+        panel.material_response.findData("field_linear_local_intensity")
     )
 
-    assert panel.material_response.currentText() == "Linearized"
+    assert panel.material_response.currentText() == "Field-linear (local intensity)"
     assert panel.image_amplification_validation_status() == (
         "compatible_validation_pending"
     )

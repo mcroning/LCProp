@@ -1,0 +1,21 @@
+Frozen A5 diagnostic fixtures
+
+Default persistent root: results/pr_frozen_a5_diagnostic_fixtures/ (repository-relative).
+Override: LCPROP_A5_DIAGNOSTIC_FIXTURES, pointing to the identical directory layout.
+Missing or altered fixtures fail the regression; no silent skip or regenerated map.
+
+Authority: local /Users/mcroning/LCProp-Research Git commit
+ e58cfe263c91f850b60b6b0acef2a062b232cf3f
+under commissioning/h200/photonics_a5/.
+The 12 exact historical blobs were recovered with git show and verified against
+pre-existing pinned identities before use. provenance.json at the fixture root
+records every original path, SHA-256, size and source commit. The same L50 evidence
+also survives under LCProp-results/local/Research/a5-material-model-discriminator-sequence-v1/historical_L50/.
+No remote access or diagnostic-map recomputation was used for recovery.
+
+To recover elsewhere, extract the paths listed in provenance.json from that
+preserved Research commit into the root above. Verify each SHA-256 before use.
+Do not substitute similar artifacts. These are historical float32 saved spectrum
+maps, not exact float64 production Analysis inputs. Original regression tolerances
+and frozen diagnostic code are unchanged. Tests bind both comparison contracts,
+coordinate bytes, map bytes, metrics bytes, shape, dtype and source definitions.

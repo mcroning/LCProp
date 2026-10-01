@@ -53,11 +53,12 @@ their state to that optical response.
 
 ### Photorefractive
 
-- all eight production choices formed by static/time-dependent evolution,
-  reduced x-only/full-transverse transport, and fully nonlinear/linearized
-  material response;
-- exact-modal time evolution for both linearized transport models;
-- coupled nonlinear and analytic linearized static solvers;
+- seven supported production choices: reduced Static offers nonlinear hopping
+  or local-intensity field-linear paper Eq. (5); reduced TD offers nonlinear
+  hopping only; full transverse retains nonlinear and uniform-reference tangent
+  models for Static and TD;
+- exact-modal time evolution for the full-transverse tangent model;
+- coupled nonlinear and analytic field-linear/tangent static solvers;
 - canonical partition-independent scattering where request schemas support it;
 - Image Amplification and carrier-resolved two-beam diagnostics;
 - PR experiment/checkpoint persistence and continuation;

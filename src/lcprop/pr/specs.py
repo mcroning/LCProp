@@ -174,12 +174,13 @@ def validate_pr_timedependent_configuration(request: PRRunRequest) -> None:
     """Validate the reduced TD response/integrator pairing."""
 
     request.material_response.validate()
-    linearized = request.material_response.model == "linearized"
-    if linearized and request.solver.integrator != PR_EXACT_MODAL_INTEGRATOR:
+    if request.material_response.model != "nonlinear":
         raise ValueError(
-            "reduced linearized TD requires integrator='exact_modal'"
+            "Reduced TD supports nonlinear hopping only. Local-intensity field-linear "
+            "TD requires a separately derived variable-coefficient integrator; "
+            "fixed-I0 linearized TD is retired from production."
         )
-    if not linearized and request.solver.integrator == PR_EXACT_MODAL_INTEGRATOR:
+    if request.solver.integrator == PR_EXACT_MODAL_INTEGRATOR:
         raise ValueError("reduced nonlinear TD does not support integrator='exact_modal'")
 
 

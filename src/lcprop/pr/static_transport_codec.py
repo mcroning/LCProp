@@ -72,7 +72,7 @@ def _validate_request(request: PRStaticRunRequest) -> None:
     request.material.validate()
     request.solver.validate()
     request.backend.validate()
-    request.material_response.validate()
+    request.material_response.validate_reduced_static()
     request.optical_boundary.validate()
     _validate_canonical_scattering_for_grid(
         request.scattering, grid=request.grid, z_length_um=request.grid.z_length_um
@@ -109,7 +109,7 @@ def encode_pr_static_transport_request(
         "material": asdict(request.material),
         "solver": pack_portable(request.solver, arrays, "solver"),
         "backend": asdict(request.backend),
-        "material_response": asdict(request.material_response),
+        "material_response": request.material_response.to_payload(),
         "launch_elements": encode_launch_elements(request.launch_elements),
         "initial_A": pack_portable(request.initial_A, arrays, "initial_A"),
         "initial_E": pack_portable(request.initial_E, arrays, "initial_E"),

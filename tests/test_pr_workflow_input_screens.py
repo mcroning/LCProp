@@ -364,6 +364,9 @@ def _wait_for(app, predicate, *, timeout: float = 8.0) -> None:
 
 def test_pr_gui_build_and_registered_dispatch_carry_screen_plan(app):
     window = PRMainWindow()
+    # This launch comparison requires the exact complex input endpoint;
+    # default Interactive retention intentionally omits A_initial.
+    window._set_product_policy("full")
     window.grid_panel.Nx.setValue(8)
     window.grid_panel.Ny.setValue(8)
     window.grid_panel.dz_um.setValue(2.0)
@@ -381,6 +384,7 @@ def test_pr_gui_build_and_registered_dispatch_carry_screen_plan(app):
     original = window.runner.run_registered
 
     def observed(material_id, workflow_id, supplied, **kwargs):
+        assert kwargs["_result_policy"] == "full"
         calls.append((material_id, workflow_id, supplied))
         return original(material_id, workflow_id, supplied, **kwargs)
 

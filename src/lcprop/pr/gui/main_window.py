@@ -144,13 +144,8 @@ from lcprop.runners.local import LocalRunner
 def _image_amplification_validation_status(capability, base_request) -> str:
     """Resolve IA validation without changing workflow-level capability data."""
 
-    if (
-        isinstance(
-            base_request,
-            (PRTransverseRunRequest, PRTransverseStaticRunRequest),
-        )
-        and base_request.material_response.model
-        == PR_MATERIAL_RESPONSE_LINEARIZED
+    if base_request.material_response.model in (
+        PR_MATERIAL_RESPONSE_LINEARIZED, "field_linear_local_intensity"
     ):
         return "compatible_validation_pending"
     return capability.validation_status
@@ -1142,7 +1137,7 @@ class PRMainWindow(QWidget):
             (PRRunRequest, PRTransverseRunRequest),
         )
         linearized = (
-            request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+            request.material_response.model != "nonlinear"
         )
         lines.extend([
             f"Evolution: {'Time dependent' if timedependent else 'Static'}",
@@ -1152,7 +1147,8 @@ class PRMainWindow(QWidget):
                 else "Transport model: Reduced x-only (x drift/diffusion)"
             ),
             (
-                "Material response: Linearized"
+                ("Material response: Uniform-reference tangent" if transverse
+                 else "Material response: Field-linear (local intensity), paper Eq. (5)")
                 if linearized
                 else "Material response: Fully nonlinear"
             ),
@@ -1185,12 +1181,6 @@ class PRMainWindow(QWidget):
                        else f"{preflight.conservative_dt_limit:.8g}")
                 ),
             ])
-            if linearized:
-                lines.append(
-                    "Linearization intensity I₀: "
-                    f"{request.material_response.reference_intensity:g} "
-                    "normalized total transport intensity"
-                )
         elif workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
             lines.extend([
                 (
@@ -1254,9 +1244,9 @@ class PRMainWindow(QWidget):
         else:
             lines.extend([
                 (
-                    "Static material model: Linearized material response"
+                    "Static material model: Field-linear (local intensity)"
                     if linearized
-                    else "Static material model: Fully nonlinear"
+                    else "Static material model: Nonlinear reduced hopping"
                 ),
                 "Transport: Reduced x-only PR transport",
                 (
@@ -1275,16 +1265,12 @@ class PRMainWindow(QWidget):
             ])
             if linearized:
                 lines.extend([
-                    (
-                        "Linearization intensity I₀: "
-                        f"{request.material_response.reference_intensity:g} "
-                        "normalized total transport intensity"
-                    ),
+                    "Intensity denominator: local optical / launch peak reference + dark + uniform background",
                     (
                         "Reduced applied field: "
                         f"{request.material.applied_field:g} normalized"
                     ),
-                    "Uniform equilibrium field E₀ = E_app I_b / I₀",
+                    "Paper Eq. (5): E + E_app D_x E - D_xx E = (E_app I_b + D_x I) / I",
                 ])
         lines.extend([
             f"Optical substeps per z slice: {request.solver.optical_substeps}",
