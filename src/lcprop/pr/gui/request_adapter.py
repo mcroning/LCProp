@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from lcprop.pr.local_plane_workflow import LocalPlaneRunRequest, PR_LOCAL_PLANE_WORKFLOW
-from lcprop.pr.local_plane_integration import validate_local_plane_request
+from lcprop.pr.published_static import PublishedStaticRequest, PR_PUBLISHED_STATIC_WORKFLOW
+from lcprop.pr.published_static_integration import validate_published_static_request
 from typing import Literal
 
 from lcprop.adapters.launchplane import beam_stack_to_launchplane
@@ -79,7 +79,7 @@ def _validate_pr_gui_common(request) -> PRBeamStackApertureReport:
     request.grid.validate()
     request.beams.validate()
     request.material.validate()
-    if not isinstance(request, LocalPlaneRunRequest):
+    if not isinstance(request, PublishedStaticRequest):
         request.solver.validate()
     request.backend.validate()
     request.optical_boundary.validate()
@@ -215,8 +215,8 @@ def validate_pr_transverse_gui_request(
 def validate_pr_gui_workflow_request(request):
     """Dispatch GUI preflight by the request's exact PR workflow type."""
 
-    if isinstance(request, LocalPlaneRunRequest):
-        validate_local_plane_request(request)
+    if isinstance(request, PublishedStaticRequest):
+        validate_published_static_request(request)
         return PRStaticRequestPreflight(aperture=_validate_pr_gui_common(request))
     if isinstance(request, PRTransverseRunRequest):
         return validate_pr_transverse_gui_request(request)
@@ -262,9 +262,10 @@ def build_pr_request(
         "optical_boundary": beam_panel.optical_boundary(),
     }
     scattering = evolution_panel.scattering_spec()
-    if workflow_id == PR_LOCAL_PLANE_WORKFLOW:
+    if workflow_id == PR_PUBLISHED_STATIC_WORKFLOW:
         common.pop("initial_E")
-        request = LocalPlaneRunRequest(**common, scattering=scattering,
+        request = PublishedStaticRequest(**common, scattering=scattering,
+            material_solver=evolution_panel.published_material_solver(),
             material_response=evolution_panel.transverse_material_response())
     elif workflow_id == PR_TIMEDEPENDENT_WORKFLOW:
         request = PRRunRequest(
@@ -343,11 +344,20 @@ def build_pr_request(
 def validate_pr_gui_request_representable(request) -> None:
     """Reject headless PR settings that have no exact GUI representation."""
 
+    from lcprop.pr.local_plane_workflow import LocalPlaneRunRequest
+    if isinstance(request, (LocalPlaneRunRequest, PRStaticRunRequest)):
+        raise ValueError("Saved midpoint/symmetric Static arithmetic is preserved headlessly; GUI cannot migrate it to published optical-first. Create a fresh request.")
     validate_pr_gui_workflow_request(request)
     if isinstance(request, PRStaticRunRequest) and request.material_response.model == "field_linear_local_intensity":
         raise ValueError("Saved pr_static Local-I requests use historical midpoint arithmetic; GUI loading cannot migrate them. Create a fresh local-plane request.")
-    if isinstance(request, LocalPlaneRunRequest) and (request.residual_rms_tolerance != 1e-5 or request.residual_max_tolerance != 1e-4):
+    if isinstance(request, PublishedStaticRequest) and (request.residual_rms_tolerance != 1e-5 or request.residual_max_tolerance != 1e-4):
         raise ValueError("GUI cannot represent nondefault local-plane residual validity gates")
+    if isinstance(request, PublishedStaticRequest):
+        from lcprop.pr.static import PRStaticSolverOptions
+        defaults = PRStaticSolverOptions()
+        if (request.material_solver.minimum_step_scale != defaults.minimum_step_scale
+                or request.material_solver.armijo_fraction != defaults.armijo_fraction):
+            raise ValueError("GUI cannot represent custom material line-search constants")
     initial_material = (
         request.initial_psi
         if isinstance(
@@ -414,8 +424,11 @@ def apply_pr_request(
     validate_pr_gui_request_representable(request)
     grid_panel.set_grid(request.grid)
     material_panel.set_material(request.material)
-    if isinstance(request, LocalPlaneRunRequest):
-        evolution_panel.set_workflow_id(PR_LOCAL_PLANE_WORKFLOW)
+    if isinstance(request, PublishedStaticRequest):
+        evolution_panel.set_workflow_id(PR_PUBLISHED_STATIC_WORKFLOW)
+        evolution_panel.set_published_material_solver(request.material_solver)
+        evolution_panel.set_transverse_material_response(request.material_response,
+            applied_field_x=request.material.applied_field)
     elif isinstance(request, PRTransverseRunRequest):
         evolution_panel.set_workflow_id(PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW)
         evolution_panel.set_transverse_material_response(
@@ -446,6 +459,8 @@ def apply_pr_request(
         evolution_panel.set_solver(request.solver)
     evolution_panel.set_scattering_spec(getattr(request, "scattering", None))
     evolution_panel.set_backend_spec(request.backend)
+    if isinstance(request, PublishedStaticRequest):
+        evolution_panel.set_published_material_solver(request.material_solver)
     beam_panel.set_aperture(
         request.grid.x_aperture_um,
         request.grid.y_aperture_um,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from lcprop.pr.published_static import PublishedStaticRequest
+
 from dataclasses import dataclass, replace
 import os
 
@@ -67,8 +69,8 @@ def _build(controls):
 @pytest.mark.parametrize(
     ("evolution", "transport", "response", "request_type"),
     (
-        ("static", "reduced_x", PR_MATERIAL_RESPONSE_NONLINEAR, PRStaticRunRequest),
-        ("static", "reduced_x", "field_linear_local_intensity", PRStaticRunRequest),
+        ("static", "reduced_x", PR_MATERIAL_RESPONSE_NONLINEAR, PublishedStaticRequest),
+        ("static", "reduced_x", "field_linear_local_intensity", PublishedStaticRequest),
         (
             "static",
             "full_transverse",
@@ -163,9 +165,9 @@ def test_image_amplification_status_is_mode_specific_not_a_model_label(app):
 
     assert panel.material_response.currentText() == "Field-linear (local intensity)"
     assert panel.image_amplification_validation_status() == (
-        "compatible_validation_pending"
+        "unavailable"
     )
-    assert "Experimental" in panel.algorithm_status.text()
+    assert "ordinary fresh calculations only" in panel.algorithm_status.text()
 
 
 def test_scattering_controls_round_trip_where_production_supports_them(app):

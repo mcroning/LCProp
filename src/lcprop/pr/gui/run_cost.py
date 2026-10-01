@@ -9,7 +9,7 @@ import math
 from lcprop.core.grid import round_nz
 from lcprop.pr.specs import PRRunRequest
 from lcprop.pr.static_workflow import PRStaticRunRequest
-from lcprop.pr.local_plane_workflow import LocalPlaneRunRequest
+from lcprop.pr.published_static import PublishedStaticRequest
 from lcprop.pr.transverse.specs import (
     PR_MATERIAL_RESPONSE_LINEARIZED,
     PRTransverseRunRequest,
@@ -69,7 +69,7 @@ def classify_pr_run_cost(
     points = float(nx * ny * nz)
     factor = _hardware_precision_factor(request)
 
-    if isinstance(request, LocalPlaneRunRequest):
+    if isinstance(request, PublishedStaticRequest):
         model = "Local-intensity PR Static — streaming local planes"
         score = points * 3.0 * factor
         potential_threshold, very_threshold = 2.0e10, 2.0e11

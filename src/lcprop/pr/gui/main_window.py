@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from lcprop.pr.local_plane_workflow import LocalPlaneRunRequest, PR_LOCAL_PLANE_WORKFLOW, PR_LOCAL_PLANE_ARITHMETIC
-from lcprop.pr.local_plane_integration import LOCAL_PLANE_OPERATION, LOCAL_PLANE_ANALYSIS_PRODUCTS
+from lcprop.pr.published_static import PublishedStaticRequest, PR_PUBLISHED_STATIC_WORKFLOW, PR_PUBLISHED_STATIC_ARITHMETIC
+from lcprop.pr.published_static_integration import PUBLISHED_STATIC_OPERATION, PUBLISHED_STATIC_ANALYSIS_PRODUCTS
 
 from lcprop.pr.live_results import (PRLivePreviewPolicy, PRLiveSnapshot,
                                     reduced_pr_live_to_run_data)
@@ -201,7 +201,7 @@ class PRMainWindow(QWidget):
                 PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
                 PR_TRANSVERSE_STATIC_OPERATION,
                 PR_STATIC_OPERATION,
-                LOCAL_PLANE_OPERATION,
+                PUBLISHED_STATIC_OPERATION,
             )
         )
         self._saved_unresolved_intent = None
@@ -503,8 +503,8 @@ class PRMainWindow(QWidget):
         """Construct the immutable request represented by the controls."""
 
         if self.input_panel.is_image_amplification():
-            if self.evolution_panel.workflow_id() == PR_LOCAL_PLANE_WORKFLOW:
-                raise ValueError("Local-plane Static currently supports fresh ordinary calculations, not Image Amplification experiments")
+            if self.evolution_panel.workflow_id() == PR_PUBLISHED_STATIC_WORKFLOW:
+                raise ValueError("Published optical-first Static currently supports fresh ordinary calculations, not Image Amplification experiments")
             base_request = build_pr_request(
                 material_panel=self.material_panel,
                 beam_panel=self.beam_panel,
@@ -525,8 +525,8 @@ class PRMainWindow(QWidget):
 
     def _capture_experiment_gui_state(self):
         workflow_id = self.evolution_panel.workflow_id()
-        if workflow_id == PR_LOCAL_PLANE_WORKFLOW:
-            solver = None
+        if workflow_id == PR_PUBLISHED_STATIC_WORKFLOW:
+            solver = self.evolution_panel.published_material_solver()
         elif workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
             solver = self.evolution_panel.transverse_solver()
         elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
@@ -572,8 +572,8 @@ class PRMainWindow(QWidget):
             state["material_response"],
             applied_field_x=state["transverse_applied_field"],
         )
-        if workflow_id == PR_LOCAL_PLANE_WORKFLOW:
-            pass
+        if workflow_id == PR_PUBLISHED_STATIC_WORKFLOW:
+            self.evolution_panel.set_published_material_solver(state["solver"])
         elif workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
             self.evolution_panel.set_transverse_solver(state["solver"])
         elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
@@ -632,11 +632,11 @@ class PRMainWindow(QWidget):
 
     def _update_product_controls(self, *, policy=None):
         from lcprop.transport.result_policy import static_product_selection
-        local_plane = self.evolution_panel.workflow_id() == PR_LOCAL_PLANE_WORKFLOW
-        supported = self.evolution_panel.workflow_id() in (PR_STATIC_WORKFLOW, PR_LOCAL_PLANE_WORKFLOW)
+        local_plane = self.evolution_panel.workflow_id() == PR_PUBLISHED_STATIC_WORKFLOW
+        supported = self.evolution_panel.workflow_id() in (PR_STATIC_WORKFLOW, PR_PUBLISHED_STATIC_WORKFLOW)
         for name, action in self._analysis_actions.items():
-            action.setEnabled(not local_plane or name in LOCAL_PLANE_ANALYSIS_PRODUCTS)
-            if local_plane and name not in LOCAL_PLANE_ANALYSIS_PRODUCTS:
+            action.setEnabled(not local_plane or name in PUBLISHED_STATIC_ANALYSIS_PRODUCTS)
+            if local_plane and name not in PUBLISHED_STATIC_ANALYSIS_PRODUCTS:
                 with QSignalBlocker(action):
                     action.setChecked(False)
         current = policy or self.result_policy_selector.currentData() or "fast"
@@ -1228,13 +1228,13 @@ class PRMainWindow(QWidget):
                     ),
                     "Electrical ensemble: fixed harmonic mean field",
                 ])
-        elif workflow_id == PR_LOCAL_PLANE_WORKFLOW:
+        elif workflow_id == PR_PUBLISHED_STATIC_WORKFLOW:
             lines.extend([
-                "Static material model: Field-linear (local intensity), paper Eq. (5)",
-                f"Arithmetic: {PR_LOCAL_PLANE_ARITHMETIC}",
-                "One direct material solve per cell; two optical half hops and one full material phase.",
+                f"Static material model: {request.material_response.model}",
+                f"Arithmetic: {PR_PUBLISHED_STATIC_ARITHMETIC}",
+                "Full optical hop → arriving intensity → material solve → full material phase → scattering.",
                 "Status: accepted cells, reached z and material residual; no coupled iteration or replay.",
-                "Distinct optical boundary and material-center coordinates; no continuation.",
+                "Explicit optical boundary and material right-endpoint coordinates; no continuation.",
             ])
         elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
             lines.extend([
@@ -1297,7 +1297,7 @@ class PRMainWindow(QWidget):
                     "Paper Eq. (5): E + E_app D_x E - D_xx E = (E_app I_b + D_x I) / I",
                 ])
         lines.extend([
-            ("Optical propagation: two half-cell hops" if isinstance(request, LocalPlaneRunRequest) else f"Optical substeps per z slice: {request.solver.optical_substeps}"),
+            ("Optical propagation: one full-cell hop" if isinstance(request, PublishedStaticRequest) else f"Optical substeps per z slice: {request.solver.optical_substeps}"),
             (
                 f"Backend: {request.backend.backend}; "
                 f"precision={request.backend.precision}"
@@ -1325,8 +1325,8 @@ class PRMainWindow(QWidget):
             return PR_TRANSVERSE_STATIC_WORKFLOW
         if isinstance(request, PRTransverseRunRequest):
             return PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
-        if isinstance(request, LocalPlaneRunRequest):
-            return PR_LOCAL_PLANE_WORKFLOW
+        if isinstance(request, PublishedStaticRequest):
+            return PR_PUBLISHED_STATIC_WORKFLOW
         if isinstance(request, PRStaticRunRequest):
             return PR_STATIC_WORKFLOW
         if isinstance(request, PRRunRequest):
@@ -1370,7 +1370,7 @@ class PRMainWindow(QWidget):
             self.runner = self.local_runner
             self.execution_target_selector.setCurrentIndex(0)
         self.runner_label.setText(f"Runner: {self.runner.name}")
-        self.result_policy_selector.setEnabled(target == "slurm" or self.evolution_panel.workflow_id() in (PR_STATIC_WORKFLOW, PR_LOCAL_PLANE_WORKFLOW))
+        self.result_policy_selector.setEnabled(target == "slurm" or self.evolution_panel.workflow_id() in (PR_STATIC_WORKFLOW, PR_PUBLISHED_STATIC_WORKFLOW))
         if target != "slurm":
             self.evolution_panel.apply_execution_backend_context(target="local")
             return
@@ -1392,7 +1392,7 @@ class PRMainWindow(QWidget):
     def _run_registered(self, request, **kwargs):
         self._require_execution_intent_resolved()
         policy = str(self.result_policy_selector.currentData())
-        if policy.startswith("analysis") and not isinstance(request, (PRStaticRunRequest, LocalPlaneRunRequest)):
+        if policy.startswith("analysis") and not isinstance(request, (PRStaticRunRequest, PublishedStaticRequest)):
             raise ValueError("Analysis product selection is supported only by reduced Static")
         if isinstance(
             request,
@@ -1469,7 +1469,7 @@ class PRMainWindow(QWidget):
             kwargs["_before_product_conversion"] = before_product_conversion
         if self.runner is self.slurm_runner:
             kwargs.update(self._remote_runner_kwargs())
-        elif isinstance(request, (PRStaticRunRequest, LocalPlaneRunRequest)):
+        elif isinstance(request, (PRStaticRunRequest, PublishedStaticRequest)):
             kwargs["_result_policy"] = policy
         elif isinstance(request, PRRunRequest):
             kwargs["live_preview_policy"] = PRLivePreviewPolicy()
@@ -1983,7 +1983,7 @@ class PRMainWindow(QWidget):
             ):
                 self.results_panel.append_console(message)
             return
-        if progress.workflow == PR_LOCAL_PLANE_WORKFLOW:
+        if progress.workflow == PR_PUBLISHED_STATIC_WORKFLOW:
             residual = (progress.diagnostics or {}).get("material_residual_rms")
             text = f"Cells {progress.completed_units}/{progress.total_units}; z={progress.current_coordinate:g} µm; material residual RMS={residual}"
             self.status_label.setText(text)
@@ -2147,7 +2147,7 @@ class PRMainWindow(QWidget):
                 PR_TIMEDEPENDENT_WORKFLOW,
                 PR_IMAGE_AMPLIFICATION_WORKFLOW,
                 PR_STATIC_WORKFLOW,
-                PR_LOCAL_PLANE_WORKFLOW,
+                PR_PUBLISHED_STATIC_WORKFLOW,
                 PR_TRANSVERSE_STATIC_WORKFLOW,
                 PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
             ):
@@ -2164,7 +2164,7 @@ class PRMainWindow(QWidget):
             self.last_result = result
             if runner_result.kind in (
                 PR_STATIC_WORKFLOW,
-                PR_LOCAL_PLANE_WORKFLOW,
+                PR_PUBLISHED_STATIC_WORKFLOW,
                 PR_TRANSVERSE_STATIC_WORKFLOW,
             ):
                 self.status_label.setText("Rendering results...")
@@ -2172,14 +2172,14 @@ class PRMainWindow(QWidget):
                 self.results_panel.set_td_time_indicator("Rendering results...")
                 self.results_panel.append_console("Rendering results...")
             state = (
-                "State at failure" if runner_result.kind == PR_LOCAL_PLANE_WORKFLOW and result.status == "failed" else
+                "State at failure" if runner_result.kind == PR_PUBLISHED_STATIC_WORKFLOW and result.status == "failed" else
                 "State at stop/cancellation"
                 if getattr(result, "status", None) in {"stopped", "cancelled"}
                 else "Completed result"
             )
             self.results_panel.set_run_data(runner_result.run_data)
             self.results_panel.workspace.finish_attempt(state)
-            if runner_result.kind == PR_LOCAL_PLANE_WORKFLOW:
+            if runner_result.kind == PR_PUBLISHED_STATIC_WORKFLOW:
                 scientific = result.run.scientific
                 self.last_checkpoint = None
                 self.run_status = "stopped" if scientific.status == "cancelled" else scientific.status
@@ -2383,9 +2383,9 @@ class PRMainWindow(QWidget):
                 )
             self.results_panel.append_console(
                 f"Local-plane execution: {result.status}"
-                if runner_result.kind == PR_LOCAL_PLANE_WORKFLOW else runner_result.message)
+                if runner_result.kind == PR_PUBLISHED_STATIC_WORKFLOW else runner_result.message)
             self.results_panel.append_console(message)
-            if runner_result.kind != PR_LOCAL_PLANE_WORKFLOW:
+            if runner_result.kind != PR_PUBLISHED_STATIC_WORKFLOW:
                 self.results_panel.append_console(
                     "Normalized optical power: "
                     f"{ordinary_result.power_initial:.8g} -> "

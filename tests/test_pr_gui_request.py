@@ -144,21 +144,19 @@ def test_static_selection_builds_only_static_semantics_and_auto_tolerances(app):
     evolution_panel.precision.setCurrentText("float32")
 
     request = _build(controls)
-    preflight = validate_pr_static_gui_request(request)
-
-    assert isinstance(request, PRStaticRunRequest)
-    assert request.solver.material_solver is None
+    from lcprop.pr.published_static import PublishedStaticRequest
+    from lcprop.pr.gui.request_adapter import validate_pr_gui_workflow_request
+    preflight = validate_pr_gui_workflow_request(request)
+    assert isinstance(request, PublishedStaticRequest)
     assert request.backend.precision == "float32"
-    assert request.solver.max_coupled_passes == 9
-    assert request.solver.optical_substeps == 3
-    assert not hasattr(request.solver, "Nt")
-    assert not hasattr(request.solver, "dt_normalized")
-    assert not hasattr(request.solver, "integrator")
+    assert not hasattr(request, "solver")
+    assert not hasattr(request.material_solver, "optical_substeps")
     assert preflight.warnings == ()
     assert evolution_panel.Nt.isHidden()
     assert evolution_panel.dt_normalized.isHidden()
     assert evolution_panel.integrator.isHidden()
-    assert not evolution_panel.max_coupled_passes.isHidden()
+    assert evolution_panel.max_coupled_passes.isHidden()
+    assert not evolution_panel.material_iterations.isHidden()
 
 
 def test_beam_stack_inverse_mapping_preserves_optical_fields_and_signs(app):
@@ -415,7 +413,11 @@ def test_reduced_static_scattering_gui_experiment_transport_roundtrip(app, algor
     spec = PRCanonicalScatteringSpec(0.02, 0.4, 304001242, 1.0, algorithm)
     controls[-1].set_scattering_spec(spec)
     assert not controls[-1].scattering_enabled.isHidden()
-    request = _build(controls)
+    fresh = _build(controls)
+    # Explicit old midpoint request: its v1/v2 identities remain decodable,
+    # but it cannot be hydrated into the fresh published GUI.
+    request = PRStaticRunRequest(grid=fresh.grid, beams=fresh.beams,
+        material=fresh.material, backend=fresh.backend, scattering=spec)
     assert request.scattering == spec
     encoded = encode_pr_static_request(request)
     restored = decode_pr_static_request(encoded)
@@ -427,8 +429,8 @@ def test_reduced_static_scattering_gui_experiment_transport_roundtrip(app, algor
     transport = encode_pr_static_transport_request(restored)
     restored = decode_pr_static_transport_request(transport.payload.metadata, transport.payload.arrays)
     assert restored.scattering == spec
-    _apply(restored, controls)
-    assert _build(controls).scattering == spec
+    with pytest.raises(ValueError, match="midpoint/symmetric"):
+        _apply(restored, controls)
     # Existing saved experiments and transport requests decode as disabled.
     encoded.pop("scattering")
     assert decode_pr_static_request(encoded).scattering is None
@@ -442,7 +444,8 @@ def test_reduced_static_gui_rejects_non_aligned_scattering(app):
     controls[-1].set_workflow_id(PR_STATIC_WORKFLOW)
     request = _build(controls)
     request = replace(request, scattering=PRCanonicalScatteringSpec(
-        0.02, 0.4, 127, request.grid.z_length_um * 2,
+        0.02, 0.4, 127, request.grid.z_length_um * 2, "canonical_phase_slabs_v2_cross_backend",
     ))
     with pytest.raises(ValueError, match="align"):
-        validate_pr_static_gui_request(request)
+        from lcprop.pr.gui.request_adapter import validate_pr_gui_workflow_request
+        validate_pr_gui_workflow_request(request)

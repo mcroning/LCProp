@@ -121,14 +121,19 @@ class _Collector:
             if selection.source_cuts:
                 cuts['source'] = self.pair(frame.source_intensity)
             if selection.residual_cuts:
-                spec = PRReducedFieldLinearSpec(request.material.applied_field,
-                    request.material.background_intensity,
-                    request.material.characteristic_wavenumber_per_um * (request.grid.x_aperture_um/request.grid.Nx))
-                residual = reduced_field_linear_residual(frame.material_field,
-                    frame.source_intensity, spec=spec, xp=xp)
+                residual = self.residual(frame, xp)
                 cuts['residual'] = self.pair(residual)
         self.pending = dict(index=frame.cell_index, boundary=frame.z_end_um,
             center=frame.material_plane_um, cuts=cuts, preview=preview)
+
+    def residual(self, frame, xp):
+        request = self.request
+        spec = PRReducedFieldLinearSpec(request.material.applied_field,
+            request.material.background_intensity,
+            request.material.characteristic_wavenumber_per_um * (request.grid.x_aperture_um/request.grid.Nx))
+        residual = reduced_field_linear_residual(frame.material_field,
+            frame.source_intensity, spec=spec, xp=xp)
+        return residual
 
     def progress(self, progress):
         record = self.pending

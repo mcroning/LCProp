@@ -31,55 +31,10 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-@pytest.fixture
-def window(app, monkeypatch):
-    import lcprop.pr.gui.main_window as module
-    def report(*args): pytest.fail(str(args))
-    monkeypatch.setattr(module, 'report_failure', report)
-    w = PRMainWindow()
-    apply_pr_request(replace(request(), initial_A=None), material_panel=w.material_panel,
-        beam_panel=w.beam_panel, grid_panel=w.grid_panel, evolution_panel=w.evolution_panel)
-    w._update_product_controls()
-    yield w
-    w.close()
 
 
-def test_gui_fresh_identity_controls_and_inspection(window):
-    r = window.build_request()
-    assert isinstance(r, LocalPlaneRunRequest)
-    assert window._workflow_id_for_request(r) == PR_LOCAL_PLANE_WORKFLOW
-    assert window.evolution_panel.max_coupled_passes.isHidden()
-    assert window.evolution_panel.optical_substeps.isHidden()
-    text = window.describe_request(r)
-    assert PR_LOCAL_PLANE_WORKFLOW in text and PR_LOCAL_PLANE_ARITHMETIC in text
-    assert 'Maximum coupled passes' not in text
-    assert 'accepted cells' in text
-    assert window._analysis_actions['far_field_intensity'].isEnabled()
-    assert not window._analysis_actions['complex_input'].isEnabled()
 
 
-def test_gui_local_dispatch_status_and_experiment_roundtrip(window, tmp_path):
-    window._set_product_policy('analysis:far_field_intensity')
-    r = window.build_request()
-    path = window.save_experiment_to(tmp_path/'fresh.lcprop.json')
-    loaded = load_experiment(path, expected_material_id='pr')
-    assert loaded.workflow_id == PR_LOCAL_PLANE_WORKFLOW
-    assert loaded.request == r
-    window.load_experiment_from(path)
-    assert window.build_request() == r
-    progress = []
-    out = window._run_registered(r, progress_callback=progress.append)
-    assert out.kind == PR_LOCAL_PLANE_WORKFLOW
-    assert out.result.status == 'completed'
-    assert out.result.run.scientific.far_field is not None
-    assert all(p.workflow == PR_LOCAL_PLANE_WORKFLOW for p in progress)
-    assert progress[-1].diagnostics['material_residual_rms'] is not None
-    window._on_progress(progress[-1])
-    assert 'Cells' in window.status_label.text()
-    window._on_finished(out)
-    assert window.run_status == 'completed'
-    assert window.last_checkpoint is None
-    assert 'far_field_intensity' in out.run_data.fields
 
 
 @pytest.mark.parametrize('policy', ['fast', 'full', 'analysis:far_field_intensity', 'analysis:complex_output,far_field_intensity'])
@@ -118,7 +73,7 @@ def test_old_midpoint_identity_is_not_migrated(tmp_path):
     restored = load_experiment(path, expected_material_id='pr')
     assert type(restored.request) is PRStaticRunRequest
     assert restored.workflow_id == PR_STATIC_WORKFLOW
-    with pytest.raises(ValueError, match='historical midpoint'):
+    with pytest.raises(ValueError, match='midpoint/symmetric'):
         validate_pr_gui_request_representable(restored.request)
     payload = encode_local_plane_request(r)
     for key, value in [('workflow_id', PR_STATIC_WORKFLOW), ('arithmetic_id', 'midpoint')]:
@@ -126,20 +81,6 @@ def test_old_midpoint_identity_is_not_migrated(tmp_path):
             decode_local_plane_request(dict(payload, **{key:value}))
 
 
-def test_other_gui_models_keep_dispatch(window):
-    panel = window.evolution_panel
-    panel.material_response.setCurrentIndex(panel.material_response.findData('nonlinear'))
-    r = window.build_request()
-    assert type(r) is PRStaticRunRequest
-    assert panel.workflow_id() == PR_STATIC_WORKFLOW
-    assert not panel.max_coupled_passes.isHidden()
-    from lcprop.pr.specs import PR_TIMEDEPENDENT_WORKFLOW, PRRunRequest
-    panel.set_workflow_id(PR_TIMEDEPENDENT_WORKFLOW)
-    assert isinstance(window.build_request(), PRRunRequest)
-    from lcprop.pr.transverse.static_workflow import PR_TRANSVERSE_STATIC_WORKFLOW, PRTransverseStaticRunRequest
-    panel.set_workflow_id(PR_TRANSVERSE_STATIC_WORKFLOW)
-    panel.material_response.setCurrentIndex(panel.material_response.findData('linearized'))
-    assert isinstance(window.build_request(), PRTransverseStaticRunRequest)
 
 
 def test_retention_independent_science_and_analysis_scope():
@@ -167,38 +108,8 @@ def test_streaming_estimator_no_longitudinal_gpu_volumes():
     assert 'continuation' in ' '.join(short.qualifications)
 
 
-def test_normal_gui_run_button_uses_registered_worker(window, app):
-    from tests.test_pr_gui_main_window import _wait_for
-    window._set_product_policy('analysis:far_field_intensity')
-    calls = []
-    real = window.runner.run_registered
-    def observed(material, workflow, req, **kwargs):
-        calls.append((material, workflow, type(req)))
-        return real(material, workflow, req, **kwargs)
-    window.runner.run_registered = observed
-    window.run_button.click()
-    _wait_for(app, lambda: not window._background_running)
-    assert calls == [('pr', PR_LOCAL_PLANE_WORKFLOW, LocalPlaneRunRequest)]
-    assert window.run_status == 'completed'
-    assert window.last_result.run.scientific.completed_cells == 2
-    assert window.last_result.run.scientific.far_field is not None
-    assert not window.continue_button.isEnabled()
-    assert not window.save_checkpoint_button.isEnabled()
 
 
-def test_failure_preserves_truthful_gui_status(window, monkeypatch):
-    import lcprop.pr.local_plane_workflow as workflow
-    def fail(*a, **kw): raise ValueError('injected material failure')
-    monkeypatch.setattr(workflow, 'step_local_intensity_cell', fail)
-    out = window._run_registered(window.build_request())
-    assert out.result.status == 'failed'
-    assert out.result.run.scientific.completed_cells == 0
-    assert out.result.run.products.boundary_z_um.tolist() == [0.]
-    window._on_finished(out)
-    assert window.run_status == 'failed'
-    assert window.status_label.text() == 'Failed'
-    encoded = LOCAL_PLANE_TRANSPORT_CODEC.encode_result(out.result)
-    assert encoded.converged is None and encoded.scientific_status == 'failed'
 
 
 def test_selected_package_executor_is_local_and_registered(tmp_path):
@@ -212,10 +123,8 @@ def test_selected_package_executor_is_local_and_registered(tmp_path):
     assert result.status == 'completed' and result.run.scientific.far_field is not None
 
 
-def test_fresh_gui_scattering_requires_v2(window):
-    from lcprop.pr.scattering import PR_CANONICAL_SCATTERING_V1, PR_CANONICAL_SCATTERING_V2
-    panel = window.evolution_panel
-    assert panel.scattering_algorithm.currentData() == PR_CANONICAL_SCATTERING_V2
-    assert not panel.scattering_algorithm.model().item(panel.scattering_algorithm.findData(PR_CANONICAL_SCATTERING_V1)).isEnabled()
-    panel.scattering_enabled.setChecked(True)
-    assert window.build_request().scattering.algorithm_version == PR_CANONICAL_SCATTERING_V2
+
+
+def test_symmetric_identity_rejects_silent_gui_migration():
+    with pytest.raises(ValueError, match="midpoint/symmetric"):
+        validate_pr_gui_request_representable(replace(request(), initial_A=None))

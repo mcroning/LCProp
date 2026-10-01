@@ -1,5 +1,7 @@
 """Explicit application composition for the initially supported transports."""
 
+from lcprop.pr.published_static_integration import PUBLISHED_STATIC_OPERATION, PUBLISHED_STATIC_TRANSPORT_CODEC
+
 from lcprop.pr.local_plane_integration import LOCAL_PLANE_OPERATION, LOCAL_PLANE_TRANSPORT_CODEC
 
 import os
@@ -35,6 +37,7 @@ def default_transport_registry() -> TransportCodecRegistry:
     registry.register(PR_TIMEDEPENDENT_TRANSPORT_CODEC)
     registry.register(PR_STATIC_TRANSPORT_CODEC)
     registry.register(LOCAL_PLANE_TRANSPORT_CODEC)
+    registry.register(PUBLISHED_STATIC_TRANSPORT_CODEC)
     registry.register(PR_TRANSVERSE_STATIC_TRANSPORT_CODEC)
     registry.register(PR_TRANSVERSE_TIMEDEPENDENT_TRANSPORT_CODEC)
     return registry
@@ -46,6 +49,7 @@ def default_transport_operations():
         PR_TIMEDEPENDENT_OPERATION,
         PR_STATIC_OPERATION,
         LOCAL_PLANE_OPERATION,
+        PUBLISHED_STATIC_OPERATION,
         PR_TRANSVERSE_STATIC_OPERATION,
         PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
     )

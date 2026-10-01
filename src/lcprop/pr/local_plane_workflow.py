@@ -218,13 +218,18 @@ def _failure_record(stage, index, exc):
                 origin_function=functions[-1] if functions else None)
 
 
-def run_local_intensity_planes(
+def _run_streaming_planes(
     request: LocalPlaneRunRequest,
     *,
     retain_boundary_field: bool = False,
     cancellation_token: CancellationToken | None = None,
     progress_callback: Callable[[LocalPlaneProgress], None] | None = None,
     observation_callback: Callable[[LocalPlaneObservation], Any] | None = None,
+    _request_type=LocalPlaneRunRequest,
+    _models=(PR_MATERIAL_RESPONSE_FIELD_LINEAR,),
+    _cell_step=None,
+    _workflow=PR_LOCAL_PLANE_WORKFLOW,
+    _arithmetic=PR_LOCAL_PLANE_ARITHMETIC,
 ) -> LocalPlaneRunResult:
     """Run once; failures become compact evidence, never scientific retries.
 
@@ -257,14 +262,14 @@ def run_local_intensity_planes(
     stage, attempted = "request_validation", None
     cancelled = lambda: cancellation_token is not None and cancellation_token.is_cancelled()
     try:
-        if not isinstance(request, LocalPlaneRunRequest):
+        if not isinstance(request, _request_type):
             raise TypeError("requires LocalPlaneRunRequest; old Static requests are not reinterpreted")
         request.grid.validate()
         request.beams.validate()
         request.material.validate()
         request.backend.validate()
         request.material_response.validate()
-        if request.material_response.model != PR_MATERIAL_RESPONSE_FIELD_LINEAR:
+        if request.material_response.model not in _models:
             raise ValueError("local-plane workflow supports only Local-I field-linear Static")
         request.optical_boundary.validate()
         if request.optical_boundary.mode != "periodic":
@@ -346,7 +351,7 @@ def run_local_intensity_planes(
                 status, reason = "cancelled", "cancelled before next cell"
                 break
             attempted, stage = k, "cell_step"
-            cell = step_local_intensity_cell(accepted, grid=grid, cell_index=k,
+            cell = (_cell_step or step_local_intensity_cell)(accepted, grid=grid, cell_index=k,
                 z_start_um=k*h, dz_um=h, interaction_length_um=length,
                 wavelength_um=wavelengths[0], material=request.material,
                 peak_intensity_reference=reference, backend=request.backend,
@@ -413,4 +418,13 @@ def run_local_intensity_planes(
         last.get('material_plane_um'), last.get('residual_rms'), last.get('residual_max'),
         launch_identity, tuple(ledger), failure,
         accepted if retain_boundary_field else None, spectrum,
-        reached if spectrum is not None else None)
+        reached if spectrum is not None else None, _workflow, _arithmetic)
+
+
+def run_local_intensity_planes(request, *, retain_boundary_field=False,
+                               cancellation_token=None, progress_callback=None,
+                               observation_callback=None):
+    """Original symmetric workflow; identity and scientific arithmetic unchanged."""
+    return _run_streaming_planes(request, retain_boundary_field=retain_boundary_field,
+        cancellation_token=cancellation_token, progress_callback=progress_callback,
+        observation_callback=observation_callback)

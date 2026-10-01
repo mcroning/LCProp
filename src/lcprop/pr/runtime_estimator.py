@@ -655,6 +655,9 @@ def _memory_ranges(
 def estimate_pr_resources(request) -> PRResourceEstimate:
     """Estimate one request without executing scientific kernels."""
 
+    from lcprop.pr.published_static import PublishedStaticRequest
+    if isinstance(request, PublishedStaticRequest):
+        return _estimate_published_static(request)
     from lcprop.pr.local_plane_workflow import LocalPlaneRunRequest
     if isinstance(request, LocalPlaneRunRequest):
         return _estimate_local_plane(request)
@@ -786,6 +789,8 @@ def format_pr_resource_estimate(estimate: PRResourceEstimate) -> str:
 
     nx, ny, nz = estimate.grid_shape
     model_labels = {
+        "published_static_field_linear_local_intensity": "Published optical-first Static — Local-I",
+        "published_static_nonlinear": "Published optical-first Static — nonlinear hopping",
         "local_plane_field_linear": "Local-intensity field-linear Static — streaming local planes",
         "reduced_x_static_field_linear": "Reduced x-only static — field-linear (local intensity)",
         "reduced_x_static_nonlinear": "Reduced x-only static — fully nonlinear",
@@ -846,6 +851,37 @@ def _estimate_local_plane(request):
         model_cell="local_plane_field_linear", grid_shape=(nx,ny,n), precision=request.backend.precision,
         material_intervals=n, optical_passes=2*n, optical_substeps=1,
         work_summary=(f"{n} direct material solves, {2*n} half hops, no coupled trials/replay volumes",),
+        local_runtime=None, h200_runtime=None, confidence="Uncalibrated planning only",
+        dominant_cost="Transverse FFT/material workspaces and selected products",
+        peak_gpu_memory=EstimateRange((16+6*channels)*plane, (48+12*channels)*plane, "bytes"),
+        peak_host_memory=EstimateRange(plane+fast, 4*plane+2*full, "bytes"),
+        fast_result_size=EstimateRange(fast, 2*fast, "bytes"),
+        full_result_size=EstimateRange(full, 2*full, "bytes"),
+        recommendation="Native streaming commissioning required",
+        qualifications=("No measured GPU peak/runtime for this workflow.",
+            "O(Nx Ny) transverse workspaces plus O(Ncells(Nx+Ny)) reduced products.",
+            "No longitudinal scientific/replay volumes; no continuation storage.",
+            "Exact preview can transfer a transient host plane; launch reference streams bounded host chunks."))
+
+
+def _estimate_published_static(request):
+    """Uncalibrated streaming storage envelope, never a native measurement."""
+    from lcprop.pr.published_static_integration import validate_published_static_request
+    validate_published_static_request(request)
+    nx, ny = request.grid.Nx, request.grid.Ny
+    n = round(request.grid.z_length_um/request.grid.dz_um)
+    itemsize = 4 if request.backend.precision == "float32" else 8
+    plane = nx*ny*itemsize
+    channels = len(request.beams.channels)
+    cuts = (n+1)*(nx+ny)*itemsize
+    preview = (n+1)*min(96**2, nx+ny)*4
+    fast = 2*cuts+preview
+    full = (2*channels+4)*cuts+preview+(2*channels+1)*plane
+    return PRResourceEstimate(
+        calibration_id="published_static_streaming_planning_v1_uncalibrated",
+        model_cell="published_static_" + request.material_response.model, grid_shape=(nx,ny,n), precision=request.backend.precision,
+        material_intervals=n, optical_passes=n, optical_substeps=1,
+        work_summary=(f"{n} {request.material_response.model} material solves, {n} full hops, no coupled trials/replay volumes",),
         local_runtime=None, h200_runtime=None, confidence="Uncalibrated planning only",
         dominant_cost="Transverse FFT/material workspaces and selected products",
         peak_gpu_memory=EstimateRange((16+6*channels)*plane, (48+12*channels)*plane, "bytes"),

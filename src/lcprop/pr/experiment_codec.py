@@ -995,3 +995,14 @@ LOCAL_PLANE_EXPERIMENT_CODEC = ExperimentRequestCodec(
 )
 
 __all__.append("LOCAL_PLANE_EXPERIMENT_CODEC")
+
+
+from lcprop.pr.published_static import PublishedStaticRequest, PR_PUBLISHED_STATIC_WORKFLOW
+from lcprop.pr.published_static_integration import encode_published_static_request, decode_published_static_request
+
+PUBLISHED_STATIC_EXPERIMENT_CODEC = ExperimentRequestCodec(
+    material_id=PR_MATERIAL_ID, workflow_id=PR_PUBLISHED_STATIC_WORKFLOW,
+    request_type=PublishedStaticRequest, encode_request=encode_published_static_request,
+    decode_request=decode_published_static_request,
+)
+__all__.append("PUBLISHED_STATIC_EXPERIMENT_CODEC")
