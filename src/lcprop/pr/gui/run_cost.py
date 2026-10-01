@@ -9,6 +9,7 @@ import math
 from lcprop.core.grid import round_nz
 from lcprop.pr.specs import PRRunRequest
 from lcprop.pr.static_workflow import PRStaticRunRequest
+from lcprop.pr.local_plane_workflow import LocalPlaneRunRequest
 from lcprop.pr.transverse.specs import (
     PR_MATERIAL_RESPONSE_LINEARIZED,
     PRTransverseRunRequest,
@@ -68,7 +69,12 @@ def classify_pr_run_cost(
     points = float(nx * ny * nz)
     factor = _hardware_precision_factor(request)
 
-    if isinstance(request, PRTransverseStaticRunRequest):
+    if isinstance(request, LocalPlaneRunRequest):
+        model = "Local-intensity PR Static — streaming local planes"
+        score = points * 3.0 * factor
+        potential_threshold, very_threshold = 2.0e10, 2.0e11
+        rationale = "one direct material solve and two optical half hops per cell; uncalibrated work score"
+    elif isinstance(request, PRTransverseStaticRunRequest):
         coupled = int(request.solver.max_coupled_iterations)
         if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
             model = "Full transverse PR transport — Linearized material response"

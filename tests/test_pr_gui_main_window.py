@@ -13,6 +13,7 @@ import pytest
 
 import lcprop.pr.gui.main_window as pr_main_window_module
 from lcprop.pr.gui.main_window import PRMainWindow
+from lcprop.pr.local_plane_integration import LOCAL_PLANE_OPERATION
 from lcprop.pr.operations import (
     PR_IMAGE_AMPLIFICATION_OPERATION,
     PR_STATIC_OPERATION,
@@ -67,6 +68,7 @@ def test_pr_window_is_standalone_and_registers_both_pr_operations(app):
         PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
         PR_TRANSVERSE_STATIC_OPERATION,
         PR_STATIC_OPERATION,
+        LOCAL_PLANE_OPERATION,
     )
     assert [window.tabs.tabText(index) for index in range(window.tabs.count())] == [
         "PR Material",

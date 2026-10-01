@@ -982,3 +982,16 @@ __all__ = [
     "encode_pr_transverse_static_request",
     "encode_pr_transverse_timedependent_request",
 ]
+
+
+# Independent identity: old pr_static payloads continue to decode as midpoint.
+from lcprop.pr.local_plane_workflow import LocalPlaneRunRequest, PR_LOCAL_PLANE_WORKFLOW
+from lcprop.pr.local_plane_integration import encode_local_plane_request, decode_local_plane_request
+
+LOCAL_PLANE_EXPERIMENT_CODEC = ExperimentRequestCodec(
+    material_id=PR_MATERIAL_ID, workflow_id=PR_LOCAL_PLANE_WORKFLOW,
+    request_type=LocalPlaneRunRequest, encode_request=encode_local_plane_request,
+    decode_request=decode_local_plane_request,
+)
+
+__all__.append("LOCAL_PLANE_EXPERIMENT_CODEC")

@@ -103,9 +103,19 @@ For zero bias, the full nonlinear equation additionally retains `(I_x/I)E_x`
 and `-E E_x` on the right. The first of these is itself linear in E at fixed I.
 Do not describe local-I forcing as the full nonlinear hopping equation.
 
-Static keeps production midpoint source, coupled backtracking, canonical
-scattering, optical boundaries and independent replay. No historical Lie march,
-windows or legacy scattering are imported. Full-transverse physics is unchanged.
+Fresh GUI Local-I Static uses `pr_static_local_intensity_planes_v1`, with
+`per_cell_half_linear_full_local_phase_v1` arithmetic: optical half hop,
+one direct response from the arriving center-plane intensity, one full material
+phase, one canonical V2 cell phase, then the second optical half hop. It has no
+coupled iteration, backtracking or independent replay. Scattering increments
+cover the original cells and are applied at their centers. Periodic boundaries
+are required. No historical launch, windows or legacy scattering are imported.
+
+Old `pr_static` requests retain their midpoint identity and remain headlessly
+executable under that identity. The GUI rejects loading old midpoint Local-I
+requests rather than converting them implicitly. Nonlinear reduced, transverse
+and TD workflows are unchanged. Native certification of the newly integrated
+local-plane path remains pending.
 
 ## Uniform-reference tangent: research reduced operator and transverse model
 

@@ -144,7 +144,7 @@ commissioning are separate evidence and are not uniform across the matrix.
 | Evolution | Transport | Response | Applicable material update | Local guidance | Validation/commissioning note |
 | --- | --- | --- | --- | --- | --- |
 | Static | Reduced x-only | Fully nonlinear | Coupled damped-Newton static solve | Local-friendly to moderate | Production; extensive local regression coverage |
-| Static | Reduced x-only | Field-linear (local intensity) | Analytic reduced Fourier response inside coupled passes | Local-friendly | Production; local float32/float64 coverage |
+| Static | Reduced x-only | Field-linear (local intensity) | Direct Fourier response in symmetric local-material-plane cells | Streaming transverse storage | Local float32/float64 coverage; native commissioning pending |
 | Static | Full transverse | Fully nonlinear | Zero-flux Newton/Krylov solve with coupled globalization | Small smoke cases only | Production; selected GPU/static paths commissioned, convergence remains problem-dependent |
 | Static | Full transverse | Uniform-reference tangent | Analytic full-transverse Fourier response inside coupled iterations | Moderate local grids | Production; isolated operator commissioned and coupled path locally validated |
 | Time dependent | Reduced x-only | Fully nonlinear | Semi-implicit trapezoidal or explicit Euler reference | Local-friendly to moderate | Production; longstanding local regression coverage |
@@ -162,6 +162,26 @@ normalized optical intensity plus dark and uniform background, and must be
 strictly positive. Reduced field-linear TD is not yet defined/integrated; TD
 offers nonlinear reduced hopping only. Saved reduced fixed-I₀ requests fail
 clearly and require explicit model selection; they are not silently migrated.
+
+Fresh **Static / Reduced x-only / Field-linear (local intensity)** requests
+use the symmetric local-material-plane workflow. Keep dz, geometry, launch,
+material, scattering and backend settings; coupled passes and optical-substep
+controls are hidden. Status reports accepted cells, reached z and material
+residuals. No coupled convergence or replay is claimed.
+
+Interactive results contain streamed optical cuts and an orthogonal-slice
+preview. Analysis can additionally retain exact final far-field intensity and
+complex output; other exact endpoint selections are currently unavailable for
+this workflow. Full retains the supported streaming center cuts and endpoint,
+not longitudinal scientific volumes. Optical boundaries have N+1 coordinates;
+material/source/residual centers have N distinct coordinates. Cancellation
+exposes only accepted data. Resource estimates are uncalibrated streaming
+planning envelopes, not measured native peaks.
+
+Fresh requests and result packages preserve the new workflow and arithmetic
+identities. Old midpoint Local-I requests remain identifiable as `pr_static`;
+the GUI refuses to migrate them silently. Create a fresh request to use the new
+path. Static checkpoint/continuation support is not implemented.
 
 ## PR material and scattering
 

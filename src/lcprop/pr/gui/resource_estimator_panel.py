@@ -16,7 +16,7 @@ class PRResourceEstimatorPanel(QWidget):
         layout = QVBoxLayout(self)
         explanation = QLabel(
             "Local Mac / NumPy and H200 / CuPy are comparison estimates, not target selections. "
-            "Planning estimates are broad ranges from versioned measurements and "
+            "Planning estimates use versioned measurements where available and "
             "explicit scaling formulas. Queue and transfer time are not included."
         )
         explanation.setWordWrap(True)
@@ -29,7 +29,7 @@ class PRResourceEstimatorPanel(QWidget):
         self.output.setPlainText("No estimate yet.")
         layout.addWidget(self.output, 1)
         caveat = QLabel(
-            "An estimate is not a convergence claim. Grid, timestep, coupled-pass, "
+            "An estimate is not a convergence claim. Uncalibrated workflows have no measured native peak. Applicable grid, timestep, coupled-pass, "
             "Newton, and PCG settings remain explicit scientific choices."
         )
         caveat.setWordWrap(True)

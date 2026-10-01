@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from lcprop.pr.local_plane_workflow import PR_LOCAL_PLANE_WORKFLOW
+
 from lcprop.gui.numeric_widgets import CompactDoubleSpinBox
 
 from lcprop.gui.layout import readable_form
@@ -215,7 +217,10 @@ class PREvolutionPanel(QWidget):
         layout.addStretch(1)
 
     def workflow_id(self) -> str:
-        return str(self.workflow.currentData())
+        value = str(self.workflow.currentData())
+        if value == PR_STATIC_WORKFLOW and self.material_response.currentData() == PR_MATERIAL_RESPONSE_FIELD_LINEAR:
+            return PR_LOCAL_PLANE_WORKFLOW
+        return value
 
     @staticmethod
     def _workflow_for_axes(evolution: str, transport: str) -> str:
@@ -231,6 +236,7 @@ class PREvolutionPanel(QWidget):
     def _axes_for_workflow(workflow_id: str) -> tuple[str, str]:
         return {
             PR_STATIC_WORKFLOW: ("static", "reduced_x"),
+            PR_LOCAL_PLANE_WORKFLOW: ("static", "reduced_x"),
             PR_TRANSVERSE_STATIC_WORKFLOW: ("static", "full_transverse"),
             PR_TIMEDEPENDENT_WORKFLOW: ("time_dependent", "reduced_x"),
             PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW: (
@@ -274,6 +280,10 @@ class PREvolutionPanel(QWidget):
         self._refresh_workflow_controls()
 
     def set_workflow_id(self, workflow_id: str) -> None:
+        if workflow_id == PR_LOCAL_PLANE_WORKFLOW:
+            self.set_workflow_id(PR_STATIC_WORKFLOW)
+            self.material_response.setCurrentIndex(self.material_response.findData(PR_MATERIAL_RESPONSE_FIELD_LINEAR))
+            return
         index = self.workflow.findData(workflow_id)
         if index < 0:
             raise ValueError(f"unsupported PR GUI workflow: {workflow_id!r}")
@@ -288,6 +298,8 @@ class PREvolutionPanel(QWidget):
         self._refresh_workflow_controls()
 
     def _image_amplification_status_for_workflow(self, workflow_id: str) -> str:
+        if workflow_id == PR_LOCAL_PLANE_WORKFLOW:
+            return "unavailable"
         status = next(
             capability.validation_status
             for capability in image_amplification_base_capabilities()
@@ -398,7 +410,7 @@ class PREvolutionPanel(QWidget):
             self._set_row_visible(widget, is_time_dependent)
         self._set_row_visible(
             self.max_coupled_passes,
-            not is_time_dependent,
+            not is_time_dependent and workflow_id != PR_LOCAL_PLANE_WORKFLOW,
         )
         static_iterations_label = self._form.labelForField(
             self.max_coupled_passes
@@ -409,6 +421,12 @@ class PREvolutionPanel(QWidget):
                 if is_transverse_static
                 else "Maximum coupled passes per slice"
             )
+        self._set_row_visible(self.optical_substeps, workflow_id != PR_LOCAL_PLANE_WORKFLOW)
+        local_plane = workflow_id == PR_LOCAL_PLANE_WORKFLOW
+        v1 = self.scattering_algorithm.findData(PR_CANONICAL_SCATTERING_V1)
+        self.scattering_algorithm.model().item(v1).setEnabled(not local_plane)
+        if local_plane and self.scattering_algorithm.currentData() != PR_CANONICAL_SCATTERING_V2:
+            self.scattering_algorithm.setCurrentIndex(self.scattering_algorithm.findData(PR_CANONICAL_SCATTERING_V2))
         supports_scattering = True
         scattering_details = (
             self.scattering_epsilon,
@@ -426,7 +444,9 @@ class PREvolutionPanel(QWidget):
         self._set_row_visible(self.algorithm_status, True)
         if self._image_amplification_mode:
             status = self.image_amplification_validation_status()
-            if status == "compatible_and_validated":
+            if status == "unavailable":
+                text = "Local-plane Static currently supports ordinary fresh calculations only."
+            elif status == "compatible_and_validated":
                 text = "Validated for the Image Amplification experiment."
             else:
                 text = (
@@ -581,7 +601,7 @@ class PREvolutionPanel(QWidget):
         applied_field_x: float,
     ) -> None:
         response.validate()
-        if self.workflow_id() == PR_STATIC_WORKFLOW:
+        if self.workflow_id() in (PR_STATIC_WORKFLOW, PR_LOCAL_PLANE_WORKFLOW):
             response.validate_reduced_static()
         index = self.material_response.findData(response.model)
         if index < 0:
