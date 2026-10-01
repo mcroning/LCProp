@@ -64,7 +64,7 @@ request = PRRunRequest(
 token = CancellationToken()
 timing = {}
 entered_optical_slice = Event()
-original_slice = workflow.advance_pr_slice_with_midpoint_source
+original_slice = workflow.advance_pr_published_frozen_slice
 
 
 def observed_slice(*args, **kwargs):
@@ -74,7 +74,7 @@ def observed_slice(*args, **kwargs):
     return original_slice(*args, **kwargs)
 
 
-workflow.advance_pr_slice_with_midpoint_source = observed_slice
+workflow.advance_pr_published_frozen_slice = observed_slice
 
 
 def request_stop():

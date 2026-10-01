@@ -27,6 +27,7 @@ from lcprop.pr.specs import (
     PRSolverOptions,
     PR_MATERIAL_ID,
     PR_TIMEDEPENDENT_WORKFLOW,
+    PR_TD_LEGACY_COUPLING,
     validate_pr_timedependent_configuration,
 )
 from lcprop.pr.image_amplification import (
@@ -154,6 +155,7 @@ def encode_pr_timedependent_request(request: PRRunRequest) -> dict:
     if not isinstance(request, PRRunRequest):
         raise TypeError("request must be a PRRunRequest")
     payload = _encode_common(request)
+    payload["optical_coupling"] = request.optical_coupling
     payload["material_response"] = request.material_response.to_payload()
     payload["scattering"] = (
         None if request.scattering is None else asdict(request.scattering)
@@ -312,7 +314,8 @@ def _payload(
             else set()
         ),
         optional=(
-            ({"scattering"} if reduced_static else set())
+            ({"optical_coupling"} if reduced_timedependent else set())
+            | ({"scattering"} if reduced_static else set())
             | (
                 {"launch_elements"}
                 if version
@@ -378,6 +381,7 @@ def decode_pr_timedependent_request(value: Any) -> PRRunRequest:
     try:
         request = PRRunRequest(
             **_decode_common(payload),
+            optical_coupling=payload.get("optical_coupling", PR_TD_LEGACY_COUPLING),
             solver=PRSolverOptions(
                 **dataclass_values(
                     PRSolverOptions,

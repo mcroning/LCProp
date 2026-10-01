@@ -128,16 +128,37 @@ stability proofs.
 
 ## Optical and material stepping
 
-The improved optical coupling remains a frozen-E Strang pass:
+Fresh reduced nonlinear TD uses `frozen_material_published_optical_first_v1`
+within the `pr_timedependent` workflow:
 
 ```text
-half PR response -> linear hop -> half PR response
+full linear hop -> arriving source -> full frozen-E material phase -> scattering
 ```
 
-for every optical substep through `advance_prepared_response()`. After a full
-optical pass, all z slices of E receive one synchronous material-time update.
-This intentionally differs from PRProp3D's interleaved full-hop/full-response
-Lie ordering.
+The optical primitives and phase convention are shared with commissioned
+published-order Static. Optical substeps subdivide only the linear hop; one
+full material phase follows. Configured sponge/Tukey boundaries act once per
+physical cell after the material phase and before scattering. The source is
+sampled before those screens, at explicit right-endpoint z coordinates.
+Canonical phases are keyed by the same physical slab identities at every
+accepted/predictor/observational evaluation; no new realization is consumed.
+All z slices of E are frozen throughout each optical march. Only after the
+complete source map returns does the synchronous material-time update proceed.
+
+The persisted `optical_coupling` distinguishes this map from
+`frozen_material_midpoint_strang_v1`. Requests/checkpoints missing the field
+retain that legacy identity and source map; continuation rejects a changed
+identity. GUI loading rejects legacy coupling rather than silently migrating
+it; fresh GUI requests and Inspect Request expose the published identity.
+
+The trapezoidal step still has exactly two required source marches, at accepted
+E and predictor E. Progress may additionally march through corrected E solely
+for products; final products also require an observational march. These do
+not enter the temporal update. Cancellation during discardable work retains
+the previous accepted state. Accepted/predictor/source material-time volumes
+remain necessary in this implementation; optical propagation keeps only a
+transverse field and does not build optical/replay z volumes. No native TD
+commissioning is claimed by local focused tests.
 
 Two named material integrators are available:
 

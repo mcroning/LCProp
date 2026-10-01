@@ -1189,6 +1189,7 @@ class PRMainWindow(QWidget):
             lines.extend([
                 f"Material steps: {request.solver.Nt}",
                 f"Material integrator: {request.solver.integrator}",
+                f"Longitudinal optical coupling: {request.optical_coupling}",
                 f"Normalized timestep: {request.solver.dt_normalized:g}",
                 (
                     "Conservative normalized timestep limit: "

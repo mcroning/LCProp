@@ -14,6 +14,8 @@ from lcprop.core.grid import make_grid
 from lcprop.optics.launch import OpticalLaunchContext, build_launch, normalized_power
 from lcprop.optics.splitstep import (
     advance_prepared_response,
+    hop_linear_inplace,
+    apply_response_screen_inplace,
     scalar_angular_spectrum_kernel,
     total_intensity,
 )
@@ -30,7 +32,8 @@ from lcprop.pr.evolution import (
     semi_implicit_trapezoidal_step,
     validate_timestep,
 )
-from lcprop.pr.optical_response import half_step_response_from_E
+from lcprop.pr.optical_response import half_step_response_from_E, delta_n_from_E
+from lcprop.optics.boundaries import transverse_boundary_mask, apply_transverse_boundary_inplace
 from lcprop.pr.scattering import (
     canonical_scattering_phase_increment,
     canonical_scattering_provenance,
@@ -47,6 +50,7 @@ from lcprop.pr.specs import (
     PR_EULER_INTEGRATOR,
     PR_SEMI_IMPLICIT_INTEGRATOR,
     PR_TIMEDEPENDENT_WORKFLOW,
+    PR_TD_PUBLISHED_COUPLING,
     validate_pr_timedependent_configuration,
 )
 from lcprop.pr.visualization import (
@@ -307,6 +311,41 @@ def _advance_pr_slice_with_midpoint_source_and_exit_intensity(
     return A_out, 0.5 * (I_before + I_after), I_after
 
 
+def advance_pr_published_frozen_slice(
+    A, E, *, request, grid, kernel, peak_reference, wavelength_um,
+):
+    """P -> arriving I -> frozen E phase; caller applies the canonical S.
+
+    E belongs to one accepted/predictor temporal stage and is read-only here.
+    Reuse the commissioned Static optical primitives, not its equilibrium
+    material solve/residual gate. Linear subhops span exactly h; the full
+    material phase and configured physical-cell boundary act once. No optical
+    longitudinal volume, midpoint source or temporal update is constructed.
+    """
+    xp = grid.xp
+    for _ in range(int(request.solver.optical_substeps)):
+        hop_linear_inplace(A, kernel, xp=xp)
+    intensity = pr_driving_intensity(
+        A, peak_intensity_reference=peak_reference,
+        background_intensity=request.material.background_intensity,
+        coherence_groups=request.beams.coherence_groups, xp=xp,
+    )
+    dn = delta_n_from_E(
+        E, gain_length_product=request.material.gain_length_product,
+        interaction_length_um=request.grid.z_length_um,
+        wavelength_um=wavelength_um,
+    )
+    phase = xp.exp(1j * (2 * np.pi / wavelength_um) * grid.dz_um * dn)
+    apply_response_screen_inplace(A, phase, xp=xp)
+    boundary = request.optical_boundary
+    mask = transverse_boundary_mask(
+        grid, boundary,
+        propagation_distance_um=(grid.dz_um if boundary.mode == "sponge" else None),
+    )
+    apply_transverse_boundary_inplace(A, mask)
+    return A, intensity
+
+
 def _optical_pass(
     A0,
     E,
@@ -330,26 +369,32 @@ def _optical_pass(
             cancellation_token,
             stage=cancellation_stage,
         )
-        A, source_stack[k], intensity_before = (
-            advance_pr_slice_with_midpoint_source(
-                A,
-                E[k],
-                kernel=kernel,
-                optical_substeps=request.solver.optical_substeps,
-                dz_um=grid.dz_um,
-                wavelength_um=wavelength_um,
-                interaction_length_um=request.grid.z_length_um,
-                gain_length_product=request.material.gain_length_product,
-                peak_intensity_reference=peak_reference,
-                background_intensity=request.material.background_intensity,
-                coherence_groups=groups,
-                xp=xp,
-                optical_boundary=request.optical_boundary,
-                boundary_grid=grid,
-                _intensity_before=intensity_before,
-                _return_exit_intensity=True,
+        if request.optical_coupling == PR_TD_PUBLISHED_COUPLING:
+            A, source_stack[k] = advance_pr_published_frozen_slice(
+                A, E[k], request=request, grid=grid, kernel=kernel,
+                peak_reference=peak_reference, wavelength_um=wavelength_um,
             )
-        )
+        else:
+            A, source_stack[k], intensity_before = (
+                advance_pr_slice_with_midpoint_source(
+                    A,
+                    E[k],
+                    kernel=kernel,
+                    optical_substeps=request.solver.optical_substeps,
+                    dz_um=grid.dz_um,
+                    wavelength_um=wavelength_um,
+                    interaction_length_um=request.grid.z_length_um,
+                    gain_length_product=request.material.gain_length_product,
+                    peak_intensity_reference=peak_reference,
+                    background_intensity=request.material.background_intensity,
+                    coherence_groups=groups,
+                    xp=xp,
+                    optical_boundary=request.optical_boundary,
+                    boundary_grid=grid,
+                    _intensity_before=intensity_before,
+                    _return_exit_intensity=True,
+                )
+            )
         _apply_canonical_scattering_after_slice(
             A,
             scattering=request.scattering,
@@ -826,6 +871,15 @@ def run_pr_timedependent(
         ),
         "peak_intensity_reference": peak_reference,
         "integrator": request.solver.integrator,
+        "optical_coupling": request.optical_coupling,
+        "source_z_um": (
+            ((np.arange(grid.Nz) + 1) * grid.dz_um).tolist()
+            if request.optical_coupling == PR_TD_PUBLISHED_COUPLING else None
+        ),
+        "required_source_marches_per_material_step": (
+            2 if request.solver.integrator == PR_SEMI_IMPLICIT_INTEGRATOR else 1
+        ),
+        "progress_optical_march_role": "observational_only",
         "cancellation_observed_stage": cancellation_stage,
         "cancellation_observed_wall_time": (
             None
@@ -853,10 +907,10 @@ def run_pr_timedependent(
             )
         ),
         "stepping_order": (
-            "frozen-E optical Strang pass, then synchronous E Euler update"
+            f"{request.optical_coupling} pass, then synchronous E Euler update"
             if request.solver.integrator == PR_EULER_INTEGRATOR
             else (
-                "accepted/predicted frozen-E optical Strang passes with "
+                f"accepted/predicted {request.optical_coupling} passes with "
                 "synchronous linearly implicit trapezoidal E update"
             )
         ),

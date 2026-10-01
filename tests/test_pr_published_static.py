@@ -133,10 +133,10 @@ def test_nonconvergence_fails_before_phase():
     assert 'material solve failed' in out.reason
 
 
-def test_model_and_td_bytes_unchanged():
+def test_material_math_and_transverse_td_bytes_unchanged():
     from pathlib import Path
     paths=['src/lcprop/pr/static.py','src/lcprop/pr/reduced_field_linear.py',
-           'src/lcprop/pr/evolution.py','src/lcprop/pr/workflow.py',
+           'src/lcprop/pr/evolution.py',
            'src/lcprop/pr/transverse/workflow.py','src/lcprop/pr/transverse/transport.py',
            'src/lcprop/pr/local_plane_step.py']
     for path in paths:

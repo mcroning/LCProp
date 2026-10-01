@@ -54,6 +54,7 @@ def _case(*, xp, nz: int, optical_substeps: int, groups: tuple[str, ...]):
         characteristic_wavenumber_per_um_override=0.5,
     )
     request = PRRunRequest(
+        optical_coupling="frozen_material_midpoint_strang_v1",
         grid=grid_spec,
         beams=beams,
         material=material,

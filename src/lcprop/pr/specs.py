@@ -21,6 +21,8 @@ _BOLTZMANN_J_PER_K = 1.380649e-23
 
 PR_MATERIAL_ID = "pr"
 PR_TIMEDEPENDENT_WORKFLOW = "pr_timedependent"
+PR_TD_PUBLISHED_COUPLING = "frozen_material_published_optical_first_v1"
+PR_TD_LEGACY_COUPLING = "frozen_material_midpoint_strang_v1"
 PR_EULER_INTEGRATOR = "euler"
 PR_SEMI_IMPLICIT_INTEGRATOR = "semi_implicit_trapezoidal"
 PR_EXACT_MODAL_INTEGRATOR = "exact_modal"
@@ -148,7 +150,9 @@ class PRRunRequest:
     ``launch_elements`` are applied to the normalized incident beams before
     propagation and cannot be combined with an explicit ``initial_A``.
     ``scattering`` is an optional canonical physical-z phase realization;
-    ``None`` preserves the historical no-scattering workflow exactly.
+    ``None`` disables scattering without changing the selected optical coupling.
+    ``optical_coupling`` identifies the frozen-state z march independently of
+    the material-time integrator. Fresh requests use published optical-first.
     """
 
     grid: GridSpec
@@ -168,11 +172,14 @@ class PRRunRequest:
     material_response: "PRTransverseMaterialResponseSpec" = field(
         default_factory=_default_material_response
     )
+    optical_coupling: str = PR_TD_PUBLISHED_COUPLING
 
 
 def validate_pr_timedependent_configuration(request: PRRunRequest) -> None:
     """Validate the reduced TD response/integrator pairing."""
 
+    if request.optical_coupling not in (PR_TD_PUBLISHED_COUPLING, PR_TD_LEGACY_COUPLING):
+        raise ValueError("unknown reduced TD optical coupling identity")
     request.material_response.validate()
     if request.material_response.model != "nonlinear":
         raise ValueError(
@@ -254,6 +261,8 @@ __all__ = [
     "PR_MATERIAL_ID",
     "PR_SEMI_IMPLICIT_INTEGRATOR",
     "PR_TIMEDEPENDENT_WORKFLOW",
+    "PR_TD_PUBLISHED_COUPLING",
+    "PR_TD_LEGACY_COUPLING",
     "PRSolverOptions",
     "PRRunRequest",
     "PRRunResult",

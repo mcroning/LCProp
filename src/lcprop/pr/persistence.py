@@ -26,6 +26,7 @@ from lcprop.pr.specs import (
     PR_EULER_INTEGRATOR,
     PR_MATERIAL_ID,
     PR_TIMEDEPENDENT_WORKFLOW,
+    PR_TD_LEGACY_COUPLING,
 )
 from lcprop.pr.transverse.specs import PRTransverseMaterialResponseSpec
 
@@ -47,6 +48,7 @@ def _request_to_dict(request: PRRunRequest) -> dict[str, Any]:
         "solver": asdict(request.solver),
         "backend": asdict(request.backend),
         "optical_boundary": asdict(request.optical_boundary),
+        "optical_coupling": request.optical_coupling,
         "material_response": asdict(request.material_response),
         "initial_conditions": {
             "A0": "checkpoint.npz:A0",
@@ -72,6 +74,7 @@ def _request_from_dict(
     elif "integrator" not in solver_values:
         raise ValueError("PR checkpoint solver is missing integrator identity")
     request = PRRunRequest(
+        optical_coupling=values.get("optical_coupling", PR_TD_LEGACY_COUPLING),
         grid=GridSpec(**values["grid"]),
         material=PRMaterialSpec(**values["material"]),
         beams=BeamStack(

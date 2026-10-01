@@ -40,6 +40,7 @@ from lcprop.pr.specs import (
     PRSolverOptions,
     PR_MATERIAL_ID,
     PR_TIMEDEPENDENT_WORKFLOW,
+    PR_TD_LEGACY_COUPLING,
     validate_pr_timedependent_configuration,
 )
 from lcprop.pr.transverse.specs import PRTransverseMaterialResponseSpec
@@ -116,6 +117,7 @@ def _encode_request_metadata(
             None if request.scattering is None else asdict(request.scattering)
         ),
         "optical_boundary": asdict(request.optical_boundary),
+        "optical_coupling": request.optical_coupling,
         "material_response": asdict(request.material_response),
     }
 
@@ -127,6 +129,7 @@ def _decode_request_metadata(
     beams = decode_beam_stack(values["beams"])
     scattering = values["scattering"]
     request = PRRunRequest(
+        optical_coupling=values.get("optical_coupling", PR_TD_LEGACY_COUPLING),
         grid=GridSpec(**values["grid"]),
         beams=beams,
         material=PRMaterialSpec(**values["material"]),

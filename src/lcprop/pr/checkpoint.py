@@ -110,6 +110,7 @@ def validate_pr_continuation(
         (request.backend, original.backend, "backend"),
         (request.scattering, original.scattering, "scattering"),
         (request.optical_boundary, original.optical_boundary, "optical_boundary"),
+        (request.optical_coupling, original.optical_coupling, "optical_coupling"),
         (
             request.material_response,
             original.material_response,

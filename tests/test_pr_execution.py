@@ -236,7 +236,7 @@ def test_active_internal_cancellation_never_accepts_partial_step(
         monkeypatch.setattr(pr_workflow, "euler_step", cancelling_step)
         expected_stage = "euler_after_material_update"
     else:
-        original_slice = pr_workflow.advance_pr_slice_with_midpoint_source
+        original_slice = pr_workflow.advance_pr_published_frozen_slice
         slice_calls = 0
         longitudinal_slices = round(
             request.grid.z_length_um / request.grid.dz_um
@@ -252,7 +252,7 @@ def test_active_internal_cancellation_never_accepts_partial_step(
 
         monkeypatch.setattr(
             pr_workflow,
-            "advance_pr_slice_with_midpoint_source",
+            "advance_pr_published_frozen_slice",
             cancelling_slice,
         )
         expected_stage = "material_source_optical_z_march"
@@ -280,7 +280,7 @@ def test_cancellation_during_first_optical_pass_discards_partial_march(monkeypat
         ),
     )
     token = CancellationToken()
-    original_slice = pr_workflow.advance_pr_slice_with_midpoint_source
+    original_slice = pr_workflow.advance_pr_published_frozen_slice
     slice_calls = 0
 
     def cancelling_slice(*args, **kwargs):
@@ -293,7 +293,7 @@ def test_cancellation_during_first_optical_pass_discards_partial_march(monkeypat
 
     monkeypatch.setattr(
         pr_workflow,
-        "advance_pr_slice_with_midpoint_source",
+        "advance_pr_published_frozen_slice",
         cancelling_slice,
     )
 
