@@ -20,6 +20,7 @@ from lcprop.pr.portable_launch import (
     encode_launch_elements,
 )
 from lcprop.pr.longitudinal_cuts import (
+    presentation_peak_intensity_reference,
     extract_longitudinal_optical_intensity_cuts,
     fast_retention_summary,
     retained_longitudinal_intensity_cuts,
@@ -27,7 +28,6 @@ from lcprop.pr.longitudinal_cuts import (
 )
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.pr.workflow import _validate_canonical_scattering_for_grid
-from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.visualization import (
     make_fast_intensity_preview,
     validate_fast_intensity_preview,
@@ -208,12 +208,11 @@ def encode_pr_static_transport_result(
             elif np.asarray(result.source_intensity_stack).shape[0] == 0:
                 cuts = None
             else:
+                presentation_reference = presentation_peak_intensity_reference(result.A_initial)
                 cuts = extract_longitudinal_optical_intensity_cuts(
                     result.source_intensity_stack,
                     grid_summary=result.grid_summary,
-                    peak_intensity_reference=channel_peak_intensity_reference(
-                        np.asarray(result.A_initial), xp=np
-                    ),
+                    peak_intensity_reference=presentation_reference,
                     background_intensity=float(
                         result.material_response_summary.get(
                             "background_intensity", 0.0
@@ -229,9 +228,7 @@ def encode_pr_static_transport_result(
                 preview = make_fast_intensity_preview(
                     result.source_intensity_stack,
                     grid_summary=result.grid_summary,
-                    peak_intensity_reference=channel_peak_intensity_reference(
-                        np.asarray(result.A_initial), xp=np
-                    ),
+                    peak_intensity_reference=presentation_reference,
                     background_intensity=float(
                         result.material_response_summary.get(
                             "background_intensity", 0.0

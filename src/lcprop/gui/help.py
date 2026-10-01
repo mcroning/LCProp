@@ -139,7 +139,7 @@ sensitive to continuation and convergence.
         "fast_full", "Result products",
         """Reduced PR Static **Interactive** returns bounded previews of the executed
 input, output and far field, exact longitudinal cuts nearest x=0/y=0, a bounded
-MPR preview, and diagnostics. It does not return complex endpoints. **Analysis**
+orthogonal-slice preview, and diagnostics. It does not return complex endpoints. **Analysis**
 adds explicitly selected exact intensity planes or complex endpoints; choose
 these products before execution. Preview values are display reductions, not
 full-resolution measurements. Historical `fast` execution intent maps to

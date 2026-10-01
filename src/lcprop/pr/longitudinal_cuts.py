@@ -8,6 +8,68 @@ from typing import Any, Mapping
 import numpy as np
 
 
+# One complex128 chunk is at most 1 MiB; never export an endpoint plane.
+_PRESENTATION_CHUNK_ELEMENTS = 65536
+
+
+def presentation_peak_intensity_reference(launch, *, asnumpy=np.asarray) -> float:
+    """Historical NumPy presentation reference, independent of solver reference.
+
+    Evaluate abs(A)**2 in the launch dtype on bounded host chunks, take each
+    channel maximum, then perform the original NumPy sum in channel order.
+    Existing host launch storage is viewed rather than copied.
+    """
+    def host_chunk(index):
+        chunk = launch[index]
+        return np.asarray(chunk if isinstance(chunk, np.ndarray) else asnumpy(chunk))
+    return _presentation_reference_from_chunks(launch, host_chunk)
+
+
+def copy_host_launch_for_presentation(launch, *, xp, synchronize):
+    """Accept exact host bytes into owned device storage and retain one scalar.
+
+    Each bounded host snapshot supplies both the upload and NumPy arithmetic.
+    Finish its upload before releasing it; no device-to-host copy is needed.
+    Caller mutation after acceptance cannot change either accepted output.
+    """
+    accepted = xp.empty(launch.shape, dtype=launch.dtype)
+    def host_chunk(index):
+        owned = np.array(launch[index], copy=True, order="C")
+        accepted[index] = xp.asarray(owned)
+        synchronize()
+        return owned
+    reference = _presentation_reference_from_chunks(launch, host_chunk)
+    return accepted, reference
+
+
+def _presentation_reference_from_chunks(launch, host_chunk):
+    if launch.ndim != 3 or any(size == 0 for size in launch.shape):
+        raise ValueError("launch must have nonempty shape (Nch, Nx, Ny)")
+    _, nx, ny = launch.shape
+    rows = max(1, _PRESENTATION_CHUNK_ELEMENTS // ny)
+    maxima = []
+    for channel in range(launch.shape[0]):
+        peak = None
+        for ix in range(0, nx, rows):
+            for iy in range(0, ny, _PRESENTATION_CHUNK_ELEMENTS):
+                index = (channel, slice(ix, ix + rows),
+                         slice(iy, iy + _PRESENTATION_CHUNK_ELEMENTS))
+                host = host_chunk(index)
+                value = np.max(np.abs(host) ** 2)
+                peak = value if peak is None else np.maximum(peak, value)
+                del host
+        maxima.append(peak)
+    reference = float(np.sum(np.asarray(maxima)))
+    if not np.isfinite(reference) or reference <= 0.0:
+        raise ValueError("presentation peak intensity reference must be finite and positive")
+    return reference
+
+
+def _normalize_presentation_cut(raw, reference, background):
+    """Shared NumPy arithmetic for Full projection and backend raw cuts."""
+    return np.asarray((np.asarray(raw) - background) * reference).copy()
+
+
 @dataclass(frozen=True)
 class PRLongitudinalIntensityCuts:
     """Physical optical intensity on the transverse samples nearest zero."""
@@ -68,8 +130,8 @@ def extract_longitudinal_optical_intensity_cuts(
     ix = int(np.argmin(np.abs(x)))
     iy = int(np.argmin(np.abs(y)))
     return PRLongitudinalIntensityCuts(
-        xz=np.asarray((source[:, :, iy] - background) * reference).copy(),
-        yz=np.asarray((source[:, ix, :] - background) * reference).copy(),
+        xz=_normalize_presentation_cut(source[:, :, iy], reference, background),
+        yz=_normalize_presentation_cut(source[:, ix, :], reference, background),
         x_cut_um=float(x[ix]),
         y_cut_um=float(y[iy]),
     )
@@ -83,7 +145,7 @@ def extract_backend_longitudinal_optical_intensity_cuts(
     background_intensity: float,
     asnumpy,
 ) -> PRLongitudinalIntensityCuts:
-    """Extract backend-resident cuts before transferring them to the host."""
+    """Transfer only raw cuts, then use the authoritative NumPy arithmetic."""
 
     nx = int(grid_summary["Nx"])
     ny = int(grid_summary["Ny"])
@@ -103,12 +165,10 @@ def extract_backend_longitudinal_optical_intensity_cuts(
     ix = int(np.argmin(np.abs(x)))
     iy = int(np.argmin(np.abs(y)))
     return PRLongitudinalIntensityCuts(
-        xz=np.asarray(asnumpy(
-            (source_intensity_stack[:, :, iy] - background) * reference
-        )).copy(),
-        yz=np.asarray(asnumpy(
-            (source_intensity_stack[:, ix, :] - background) * reference
-        )).copy(),
+        xz=_normalize_presentation_cut(
+            asnumpy(source_intensity_stack[:, :, iy]), reference, background),
+        yz=_normalize_presentation_cut(
+            asnumpy(source_intensity_stack[:, ix, :]), reference, background),
         x_cut_um=float(x[ix]),
         y_cut_um=float(y[iy]),
     )
@@ -196,6 +256,7 @@ def validate_longitudinal_cut_coordinates(
 __all__ = [
     "PRLongitudinalIntensityCuts",
     "centered_transverse_coordinates",
+    "presentation_peak_intensity_reference",
     "extract_longitudinal_optical_intensity_cuts",
     "extract_backend_longitudinal_optical_intensity_cuts",
     "fast_retention_summary",

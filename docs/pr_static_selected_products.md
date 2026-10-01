@@ -44,10 +44,24 @@ only in row blocks and immediately reduced. Reduction rows are limited to
 necessarily set the one-row lower bound. Host transfers are row summaries,
 coordinates and selected products. FFT workspace remains backend dependent.
 
-Cuts and MPR use the executed launch's already-computed channel-peak reference,
-with the existing background subtraction and sampling/block definitions.
-Backend roundoff can differ from the former CPU re-evaluation of this reference;
-native CuPy equivalence requires commissioning. No normalization is refitted.
+Cuts and orthogonal-slice previews use the authoritative NumPy presentation
+reference, separately from the scientific backend reference. Exact supplied host
+launches carry the scalar from accepted owned bytes; GPU-generated launches
+use bounded host streaming after replay. Background subtraction, sampling and
+block definitions are unchanged. Native CuPy equivalence requires commissioning.
+This streaming is permitted for complete and cancelled/nonconverged partial
+results with accepted slices whenever requested retained cuts/previews need the
+reference and no accepted-host scalar exists. It occurs only in result
+construction after slice acceptance and existing replay/completion have ended;
+it does not change scientific state or truthful result status. Zero accepted
+slices and failures before result construction cause no presentation-reference
+readback. Full construction requires no such reference; its later Fast projection
+uses retained host bytes. All Interactive/Analysis policies include baseline
+cuts/previews, even when no additional exact Analysis product is selected.
+For an 8192×4096 single-channel complex128 GPU-native launch, complete or retained
+partial results can require 512 MiB of streamed device-to-host launch traffic,
+using bounded host workspace. This is not package storage, Mac/network retrieval,
+or a longitudinal-volume transfer.
 Carrier scalar diagnostics run on the execution backend using bounded intensity
 reductions. Two-carrier partition masks and FFT workspaces still require planes.
 

@@ -224,7 +224,7 @@ class LongitudinalPane(QWidget):
                 self.field_selector.setItemData(
                     self.field_selector.count() - 1,
                     "Fast result: exact full-resolution fixed nearest-zero "
-                    "x-z and y-z cuts, separate from any downsampled MPR preview.",
+                    "x-z and y-z cuts, separate from any downsampled orthogonal-slice preview.",
                     Qt.ItemDataRole.ToolTipRole,
                 )
 

@@ -42,6 +42,8 @@ from lcprop.pr.transverse.specs import (
     PRTransverseMaterialResponseSpec,
 )
 from lcprop.pr.longitudinal_cuts import (
+    presentation_peak_intensity_reference,
+    copy_host_launch_for_presentation,
     extract_backend_longitudinal_optical_intensity_cuts,
     fast_retention_summary,
 )
@@ -585,8 +587,23 @@ def run_pr_static(
             dx_normalized=dx_normalized,
         )
         linearized_spec.validate()
+    accepted_host_presentation_reference = None
     if request.initial_A is None:
         A0 = launch.A0.copy()
+    elif (isinstance(request.initial_A, np.ndarray)
+          and request.initial_A.dtype == np.dtype(backend.complex_dtype)):
+        if request.initial_A.shape != launch.A0.shape:
+            raise ValueError(
+                f"initial_A shape {request.initial_A.shape} does not match {launch.A0.shape}"
+            )
+        if backend.is_gpu:
+            A0, accepted_host_presentation_reference = copy_host_launch_for_presentation(
+                request.initial_A, xp=xp,
+                synchronize=xp.cuda.get_current_stream().synchronize,
+            )
+        else:
+            A0 = xp.asarray(request.initial_A, dtype=backend.complex_dtype).copy()
+            accepted_host_presentation_reference = presentation_peak_intensity_reference(A0)
     else:
         A0 = xp.asarray(request.initial_A, dtype=backend.complex_dtype).copy()
         if A0.shape != launch.A0.shape:
@@ -1053,9 +1070,15 @@ def run_pr_static(
         selected_products["carrier_power"] = carrier_power_diagnostic_from_summary(
             A0, replay_A, grid_summary=grid.summary(), launch_summary=resolved_launch, xp=xp, bounded=True,
         )
-        reference = peak_reference
         host_initial = _owned_host_result(A0) if "complex_input" in selected else None
         host_final = _owned_host_result(replay_A) if "complex_output" in selected else None
+        # Presentation deliberately reproduces the historical NumPy convention.
+        # Do not reuse the scientific GPU peak_reference: it can differ by 1 ULP.
+        reference = accepted_host_presentation_reference
+        if completed_slices and reference is None:
+            reference = presentation_peak_intensity_reference(
+                host_initial if host_initial is not None else A0, asnumpy=asnumpy,
+            )
         del A0, replay_A, A
         if completed_slices:
             product_options = dict(
