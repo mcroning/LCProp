@@ -551,7 +551,7 @@ def run_pr_timedependent(
             xp=grid.xp,
         )
         movie_frames.append(
-            downsample_td_movie_frame(np.asarray(asnumpy(intensity)))
+            downsample_td_movie_frame(intensity, xp=grid.xp, asnumpy=asnumpy)
         )
         movie_frame_indices.append(int(index))
         movie_times.append(

@@ -188,11 +188,71 @@ def td_movie_frame_indices(total_steps: int) -> np.ndarray:
     )
 
 
-def downsample_td_movie_frame(intensity_xy: Any) -> np.ndarray:
-    reduced, _, _ = block_average_2d(
-        intensity_xy, max_x=TD_MOVIE_MAX_X, max_y=TD_MOVIE_MAX_Y
-    )
-    return reduced.astype(np.float32)
+def _movie_pairwise_sum(values: Any, *, xp: Any):
+    """Match NumPy's float64 pairwise add loop along axis zero.
+
+    NumPy reduceat copies the first element then adds this sum of the tail.
+    Keep the eight-lane/128-element tree explicit: backend sum reductions may
+    use a different tree. Only presentation arithmetic uses this helper.
+    Reference: NumPy 2.1.0 _core/src/umath/loops_utils.h.src and
+    ufunc_object.c (reduceat first-element initialization).
+    """
+    n = values.shape[0]
+    if n < 8:
+        result = xp.full(values.shape[1:], -0.0, dtype=xp.float64)
+        for i in range(n):
+            result = result + values[i]
+        return result
+    if n <= 128:
+        lanes = [values[i] for i in range(8)]
+        end = n - n % 8
+        for i in range(8, end, 8):
+            lanes = [lanes[j] + values[i + j] for j in range(8)]
+        result = ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3])) + (
+            (lanes[4] + lanes[5]) + (lanes[6] + lanes[7])
+        )
+        for i in range(end, n):
+            result = result + values[i]
+        return result
+    split = (n // 2) // 8 * 8
+    return (_movie_pairwise_sum(values[:split], xp=xp)
+            + _movie_pairwise_sum(values[split:], xp=xp))
+
+
+def _movie_reduceat(values: Any, edges: np.ndarray, *, axis: int, xp: Any):
+    source = xp.moveaxis(values, axis, 0)
+    result = xp.empty((len(edges) - 1,) + source.shape[1:], dtype=xp.float64)
+    for i, (start, stop) in enumerate(zip(edges[:-1], edges[1:])):
+        first = source[int(start)]
+        result[i] = (first if stop - start == 1 else first + _movie_pairwise_sum(
+            source[int(start) + 1:int(stop)], xp=xp
+        ))
+    return xp.moveaxis(result, 0, axis)
+
+
+def downsample_td_movie_frame(
+    intensity_xy: Any, *, xp: Any = np, asnumpy: Callable[[Any], Any] = np.asarray
+) -> np.ndarray:
+    """Transfer only the <=128x128 float32 movie frame after backend reduction.
+
+    Preserve the existing block edges, x-then-y float64 reduceat arithmetic,
+    orientation and float32 cast. The caller owns the input; it is never mutated.
+    """
+    if xp is np:
+        reduced, _, _ = block_average_2d(
+            intensity_xy, max_x=TD_MOVIE_MAX_X, max_y=TD_MOVIE_MAX_Y
+        )
+        return reduced.astype(np.float32)
+    if intensity_xy.ndim != 2 or intensity_xy.dtype.hasobject:
+        raise ValueError("block averaging requires a numeric 2-D array")
+    xe = _bin_edges(intensity_xy.shape[0], TD_MOVIE_MAX_X)
+    ye = _bin_edges(intensity_xy.shape[1], TD_MOVIE_MAX_Y)
+    source = xp.asarray(intensity_xy, dtype=xp.float64)
+    summed_x = _movie_reduceat(source, xe, axis=0, xp=xp)
+    summed_xy = _movie_reduceat(summed_x, ye, axis=1, xp=xp)
+    counts = xp.asarray(np.diff(xe)[:, None] * np.diff(ye)[None, :])
+    preview = (summed_xy / counts).astype(xp.float32)
+    return np.asarray(asnumpy(preview))
 
 
 def encode_td_preview_movie(
