@@ -84,6 +84,8 @@ def test_gui_builds_canonical_transverse_td_request_and_registers_operation(app)
     assert isinstance(request, PRTransverseRunRequest)
     assert request.solver.Nt == 3
     assert request.solver.dt_normalized == pytest.approx(1.0e-4)
+    assert request.optical_coupling == "frozen_material_published_optical_first_v1"
+    assert "frozen_material_published_optical_first_v1" in summary
     assert request.solver.integrator == PR_TRANSVERSE_IMEX_EULER
     assert request.transport.m_y == 1.0
     assert request.dielectric.h_y == 1.0

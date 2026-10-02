@@ -19,6 +19,7 @@ from lcprop.pr.specs import (
     PRRunRequest,
     PR_TIMEDEPENDENT_WORKFLOW,
     PR_TD_PUBLISHED_COUPLING,
+    PR_TD_LEGACY_COUPLING,
     validate_pr_timedependent_configuration,
 )
 from lcprop.pr.workflow import _validate_canonical_scattering_for_grid
@@ -319,6 +320,7 @@ def build_pr_request(
             else PR_FULL_TRANSVERSE_PROFILE_V1
         )
         request = PRTransverseRunRequest(
+            optical_coupling=(PR_TD_PUBLISHED_COUPLING if material_response.model == "nonlinear" else PR_TD_LEGACY_COUPLING),
             **transverse_common,
             transport=PRTransverseTransportProfile(),
             dielectric=PRTransverseDielectricProfile(),
@@ -348,6 +350,10 @@ def validate_pr_gui_request_representable(request) -> None:
     from lcprop.pr.local_plane_workflow import LocalPlaneRunRequest
     if isinstance(request, PRRunRequest) and request.optical_coupling != PR_TD_PUBLISHED_COUPLING:
         raise ValueError("Saved midpoint TD coupling is preserved headlessly; GUI cannot silently migrate it to published optical-first. Create a fresh request.")
+    if (isinstance(request, PRTransverseRunRequest)
+            and request.material_response.model == "nonlinear"
+            and request.resolved_optical_coupling != PR_TD_PUBLISHED_COUPLING):
+        raise ValueError("Saved transverse midpoint TD coupling cannot silently migrate in the GUI; create a fresh request.")
     if isinstance(request, (LocalPlaneRunRequest, PRStaticRunRequest)):
         raise ValueError("Saved midpoint/symmetric Static arithmetic is preserved headlessly; GUI cannot migrate it to published optical-first. Create a fresh request.")
     validate_pr_gui_workflow_request(request)

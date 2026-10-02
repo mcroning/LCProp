@@ -175,6 +175,8 @@ def encode_pr_static_request(request: PRStaticRunRequest) -> dict:
 def _validate_transverse_request(
     request: PRTransverseRunRequest | PRTransverseStaticRunRequest,
 ) -> None:
+    if isinstance(request, PRTransverseRunRequest):
+        request.resolved_optical_coupling
     request.grid.validate()
     request.beams.validate()
     request.material.validate()
@@ -265,6 +267,7 @@ def encode_pr_transverse_timedependent_request(
         "projection": asdict(request.projection),
         "material_response": request.material_response.to_payload(),
         "solver": asdict(request.solver),
+        "optical_coupling": request.resolved_optical_coupling,
         "backend": asdict(request.backend),
         "scattering": (
             None if request.scattering is None else asdict(request.scattering)
@@ -693,12 +696,14 @@ def decode_pr_transverse_timedependent_request(
             if version >= _PR_OPTICAL_BOUNDARY_EXPERIMENT_REQUEST_SCHEMA_VERSION
             else set()
         ),
+        optional={"optical_coupling"},
         name="PR transverse-TD request_payload",
     )
     scattering_values = payload["scattering"]
     try:
         beams = decode_beam_stack(payload["beams"])
         request = PRTransverseRunRequest(
+            optical_coupling=payload.get("optical_coupling", PR_TD_LEGACY_COUPLING),
             grid=GridSpec(
                 **dataclass_values(
                     GridSpec,

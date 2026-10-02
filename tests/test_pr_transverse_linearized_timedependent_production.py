@@ -93,6 +93,7 @@ def _request(
         return request
     return replace(
         request,
+        optical_coupling="frozen_material_midpoint_strang_v1",
         boundary=PRTransverseBoundaryProfile(
             profile_id=PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1,
             applied_field_x=bias,
@@ -171,6 +172,7 @@ def test_linearized_td_requires_explicit_reference_and_matching_bias_profile():
     nonlinear = _request(linearized=False)
     missing_reference = replace(
         nonlinear,
+        optical_coupling="frozen_material_midpoint_strang_v1",
         material_response=PRTransverseMaterialResponseSpec(
             model=PR_MATERIAL_RESPONSE_LINEARIZED
         ),

@@ -31,7 +31,7 @@ from lcprop.pr.visualization import (
     make_fast_intensity_preview,
     validate_fast_intensity_preview,
 )
-from lcprop.pr.specs import PRMaterialSpec, PR_MATERIAL_ID
+from lcprop.pr.specs import PRMaterialSpec, PR_MATERIAL_ID, PR_TD_LEGACY_COUPLING
 from lcprop.pr.transport_common import pack_portable, unpack_portable
 from lcprop.pr.transverse.specs import (
     PRTransverseBoundaryProfile,
@@ -90,6 +90,7 @@ def _require_exact_keys(
 
 
 def _validate_request(request: PRTransverseRunRequest) -> None:
+    request.resolved_optical_coupling
     request.grid.validate()
     request.beams.validate()
     request.material.validate()
@@ -158,6 +159,7 @@ def encode_pr_transverse_timedependent_transport_request(
         ),
         "launch_elements": encode_launch_elements(request.launch_elements),
         "optical_boundary": asdict(request.optical_boundary),
+        "optical_coupling": request.resolved_optical_coupling,
     }
     return EncodedRequest(
         PortablePayload(metadata, arrays), request.backend.backend
@@ -185,7 +187,7 @@ def decode_pr_transverse_timedependent_transport_request(
         "launch_elements",
     }
     try:
-        extra = set(metadata) - required - {"material_response", "optical_boundary"}
+        extra = set(metadata) - required - {"material_response", "optical_boundary", "optical_coupling"}
         missing = required - set(metadata)
         if missing or extra:
             details = []
@@ -200,6 +202,7 @@ def decode_pr_transverse_timedependent_transport_request(
         beams = decode_beam_stack(values["beams"])
         scattering = values["scattering"]
         request = PRTransverseRunRequest(
+            optical_coupling=values.get("optical_coupling", PR_TD_LEGACY_COUPLING),
             grid=GridSpec(**values["grid"]),
             beams=beams,
             material=PRMaterialSpec(**values["material"]),

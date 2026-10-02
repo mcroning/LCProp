@@ -58,7 +58,10 @@ from lcprop.pr.workflow import (
     _canonical_scattering_phase_stack,
     _validate_canonical_scattering_for_grid,
     advance_pr_slice_with_midpoint_source,
+    advance_pr_published_frozen_slice,
 )
+
+from lcprop.pr.specs import PR_TD_PUBLISHED_COUPLING
 
 
 ProgressCallback = Callable[[RunProgress], None]
@@ -76,6 +79,7 @@ def _check_cancel(token: CancellationToken | None, stage: str) -> None:
 
 
 def _validate_request(request: PRTransverseRunRequest) -> None:
+    request.resolved_optical_coupling  # Validate the explicit/default coupling identity.
     request.grid.validate()
     request.beams.validate()
     request.material.validate()
@@ -215,24 +219,30 @@ def _optical_pass(
     )
     for z_index in range(grid.Nz):
         _check_cancel(cancellation_token, "material_source_optical_z_march")
-        A, source[z_index], intensity_before = advance_pr_slice_with_midpoint_source(
-            A,
-            active[z_index],
-            kernel=kernel,
-            optical_substeps=request.solver.optical_substeps,
-            dz_um=grid.dz_um,
-            wavelength_um=wavelength_um,
-            interaction_length_um=request.grid.z_length_um,
-            gain_length_product=request.material.gain_length_product,
-            peak_intensity_reference=peak_reference,
-            background_intensity=request.material.background_intensity,
-            coherence_groups=request.beams.coherence_groups,
-            xp=xp,
-            optical_boundary=request.optical_boundary,
-            boundary_grid=grid,
-            _intensity_before=intensity_before,
-            _return_exit_intensity=True,
-        )
+        if request.resolved_optical_coupling == PR_TD_PUBLISHED_COUPLING:
+            A, source[z_index] = advance_pr_published_frozen_slice(
+                A, active[z_index], request=request, grid=grid, kernel=kernel,
+                peak_reference=peak_reference, wavelength_um=wavelength_um,
+            )
+        else:
+            A, source[z_index], intensity_before = advance_pr_slice_with_midpoint_source(
+                A,
+                active[z_index],
+                kernel=kernel,
+                optical_substeps=request.solver.optical_substeps,
+                dz_um=grid.dz_um,
+                wavelength_um=wavelength_um,
+                interaction_length_um=request.grid.z_length_um,
+                gain_length_product=request.material.gain_length_product,
+                peak_intensity_reference=peak_reference,
+                background_intensity=request.material.background_intensity,
+                coherence_groups=request.beams.coherence_groups,
+                xp=xp,
+                optical_boundary=request.optical_boundary,
+                boundary_grid=grid,
+                _intensity_before=intensity_before,
+                _return_exit_intensity=True,
+            )
         _apply_canonical_scattering_after_slice(
             A,
             scattering=request.scattering,
@@ -359,7 +369,7 @@ def run_pr_transverse_timedependent(
             xp=xp,
         )
         movie_frames.append(
-            downsample_td_movie_frame(np.asarray(asnumpy(intensity)))
+            downsample_td_movie_frame(intensity, xp=grid.xp, asnumpy=asnumpy)
         )
         movie_frame_indices.append(int(index))
         movie_times.append(int(index) * float(request.solver.dt_normalized))
@@ -485,12 +495,16 @@ def run_pr_transverse_timedependent(
                     coordinate_name="material_time",
                     coordinate_unit="normalized",
                     elapsed_wall_time=perf_counter() - started,
+                    # Owned observation on its compute backend; callbacks must
+                    # explicitly sample before requesting host presentation data.
                     latest_field_state={
-                        "psi_current": np.asarray(asnumpy(psi)).copy()
+                        "psi_current": psi.copy(),
+                        "psi_current_backend": backend.name
                     },
                     message="transverse PR material-time step accepted",
                     diagnostics={
                         "material_response": request.material_response.model,
+                        "optical_coupling": request.resolved_optical_coupling,
                         "material_update": (
                             "exact_frozen_source_modal"
                             if request.material_response.model
@@ -556,8 +570,13 @@ def run_pr_transverse_timedependent(
                     else "transparent_reference_not_production_default"
                 )
             ),
-            "complete_final_optical_replay": True,
+            "complete_final_optical_replay": True,  # Historical result key; observational only.
+            "final_optical_march_role": "accepted_state_products_only",
+            "source_sample_z_um": ((np.arange(grid.Nz) + 1) * grid.dz_um).tolist()
+                if request.resolved_optical_coupling == PR_TD_PUBLISHED_COUPLING
+                else None,
             "material_response": request.material_response.model,
+            "optical_coupling": request.resolved_optical_coupling,
             "material_response_validation": (
                 "experimental"
                 if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED

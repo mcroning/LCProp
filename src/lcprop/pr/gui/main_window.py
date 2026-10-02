@@ -1200,6 +1200,7 @@ class PRMainWindow(QWidget):
             ])
         elif workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
             lines.extend([
+                f"Longitudinal optical coupling: {request.resolved_optical_coupling}",
                 (
                     "Time-dependent material model: Linearized full transverse"
                     if linearized

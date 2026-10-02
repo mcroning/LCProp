@@ -654,7 +654,9 @@ def _static_presentation_products(
             "half-width=max(two spectral bins, wavelength/(2*n_ref*waist))"
         ),
         "longitudinal_optical_observation": (
-            "midpoint channel intensity reconstructed exactly from retained "
+            ("arriving right-endpoint channel intensity reconstructed exactly from retained "
+             if result.diagnostics.get("optical_coupling") == "frozen_material_published_optical_first_v1"
+             else "midpoint channel intensity reconstructed exactly from retained ") +
             "transport source minus uniform dark/background"
         ),
         "sparse_presentation_contract": True,
@@ -671,7 +673,9 @@ def pr_transverse_result_to_run_data(result: PRTransverseRunResult) -> RunData:
     nx, ny, nz = (int(summary[key]) for key in ("Nx", "Ny", "Nz"))
     x = (np.arange(nx) - 0.5 * (nx - 1)) * float(summary["dx_um"])
     y = (np.arange(ny) - 0.5 * (ny - 1)) * float(summary["dy_um"])
-    z = np.arange(nz) * float(summary["dz_um"])
+    offset = (1 if result.diagnostics.get("optical_coupling")
+              == "frozen_material_published_optical_first_v1" else 0)
+    z = (np.arange(nz) + offset) * float(summary["dz_um"])
     geometry = Geometry(x=x, y=y, z=z, units="um")
     if result.retention_summary.get("policy", "full") == "fast":
         return _fast_optical_run_data(

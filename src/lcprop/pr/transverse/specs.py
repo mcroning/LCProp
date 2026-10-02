@@ -12,7 +12,7 @@ from lcprop.core.context import GridSpec
 from lcprop.optics.screens import ChannelLaunchElements
 from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
-from lcprop.pr.specs import PRMaterialSpec
+from lcprop.pr.specs import PRMaterialSpec, PR_TD_PUBLISHED_COUPLING, PR_TD_LEGACY_COUPLING
 
 
 PR_FULL_TRANSVERSE_PROFILE_V1 = "pr_full_transverse_unbiased_reference_v1"
@@ -249,6 +249,25 @@ class PRTransverseRunRequest:
         default_factory=PRTransverseMaterialResponseSpec
     )
     optical_boundary: TransverseBoundarySpec = TransverseBoundarySpec()
+    # Resolve fresh defaults once; persisted requests always carry an explicit ID.
+    optical_coupling: str | None = None
+
+    def __post_init__(self):
+        if self.optical_coupling is None:
+            object.__setattr__(self, "optical_coupling", (
+                PR_TD_PUBLISHED_COUPLING
+                if self.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR
+                else PR_TD_LEGACY_COUPLING
+            ))
+
+    @property
+    def resolved_optical_coupling(self) -> str:
+        if self.optical_coupling not in (PR_TD_PUBLISHED_COUPLING, PR_TD_LEGACY_COUPLING):
+            raise ValueError("unsupported transverse TD optical_coupling")
+        if (self.material_response.model != PR_MATERIAL_RESPONSE_NONLINEAR
+                and self.optical_coupling != PR_TD_LEGACY_COUPLING):
+            raise ValueError("published transverse TD coupling requires nonlinear transport")
+        return self.optical_coupling
 
 
 @dataclass(frozen=True)
