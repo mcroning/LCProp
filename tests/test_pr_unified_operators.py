@@ -33,8 +33,8 @@ def test_incidence_conservation_nullspace_and_flux(precision):
                                   -(np.roll(I, -1)-I)/h)
     J = flux(g, np.ones(16, dtype=precision), z, z, np.array([.3], dtype=precision))[0]
     np.testing.assert_allclose(J, .3, rtol=2e-6, atol=2e-7)
-    with pytest.raises(ValueError, match='one active'):
-        Geometry((8, 2), (4., 2.), B)
+    with pytest.raises(ValueError, match='one or two active'):
+        Geometry((8, 2, 2), (4., 2., 2.), B)
 
 
 @pytest.mark.parametrize('precision', ['float32', 'float64'])

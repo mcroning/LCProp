@@ -141,8 +141,9 @@ def test_invalid_inputs_and_no_partial_result(monkeypatch):
         with pytest.raises(MaterialConvergenceError):
             solve_static_material(transport(np.full(8, value)), closure=zero())
     full = replace(transport(I), spatial=PRUnifiedSpatialSpec((8, 2), (6., 2.), ('x', 'y')))
-    with pytest.raises(ValueError, match='one-dimensional'):
-        solve_static_material(full, closure=PRElectricalClosureSpec(UNBIASED, 2, (0., 0.)))
+    # Genuine 2D is now supported, but still cannot use a 1D electrical closure.
+    with pytest.raises(ValueError, match='dimensions disagree'):
+        solve_static_material(full, closure=zero())
 
 
 @pytest.mark.parametrize('cell,column', [(51, 31), (52, 31), (54, 30), (56, 31)])

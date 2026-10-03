@@ -1,4 +1,4 @@
-"""Private one-column Newton core, preserving the frozen Stage-E1.1 arithmetic."""
+"""Shared active-domain Newton core, preserving the frozen Stage-E1.1 arithmetic."""
 import numpy as np
 from .operators import carrier, flux, bernoulli, normalized_log_carrier
 
@@ -81,10 +81,10 @@ def diagnose(g, I, q, p, b, electrical, zero):
     return dict(passed=bool(passed), values=v.tolist(), rms_limits=rms.tolist(), max_limits=maximum.tolist())
 
 
-def solve_column(g, intensity, electrical, *, zero):
+def solve_domain(g, intensity, electrical, *, zero):
     xp, B = g.xp, g.backend
     I = B.array(intensity).copy()
-    if I.shape != g.shape or electrical[2].size != 1:
+    if I.shape != g.shape or electrical[2].size != len(g.shape):
         raise ValueError('Shape/closure mismatch')
     if not B.status([xp.all(xp.isfinite(I)) & xp.all(I > 0)])[0]:
         raise ValueError('Positive finite total intensity required')
@@ -143,3 +143,10 @@ def solve_column(g, intensity, electrical, *, zero):
         else:
             raise RuntimeError('Armijo bound: '+str(r))
     raise AssertionError('unreachable')
+
+
+def solve_column(g, intensity, electrical, *, zero):
+    """M2 fast path: never create a two-dimensional transport domain."""
+    if len(g.shape) != 1:
+        raise ValueError('Independent-column solve requires exactly one active axis')
+    return solve_domain(g, intensity, electrical, zero=zero)

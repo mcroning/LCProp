@@ -1,4 +1,4 @@
-"""One-dimensional compatible incidence operators and hopping face flux.
+"""Shared one/two-dimensional compatible incidence operators and hopping face flux.
 
 Ported from the frozen Stage-E1.1 core; no transport in batch axes."""
 import math
@@ -30,8 +30,8 @@ class Geometry:
     backend: object
 
     def __post_init__(self):
-        if len(self.shape) != 1 or len(self.lengths) != 1:
-            raise ValueError('M2 supports one active x axis only')
+        if len(self.shape) not in (1, 2) or len(self.lengths) != len(self.shape):
+            raise ValueError('Only one or two active axes are supported')
         if any(n < 2 or int(n) != n for n in self.shape) or any(not math.isfinite(v) or v <= 0 for v in self.lengths):
             raise ValueError('Invalid geometry')
         self.xp = self.backend.xp

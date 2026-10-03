@@ -1,4 +1,4 @@
-"""Bounded 1D unified material solve; deliberately unregistered with workflows.
+"""Bounded unified material solve; deliberately unregistered with workflows.
 
 Returns (owned canonical state, scalar diagnostics). No optical or z semantics.
 Every independent column has its own Newton/Armijo path. On failure no partially
@@ -7,9 +7,9 @@ accepted plane is returned, and caller buffers are never changed.
 from contextlib import nullcontext
 
 from ._backend import MaterialBackend
-from ._newton import solve_column
+from ._newton import solve_column, solve_domain
 from .operators import Geometry, flux
-from .specs import A7_CURRENT, FIXED_FIELD, PRESCRIBED_CURRENT, UNBIASED, PRElectricalClosureSpec
+from .specs import A7_CURRENT, FIXED_FIELD, PRESCRIBED_CURRENT, UNBIASED, OPEN_TRANSVERSE, PRElectricalClosureSpec
 from .state import PRMaterialDiagnostics, PRTransportIntensity, PRUnifiedMaterialState
 
 
@@ -22,12 +22,13 @@ class MaterialConvergenceError(RuntimeError):
 
 
 def solve_static_material(intensity: PRTransportIntensity, *, closure):
-    """Solve one dark-inclusive transport plane under an explicit 1D closure.
+    """Solve one dark-inclusive transport domain or independent reduced batch.
 
     Borrowed intensity must stay unchanged for the duration of this synchronous
     call. Returned q/psi/b are detached, owned arrays, borrowed by the M1 record.
     Physical gates are the frozen research gates, not M1 structural validation.
-    Diagnostics use column-qualified scalar names; provenance includes the exact
+    Reduced diagnostics use column-qualified names; connected diagnostics name
+    both harmonic/current components. Provenance includes the exact
     precision identity in the state and explicit backend/policy indicator values.
     """
     if not isinstance(intensity, PRTransportIntensity):
@@ -37,7 +38,9 @@ def solve_static_material(intensity: PRTransportIntensity, *, closure):
     if not isinstance(closure, PRElectricalClosureSpec):
         raise TypeError('PRElectricalClosureSpec required')
     closure.validate_spatial(spatial)
-    if spatial.dimension != 1 or closure.identity not in (
+    if spatial.dimension == 2:
+        return _solve_connected_plane(intensity, closure)
+    if closure.identity not in (
             UNBIASED, FIXED_FIELD, PRESCRIBED_CURRENT, A7_CURRENT):
         raise ValueError('M2 requires a supported one-dimensional Static closure')
     if closure.identity == A7_CURRENT and closure.background_intensity != intensity.total_background:
@@ -101,3 +104,66 @@ def solve_static_material(intensity: PRTransportIntensity, *, closure):
         state.validate_structure()
         diagnostics = PRMaterialDiagnostics(tuple(observations), tuple(limits), 'reported')
         return state, diagnostics
+
+
+# Largest published Stage-C reduction: 4096 x 3. This reference/direct-solver
+# ceiling is not a large-2D performance guarantee or a resource estimator.
+MAX_CONNECTED_NODES = 12288
+
+
+def _solve_connected_plane(intensity, closure):
+    """Connected x-y domain, using the same flux, Jacobian and Newton as 1D."""
+    spatial, precision = intensity.spatial, intensity.precision
+    if spatial.active_shape[0]*spatial.active_shape[1] > MAX_CONNECTED_NODES:
+        raise ValueError('Connected material plane exceeds bounded direct-solver scope')
+    if closure.identity not in (UNBIASED, FIXED_FIELD, PRESCRIBED_CURRENT, OPEN_TRANSVERSE):
+        raise ValueError('Unsupported two-dimensional electrical closure')
+    context = intensity.values.device if intensity.backend == 'cupy' else nullcontext()
+    with context:
+        backend = MaterialBackend(intensity.backend, precision.state_dtype)
+        xp = backend.xp
+        if closure.identity in (UNBIASED, FIXED_FIELD):
+            U, V = ((1., 0.), (0., 1.)), ((0., 0.), (0., 0.))
+        elif closure.identity == PRESCRIBED_CURRENT:
+            U, V = ((0., 0.), (0., 0.)), ((1., 0.), (0., 1.))
+        else:
+            # Fix b_x; constrain mean J_y. b_y remains an unknown, not zero.
+            U, V = ((1., 0.), (0., 0.)), ((0., 0.), (0., 1.))
+        electrical = tuple(backend.array(a) for a in (U, V, closure.target))
+        geometry = Geometry(spatial.active_shape, spatial.normalized_lengths, backend)
+        try:
+            solution = solve_domain(geometry, intensity.values, electrical, zero=closure.identity == UNBIASED)
+        except (RuntimeError, ValueError) as exc:
+            raise RuntimeError(f'Unified connected material plane: {exc}') from exc
+        # The shared solver owns these arrays; no additional full-plane copies.
+        state = PRUnifiedMaterialState(solution['q'], solution['psi'], solution['b'],
+            spatial, closure, precision, intensity.backend)
+        state.validate_structure()
+        trace = solution['trace']
+        names = ('gauss_rms', 'gauss_max', 'flux_divergence_rms', 'flux_divergence_max',
+                 'closure_rms', 'closure_max', 'neutrality', 'gauge', 'carrier_min',
+                 'carrier_max', 'finite', 'gauss_scale', 'flux_scale', 'face_flux_max')
+        observations = [('backend_numpy', float(intensity.backend == 'numpy')),
+                        ('backend_cupy', float(intensity.backend == 'cupy')),
+                        ('state_bits', 32. if precision.state_dtype == 'float32' else 64.),
+                        ('linear_bits', 64.), ('bernoulli_bits', 64.), ('active_dimensions', 2.),
+                        ('iterations', float(len(trace)-1)), ('converged', 1.)]
+        observations.extend(zip(names, trace[-1]['values']))
+        faces = flux(geometry, intensity.values, state.q, state.psi, state.b)
+        values = backend.status([state.b[0], state.b[1], xp.mean(faces[0]), xp.mean(faces[1])])
+        observations.extend(zip(('harmonic_x', 'harmonic_y', 'mean_current_x', 'mean_current_y'), values))
+        limits = []
+        for group, rms, maximum in zip(('gauss', 'flux_divergence', 'closure'),
+                                       trace[-1]['rms_limits'], trace[-1]['max_limits']):
+            limits.extend(((group+'_rms', rms), (group+'_max', maximum)))
+        eps = 2.**-23 if precision.state_dtype == 'float32' else 0.
+        limits.extend((('neutrality', max(1e-11, 8*eps)), ('gauge', max(1e-11, 8*eps))))
+        if closure.identity == UNBIASED:
+            limits.append(('face_flux_max', max(1e-9, 32*eps*trace[-1]['values'][12])))
+        for step in trace:
+            tag = f"iteration_{step['iteration']}."
+            observations.extend((tag+name, float(value)) for name, value in zip(names, step['values']))
+            for key in ('alpha', 'halvings', 'relative_potential_correction', 'q_b_correction'):
+                if key in step:
+                    observations.append((tag+key, float(step[key])))
+        return state, PRMaterialDiagnostics(tuple(observations), tuple(limits), 'reported')
