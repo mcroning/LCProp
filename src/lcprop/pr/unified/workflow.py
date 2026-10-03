@@ -1,11 +1,13 @@
-"""Unregistered headless unified published-order Static march (M4 only).
+"""Unregistered headless unified published-order Static march.
 
 Requires an explicit backend-resident prepared launch; does not build GUI
 requests, register dispatch, encode results, or offer continuation. All arrays
 returned are runtime backend arrays, never implicit host presentation payloads.
+M5's private product collector observes isolated snapshots without new arithmetic.
 """
 from contextlib import nullcontext
-from dataclasses import asdict, dataclass
+from copy import deepcopy
+from dataclasses import asdict, dataclass, replace
 import math
 from typing import Any
 
@@ -93,6 +95,7 @@ class UnifiedStaticResult:
     products: dict
     identities: dict
     failure: dict | None
+    collection: Any | None = None
 
 
 def _finite(a, xp, name):
@@ -181,7 +184,36 @@ def _prepare_acceptance(ledger, record, cuts, new_cut):
     return ledger+(record,), cuts+((new_cut,) if new_cut is not None else ())
 
 
-def run_unified_static(request, *, selection=UnifiedProductSelection(), cancellation_token=None):
+def _collect(collector, previous, A, state, intensity, grid, record, identities, xp):
+    """Internal M5 observation transaction on detached, synchronous snapshots.
+
+    Snapshot mutation fails closed; no observer receives scientific buffers.
+    Only the returned collection is eligible for atomic cell acceptance.
+    """
+    material_observed = state is not None and collector.needs_material
+    optical_observed = collector.needs_optical or (record is None and collector.selection.launch)
+    originals = (A if optical_observed else None,
+        state.q if material_observed else None, state.psi if material_observed else None,
+        state.b if material_observed else None, intensity if material_observed else None,
+        grid.x_um, grid.y_um)
+    copies = tuple(a.copy(order="C") if a is not None else None for a in originals)
+    snapshot = replace(state, q=copies[1], psi=copies[2], b=copies[3]) if material_observed else None
+    product_grid = replace(grid, x_um=copies[-2], y_um=copies[-1],
+                           fx_um=None, fy_um=None, fxy2_um=None)
+    result = collector.prepare(previous, copies[0], snapshot,
+        copies[4], product_grid, deepcopy(record), deepcopy(identities))
+    for original, copied in zip(originals, copies):
+        if original is None:
+            continue
+        if (original.shape != copied.shape or original.dtype != copied.dtype
+                or not bool(xp.array_equal(xp.ascontiguousarray(original).view(xp.uint8),
+                                           copied.view(xp.uint8)))):
+            raise ValueError("product collector mutated an observation snapshot")
+    return result
+
+
+def run_unified_static(request, *, selection=UnifiedProductSelection(), cancellation_token=None,
+                       _collector=None):
     """Run fresh prepared launch; return truthful last accepted state on failure.
 
     Cancellation is checked before a cell and after its complete candidate and
@@ -189,6 +221,10 @@ def run_unified_static(request, *, selection=UnifiedProductSelection(), cancella
     No progress/array callback, replay, continuation or external observer exists.
     """
     count = _validate(request, selection)  # Invalid metadata raises before allocation.
+    if _collector is not None:
+        from .products import _Collector
+        if type(_collector) is not _Collector:
+            raise TypeError("only the internal unified product collector is supported")
     r = request
     backend = get_backend(BackendSpec(r.backend, r.precision.state_dtype, False))
     xp = backend.xp
@@ -198,15 +234,16 @@ def run_unified_static(request, *, selection=UnifiedProductSelection(), cancella
         raise ValueError("prepared launch must match execution backend, shape and dtype")
     context = A.device if r.backend == "cupy" else nullcontext()
     with context:
-        return _run(r, selection, count, backend, cancellation_token)
+        return _run(r, selection, count, backend, cancellation_token, _collector)
 
 
-def _run(r, selection, count, backend, token):
+def _run(r, selection, count, backend, token, collector=None):
     xp = backend.xp
     accepted = material_state = launch = None
     completed = 0
     reached = 0.
     ledger = cuts = ()
+    collection = None
     products = {}
     status, reason, failure = "completed", "all cells accepted", None
     stage, attempted = "launch", None
@@ -232,7 +269,10 @@ def _run(r, selection, count, backend, token):
         ix, iy = int(xp.argmin(abs(grid.x_um)).item()), int(xp.argmin(abs(grid.y_um)).item())
         initial_cut = (_cuts(candidate, ix, iy),) if selection.boundary_cuts else ()
         launch_copy = candidate.copy() if selection.launch else None
-        accepted, cuts, launch = candidate, initial_cut, launch_copy
+        initial_collection = (_collect(collector, None, candidate, None, None,
+            grid, None, identities, xp) if collector is not None else None)
+        accepted, cuts, launch, collection = candidate, initial_cut, launch_copy, initial_collection
+        del initial_collection
         del candidate, launch_copy
         h, length = float(r.grid.dz_um), float(r.grid.z_length_um)
         kernel = scalar_angular_spectrum_kernel(grid.fxy2_um, dz=h,
@@ -284,12 +324,14 @@ def _run(r, selection, count, backend, token):
                 canonical_slabs=slabs, observations=observations, limits=limits)
             new_cut = _cuts(candidate, ix, iy) if selection.boundary_cuts else None
             next_ledger, next_cuts = _prepare_acceptance(ledger, record, cuts, new_cut)
+            next_collection = (_collect(collector, collection, candidate, state, intensity,
+                grid, record, identities, xp) if collector is not None else None)
             if cancelled():
                 status, reason = "cancelled", "cancelled before candidate acceptance"
                 break
-            accepted, material_state, completed, reached, ledger, cuts = (
-                candidate, state, k+1, end, next_ledger, next_cuts)
-            del candidate, state, transport, intensity, diag, next_ledger, next_cuts
+            accepted, material_state, completed, reached, ledger, cuts, collection = (
+                candidate, state, k+1, end, next_ledger, next_cuts, next_collection)
+            del candidate, state, transport, intensity, diag, next_ledger, next_cuts, next_collection
             attempted = None
     except Exception as exc:
         status, reason = "failed", str(exc)
@@ -324,4 +366,4 @@ def _run(r, selection, count, backend, token):
     boundaries = ((0.,)+tuple(v['z_end_um'] for v in ledger)) if accepted is not None else ()
     return UnifiedStaticResult(status, reason, completed, reached, accepted,
         material_state if selection.material_state else None, boundaries,
-        tuple(v['material_z_um'] for v in ledger), ledger, products, identities, failure)
+        tuple(v['material_z_um'] for v in ledger), ledger, products, identities, failure, collection)
