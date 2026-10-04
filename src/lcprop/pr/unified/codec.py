@@ -24,8 +24,10 @@ from .workflow import (UnifiedStaticRequest,UnifiedStaticResult,UnifiedProductSe
                        WORKFLOW_ID,ARITHMETIC_ID,_validate,_material_gate)
 from .products import UnifiedSelection,UnifiedSelectedResult,PRODUCTS_SCHEMA,product_locations,next_address
 
-REQUEST_SCHEMA = 'pr_unified_static_request_v1'
-RESULT_SCHEMA = 'pr_unified_static_result_v1'
+LEGACY_REQUEST_SCHEMA = 'pr_unified_static_request_v1'
+REQUEST_SCHEMA = 'pr_unified_static_request_v2'
+LEGACY_RESULT_SCHEMA = 'pr_unified_static_result_v1'
+RESULT_SCHEMA = 'pr_unified_static_result_v2'
 STATE_SCHEMA = 'pr_unified_static_canonical_state_v1'
 GAUGE = 'zero_mean_potential_per_active_domain_v1'
 
@@ -60,7 +62,7 @@ def _unpack(payload, schema):
             names=archive.namelist()
             if len(names)!=len(set(names)): raise ValueError('duplicate archive entries')
             meta=json.loads(archive.read('metadata.json'),parse_constant=lambda s: (_ for _ in ()).throw(ValueError(s)))
-            if meta['schema']!=schema: raise ValueError('unknown persistence schema')
+            if meta['schema'] not in ((schema,) if isinstance(schema,str) else schema): raise ValueError('unknown persistence schema')
             arrays={};paths=[]
             for name,r in meta.pop('arrays').items():
                 paths.append(r['path']);data=archive.read(r['path'])
@@ -83,8 +85,8 @@ def _keys(value, expected):
         raise ValueError('unknown or missing schema fields')
 
 
-def _construct(cls, value):
-    if cls is UnifiedSelection:
+def _construct(cls, value, *, legacy_selection=False):
+    if cls is UnifiedSelection and legacy_selection:
         legacy = {f.name for f in fields(cls)} - {'intensity_volume','material_volumes'}
         if isinstance(value,dict) and set(value)==legacy:
             value=dict(value,intensity_volume=False,material_volumes=())
@@ -95,17 +97,23 @@ def _construct(cls, value):
 
 def request_metadata(r):
     from .solver_specs import legacy_solver
-    if r.solver != legacy_solver(r.spatial):
-        raise ValueError("scalable persistence requires a new schema (S4-M3)")
-    result={f.name:getattr(r,f.name) for f in fields(r) if f.name not in ('initial_A','solver')}
+    legacy = r.persistence_schema == LEGACY_REQUEST_SCHEMA
+    if r.persistence_schema not in (LEGACY_REQUEST_SCHEMA, REQUEST_SCHEMA):
+        raise ValueError('unknown request provenance')
+    if legacy and r.solver != legacy_solver(r.spatial):
+        raise ValueError('legacy request cannot represent scalable solver')
+    result={f.name:getattr(r,f.name) for f in fields(r) if f.name not in ('initial_A','solver','persistence_schema')}
     for key in ('grid','spatial','closure','precision','material'):
         result[key]=asdict(result[key])
+    if not legacy: result['solver']=asdict(r.solver)
     result['scattering']=asdict(r.scattering) if r.scattering is not None else None
     return result
 
 
 def _request(config, launch):
-    _keys(config,[f.name for f in fields(UnifiedStaticRequest) if f.name not in ('initial_A','solver')])
+    from .solver_specs import PRUnifiedSolverSpec
+    modern = 'solver' in config
+    _keys(config,[f.name for f in fields(UnifiedStaticRequest) if f.name not in ('initial_A','persistence_schema') and (modern or f.name != 'solver')])
     values=dict(config)
     for key,cls in (('grid',GridSpec),('spatial',PRUnifiedSpatialSpec),('closure',PRElectricalClosureSpec),
                     ('precision',PRMaterialPrecisionSpec),('material',PRMaterialSpec)):
@@ -113,6 +121,8 @@ def _request(config, launch):
     if values['scattering'] is not None:
         values['scattering']=_construct(PRCanonicalScatteringSpec,values['scattering'])
     if values['coherence_groups'] is not None: values['coherence_groups']=tuple(values['coherence_groups'])
+    if modern: values["solver"]=_construct(PRUnifiedSolverSpec,values["solver"])
+    values["persistence_schema"]=REQUEST_SCHEMA if modern else LEGACY_REQUEST_SCHEMA
     r=UnifiedStaticRequest(initial_A=launch,**values)
     _validate(r,UnifiedProductSelection())
     return r
@@ -140,19 +150,21 @@ class StoredUnifiedRequest:
 def encode_request(request, *, selection=UnifiedSelection()):
     config=request_metadata(request)
     _validate(request,UnifiedProductSelection());selection.validate(request.spatial)
-    payload=_pack(dict(schema=REQUEST_SCHEMA,material_identity=MATERIAL_ID,
+    payload=_pack(dict(schema=request.persistence_schema,material_identity=MATERIAL_ID,
         normalization=NORMALIZATION_ID,config=config,selection=asdict(selection)),{'launch':request.initial_A})
     decode_request(payload)  # Same strict acceptance for encode/decode.
     return payload
 
 
 def _decode_request(payload):
-    meta,arrays=_unpack(payload,REQUEST_SCHEMA)
+    meta,arrays=_unpack(payload,(REQUEST_SCHEMA,LEGACY_REQUEST_SCHEMA))
     _keys(meta,('schema','material_identity','normalization','config','selection'))
     if meta['material_identity']!=MATERIAL_ID or meta['normalization']!=NORMALIZATION_ID or set(arrays)!={'launch'}:
         raise ValueError('incompatible material/normalization/launch record')
+    if ('solver' in meta['config']) != (meta['schema']==REQUEST_SCHEMA): raise ValueError('solver/schema mismatch')
     r=_request(meta['config'],arrays['launch'])
-    selection=_construct(UnifiedSelection,meta['selection']);selection.validate(r.spatial)
+    selection=_construct(UnifiedSelection,meta['selection'],
+        legacy_selection=meta['schema']==LEGACY_REQUEST_SCHEMA);selection.validate(r.spatial)
     a=arrays['launch'];dtype='complex64' if r.precision.state_dtype=='float32' else 'complex128'
     if a.ndim!=3 or a.shape[0]<1 or a.shape[1:]!=r.spatial.field_shape or a.dtype.name!=dtype:
         raise ValueError('launch geometry/precision mismatch')
@@ -165,7 +177,7 @@ def _identity_request(identity):
     # M4 result provenance, not an old request with extension flags.
     required={'workflow','arithmetic','projection','material','spatial','closure','precision','backend',
               'electro_optic','optical_boundary','wavelength_um','material_parameters','grid','scattering'}
-    if not required<=set(identity) or set(identity)-required-{'coherence_groups','peak_intensity_reference'}:
+    if not required<=set(identity) or set(identity)-required-{'coherence_groups','peak_intensity_reference','solver'}:
         raise ValueError('incomplete or unknown execution provenance')
     if (identity['material']!=MATERIAL_ID or identity['optical_boundary']!='periodic'
             or identity['electro_optic']!='existing_scalar_x_delta_n'):
@@ -175,6 +187,7 @@ def _identity_request(identity):
         wavelength_um=identity['wavelength_um'],coherence_groups=identity.get('coherence_groups'),
         scattering=identity['scattering'],workflow_identity=identity['workflow'],
         arithmetic_identity=identity['arithmetic'],projection_identity=identity['projection'])
+    if "solver" in identity: config["solver"]=identity["solver"]
     return _request(config,None)
 
 
@@ -212,11 +225,32 @@ def _launch_provenance(identity, endpoint, launch=None):
                 raise ValueError('accepted-launch peak reference mismatch')
 
 
+def _failure_metadata(failure):
+    """Allowlisted scalar failure evidence; never serialize traceback/buffers."""
+    if failure is None: return None
+    result=dict(failure)
+    exc=result.pop('material_exception',None)
+    if exc is not None:
+        cause=exc.__cause__
+        result['material_failure']=dict(type=type(exc).__name__,message=str(exc),
+            cause=None if cause is None else dict(type=type(cause).__name__,message=str(cause)),
+            stage=getattr(exc,'stage',None),operation_stage=getattr(exc,'operation_stage',None),
+            iteration=getattr(exc,'iteration',None),state_iteration=getattr(exc,'state_iteration',None),
+            linear_solver=getattr(exc,'linear_solver',None),trace=getattr(exc,'trace',None),
+            last_diagnostics=getattr(exc,'last_diagnostics',None),
+            valid_solver_iterate_available=getattr(exc,'state',None) is not None)
+    def finite_metadata(value):
+        if isinstance(value,float) and not math.isfinite(value):
+            return {'nonfinite_float':repr(value)}
+        if isinstance(value,dict):return {k:finite_metadata(v) for k,v in value.items()}
+        if isinstance(value,(list,tuple)):return [finite_metadata(v) for v in value]
+        return value
+    return finite_metadata(result)
+
+
 def encode_result(result):
     s=result.scientific
-    if "solver" in s.identities:
-        raise ValueError("scalable persistence requires a new schema (S4-M3)")
-    if result.schema not in (PRODUCTS_SCHEMA,'pr_unified_static_products_v1'):
+    if result.schema not in (PRODUCTS_SCHEMA,'pr_unified_static_products_v2','pr_unified_static_products_v1'):
         raise ValueError('unknown product schema')
     selection=asdict(result.selection)
     if result.schema=='pr_unified_static_products_v1':
@@ -237,7 +271,11 @@ def encode_result(result):
         arrays.update({'state/'+k:getattr(s.material_state,k) for k in ('q','psi','b')})
     science={name:getattr(s,name) for name in ('status','reason','completed_cells','reached_z_um',
         'boundary_z_um','material_z_um','ledger','identities','failure')}
-    meta=dict(schema=RESULT_SCHEMA,products_schema=result.schema,scientific=science,
+    modern=result.schema==PRODUCTS_SCHEMA
+    if modern and "solver" not in science["identities"]: raise ValueError("explicit solver required")
+    if not modern and "solver" in science["identities"]: raise ValueError("legacy result cannot represent solver metadata")
+    science["failure"]=_failure_metadata(science["failure"])
+    meta=dict(schema=RESULT_SCHEMA if modern else LEGACY_RESULT_SCHEMA,products_schema=result.schema,scientific=science,
         selection=selection,locations=result.locations,state=state,next_address=result.next_address,
         normalization=NORMALIZATION_ID)
     payload=_pack(meta,arrays)
@@ -246,16 +284,19 @@ def encode_result(result):
 
 
 def _decode_result(payload):
-    meta,arrays=_unpack(payload,RESULT_SCHEMA)
+    meta,arrays=_unpack(payload,(RESULT_SCHEMA,LEGACY_RESULT_SCHEMA))
     _keys(meta,('schema','products_schema','scientific','selection','locations','state','next_address','normalization'))
-    if meta['products_schema'] not in (PRODUCTS_SCHEMA,'pr_unified_static_products_v1'): raise ValueError('unknown products identity')
-    if meta['products_schema']==PRODUCTS_SCHEMA:
+    if meta['products_schema'] not in (PRODUCTS_SCHEMA,'pr_unified_static_products_v2','pr_unified_static_products_v1'): raise ValueError('unknown products identity')
+    if (meta['schema']==RESULT_SCHEMA) != (meta['products_schema']==PRODUCTS_SCHEMA): raise ValueError('result schema mismatch')
+    if meta['products_schema'] in (PRODUCTS_SCHEMA,'pr_unified_static_products_v2'):
         _keys(meta['selection'],[f.name for f in fields(UnifiedSelection)])
     if meta['normalization']!=NORMALIZATION_ID: raise ValueError('unknown source normalization')
     s=meta['scientific']
     _keys(s,('status','reason','completed_cells','reached_z_um','boundary_z_um','material_z_um','ledger','identities','failure'))
+    if ('solver' in s['identities']) != (meta['schema']==RESULT_SCHEMA): raise ValueError('solver/schema mismatch')
     r=_identity_request(s['identities'])
-    selection=_construct(UnifiedSelection,meta['selection']);selection.validate(r.spatial)
+    selection=_construct(UnifiedSelection,meta['selection'],
+        legacy_selection=meta['products_schema']=='pr_unified_static_products_v1');selection.validate(r.spatial)
     if meta['products_schema']=='pr_unified_static_products_v1' and (selection.intensity_volume or selection.material_volumes):
         raise ValueError('legacy product schema cannot contain selected volumes')
     count=s['completed_cells'];boundary=tuple(s['boundary_z_um']);material=tuple(s['material_z_um'])
@@ -357,6 +398,11 @@ def decode_result(payload):
 def _validate_products(products,coords,selection,r,endpoint,count,status,partial_products=False):
     expected={};coordinate_keys={'boundary_z_um','material_z_um'}
     real=np.dtype(r.precision.state_dtype);complex_type=np.dtype('complex64' if real==np.float32 else 'complex128')
+    from .specs import POSITIVE_PRECISION
+    def product_dtype(name):
+        if r.precision.identity==POSITIVE_PRECISION and (name=='carrier_node' or name.startswith('hopping_current_')):
+            return np.dtype('float64')
+        return complex_type if name=='material_phase_optical_node' else real
     nx,ny=r.spatial.field_shape
     if endpoint is not None:
         coordinate_keys|={'x_um','y_um'}
@@ -369,7 +415,7 @@ def _validate_products(products,coords,selection,r,endpoint,count,status,partial
         nch=endpoint.shape[0];nb=count+1
         if selection.intensity_volume: expected['intensity_volume']=((nb,nx,ny),real)
         for name in selection.material_volumes:
-            expected[name+'_volume']=((count,nx,ny),complex_type if name=='material_phase_optical_node' else real)
+            expected[name+'_volume']=((count,nx,ny),product_dtype(name))
         if selection.launch: expected['launch']=(endpoint.shape,complex_type)
         if selection.boundary_intensity: expected['boundary_intensity']=((nx,ny),real)
         for name,enabled in (('optical',selection.optical_cuts),('intensity',selection.intensity_cuts)):
@@ -379,10 +425,10 @@ def _validate_products(products,coords,selection,r,endpoint,count,status,partial
         if count:
             for name in selection.material_fields:
                 expected[name]=(r.spatial.harmonic_shape if name=='harmonic_field' else (nx,ny),
-                                complex_type if name=='material_phase_optical_node' else real)
+                                product_dtype(name))
             for name in selection.material_cuts:
                 for axis,n in (('x',nx),('y',ny)):
-                    expected[name+'_cut_'+axis]=((count,n),complex_type if name=='material_phase_optical_node' else real)
+                    expected[name+'_cut_'+axis]=((count,n),product_dtype(name))
         if selection.far_field and ('far_field_intensity' in products or status!='failed'):
             expected['far_field_intensity']=((nx,ny),real);coordinate_keys|={'s_x','s_y'}
             for name,n in (('s_x',nx),('s_y',ny)):

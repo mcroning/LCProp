@@ -73,7 +73,11 @@ def classify_pr_run_cost(
     if isinstance(request, UnifiedFreshRequest):
         plan=resource_plan(request)
         model=f"Unified nonlinear {plan['active_dimensions']}D Static — streaming"
-        score=(sum(plan['bytes'].values())+plan['direct_solver']['dense_factorization_scenario_bytes'])*nz
+        if plan.get('scalable_solver') is not None:
+            # Matrix-free workspaces are already included; no direct factorization.
+            score=sum(plan['bytes'].values())*nz
+        else:
+            score=(sum(plan['bytes'].values())+plan['direct_solver']['dense_factorization_scenario_bytes'])*nz
         potential_threshold, very_threshold = 2.0e10, 2.0e11
         rationale='M5 workspace scenario times cells; uncalibrated local-work warning, not runtime or feasibility'
     elif isinstance(request, PublishedStaticRequest):

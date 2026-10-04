@@ -23,5 +23,17 @@ def solve_with_diagnostics(intensity, *, closure, solver):
     for key in ('relative_potential_correction', 'q_b_correction'):
         if key in final:
             observations.append((key, final[key]))
+    observations.extend((('linear_pcg',float(closure.identity==UNBIASED)),
+                         ('linear_gmres',float(closure.identity!=UNBIASED))))
+    for step in trace:
+        tag=f"iteration_{step['iteration']}."
+        observations.append((tag+'inner_iterations',float(len(step.get('linear',[])))))
+        for key in ('eta','alpha','halvings','final_true_relative','postcast_true_relative'):
+            if key in step:observations.append((tag+key,float(step[key])))
+        for index,inner in enumerate(step.get('linear',[])):
+            for key,value in inner.items():
+                if isinstance(value,(int,float)):
+                    observations.append((tag+f'linear_{index}.'+key,float(value)))
+    observations.append(('inner_iterations_total',float(sum(len(step.get('linear',[])) for step in trace))))
     # The core returns only after its physical AND state32 correction gates.
     return state, PRMaterialDiagnostics(tuple(observations), tuple(limits), 'reported')

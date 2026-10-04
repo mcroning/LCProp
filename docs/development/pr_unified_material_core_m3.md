@@ -98,3 +98,11 @@ A predeclared same-fixture 4096x64 benchmark compares the committed M2 path with
 M3, including exact q/psi/b and diagnostics hashes. Structural tests prohibit
 routing reduced columns to the connected wrapper. Timings detect gross regression
 with normal noise qualification, not a sub-percent performance claim.
+
+## Connected direct guard after scalable integration
+
+The 12,288-node guard remains mandatory for the connected **direct/reference**
+solver described here. It is not a universal full-x-y restriction: explicit
+scalable requests have their own backend/precision qualification envelope.
+Reduced independent-column behavior and the direct/reference equations remain
+unchanged. Historical requests never acquire scalable identity implicitly.

@@ -215,6 +215,11 @@ class PREvolutionPanel(QWidget):
         self.legacy_static = False
         self.unified_closure = UnifiedClosurePanel()
         form.addRow(self.unified_closure)
+        self.unified_solver = QComboBox()
+        self.unified_solver.addItem('Scalable iterative — full x-y', 'pr_unified_connected_scalable_v1')
+        self.unified_solver.addItem('Reference/direct — bounded validation', 'pr_unified_connected_direct_v1')
+        self.unified_solver.currentIndexChanged.connect(self._refresh_workflow_controls)
+        form.addRow('Unified material solver', self.unified_solver)
         self.fresh_unified_button=QPushButton('Create fresh unified nonlinear Static request')
         self.fresh_unified_button.clicked.connect(self._fresh_unified)
         form.addRow(self.fresh_unified_button)
@@ -244,6 +249,8 @@ class PREvolutionPanel(QWidget):
         layout.addStretch(1)
 
     def _fresh_unified(self):
+        self._loaded_unified_request = None
+        self.unified_solver.setCurrentIndex(0)
         self.legacy_static=False
         self.unified_closure.condition.setCurrentIndex(0)
         self._refresh_workflow_controls()
@@ -477,6 +484,7 @@ class PREvolutionPanel(QWidget):
             self.material_response.setItemText(index,'Fully nonlinear (unified transport)')
         self.unified_closure.setVisible(workflow_id == UNIFIED_WORKFLOW)
         dimension = 2 if self.transport_model.currentData() == 'full_transverse' else 1
+        self._set_row_visible(self.unified_solver, workflow_id == UNIFIED_WORKFLOW and dimension == 2)
         if self.unified_closure.dimension != dimension:
             self.unified_closure.set_dimension(dimension)
         v1 = self.scattering_algorithm.findData(PR_CANONICAL_SCATTERING_V1)
@@ -534,7 +542,7 @@ class PREvolutionPanel(QWidget):
 
         if workflow_id == UNIFIED_WORKFLOW:
             self.algorithm_status.setText('Unified nonlinear Static: published optical-first; certified mixed precision. No coupled passes or replay.')
-            self.execution_guidance.setText('Full x-y: at most 12,288 active material nodes, including on H200. Reduced x-only: y columns are independent.')
+            self.execution_guidance.setText('Reduced x-only: independent y columns. Reference/direct: 12,288 nodes. Scalable: NumPy ≤96 per axis; CuPy state32 ≤256, state64 ≤512 per axis; unbiased 384×32 bridge. Inspect Request validates the selected solver/backend envelope.')
 
     def _refresh_integrator_choices(self) -> None:
         workflow_id = self.workflow_id()

@@ -1,4 +1,8 @@
-# Unified Static products, persistence and resource planning (M5)
+# Unified Static products, persistence and resource planning
+
+The original M5 description below records its historical boundary. Current
+S4-M3 schema/planning additions are specified at the end; later M6 rich products
+and observation semantics are documented in `pr_unified_static_gui_v1.md`.
 
 M5 is a direct headless/testing layer. There is no GUI, normal workflow registry,
 legacy codec modification, checkpoint, resume, continuation or TD integration.
@@ -144,3 +148,69 @@ fault/mutation/cancellation, failed-launch persistence, postprocessing failure,
 unknown/malformed records, bounded output shapes, resource scaling and legacy
 isolation are covered. Native CuPy tests remain local skips when unavailable;
 no H200 commissioning is claimed here.
+
+## S4-M3 explicit solver schemas
+
+New prepared requests use `pr_unified_static_request_v2`, new results use
+`pr_unified_static_result_v2`, and new selected products use
+`pr_unified_static_products_v3`. The fresh GUI launch schema and transport codec
+versions are 2. Transport still accepts version 1. Every new request/result
+carries explicit solver, linear-policy, initialization/convergence-policy and
+precision identities. No persisted `auto` exists.
+
+Legacy prepared/fresh V1 requests retain their schema on ordinary decode/save.
+Missing historical solver metadata means reduced direct for x-active independent
+columns or connected direct for genuine 2D; it never consults grid size, backend
+or the GUI default. Legacy result V1 with product V1/V2 retains its original
+schema, selection vocabulary and absence of solver metadata over repeated saves.
+V1 precision remains V1. New schemas reject missing/contradictory identities.
+
+Scalable state32 uses `state32_carrier64_coeff64_linear64_bernoulli64_v3`:
+canonical q/psi/b remain float32, while carrier and hopping-current products
+remain float64 in last-plane fields, cuts, volumes, archive and common viewer
+raw data. Direct state32 retains `state32_linear64_bernoulli64_v1`. State64
+retains its existing identity. Optical/material longitudinal coordinates and
+native face offsets remain separate. Reopening does not execute science.
+
+Failure archives retain accepted endpoint/q/psi/b and partial products plus
+material exception type/message, cause classification, stage, iteration and
+scalar Newton/Krylov trace where supplied. Nonfinite failure diagnostics use
+explicit `nonfinite_float` markers, not nonstandard JSON NaN/Infinity. Runtime
+exception objects, traceback buffers and unaccepted solver-state arrays are not
+serialized; availability of the latter is recorded without inventing a checkpoint.
+Successful accepted diagnostics retain iteration counts and inner residual history.
+
+Resource plans use `pr_unified_static_resource_plan_v2`. Scalable estimates
+separate n64 and carrier weights (8N each), coefficients (3N or 24N doubles),
+material FFT workspace scenario (8N complex128), unbiased PCG vectors (10N doubles),
+or biased GMRES basis (61*(2N+2) doubles), work vectors (10*(2N+2) doubles),
+Hessenberg (61*60 doubles) and Schur workspace ((8N+4) doubles).
+Canonical/optical working storage, selected products, assembly and host retrieval
+are separate. V3 carrier/current result bytes use eight bytes per element.
+
+These conservative source-inventory scenarios bind the S3-v3 job-4880828
+allocation inventory. Its sampled 1,571-MiB peak is reported as a certification
+measurement, not a calibrated arbitrary-grid Product estimate. Allocator caches,
+FFT plans, metadata and library overhead are unmeasured. The runtime planner's
+25% scalable workspace margin is a planning scenario, not a guaranteed peak.
+The existing 512-MiB selected-volume warning threshold remains a separate GUI
+safeguard. No planning operation changes solver, grid, closure or precision.
+
+### Complete fresh V2 metadata
+
+Fresh V2 requires the complete encoded scientific tree before construction:
+all grid/material/backend/boundary, solver/precision/closure fields; explicit
+workflow/arithmetic/projection; all beam-stack/channel fields; and all fields of
+non-null scattering and present launch screens (assignment, raster source and
+placement). Missing keys never select legacy semantics. Errors name the failing
+object/field. The schema follows the current complete encoder vocabulary and
+existing strict beam/portable-screen contracts, not dataclass default values.
+
+Null is permitted only for scattering (disabled), the material wavenumber override
+(derived), closure reservoir/background metadata where the closure permits it,
+and portable raster asset ID/encoded bytes where the source contract permits it.
+Their keys remain required. Empty launch-element lists mean no screens. Explicit
+zero gain and dark intensity 0.01 remain valid values; omitting them is invalid.
+Derived normalized geometry/launch arrays/reference scalar are not fresh metadata.
+Selected products belong to the execution-policy/prepared/result schemas.
+Historical V1 decoder defaults remain selected only by explicit V1 identity.

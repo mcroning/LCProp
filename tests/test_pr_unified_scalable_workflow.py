@@ -127,7 +127,7 @@ def test_metadata_routing_without_device(monkeypatch):
 
 @pytest.mark.parametrize('dimension',[1,2])
 def test_legacy_codec_and_explicit_rejection(dimension):
-    r=request(1,dimension=dimension)
+    r=replace(request(1,dimension=dimension),persistence_schema=codec.LEGACY_REQUEST_SCHEMA)
     meta=codec.request_metadata(r)
     assert 'solver' not in meta
     decoded=codec.decode_request(codec.encode_request(r))
@@ -137,9 +137,11 @@ def test_legacy_codec_and_explicit_rejection(dimension):
     assert out.solver.identity==(REDUCED if dimension==1 else DIRECT)
     assert out.precision==r.precision
     if dimension==2:
-        with pytest.raises(ValueError,match='new schema'):codec.encode_request(scalable(r))
-        result=run_unified_products(scalable(r))
-        with pytest.raises(ValueError,match='new schema'):codec.encode_result(result)
+        with pytest.raises(ValueError,match='legacy request'):codec.encode_request(scalable(r))
+        modern=replace(scalable(r),persistence_schema=codec.REQUEST_SCHEMA)
+        assert codec.decode_request(codec.encode_request(modern)).materialize().solver==SOLVER
+        result=run_unified_products(modern)
+        assert codec.decode_result(codec.encode_result(result)).scientific.status=='completed'
 
 
 def test_failure_retains_previous_acceptance(monkeypatch):
@@ -212,7 +214,7 @@ def test_legacy_workflow_bytes_against_committed_driver():
     for dimension in (1,2):
         for precision in ('float32','float64'):
             r=request(2,precision,dimension,True)
-            kwargs=dict(vars(r));kwargs.pop('solver')
+            kwargs=dict(vars(r));kwargs.pop('solver');kwargs.pop('persistence_schema')
             a=old.run_unified_static(old.UnifiedStaticRequest(**kwargs),selection=old.UnifiedProductSelection(material_state=True,carrier=True,far_field=True))
             b=w.run_unified_static(r,selection=w.UnifiedProductSelection(material_state=True,carrier=True,far_field=True))
             assert a.status==b.status=='completed'

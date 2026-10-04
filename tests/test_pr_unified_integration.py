@@ -159,7 +159,7 @@ def test_controls_guards_estimator_and_identity(window):
         assert estimate.calibration_id==plan['schema'];assert plan['longitudinal_full_volume_bytes']==0
     r=fresh(2);large=replace(r,grid=replace(r.grid,Nx=4096,Ny=64))
     with pytest.raises(ValueError,match='12,288'):a.resource_plan(large)
-    reduced=replace(large,closure=fresh().closure)
+    reduced=replace(large,closure=fresh().closure,solver=fresh().solver)
     assert a.resource_plan(reduced)['independent_columns']==64
     for key in ('workflow_identity','arithmetic_identity','projection_identity'):
         with pytest.raises(ValueError):a.decode_fresh(dict(a.encode_fresh(r),**{key:'legacy'}))
@@ -281,7 +281,7 @@ def test_selecting_farfield_requests_analysis_and_gui_size_guard(window):
     assert a.selection_for_policy(window.result_policy_selector.currentData()).far_field
     window.evolution_panel.transport_model.setCurrentIndex(1)
     window.grid_panel.Nx.setValue(4096);window.grid_panel.Ny.setValue(64)
-    with pytest.raises(ValueError,match='12,288'):window.build_request()
+    with pytest.raises(ValueError,match='envelope'):window.build_request()
     window.evolution_panel.transport_model.setCurrentIndex(0)
     assert window.build_request().closure.dimension==1
 
@@ -394,7 +394,10 @@ def test_preexisting_minimal_archive_remains_readable():
     old=products.run_unified_products(independent_prepared(fresh()),
         selection=products.UnifiedSelection(boundary_intensity=True,intensity_cuts=True))
     from tests.test_pr_unified_codec import rewrite
-    package=np.frombuffer(rewrite(codec.encode_result(old),lambda m:m.update(products_schema='pr_unified_static_products_v1')),dtype=np.uint8)
+    def legacy_metadata(m):
+        m.update(schema=codec.LEGACY_RESULT_SCHEMA,products_schema='pr_unified_static_products_v1')
+        m['scientific']['identities'].pop('solver')
+    package=np.frombuffer(rewrite(codec.encode_result(old),legacy_metadata),dtype=np.uint8)
     decoded=a._decode_result({'backend':'numpy','result_policy':'fast'},{'unified_package':package})
     assert 'far_field_intensity' not in decoded.run.arrays
 

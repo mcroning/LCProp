@@ -63,6 +63,7 @@ class UnifiedStaticRequest:
     workflow_identity: str = WORKFLOW_ID
     arithmetic_identity: str = ARITHMETIC_ID
     projection_identity: str = PROJECTION_ID
+    persistence_schema: str = "pr_unified_static_request_v2"
     solver: PRUnifiedSolverSpec | None = None
 
     def __post_init__(self):

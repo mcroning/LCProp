@@ -141,7 +141,7 @@ def test_v1_cannot_claim_volume_selection_and_v2_policy_cannot_drop_it():
     payload=codec.encode_result(out.run)
     with pytest.raises(ValueError,match='schema fields'):
         codec.decode_result(rewrite(payload,lambda m:m['selection'].pop('intensity_volume')))
-    with pytest.raises(ValueError,match='legacy'):codec.decode_result(rewrite(payload,lambda m:m.update(products_schema='pr_unified_static_products_v1')))
+    with pytest.raises(ValueError,match='schema'):codec.decode_result(rewrite(payload,lambda m:m.update(products_schema='pr_unified_static_products_v1')))
     minimal=a.execute_unified(fresh(),result_policy='fast')
     with pytest.raises(ValueError,match='selection/policy'):
         a._decode_result(dict(backend='numpy',result_policy='full'),{'unified_package':np.frombuffer(codec.encode_result(minimal.run),dtype=np.uint8)})
@@ -214,6 +214,8 @@ def test_v1_provenance_repeated_save_reopen_and_viewer(app,policy,tmp_path,recor
         boundary_intensity=True,intensity_cuts=True,far_field=policy=='full'))
     def v1_header(m):
         m['products_schema']=legacy
+        m['schema']=codec.LEGACY_RESULT_SCHEMA
+        m['scientific']['identities'].pop('solver')
         m['selection'].pop('intensity_volume');m['selection'].pop('material_volumes')
     payload=rewrite(codec.encode_result(original),v1_header)
     metadata=dict(backend='numpy',result_policy=policy)
@@ -225,7 +227,8 @@ def test_v1_provenance_repeated_save_reopen_and_viewer(app,policy,tmp_path,recor
         loaded=a._decode_result(metadata,{'unified_package':np.frombuffer(payload,dtype=np.uint8)})
         assert loaded.run.schema==legacy and loaded.result_policy==policy
         assert hashes(loaded.run)==before
-        science_equal(original.scientific,loaded.run.scientific)
+        identity=dict(original.scientific.identities);identity.pop("solver")
+        science_equal(replace(original.scientific,identities=identity),loaded.run.scientific)
         assert not loaded.run.selection.intensity_volume and not loaded.run.selection.material_volumes
         assert ('far_field_intensity' in loaded.run.arrays)==(policy=='full')
         # Both standalone save/load and the registered transport codec preserve identity.

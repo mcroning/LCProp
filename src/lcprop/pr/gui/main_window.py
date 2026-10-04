@@ -379,6 +379,7 @@ class PRMainWindow(QWidget):
         self.input_panel.set_beam_panel(self.beam_panel)
         self.evolution_panel = PREvolutionPanel()
         self.evolution_panel.fresh_unified_button.clicked.connect(self._configuration_changed)
+        self.evolution_panel.unified_solver.currentIndexChanged.connect(self._configuration_changed)
         self.resource_estimator_panel = PRResourceEstimatorPanel()
         self.results_panel = ResultsPanel()
         self.tabs.addTab(self.material_panel, "PR Material")
@@ -569,6 +570,8 @@ class PRMainWindow(QWidget):
         else:
             solver = self.evolution_panel.solver()
         return {
+            "loaded_unified_request": getattr(self.evolution_panel, "_loaded_unified_request", None),
+            "unified_solver": self.evolution_panel.unified_solver.currentData(),
             "unified_closure": self.evolution_panel.unified_closure.closure(self.material_panel.material().background_intensity),
             "legacy_static": self.evolution_panel.legacy_static,
             "transport": self.evolution_panel.transport_model.currentData(),
@@ -598,6 +601,7 @@ class PRMainWindow(QWidget):
         }
 
     def _restore_experiment_gui_state(self, state) -> None:
+        self.evolution_panel._loaded_unified_request = state["loaded_unified_request"]
         mode_index = self.input_panel.input_mode.findData(state["input_mode"])
         self.input_panel.input_mode.setCurrentIndex(mode_index)
         self.grid_panel.set_grid(state["grid"])
@@ -607,6 +611,7 @@ class PRMainWindow(QWidget):
         self.evolution_panel.transport_model.setCurrentIndex(self.evolution_panel.transport_model.findData(state['transport']))
         self.evolution_panel.legacy_static=state['legacy_static']
         self.evolution_panel.unified_closure.set_closure(state['unified_closure'])
+        self.evolution_panel.unified_solver.setCurrentIndex(self.evolution_panel.unified_solver.findData(state['unified_solver']))
         self.evolution_panel.set_transverse_material_response(
             state["material_response"],
             applied_field_x=state["transverse_applied_field"],
@@ -1155,6 +1160,8 @@ class PRMainWindow(QWidget):
         preflight = validate_pr_gui_workflow_request(request)
         if isinstance(request, UnifiedFreshRequest):
             r=core_request(request);c=request.closure
+            from lcprop.pr.unified.integration import resource_plan
+            plan=resource_plan(request)
             return '\n'.join([
                 f'Workflow: {UNIFIED_WORKFLOW}',f'Arithmetic: {r.arithmetic_identity}',
                 f'Transport: {r.spatial.dimension}D active; batch axes {r.spatial.batch_axes}',
@@ -1165,7 +1172,9 @@ class PRMainWindow(QWidget):
                 'Published optical-first: P → I → material → projection → M → S; no replay',
                 f'Scattering: {request.scattering}',
                 f'Grid: {request.grid}; wavelength={r.wavelength_um}; gain-length={request.material.gain_length_product}',
-                'Full x-y reference solver: maximum 12,288 active nodes, independent of execution target.',
+                f'Material solver: {r.solver.identity}; backend: {request.backend.backend}; execution target: {self.execution_target_selector.currentData()}',
+                f'Support envelope: {plan["support_envelope"]}',
+                f'Resource formula: {plan["schema"]}; working bytes: {plan["bytes"]}',
                 *preflight.warnings])
         workflow_id = self._workflow_id_for_request(request)
         lines = [

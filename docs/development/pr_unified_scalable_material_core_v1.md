@@ -97,3 +97,13 @@ new mandatory pointwise gates or hidden passes.
 Native Product certification is pending. No existing GUI/workflow can select
 this solver, and no scalable size/resource or persistence promise is made by
 M1. Future S4-M2 dispatch and S4-M3 schema/GUI work require separate review.
+
+## Integration boundary after S4-M3
+
+The earlier sections describe the M1 standalone boundary. Committed S4-M2 now
+routes explicitly selected scalable requests through the common published-order
+headless workflow. S4-M3 adds explicit schemas, solver-aware planning and the
+normal GUI adapter, without changing the core arithmetic or policies above.
+See `pr_unified_products_persistence_m5.md` and `pr_unified_static_gui_v1.md` for
+schema and backend/precision envelopes. Product-native qualification of this
+integrated path remains S4-M4; research certification does not replace it.

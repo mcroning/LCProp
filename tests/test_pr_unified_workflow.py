@@ -313,7 +313,10 @@ def test_import_isolation_and_m1_m3_unchanged():
     # M6 already registered the legacy unified workflow. S4-M2 must not alter
     # any existing external dispatch, including Local-I and either TD path.
     paths=subprocess.check_output(['git','ls-files','src'],cwd=root,text=True).splitlines()
-    protected={'src/lcprop/pr/published_static.py'}
+    protected={'src/lcprop/pr/published_static.py',
+        'src/lcprop/pr/gui/evolution_panel.py','src/lcprop/pr/gui/request_adapter.py',
+        'src/lcprop/pr/gui/main_window.py','src/lcprop/pr/runtime_estimator.py',
+        'src/lcprop/pr/gui/run_cost.py'}
     for p in paths:
         if '/pr/unified/' not in p and p not in protected:
             assert (root/p).read_bytes()==subprocess.check_output(

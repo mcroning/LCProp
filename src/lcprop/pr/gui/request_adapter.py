@@ -272,7 +272,13 @@ def build_pr_request(
         common.pop('initial_A');common.pop('initial_E')
         closure=evolution_panel.unified_closure.closure(material.background_intensity)
         common['material']=replace(material,applied_field=closure.reservoir_field or 0.)
-        request=UnifiedFreshRequest(**common,closure=closure,scattering=scattering)
+        from lcprop.pr.unified.solver_specs import PRUnifiedSolverSpec, REDUCED, SCALABLE, DIRECT_POLICY, ITERATIVE_POLICY
+        identity=evolution_panel.unified_solver.currentData() if closure.dimension==2 else REDUCED
+        solver=PRUnifiedSolverSpec(identity,ITERATIVE_POLICY if identity==SCALABLE else DIRECT_POLICY)
+        request=UnifiedFreshRequest(**common,closure=closure,scattering=scattering,solver=solver)
+        loaded=getattr(evolution_panel,'_loaded_unified_request',None)
+        if loaded is not None and replace(request,schema=loaded.schema)==loaded:
+            request=loaded  # Unmodified legacy re-save retains its origin.
     elif workflow_id == PR_PUBLISHED_STATIC_WORKFLOW:
         common.pop("initial_E")
         request = PublishedStaticRequest(**common, scattering=scattering,
@@ -456,6 +462,8 @@ def apply_pr_request(
         evolution_panel.set_workflow_id(PR_STATIC_WORKFLOW if request.closure.dimension==1 else PR_TRANSVERSE_STATIC_WORKFLOW)
         evolution_panel.material_response.setCurrentIndex(evolution_panel.material_response.findData('nonlinear'))
         evolution_panel.unified_closure.set_closure(request.closure)
+        index=evolution_panel.unified_solver.findData(request.solver.identity)
+        if index>=0:evolution_panel.unified_solver.setCurrentIndex(index)
         evolution_panel.set_backend_spec(request.backend);evolution_panel.set_scattering_spec(request.scattering)
         beam_panel.set_aperture(request.grid.x_aperture_um,request.grid.y_aperture_um)
         beam_panel.set_beam_stack_definition(beam_stack_to_launchplane(request.beams) if beam_stack_definition is None else beam_stack_definition)
@@ -463,6 +471,7 @@ def apply_pr_request(
         beam_panel.set_optical_context(n_ref=request.material.refractive_index,interaction_length_um=request.grid.z_length_um)
         beam_panel.input_screen_editor.set_launch_elements(request.launch_elements)
         evolution_panel._refresh_workflow_controls()
+        evolution_panel._loaded_unified_request=request
         return
     # Explicit legacy identity remains selected when loading; never reinterpret it.
     evolution_panel.legacy_static=isinstance(request,(PublishedStaticRequest,PRTransverseStaticRunRequest,PRStaticRunRequest))

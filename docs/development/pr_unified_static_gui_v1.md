@@ -23,7 +23,7 @@ quantities. No arbitrary circuit conditions are offered.
 
 The adapter prepares the launch with the existing Product launch primitive on the
 explicit execution backend. Its fresh launch-definition schema is
-`pr_unified_static_fresh_launch_v1`; the prepared request remains the unchanged
+`pr_unified_static_fresh_launch_v2`; the prepared request uses the versioned
 M5 `UnifiedStaticRequest`. The registered material-neutral operation delegates
 once to M5 `run_unified_products`. Local and Slurm use the same registration.
 Prepared requests and canonical q/psi/b results use the dedicated M5 codecs;
@@ -79,7 +79,7 @@ viewer rendering/downsampling convention applies without changing retained raw
 values. Complete and partial field titles carry status/reached z. The complex
 endpoint remains available in the result archive.
 
-Selected result products use `pr_unified_static_products_v2`; the dedicated codec
+Selected result products use `pr_unified_static_products_v3`; the dedicated codec
 preserves volumes, explicit coordinates/locations, gauge/projection and the
 accepted diagnostic ledger. Version-1 archives remain readable with no fabricated
 volumes or spectrum. A v1 archive cannot claim a v2 volume selection, and a new
@@ -105,10 +105,10 @@ presentation safeguard, not a claim about installed memory or solver capacity.
 
 M5 planning is used without allocating a launch for preflight. Array estimates
 exclude archive metadata/allocator overhead and are not measured peak bounds.
-Full x-y requests above 12,288 active nodes fail on every execution target,
-including H200. This is an algorithmic reference-solver limit; reduced large
-optical planes are not subject to that connected-2D ceiling. No large-2D
-feasibility or M6 native GUI certification is claimed.
+The 12,288-active-node limit applies only to connected reference/direct.
+Scalable applies the backend/precision envelope below. Neither is a GPU-memory
+or physical limit. Reduced independent columns do not use the connected-2D
+ceiling. New Product-native certification remains deferred to S4-M4.
 
 ## Accepted-state progress and installed-GUI views
 
@@ -145,3 +145,35 @@ Native follow-up remains bounded: both precisions, callback/volume selection
 identity, backend retention, bounded progress transfers, explicit selected-volume
 export/codec, cancellation and accepted-state ordering. This work does not rerun
 or supersede the 556-solve native material matrix.
+
+## S4-M3 solver-aware requests and planning
+
+Fresh genuine full-x-y requests default explicitly to **Scalable iterative**.
+**Reference/direct** remains selectable for bounded validation. Reduced x-only
+always resolves to independent-column direct. PCG/GMRES is closure-selected,
+not a GUI tuning choice. Loading old requests preserves direct identity and
+precision; ordinary re-save preserves their historical schema. Creating a fresh
+request is an explicit separate action.
+
+| Solver/backend | Initial support envelope |
+|---|---|
+| Reduced columns | Existing independent-column policy |
+| Connected direct, any backend | At most 12,288 active nodes |
+| Scalable NumPy | At most 96 nodes per axis |
+| Scalable CuPy state32 v3 | At most 256 nodes per axis |
+| Scalable CuPy state64 | At most 512 nodes per axis |
+
+The explicit unbiased 384x32 bridge is also supported in both scalable
+precisions/backends. Other over-envelope shapes and 1024 squared are rejected;
+there is no automatic solver/backend/precision substitution. These are the
+migration design's initial research-qualified planning limits. Metadata routing
+does not probe CUDA and is not Product-native certification.
+
+Inspect Request shows solver/precision/projection, closure, physical request,
+backend/execution target and applicable envelope/resource formula. Scalable
+state32 shows v3; direct state32 shows v1. Common Results retains exact Product
+far-field arrays/axes, accepted-state progress, linked optical/material views
+and residual/carrier curves. Carrier raw Fields data stays float64 for v3.
+Accepted diagnostics include Newton and inner iteration counts/linear-method
+flags; failed records expose material stage/cause metadata. No GUI scientific
+path, FFT, replay, material re-solve or TD modification is introduced.

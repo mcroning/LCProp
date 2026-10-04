@@ -27,7 +27,7 @@ def test_connected_guard_and_precision():
     r=request(1,dimension=2);plan=estimate_resources(r)
     assert plan['active_dimensions']==2 and plan['direct_solver']['domain_nodes']==64
     big=replace(r,grid=replace(r.grid,Nx=128,Ny=128),spatial=PRUnifiedSpatialSpec((128,128),(16.,8.),active_axes=('x','y')))
-    with pytest.raises(ValueError,match='scope'):estimate_resources(big)
+    with pytest.raises(ValueError,match='12,288'):estimate_resources(big)
     single=estimate_resources(request(1,'float32'))
     double=estimate_resources(request(1,'float64'))
     assert single['precision_identity']=='state32_linear64_bernoulli64_v1'
@@ -47,7 +47,7 @@ def test_no_new_normal_dispatch_or_legacy_codec_edits():
 
 def test_m4_cell_scientific_ast_is_unchanged():
     root=Path(__file__).resolve().parents[1];path='src/lcprop/pr/unified/workflow.py'
-    before=subprocess.check_output(['git','show','f662512041af05d752caf591f8e5e0a87c431f76:'+path],cwd=root).decode()
+    before=subprocess.check_output(['git','show','a5e8560a54c3b1a1faae61877ac8ed8f8fe9b471:'+path],cwd=root).decode()
     after=(root/path).read_text()
     def scientific(text):
         tree=ast.parse(text)

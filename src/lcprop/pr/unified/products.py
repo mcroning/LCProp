@@ -1,5 +1,5 @@
 """Selected runtime products, on isolated M4 observations; no public dispatch."""
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from contextlib import nullcontext
 import sys
 from types import SimpleNamespace
@@ -11,7 +11,7 @@ from .operators import Geometry, flux
 from .projection import PROJECTION_ID, electric_field_face, electric_field_optical_node
 from .workflow import UnifiedProductSelection, run_unified_static
 
-PRODUCTS_SCHEMA = 'pr_unified_static_products_v2'
+PRODUCTS_SCHEMA = 'pr_unified_static_products_v3'
 FIELDS = ('q_log_carrier', 'carrier_node', 'potential_node', 'harmonic_field', 'transport_intensity_node',
           'electric_field_x_face', 'electric_field_y_face', 'hopping_current_x_face',
           'hopping_current_y_face', 'electric_field_x_optical_node',
@@ -203,6 +203,7 @@ def _run_products(request, selection, cancellation_token, observer=None):
     result = run_unified_static(request,
         selection=UnifiedProductSelection(material_state=True,far_field=selection.far_field),
         cancellation_token=cancellation_token,observer=observer,_collector=collector if observing else None)
+    result = replace(result, identities=dict(result.identities, solver=asdict(request.solver)))
     xp = sys.modules[request.backend]
     arrays = {}
     collection = result.collection
