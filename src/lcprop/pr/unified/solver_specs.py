@@ -52,3 +52,24 @@ class PRUnifiedSolverSpec:
             raise ValueError('solver/precision combination not supported')
         if self.identity == DIRECT and spatial.active_shape[0]*spatial.active_shape[1] > 12288:
             raise ValueError('connected direct solver exceeds 12,288-node bound')
+
+
+def legacy_solver(spatial):
+    """Fixed historical meaning, independent of planners and runtime hardware."""
+    return PRUnifiedSolverSpec(REDUCED if spatial.dimension == 1 else DIRECT, DIRECT_POLICY)
+
+
+def validate_execution(solver, spatial, closure, precision, backend):
+    """Metadata-only qualification; never probe or allocate a device."""
+    if not isinstance(solver, PRUnifiedSolverSpec):
+        raise TypeError('explicit PRUnifiedSolverSpec required')
+    solver.validate_material(spatial, closure, precision)
+    if solver.identity != SCALABLE:
+        return
+    if backend not in ('numpy', 'cupy'):
+        raise ValueError('unknown scalable backend')
+    bridge = spatial.active_shape == (384, 32) and closure.identity == UNBIASED
+    limit = 96 if backend == 'numpy' else (256 if precision.identity == POSITIVE_PRECISION else 512)
+    if not bridge and (max(spatial.active_shape) > limit or
+                       spatial.active_shape[0]*spatial.active_shape[1] > limit*limit):
+        raise ValueError('outside scalable commissioned envelope')

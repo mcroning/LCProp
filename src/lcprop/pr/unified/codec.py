@@ -94,7 +94,10 @@ def _construct(cls, value):
 
 
 def request_metadata(r):
-    result={f.name:getattr(r,f.name) for f in fields(r) if f.name!='initial_A'}
+    from .solver_specs import legacy_solver
+    if r.solver != legacy_solver(r.spatial):
+        raise ValueError("scalable persistence requires a new schema (S4-M3)")
+    result={f.name:getattr(r,f.name) for f in fields(r) if f.name not in ('initial_A','solver')}
     for key in ('grid','spatial','closure','precision','material'):
         result[key]=asdict(result[key])
     result['scattering']=asdict(r.scattering) if r.scattering is not None else None
@@ -102,7 +105,7 @@ def request_metadata(r):
 
 
 def _request(config, launch):
-    _keys(config,[f.name for f in fields(UnifiedStaticRequest) if f.name!='initial_A'])
+    _keys(config,[f.name for f in fields(UnifiedStaticRequest) if f.name not in ('initial_A','solver')])
     values=dict(config)
     for key,cls in (('grid',GridSpec),('spatial',PRUnifiedSpatialSpec),('closure',PRElectricalClosureSpec),
                     ('precision',PRMaterialPrecisionSpec),('material',PRMaterialSpec)):
@@ -211,6 +214,8 @@ def _launch_provenance(identity, endpoint, launch=None):
 
 def encode_result(result):
     s=result.scientific
+    if "solver" in s.identities:
+        raise ValueError("scalable persistence requires a new schema (S4-M3)")
     if result.schema not in (PRODUCTS_SCHEMA,'pr_unified_static_products_v1'):
         raise ValueError('unknown product schema')
     selection=asdict(result.selection)

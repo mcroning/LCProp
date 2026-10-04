@@ -33,6 +33,7 @@ from .specs import (
 )
 from .state import PRTransportIntensity
 from .static import MAX_CONNECTED_NODES, solve_static_material
+from .solver_specs import PRUnifiedSolverSpec, SCALABLE, legacy_solver, validate_execution
 
 
 WORKFLOW_ID = "pr_static_unified_published_optical_first_v1"
@@ -62,6 +63,11 @@ class UnifiedStaticRequest:
     workflow_identity: str = WORKFLOW_ID
     arithmetic_identity: str = ARITHMETIC_ID
     projection_identity: str = PROJECTION_ID
+    solver: PRUnifiedSolverSpec | None = None
+
+    def __post_init__(self):
+        if self.solver is None:
+            object.__setattr__(self, "solver", legacy_solver(self.spatial))
 
 
 @dataclass(frozen=True)
@@ -109,6 +115,7 @@ def _validate(r, selection):
         raise ValueError("unknown unified workflow/arithmetic/projection identity")
     r.grid.validate(); r.spatial.validate(); r.precision.validate()
     r.material.validate(); r.closure.validate_spatial(r.spatial)
+    validate_execution(r.solver, r.spatial, r.closure, r.precision, r.backend)
     if r.backend not in ("numpy", "cupy"):
         raise ValueError("explicit backend required; no scientific fallback")
     if not math.isfinite(r.wavelength_um) or r.wavelength_um <= 0:
@@ -118,7 +125,7 @@ def _validate(r, selection):
     lengths = (r.material.characteristic_wavenumber_per_um*r.grid.x_aperture_um,)
     if r.spatial.dimension == 2:
         lengths += (r.material.characteristic_wavenumber_per_um*r.grid.y_aperture_um,)
-        if math.prod(r.spatial.active_shape) > MAX_CONNECTED_NODES:
+        if r.solver.identity != SCALABLE and math.prod(r.spatial.active_shape) > MAX_CONNECTED_NODES:
             raise ValueError("connected material plane exceeds bounded direct-solver scope")
     if r.spatial.normalized_lengths != lengths:
         raise ValueError("material/optical normalized lengths disagree")
@@ -256,6 +263,8 @@ def _run(r, selection, count, backend, token, collector=None, observer=None):
         optical_boundary="periodic", wavelength_um=r.wavelength_um,
         material_parameters=asdict(r.material), grid=asdict(r.grid),
         scattering=asdict(r.scattering) if r.scattering else None)
+    if r.solver.identity == SCALABLE:
+        identities["solver"] = asdict(r.solver)
     cancelled = lambda: token is not None and token.is_cancelled()
     try:
         grid = make_grid(r.grid, xp=xp, real_dtype=backend.real_dtype)
@@ -297,7 +306,11 @@ def _run(r, selection, count, backend, token, collector=None, observer=None):
             transport = PRTransportIntensity(intensity, r.spatial, r.precision, r.backend,
                 peak, r.material.dark_intensity, r.material.uniform_background_intensity)
             stage = "material_equilibrium"
-            state, diag = solve_static_material(transport, closure=r.closure)
+            if r.solver.identity == SCALABLE:
+                from .scalable_workflow import solve_with_diagnostics
+                state, diag = solve_with_diagnostics(transport, closure=r.closure, solver=r.solver)
+            else:
+                state, diag = solve_static_material(transport, closure=r.closure)
             observations, limits = _material_gate(state, diag)
             stage = "optical_projection"
             E = electric_field_optical_node(state, identity=r.projection_identity)
@@ -348,6 +361,9 @@ def _run(r, selection, count, backend, token, collector=None, observer=None):
     except Exception as exc:
         status, reason = "failed", str(exc)
         failure = dict(stage=stage, cell_index=attempted, type=type(exc).__name__, reason=str(exc))
+        if r.solver.identity == SCALABLE:
+            # Runtime-only evidence: keep original chained exception and its arrays.
+            failure["material_exception"] = exc
     # Postprocessing uses only the accepted boundary/material state, never a
     # rejected candidate. Product failure cannot roll science forward/backward.
     try:
@@ -364,7 +380,8 @@ def _run(r, selection, count, backend, token, collector=None, observer=None):
                 products['far_field_z_um'] = reached
             if material_state is not None:
                 if selection.carrier:
-                    products['carrier_node'] = xp.exp(material_state.q)
+                    from .products import material_carrier
+                    products['carrier_node'] = material_carrier(material_state, xp)
                 for c in selection.electric_faces:
                     products[f'electric_field_{c}_face'] = electric_field_face(material_state, component=c)
                 for c in selection.electric_nodes:

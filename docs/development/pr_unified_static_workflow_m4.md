@@ -135,3 +135,37 @@ bookkeeping; cancellation and retention cannot change accepted science.
 M1–M3 regressions, including frozen material references, remain required.
 CuPy-only projection/workflow parity tests may skip locally for unavailable
 CUDA; native commissioning must execute them and transfer guards later.
+
+## S4-M2 explicit headless material solver
+
+`UnifiedStaticRequest.solver` resolves omitted metadata to the historical reduced
+independent-column or connected direct solver, according to active transport
+dimensionality. It never selects a solver from grid size, backend or a planner.
+Explicit `pr_unified_connected_scalable_v1` routes only the material operation to
+the committed PCG/GMRES core; published optical ordering and cold initialization
+are unchanged. State32 scalable execution requires
+`state32_carrier64_coeff64_linear64_bernoulli64_v3`; state64 retains its existing
+identity. Reduced/direct requests retain their existing precision policies.
+
+The direct 12,288-node bound remains. Scalable metadata validation separately
+limits ordinary NumPy grids to 96×96, CuPy state32 to 256×256 and CuPy state64 to
+512×512, with the explicit unbiased 384×32 bridge. These are qualification
+bounds, not memory estimates or convergence promises. The 128² CuPy routing test
+is metadata-only and does not certify native Product workflow execution.
+
+Scalable failure results retain the original numerical exception in the in-memory
+`failure['material_exception']`, including its chained cause, last valid solver
+iterate and trace. This is not an accepted optical/material workflow state.
+Accepted state, products, coordinates and observers never advance on a failed
+material call. V3 quantitative carrier/current products retain float64.
+
+The S4-M2 codec bridge preserves V1 reduced/direct request meaning and vocabulary.
+Scalable requests/results explicitly reject serialization until S4-M3 implements
+complete versioned solver/precision persistence. No new schema, GUI selector,
+transport registration or resource planning is introduced here.
+
+Workflow overlap comparisons use the frozen root budgets (state32 2e-4/2e-5,
+state64 1e-8/1e-8). Float32 face-current comparisons alone retain the prior
+cancellation-aware absolute allowance
+`max(2e-5,16*eps32*Imax*n_reference_max/min(h))`, with rtol 2e-4.
+This does not relax physical residual, root, phase or optical-product gates.

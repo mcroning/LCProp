@@ -64,6 +64,14 @@ class UnifiedSelectedResult:
     next_address: dict | None = None
 
 
+def material_carrier(state, xp):
+    from .specs import POSITIVE_PRECISION
+    if state.precision.identity == POSITIVE_PRECISION:
+        from ._positive import carrier_product
+        return carrier_product(xp, state.q)
+    return xp.exp(state.q)
+
+
 def material_products(state, I, names, identities, width):
     """Only requested products; native current uses the unchanged fitted flux."""
     xp = sys.modules[state.backend]
@@ -72,7 +80,7 @@ def material_products(state, I, names, identities, width):
     for name, value in (('q_log_carrier',state.q),('potential_node',state.psi),('harmonic_field',state.b)):
         if name in names: out[name] = value
     if 'transport_intensity_node' in names: out['transport_intensity_node'] = I
-    if 'carrier_node' in names: out['carrier_node'] = xp.exp(state.q)
+    if 'carrier_node' in names: out['carrier_node'] = material_carrier(state, xp)
     for c in ('x','y'):
         name = f'electric_field_{c}_face'
         if name in names: out[name] = electric_field_face(state,component=c)
@@ -85,7 +93,12 @@ def material_products(state, I, names, identities, width):
                 current[:,j] = flux(g,I[:,j],state.q[:,j],state.psi[:,j],state.b[j])[0]
             out['hopping_current_x_face'] = current
         else:
-            values = flux(g,I,state.q,state.psi,state.b)
+            from .specs import POSITIVE_PRECISION
+            if state.precision.identity == POSITIVE_PRECISION:
+                from ._positive import ARITHMETIC
+                values = ARITHMETIC.flux(g,I,state.q,state.psi,state.b)
+            else:
+                values = flux(g,I,state.q,state.psi,state.b)
             for name in currents: out[name] = values[s.active_axes.index(name.split('_')[2])]
     optical = {'electric_field_x_optical_node','delta_n_optical_node','material_phase_optical_node'}
     if set(names)&optical:
@@ -224,6 +237,9 @@ def _finish_products(request,selection,result,xp,arrays,coordinates,collection):
         for name in selection.material_volumes:
             if result.completed_cells == 0:
                 dtype = ('complex64' if request.precision.state_dtype=='float32' else 'complex128') if name=='material_phase_optical_node' else request.precision.state_dtype
+                from .specs import POSITIVE_PRECISION
+                if request.precision.identity == POSITIVE_PRECISION and (name == 'carrier_node' or name.startswith('hopping_current_')):
+                    dtype = 'float64'
                 arrays[name+'_volume'] = xp.empty((0,)+request.spatial.field_shape,dtype=dtype)
         for name,pairs in collection['series'].items():
             for axis,index in (('x',0),('y',1)):

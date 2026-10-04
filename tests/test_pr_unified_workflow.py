@@ -202,7 +202,7 @@ def test_material_gate_failure_and_early_size_guard(monkeypatch):
     r2=request(1,dimension=2)
     r2=replace(r2,grid=replace(r2.grid,Nx=128,Ny=128),spatial=PRUnifiedSpatialSpec((128,128),(16.,8.),active_axes=('x','y')))
     monkeypatch.setattr(w,'get_backend',lambda *a: pytest.fail('guard must precede backend/allocation'))
-    with pytest.raises(ValueError,match='scope'): w.run_unified_static(r2)
+    with pytest.raises(ValueError,match='12,288-node bound'): w.run_unified_static(r2)
 
 
 def test_uniform_constant_phase_and_fractional_domain():
@@ -309,11 +309,16 @@ def test_import_isolation_and_m1_m3_unchanged():
     core=['__init__.py','specs.py','state.py','_backend.py','_newton.py','operators.py','static.py']
     for name in core:
         p='src/lcprop/pr/unified/'+name
-        assert (root/p).read_bytes()==subprocess.check_output(['git','show','1bd45fb8263e5406a5fc5a2201e8f7a0fe63c492:'+p],cwd=root)
-    for p in (root/'src').rglob('*.py'):
-        if '/pr/unified/' not in str(p) and p.relative_to(root).as_posix() not in {
-                'src/lcprop/pr/gui/evolution_panel.py','src/lcprop/transport/envelopes.py'}:
-            assert 'pr.unified.workflow' not in p.read_text() and 'pr_static_unified_published_optical_first_v1' not in p.read_text()
+        assert (root/p).read_bytes()==subprocess.check_output(['git','show','4eca4a116babf901b85cfa3cddd663b4ca1ace88:'+p],cwd=root)
+    # M6 already registered the legacy unified workflow. S4-M2 must not alter
+    # any existing external dispatch, including Local-I and either TD path.
+    paths=subprocess.check_output(['git','ls-files','src'],cwd=root,text=True).splitlines()
+    protected={'src/lcprop/pr/published_static.py'}
+    for p in paths:
+        if '/pr/unified/' not in p and p not in protected:
+            assert (root/p).read_bytes()==subprocess.check_output(
+                ['git','show','4eca4a116babf901b85cfa3cddd663b4ca1ace88:'+p],cwd=root)
+
 
 
 @pytest.mark.parametrize('precision',['float32','float64'])
