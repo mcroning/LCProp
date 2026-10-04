@@ -655,6 +655,9 @@ def _memory_ranges(
 def estimate_pr_resources(request) -> PRResourceEstimate:
     """Estimate one request without executing scientific kernels."""
 
+    from lcprop.pr.unified.integration import UnifiedFreshRequest
+    if isinstance(request, UnifiedFreshRequest):
+        return _estimate_unified(request)
     from lcprop.pr.published_static import PublishedStaticRequest
     if isinstance(request, PublishedStaticRequest):
         return _estimate_published_static(request)
@@ -893,3 +896,25 @@ def _estimate_published_static(request):
             "O(Nx Ny) transverse workspaces plus O(Ncells(Nx+Ny)) reduced products.",
             "No longitudinal scientific/replay volumes; no continuation storage.",
             "Exact preview can transfer a transient host plane; launch reference streams bounded host chunks."))
+
+
+def _estimate_unified(request):
+    from lcprop.pr.unified.integration import resource_plan
+    fast=resource_plan(request,'fast');full=resource_plan(request,'full');b=full['bytes']
+    device=sum(v for k,v in b.items() if k!='host_serialization_array_and_archive_scenario')
+    def retained(p):
+        return sum(p['bytes'][k] for k in ('selected_products','coordinates','canonical_final_outputs'))
+    low,high=retained(fast),retained(full)
+    return PRResourceEstimate(calibration_id=fast['schema'],model_cell='unified_nonlinear',
+        grid_shape=(request.grid.Nx,request.grid.Ny,fast['cells']),precision=request.backend.precision,
+        material_intervals=fast['cells'],optical_passes=fast['cells'],optical_substeps=1,
+        work_summary=(f"Unified {fast['active_dimensions']}D transport; {fast['independent_columns']} independent domains",),
+        local_runtime=None,h200_runtime=None,confidence='M5 array/workspace planning; not a peak bound',
+        dominant_cost='Transverse material/optical state and sparse direct factorization',
+        peak_gpu_memory=EstimateRange(device,device+full['direct_solver']['dense_factorization_scenario_bytes'],'bytes'),
+        peak_host_memory=EstimateRange(low,b['host_serialization_array_and_archive_scenario'],'bytes'),
+        fast_result_size=EstimateRange(low,low,'bytes'),full_result_size=EstimateRange(high,high,'bytes'),
+        recommendation='Full x-y limited to 12,288 active nodes on every execution target',
+        qualifications=(fast['limitations'],'Output sizes are array-only; archive/metadata overhead additional.',
+            'No longitudinal scientific volumes. Reduced y columns are independent batches.',
+            'Bounded native certification is not a large-2D peak/runtime calibration.'))

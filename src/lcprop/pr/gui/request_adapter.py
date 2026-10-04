@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from lcprop.pr.unified.integration import UnifiedFreshRequest, WORKFLOW_ID as UNIFIED_WORKFLOW, validate_fresh
 from lcprop.pr.published_static import PublishedStaticRequest, PR_PUBLISHED_STATIC_WORKFLOW
 from lcprop.pr.published_static_integration import validate_published_static_request
 from typing import Literal
@@ -81,7 +82,7 @@ def _validate_pr_gui_common(request) -> PRBeamStackApertureReport:
     request.grid.validate()
     request.beams.validate()
     request.material.validate()
-    if not isinstance(request, PublishedStaticRequest):
+    if not isinstance(request, (PublishedStaticRequest, UnifiedFreshRequest)):
         request.solver.validate()
     request.backend.validate()
     request.optical_boundary.validate()
@@ -217,6 +218,9 @@ def validate_pr_transverse_gui_request(
 def validate_pr_gui_workflow_request(request):
     """Dispatch GUI preflight by the request's exact PR workflow type."""
 
+    if isinstance(request, UnifiedFreshRequest):
+        validate_fresh(request)
+        return PRStaticRequestPreflight(aperture=_validate_pr_gui_common(request))
     if isinstance(request, PublishedStaticRequest):
         validate_published_static_request(request)
         return PRStaticRequestPreflight(aperture=_validate_pr_gui_common(request))
@@ -264,7 +268,12 @@ def build_pr_request(
         "optical_boundary": beam_panel.optical_boundary(),
     }
     scattering = evolution_panel.scattering_spec()
-    if workflow_id == PR_PUBLISHED_STATIC_WORKFLOW:
+    if workflow_id == UNIFIED_WORKFLOW:
+        common.pop('initial_A');common.pop('initial_E')
+        closure=evolution_panel.unified_closure.closure(material.background_intensity)
+        common['material']=replace(material,applied_field=closure.reservoir_field or 0.)
+        request=UnifiedFreshRequest(**common,closure=closure,scattering=scattering)
+    elif workflow_id == PR_PUBLISHED_STATIC_WORKFLOW:
         common.pop("initial_E")
         request = PublishedStaticRequest(**common, scattering=scattering,
             material_solver=evolution_panel.published_material_solver(),
@@ -347,6 +356,16 @@ def build_pr_request(
 def validate_pr_gui_request_representable(request) -> None:
     """Reject headless PR settings that have no exact GUI representation."""
 
+    if isinstance(request, UnifiedFreshRequest):
+        validate_pr_gui_workflow_request(request)
+        # Do not silently round newly introduced electrical targets on load.
+        c=request.closure
+        values=(c.reservoir_field,) if c.reservoir_field is not None else c.target
+        if any(abs(v)>1e9 or round(v,12)!=v for v in values):
+            raise ValueError('GUI cannot represent this electrical target exactly; use the headless request')
+        if request.backend.verbose:
+            raise ValueError('PR GUI cannot represent backend verbose=True')
+        return
     from lcprop.pr.local_plane_workflow import LocalPlaneRunRequest
     if isinstance(request, PRRunRequest) and request.optical_coupling != PR_TD_PUBLISHED_COUPLING:
         raise ValueError("Saved midpoint TD coupling is preserved headlessly; GUI cannot silently migrate it to published optical-first. Create a fresh request.")
@@ -431,6 +450,22 @@ def apply_pr_request(
     """Populate every representable PR control from a saved request."""
 
     validate_pr_gui_request_representable(request)
+    if isinstance(request, UnifiedFreshRequest):
+        grid_panel.set_grid(request.grid);material_panel.set_material(request.material)
+        evolution_panel.legacy_static=False
+        evolution_panel.set_workflow_id(PR_STATIC_WORKFLOW if request.closure.dimension==1 else PR_TRANSVERSE_STATIC_WORKFLOW)
+        evolution_panel.material_response.setCurrentIndex(evolution_panel.material_response.findData('nonlinear'))
+        evolution_panel.unified_closure.set_closure(request.closure)
+        evolution_panel.set_backend_spec(request.backend);evolution_panel.set_scattering_spec(request.scattering)
+        beam_panel.set_aperture(request.grid.x_aperture_um,request.grid.y_aperture_um)
+        beam_panel.set_beam_stack_definition(beam_stack_to_launchplane(request.beams) if beam_stack_definition is None else beam_stack_definition)
+        beam_panel.set_optical_boundary(request.optical_boundary)
+        beam_panel.set_optical_context(n_ref=request.material.refractive_index,interaction_length_um=request.grid.z_length_um)
+        beam_panel.input_screen_editor.set_launch_elements(request.launch_elements)
+        evolution_panel._refresh_workflow_controls()
+        return
+    # Explicit legacy identity remains selected when loading; never reinterpret it.
+    evolution_panel.legacy_static=isinstance(request,(PublishedStaticRequest,PRTransverseStaticRunRequest,PRStaticRunRequest))
     grid_panel.set_grid(request.grid)
     material_panel.set_material(request.material)
     if isinstance(request, PublishedStaticRequest):

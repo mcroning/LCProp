@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from lcprop.pr.unified.integration import UnifiedFreshRequest, UNIFIED_OPERATION, WORKFLOW_ID as UNIFIED_WORKFLOW, core_request
 from lcprop.pr.published_static import PublishedStaticRequest, PR_PUBLISHED_STATIC_WORKFLOW, PR_PUBLISHED_STATIC_ARITHMETIC
 from lcprop.pr.published_static_integration import PUBLISHED_STATIC_OPERATION, PUBLISHED_STATIC_ANALYSIS_PRODUCTS
 
@@ -189,6 +190,36 @@ class _UnresolvedExecutionRunner:
     name = "Slurm (saved target unavailable/unresolved)"
 
 
+def electrical_closure_summary(closure):
+    """Describe validated electrical metadata without changing the request."""
+    from lcprop.pr.unified.specs import (
+        UNBIASED, FIXED_FIELD, PRESCRIBED_CURRENT, A7_CURRENT, OPEN_TRANSVERSE,
+    )
+
+    closure.validate()
+    if closure.identity == UNBIASED:
+        meaning = 'Unbiased / zero-flux electrical condition'
+    elif closure.identity == FIXED_FIELD:
+        meaning = f'Prescribed mean-field target b = {closure.target}'
+    elif closure.identity == PRESCRIBED_CURRENT:
+        meaning = f'Prescribed mean-current target <J> = {closure.target}; harmonic field b is solved'
+    elif closure.identity == A7_CURRENT:
+        meaning = (
+            f'A7 reservoir/applied parameter E_app = {closure.reservoir_field}; '
+            f'background intensity I_b = {closure.background_intensity}; '
+            f'derived prescribed normalized current J_ext = E_app * I_b = {closure.target[0]}; '
+            'harmonic field b is solved independently of the reservoir parameter'
+        )
+    elif closure.identity == OPEN_TRANSVERSE:
+        meaning = (
+            f'Prescribed x mean-field target b_x = {closure.target[0]}; '
+            'open-circuit y condition: transverse mean current <J_y> = 0; b_y is solved'
+        )
+    else:
+        raise ValueError(f'Unsupported electrical closure summary: {closure.identity}')
+    return f'Electrical closure: {closure.identity}\n{meaning}'
+
+
 class PRMainWindow(QWidget):
     """Focused GUI for the registered PR workflow operations."""
 
@@ -202,6 +233,7 @@ class PRMainWindow(QWidget):
                 PR_TRANSVERSE_STATIC_OPERATION,
                 PR_STATIC_OPERATION,
                 PUBLISHED_STATIC_OPERATION,
+                UNIFIED_OPERATION,
             )
         )
         self._saved_unresolved_intent = None
@@ -346,6 +378,7 @@ class PRMainWindow(QWidget):
         )
         self.input_panel.set_beam_panel(self.beam_panel)
         self.evolution_panel = PREvolutionPanel()
+        self.evolution_panel.fresh_unified_button.clicked.connect(self._configuration_changed)
         self.resource_estimator_panel = PRResourceEstimatorPanel()
         self.results_panel = ResultsPanel()
         self.tabs.addTab(self.material_panel, "PR Material")
@@ -503,7 +536,7 @@ class PRMainWindow(QWidget):
         """Construct the immutable request represented by the controls."""
 
         if self.input_panel.is_image_amplification():
-            if self.evolution_panel.workflow_id() == PR_PUBLISHED_STATIC_WORKFLOW:
+            if self.evolution_panel.workflow_id() in (PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW):
                 raise ValueError("Published optical-first Static currently supports fresh ordinary calculations, not Image Amplification experiments")
             base_request = build_pr_request(
                 material_panel=self.material_panel,
@@ -536,6 +569,9 @@ class PRMainWindow(QWidget):
         else:
             solver = self.evolution_panel.solver()
         return {
+            "unified_closure": self.evolution_panel.unified_closure.closure(self.material_panel.material().background_intensity),
+            "legacy_static": self.evolution_panel.legacy_static,
+            "transport": self.evolution_panel.transport_model.currentData(),
             "execution_controls": self._capture_execution_controls(),
             "input_mode": self.input_panel.mode_id(),
             "workflow_id": workflow_id,
@@ -568,6 +604,9 @@ class PRMainWindow(QWidget):
         self.material_panel.set_material(state["material"])
         workflow_id = state["workflow_id"]
         self.evolution_panel.set_workflow_id(workflow_id)
+        self.evolution_panel.transport_model.setCurrentIndex(self.evolution_panel.transport_model.findData(state['transport']))
+        self.evolution_panel.legacy_static=state['legacy_static']
+        self.evolution_panel.unified_closure.set_closure(state['unified_closure'])
         self.evolution_panel.set_transverse_material_response(
             state["material_response"],
             applied_field_x=state["transverse_applied_field"],
@@ -632,8 +671,11 @@ class PRMainWindow(QWidget):
 
     def _update_product_controls(self, *, policy=None):
         from lcprop.transport.result_policy import static_product_selection
-        local_plane = self.evolution_panel.workflow_id() == PR_PUBLISHED_STATIC_WORKFLOW
-        supported = self.evolution_panel.workflow_id() in (PR_STATIC_WORKFLOW, PR_PUBLISHED_STATIC_WORKFLOW)
+        unified=self.evolution_panel.workflow_id()==UNIFIED_WORKFLOW
+        self.material_panel.applied_field.setEnabled(not unified)
+        self.material_panel.applied_field.setToolTip('Unified Static uses the explicit electrical-condition controls; this legacy value is not used.' if unified else '')
+        local_plane = self.evolution_panel.workflow_id() in (PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW)
+        supported = self.evolution_panel.workflow_id() in (PR_STATIC_WORKFLOW, PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW)
         for name, action in self._analysis_actions.items():
             action.setEnabled(not local_plane or name in PUBLISHED_STATIC_ANALYSIS_PRODUCTS)
             if local_plane and name not in PUBLISHED_STATIC_ANALYSIS_PRODUCTS:
@@ -661,10 +703,18 @@ class PRMainWindow(QWidget):
                     self.result_policy_selector.addItem(label, value)
             self.result_policy_selector.setCurrentIndex(self.result_policy_selector.findData(selected))
         self.analysis_products_button.setEnabled(supported)
+        self.analysis_products_button.setToolTip(
+            'Unified Static: selecting far-field requests the exact M5 accepted-boundary spectrum and Product axes.'
+            if unified else 'Reduced x-only Static only; select before execution. Unselected exact products will not be retrievable later.')
         self.result_policy_selector.setEnabled(supported or self.execution_target_selector.currentData() == "slurm")
 
-    def _analysis_selection_changed(self, *_):
-        self._update_product_controls()
+    def _analysis_selection_changed(self, *event):
+        if (event and event[0] is True and hasattr(self,'evolution_panel')
+                and self.evolution_panel.workflow_id()==UNIFIED_WORKFLOW):
+            names=sorted(name for name,action in self._analysis_actions.items() if action.isChecked())
+            self._update_product_controls(policy='analysis:'+','.join(names))
+        else:
+            self._update_product_controls()
         if hasattr(self, "resource_estimator_panel"):
             self.resource_estimator_panel.mark_stale()
 
@@ -1099,6 +1149,20 @@ class PRMainWindow(QWidget):
                 lines.append("Preflight warnings: none")
             return "\n".join(lines)
         preflight = validate_pr_gui_workflow_request(request)
+        if isinstance(request, UnifiedFreshRequest):
+            r=core_request(request);c=request.closure
+            return '\n'.join([
+                f'Workflow: {UNIFIED_WORKFLOW}',f'Arithmetic: {r.arithmetic_identity}',
+                f'Transport: {r.spatial.dimension}D active; batch axes {r.spatial.batch_axes}',
+                'Material response: fully nonlinear unified transport',
+                electrical_closure_summary(c),
+                f'Dark={request.material.dark_intensity}; uniform={request.material.uniform_background_intensity}',
+                f'Precision: {r.precision.identity}',f'Projection: {r.projection_identity}',
+                'Published optical-first: P → I → material → projection → M → S; no replay',
+                f'Scattering: {request.scattering}',
+                f'Grid: {request.grid}; wavelength={r.wavelength_um}; gain-length={request.material.gain_length_product}',
+                'Full x-y reference solver: maximum 12,288 active nodes, independent of execution target.',
+                self._execution_summary(request, runner=runner),*preflight.warnings])
         workflow_id = self._workflow_id_for_request(request)
         lines = [
             "Material: photorefractive",
@@ -1314,6 +1378,8 @@ class PRMainWindow(QWidget):
 
     @staticmethod
     def _workflow_id_for_request(request) -> str:
+        if isinstance(request, UnifiedFreshRequest):
+            return UNIFIED_WORKFLOW
         if isinstance(
             request,
             (
@@ -1372,7 +1438,7 @@ class PRMainWindow(QWidget):
             self.runner = self.local_runner
             self.execution_target_selector.setCurrentIndex(0)
         self.runner_label.setText(f"Runner: {self.runner.name}")
-        self.result_policy_selector.setEnabled(target == "slurm" or self.evolution_panel.workflow_id() in (PR_STATIC_WORKFLOW, PR_PUBLISHED_STATIC_WORKFLOW))
+        self.result_policy_selector.setEnabled(target == "slurm" or self.evolution_panel.workflow_id() in (PR_STATIC_WORKFLOW, PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW))
         if target != "slurm":
             self.evolution_panel.apply_execution_backend_context(target="local")
             return
@@ -1394,7 +1460,7 @@ class PRMainWindow(QWidget):
     def _run_registered(self, request, **kwargs):
         self._require_execution_intent_resolved()
         policy = str(self.result_policy_selector.currentData())
-        if policy.startswith("analysis") and not isinstance(request, (PRStaticRunRequest, PublishedStaticRequest)):
+        if policy.startswith("analysis") and not isinstance(request, (PRStaticRunRequest, PublishedStaticRequest, UnifiedFreshRequest)):
             raise ValueError("Analysis product selection is supported only by reduced Static")
         if isinstance(
             request,
@@ -1471,7 +1537,7 @@ class PRMainWindow(QWidget):
             kwargs["_before_product_conversion"] = before_product_conversion
         if self.runner is self.slurm_runner:
             kwargs.update(self._remote_runner_kwargs())
-        elif isinstance(request, (PRStaticRunRequest, PublishedStaticRequest)):
+        elif isinstance(request, (PRStaticRunRequest, PublishedStaticRequest, UnifiedFreshRequest)):
             kwargs["_result_policy"] = policy
         elif isinstance(request, PRRunRequest):
             kwargs["live_preview_policy"] = PRLivePreviewPolicy()
@@ -1769,8 +1835,8 @@ class PRMainWindow(QWidget):
             f"Selected model: {assessment.model_label}\n"
             f"Grid: {nx} x {ny} x {nz}\n"
             "Execution: Local\n\n"
-            + ("Large streaming local-plane calculations can still be costly locally; native commissioning is pending.\n\n"
-             if "streaming local planes" in assessment.model_label else
+            + ("Large streaming calculations can still be costly locally; bounded certification is not a runtime estimate.\n\n"
+             if "streaming" in assessment.model_label else
              "Full-transverse nonlinear PR can be very slow locally. Use Slurm/H200 for large full-transverse nonlinear PR runs.\n\n")
             + "Stop is observed at the next safe solver cancellation checkpoint; "
             "an in-progress trial is discarded and the last accepted state is "
@@ -2150,6 +2216,7 @@ class PRMainWindow(QWidget):
                 PR_IMAGE_AMPLIFICATION_WORKFLOW,
                 PR_STATIC_WORKFLOW,
                 PR_PUBLISHED_STATIC_WORKFLOW,
+                UNIFIED_WORKFLOW,
                 PR_TRANSVERSE_STATIC_WORKFLOW,
                 PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
             ):
@@ -2167,6 +2234,7 @@ class PRMainWindow(QWidget):
             if runner_result.kind in (
                 PR_STATIC_WORKFLOW,
                 PR_PUBLISHED_STATIC_WORKFLOW,
+                UNIFIED_WORKFLOW,
                 PR_TRANSVERSE_STATIC_WORKFLOW,
             ):
                 self.status_label.setText("Rendering results...")
@@ -2174,14 +2242,23 @@ class PRMainWindow(QWidget):
                 self.results_panel.set_td_time_indicator("Rendering results...")
                 self.results_panel.append_console("Rendering results...")
             state = (
-                "State at failure" if runner_result.kind == PR_PUBLISHED_STATIC_WORKFLOW and result.status == "failed" else
+                "State at failure" if runner_result.kind in (PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW) and result.status == "failed" else
                 "State at stop/cancellation"
                 if getattr(result, "status", None) in {"stopped", "cancelled"}
                 else "Completed result"
             )
             self.results_panel.set_run_data(runner_result.run_data)
             self.results_panel.workspace.finish_attempt(state)
-            if runner_result.kind == PR_PUBLISHED_STATIC_WORKFLOW:
+            if runner_result.kind == UNIFIED_WORKFLOW:
+                scientific=result.run.scientific
+                self.last_checkpoint=None
+                self.run_status='stopped' if scientific.status=='cancelled' else scientific.status
+                self.status_label.setText(self.run_status.title());message=scientific.reason
+                residuals=scientific.ledger[-1]['observations'] if scientific.ledger else {}
+                maximum=max((abs(v) for k,v in residuals.items() if k.endswith('_rms')),default=0.)
+                self.results_panel.set_td_time_indicator(f'{scientific.status}: cells {scientific.completed_cells}; accepted z={scientific.reached_z_um:g} µm; material residual RMS max={maximum:g}')
+                if scientific.failure:self.results_panel.append_console(str(scientific.failure))
+            elif runner_result.kind == PR_PUBLISHED_STATIC_WORKFLOW:
                 scientific = result.run.scientific
                 self.last_checkpoint = None
                 self.run_status = "stopped" if scientific.status == "cancelled" else scientific.status
@@ -2385,9 +2462,9 @@ class PRMainWindow(QWidget):
                 )
             self.results_panel.append_console(
                 f"Local-plane execution: {result.status}"
-                if runner_result.kind == PR_PUBLISHED_STATIC_WORKFLOW else runner_result.message)
+                if runner_result.kind in (PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW) else runner_result.message)
             self.results_panel.append_console(message)
-            if runner_result.kind != PR_PUBLISHED_STATIC_WORKFLOW:
+            if runner_result.kind not in (PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW):
                 self.results_panel.append_console(
                     "Normalized optical power: "
                     f"{ordinary_result.power_initial:.8g} -> "

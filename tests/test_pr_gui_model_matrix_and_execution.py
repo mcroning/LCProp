@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from lcprop.pr.published_static import PublishedStaticRequest
+from lcprop.pr.unified.integration import UnifiedFreshRequest
 
 from dataclasses import dataclass, replace
 import os
@@ -69,13 +70,13 @@ def _build(controls):
 @pytest.mark.parametrize(
     ("evolution", "transport", "response", "request_type"),
     (
-        ("static", "reduced_x", PR_MATERIAL_RESPONSE_NONLINEAR, PublishedStaticRequest),
+        ("static", "reduced_x", PR_MATERIAL_RESPONSE_NONLINEAR, UnifiedFreshRequest),
         ("static", "reduced_x", "field_linear_local_intensity", PublishedStaticRequest),
         (
             "static",
             "full_transverse",
             PR_MATERIAL_RESPONSE_NONLINEAR,
-            PRTransverseStaticRunRequest,
+            UnifiedFreshRequest,
         ),
         (
             "static",
@@ -116,14 +117,19 @@ def test_independent_model_axes_build_supported_production_cells(
         panel.material_response.findData(response)
     )
 
+    if request_type is UnifiedFreshRequest and transport == 'full_transverse':
+        controls[2].Nx.setValue(32);controls[2].Ny.setValue(32)
     request = _build(controls)
 
     assert type(request) is request_type
-    assert request.material_response.model == response
+    if isinstance(request,UnifiedFreshRequest):
+        assert request.closure.dimension==(1 if transport=='reduced_x' else 2)
+    else:
+        assert request.material_response.model == response
     assert "x-only" in panel.transport_model.itemText(0)
     assert "x-y" in panel.transport_model.itemText(1)
     assert "Experimental" not in panel.material_response.currentText()
-    assert "Production model selection" in panel.algorithm_status.text()
+    assert ('Unified nonlinear Static' if isinstance(request,UnifiedFreshRequest) else 'Production model selection') in panel.algorithm_status.text()
 
 
 def test_integrator_choices_follow_the_selected_td_model(app):

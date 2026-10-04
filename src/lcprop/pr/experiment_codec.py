@@ -1015,3 +1015,9 @@ PUBLISHED_STATIC_EXPERIMENT_CODEC = ExperimentRequestCodec(
     decode_request=decode_published_static_request,
 )
 __all__.append("PUBLISHED_STATIC_EXPERIMENT_CODEC")
+
+from lcprop.pr.unified.integration import UnifiedFreshRequest, WORKFLOW_ID as UNIFIED_WORKFLOW, encode_fresh, decode_fresh
+UNIFIED_STATIC_EXPERIMENT_CODEC = ExperimentRequestCodec(
+    material_id=PR_MATERIAL_ID, workflow_id=UNIFIED_WORKFLOW,
+    request_type=UnifiedFreshRequest, encode_request=encode_fresh, decode_request=decode_fresh)
+__all__.append("UNIFIED_STATIC_EXPERIMENT_CODEC")

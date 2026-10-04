@@ -69,7 +69,14 @@ def classify_pr_run_cost(
     points = float(nx * ny * nz)
     factor = _hardware_precision_factor(request)
 
-    if isinstance(request, PublishedStaticRequest):
+    from lcprop.pr.unified.integration import UnifiedFreshRequest, resource_plan
+    if isinstance(request, UnifiedFreshRequest):
+        plan=resource_plan(request)
+        model=f"Unified nonlinear {plan['active_dimensions']}D Static — streaming"
+        score=(sum(plan['bytes'].values())+plan['direct_solver']['dense_factorization_scenario_bytes'])*nz
+        potential_threshold, very_threshold = 2.0e10, 2.0e11
+        rationale='M5 workspace scenario times cells; uncalibrated local-work warning, not runtime or feasibility'
+    elif isinstance(request, PublishedStaticRequest):
         model = "Local-intensity PR Static — streaming local planes"
         score = points * 3.0 * factor
         potential_threshold, very_threshold = 2.0e10, 2.0e11

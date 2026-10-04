@@ -113,7 +113,7 @@ class RequestEnvelope:
 
     @staticmethod
     def _validate_product_scope(material_id, workflow_id, policy):
-        if _result_policy(policy) not in ("fast", "full") and (material_id, workflow_id) not in (("pr", "pr_static"), ("pr", "pr_static_local_intensity_planes_v1"), ("pr", "pr_static_published_optical_first_v1")):
+        if _result_policy(policy) not in ("fast", "full") and (material_id, workflow_id) not in (("pr", "pr_static_unified_published_optical_first_v1"), ("pr", "pr_static"), ("pr", "pr_static_local_intensity_planes_v1"), ("pr", "pr_static_published_optical_first_v1")):
             raise TransportFormatError("selected result products are supported only by reduced PR Static")
 
     @classmethod

@@ -311,7 +311,8 @@ def test_import_isolation_and_m1_m3_unchanged():
         p='src/lcprop/pr/unified/'+name
         assert (root/p).read_bytes()==subprocess.check_output(['git','show','1bd45fb8263e5406a5fc5a2201e8f7a0fe63c492:'+p],cwd=root)
     for p in (root/'src').rglob('*.py'):
-        if '/pr/unified/' not in str(p):
+        if '/pr/unified/' not in str(p) and p.relative_to(root).as_posix() not in {
+                'src/lcprop/pr/gui/evolution_panel.py','src/lcprop/transport/envelopes.py'}:
             assert 'pr.unified.workflow' not in p.read_text() and 'pr_static_unified_published_optical_first_v1' not in p.read_text()
 
 

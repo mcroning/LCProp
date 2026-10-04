@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from lcprop.pr.unified.workflow import WORKFLOW_ID as UNIFIED_WORKFLOW
+from .unified_controls import UnifiedClosurePanel
+
 from lcprop.pr.published_static import PR_PUBLISHED_STATIC_WORKFLOW
 
 from lcprop.gui.numeric_widgets import CompactDoubleSpinBox
@@ -12,6 +15,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QLabel,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -208,6 +212,12 @@ class PREvolutionPanel(QWidget):
         self.precision.currentTextChanged.connect(self._update_material_precision_defaults)
         self._form = form
         self._image_amplification_mode = False
+        self.legacy_static = False
+        self.unified_closure = UnifiedClosurePanel()
+        form.addRow(self.unified_closure)
+        self.fresh_unified_button=QPushButton('Create fresh unified nonlinear Static request')
+        self.fresh_unified_button.clicked.connect(self._fresh_unified)
+        form.addRow(self.fresh_unified_button)
         self._syncing_model_controls = False
         self._implicit_local_backend = "numpy"
         self._backend_origin = "implicit_local_default"
@@ -233,8 +243,17 @@ class PREvolutionPanel(QWidget):
         layout.addLayout(form)
         layout.addStretch(1)
 
+    def _fresh_unified(self):
+        self.legacy_static=False
+        self.unified_closure.condition.setCurrentIndex(0)
+        self._refresh_workflow_controls()
+
     def workflow_id(self) -> str:
         value = str(self.workflow.currentData())
+        if (value in (PR_STATIC_WORKFLOW, PR_TRANSVERSE_STATIC_WORKFLOW)
+                and self.material_response.currentData() == PR_MATERIAL_RESPONSE_NONLINEAR
+                and not self.legacy_static and not self._image_amplification_mode):
+            return UNIFIED_WORKFLOW
         if value == PR_STATIC_WORKFLOW:
             return PR_PUBLISHED_STATIC_WORKFLOW
         return value
@@ -275,6 +294,8 @@ class PREvolutionPanel(QWidget):
     def _model_axis_changed(self, *_args) -> None:
         if self._syncing_model_controls:
             return
+        # An explicit dimensionality/evolution change creates a fresh request.
+        self.legacy_static = False
         self._syncing_model_controls = True
         try:
             self._sync_workflow_from_model_axes()
@@ -287,7 +308,7 @@ class PREvolutionPanel(QWidget):
             return
         self._syncing_model_controls = True
         try:
-            evolution, transport = self._axes_for_workflow(self.workflow_id())
+            evolution, transport = self._axes_for_workflow(str(self.workflow.currentData()))
             self.evolution.setCurrentIndex(self.evolution.findData(evolution))
             self.transport_model.setCurrentIndex(
                 self.transport_model.findData(transport)
@@ -297,6 +318,12 @@ class PREvolutionPanel(QWidget):
         self._refresh_workflow_controls()
 
     def set_workflow_id(self, workflow_id: str) -> None:
+        if workflow_id == UNIFIED_WORKFLOW:
+            self.legacy_static = False
+            self.set_workflow_id(self._workflow_for_axes('static',str(self.transport_model.currentData())))
+            self.material_response.setCurrentIndex(self.material_response.findData(PR_MATERIAL_RESPONSE_NONLINEAR))
+            self._refresh_workflow_controls()
+            return
         if workflow_id == PR_PUBLISHED_STATIC_WORKFLOW:
             self.set_workflow_id(PR_STATIC_WORKFLOW)
             return
@@ -382,7 +409,7 @@ class PREvolutionPanel(QWidget):
             PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
         )
         is_transverse_static = (
-            workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW
+            str(self.workflow.currentData()) == PR_TRANSVERSE_STATIC_WORKFLOW
         )
         is_transverse_timedependent = (
             workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
@@ -408,6 +435,7 @@ class PREvolutionPanel(QWidget):
         else:
             for i, (label, _) in enumerate(choices):
                 self.material_response.setItemText(i, label)
+        workflow_id = self.workflow_id()  # Response choices may have changed with the axes.
         self.material_response.setEnabled(True)
         self._set_row_visible(self.material_response, True)
         is_linearized = (
@@ -426,7 +454,7 @@ class PREvolutionPanel(QWidget):
             self._set_row_visible(widget, is_time_dependent)
         self._set_row_visible(
             self.max_coupled_passes,
-            not is_time_dependent and workflow_id != PR_PUBLISHED_STATIC_WORKFLOW,
+            not is_time_dependent and workflow_id not in (PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW),
         )
         static_iterations_label = self._form.labelForField(
             self.max_coupled_passes
@@ -437,10 +465,20 @@ class PREvolutionPanel(QWidget):
                 if is_transverse_static
                 else "Maximum coupled passes per slice"
             )
-        self._set_row_visible(self.optical_substeps, workflow_id != PR_PUBLISHED_STATIC_WORKFLOW)
-        local_plane = workflow_id == PR_PUBLISHED_STATIC_WORKFLOW
+        self._set_row_visible(self.optical_substeps, workflow_id not in (PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW))
+        local_plane = workflow_id in (PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW)
         for widget in (self.material_iterations, self.material_backtracks, self.material_rms, self.material_max):
-            self._set_row_visible(widget, local_plane and self.material_response.currentData() == PR_MATERIAL_RESPONSE_NONLINEAR)
+            self._set_row_visible(widget, workflow_id == PR_PUBLISHED_STATIC_WORKFLOW and self.material_response.currentData() == PR_MATERIAL_RESPONSE_NONLINEAR)
+        self.fresh_unified_button.setVisible(self.legacy_static and not is_time_dependent
+            and self.material_response.currentData() == PR_MATERIAL_RESPONSE_NONLINEAR
+            and not self._image_amplification_mode)
+        if workflow_id == UNIFIED_WORKFLOW:
+            index=self.material_response.findData(PR_MATERIAL_RESPONSE_NONLINEAR)
+            self.material_response.setItemText(index,'Fully nonlinear (unified transport)')
+        self.unified_closure.setVisible(workflow_id == UNIFIED_WORKFLOW)
+        dimension = 2 if self.transport_model.currentData() == 'full_transverse' else 1
+        if self.unified_closure.dimension != dimension:
+            self.unified_closure.set_dimension(dimension)
         v1 = self.scattering_algorithm.findData(PR_CANONICAL_SCATTERING_V1)
         self.scattering_algorithm.model().item(v1).setEnabled(not local_plane)
         if local_plane and self.scattering_algorithm.currentData() != PR_CANONICAL_SCATTERING_V2:
@@ -493,6 +531,10 @@ class PREvolutionPanel(QWidget):
                 )
             )
         )
+
+        if workflow_id == UNIFIED_WORKFLOW:
+            self.algorithm_status.setText('Unified nonlinear Static: published optical-first; certified mixed precision. No coupled passes or replay.')
+            self.execution_guidance.setText('Full x-y: at most 12,288 active material nodes, including on H200. Reduced x-only: y columns are independent.')
 
     def _refresh_integrator_choices(self) -> None:
         workflow_id = self.workflow_id()
