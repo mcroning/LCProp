@@ -84,6 +84,10 @@ def _keys(value, expected):
 
 
 def _construct(cls, value):
+    if cls is UnifiedSelection:
+        legacy = {f.name for f in fields(cls)} - {'intensity_volume','material_volumes'}
+        if isinstance(value,dict) and set(value)==legacy:
+            value=dict(value,intensity_volume=False,material_volumes=())
     _keys(value,[f.name for f in fields(cls)])
     try: return cls(**value)
     except TypeError as exc: raise ValueError('malformed specification') from exc
@@ -207,7 +211,15 @@ def _launch_provenance(identity, endpoint, launch=None):
 
 def encode_result(result):
     s=result.scientific
-    if result.schema!=PRODUCTS_SCHEMA: raise ValueError('unknown product schema')
+    if result.schema not in (PRODUCTS_SCHEMA,'pr_unified_static_products_v1'):
+        raise ValueError('unknown product schema')
+    selection=asdict(result.selection)
+    if result.schema=='pr_unified_static_products_v1':
+        if result.selection.intensity_volume or result.selection.material_volumes:
+            raise ValueError('legacy product schema cannot contain selected volumes')
+        # Ordinary save preserves the original V1 selection vocabulary.
+        selection.pop('intensity_volume')
+        selection.pop('material_volumes')
     launch=result.arrays.get('launch')
     if launch is None and s.completed_cells==0: launch=s.boundary_field
     _launch_provenance(s.identities,s.boundary_field,launch)
@@ -220,8 +232,8 @@ def encode_result(result):
         arrays.update({'state/'+k:getattr(s.material_state,k) for k in ('q','psi','b')})
     science={name:getattr(s,name) for name in ('status','reason','completed_cells','reached_z_um',
         'boundary_z_um','material_z_um','ledger','identities','failure')}
-    meta=dict(schema=RESULT_SCHEMA,products_schema=PRODUCTS_SCHEMA,scientific=science,
-        selection=asdict(result.selection),locations=result.locations,state=state,next_address=result.next_address,
+    meta=dict(schema=RESULT_SCHEMA,products_schema=result.schema,scientific=science,
+        selection=selection,locations=result.locations,state=state,next_address=result.next_address,
         normalization=NORMALIZATION_ID)
     payload=_pack(meta,arrays)
     decode_result(payload)
@@ -231,12 +243,16 @@ def encode_result(result):
 def _decode_result(payload):
     meta,arrays=_unpack(payload,RESULT_SCHEMA)
     _keys(meta,('schema','products_schema','scientific','selection','locations','state','next_address','normalization'))
-    if meta['products_schema']!=PRODUCTS_SCHEMA: raise ValueError('unknown products identity')
+    if meta['products_schema'] not in (PRODUCTS_SCHEMA,'pr_unified_static_products_v1'): raise ValueError('unknown products identity')
+    if meta['products_schema']==PRODUCTS_SCHEMA:
+        _keys(meta['selection'],[f.name for f in fields(UnifiedSelection)])
     if meta['normalization']!=NORMALIZATION_ID: raise ValueError('unknown source normalization')
     s=meta['scientific']
     _keys(s,('status','reason','completed_cells','reached_z_um','boundary_z_um','material_z_um','ledger','identities','failure'))
     r=_identity_request(s['identities'])
     selection=_construct(UnifiedSelection,meta['selection']);selection.validate(r.spatial)
+    if meta['products_schema']=='pr_unified_static_products_v1' and (selection.intensity_volume or selection.material_volumes):
+        raise ValueError('legacy product schema cannot contain selected volumes')
     count=s['completed_cells'];boundary=tuple(s['boundary_z_um']);material=tuple(s['material_z_um'])
     if type(count) is not int or count<0 or len(s['ledger'])!=count or s['status'] not in ('completed','cancelled','failed'):
         raise ValueError('invalid completion ledger')
@@ -317,7 +333,8 @@ def _decode_result(payload):
     if 'coherence_groups' in identity: identity['coherence_groups']=tuple(identity['coherence_groups'])
     scientific=UnifiedStaticResult(s['status'],s['reason'],count,s['reached_z_um'],endpoint,state,
         boundary,material,tuple(s['ledger']),{},identity,s['failure'])
-    return UnifiedSelectedResult(scientific,selection,products,coordinates,locations,next_address=meta['next_address'])
+    return UnifiedSelectedResult(scientific,selection,products,coordinates,locations,
+        schema=meta['products_schema'],next_address=meta['next_address'])
 
 
 def decode_request(payload):
@@ -345,6 +362,9 @@ def _validate_products(products,coords,selection,r,endpoint,count,status,partial
             ideal=(np.arange(n,dtype=real)-n/2)*(aperture/n)+.5*(aperture/n)
             if not np.array_equal(a,ideal.astype(real)): raise ValueError('transverse grid mismatch')
         nch=endpoint.shape[0];nb=count+1
+        if selection.intensity_volume: expected['intensity_volume']=((nb,nx,ny),real)
+        for name in selection.material_volumes:
+            expected[name+'_volume']=((count,nx,ny),complex_type if name=='material_phase_optical_node' else real)
         if selection.launch: expected['launch']=(endpoint.shape,complex_type)
         if selection.boundary_intensity: expected['boundary_intensity']=((nx,ny),real)
         for name,enabled in (('optical',selection.optical_cuts),('intensity',selection.intensity_cuts)):

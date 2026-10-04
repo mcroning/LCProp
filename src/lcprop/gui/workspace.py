@@ -266,7 +266,7 @@ class Workspace(QWidget):
             summary = run_data.diagnostics.get("summary")
             values = {} if summary is None else summary.values
             if state is None:
-                state = (
+                state = values.get("presentation_state") or (
                     "State at stop/cancellation"
                     if values.get("status") in {"stopped", "cancelled"}
                     else "Completed result"

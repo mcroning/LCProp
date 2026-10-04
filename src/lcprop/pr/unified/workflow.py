@@ -213,12 +213,14 @@ def _collect(collector, previous, A, state, intensity, grid, record, identities,
 
 
 def run_unified_static(request, *, selection=UnifiedProductSelection(), cancellation_token=None,
-                       _collector=None):
+                       _collector=None, observer=None):
     """Run fresh prepared launch; return truthful last accepted state on failure.
 
     Cancellation is checked before a cell and after its complete candidate and
     bookkeeping, before acceptance. Material solves are indivisible M3 calls.
-    No progress/array callback, replay, continuation or external observer exists.
+    The optional progress observer receives detached bounded presentation data only
+    after atomic acceptance. Observer failure returns failed with that accepted
+    state intact; cancellation from an observer stops future cells, not this one.
     """
     count = _validate(request, selection)  # Invalid metadata raises before allocation.
     if _collector is not None:
@@ -234,10 +236,10 @@ def run_unified_static(request, *, selection=UnifiedProductSelection(), cancella
         raise ValueError("prepared launch must match execution backend, shape and dtype")
     context = A.device if r.backend == "cupy" else nullcontext()
     with context:
-        return _run(r, selection, count, backend, cancellation_token, _collector)
+        return _run(r, selection, count, backend, cancellation_token, _collector, observer)
 
 
-def _run(r, selection, count, backend, token, collector=None):
+def _run(r, selection, count, backend, token, collector=None, observer=None):
     xp = backend.xp
     accepted = material_state = launch = None
     completed = 0
@@ -272,6 +274,9 @@ def _run(r, selection, count, backend, token, collector=None):
         initial_collection = (_collect(collector, None, candidate, None, None,
             grid, None, identities, xp) if collector is not None else None)
         accepted, cuts, launch, collection = candidate, initial_cut, launch_copy, initial_collection
+        if collector is not None:
+            stage = "accepted_products"
+            collection = collector.accept(collection)
         del initial_collection
         del candidate, launch_copy
         h, length = float(r.grid.dz_um), float(r.grid.z_length_um)
@@ -333,6 +338,13 @@ def _run(r, selection, count, backend, token, collector=None):
                 candidate, state, k+1, end, next_ledger, next_cuts, next_collection)
             del candidate, state, transport, intensity, diag, next_ledger, next_cuts, next_collection
             attempted = None
+            if collector is not None:
+                stage = "accepted_products"
+                collection = collector.accept(collection)
+            if observer is not None:
+                stage = "post_acceptance_observer"
+                from .progress import notify_accepted
+                notify_accepted(observer, accepted, grid, groups, record, completed, count, xp)
     except Exception as exc:
         status, reason = "failed", str(exc)
         failure = dict(stage=stage, cell_index=attempted, type=type(exc).__name__, reason=str(exc))

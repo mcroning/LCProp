@@ -40,7 +40,7 @@ __all__ = [
 ]
 
 # Serialized operational selection; never part of a scientific request.
-ANALYSIS_PRODUCTS = ("input_intensity", "output_intensity", "far_field_intensity", "complex_input", "complex_output")
+ANALYSIS_PRODUCTS = ("unified_intensity_volume", "unified_potential_volume", "unified_carrier_volume", "unified_optical_field_volume", "unified_face_x_volume", "unified_face_y_volume", "input_intensity", "output_intensity", "far_field_intensity", "complex_input", "complex_output")
 
 
 def static_product_selection(value):

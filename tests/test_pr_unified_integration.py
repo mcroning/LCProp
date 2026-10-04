@@ -346,3 +346,63 @@ def test_electrical_summary_rejects_unknown_identity():
     object.__setattr__(closure,'identity','unknown_closure_v1')
     with pytest.raises(ValueError,match='unknown or unsupported electrical closure'):
         electrical_closure_summary(closure)
+
+
+def test_installed_interactive_selectors_progress_and_reopen(window,record_property):
+    r=fresh(scatter=True);apply(window,r);window._set_product_policy('fast')
+    events=[]
+    def callback(e):
+        events.append(e);window._on_progress(e)
+        assert f'Accepted cells {e.completed_units}/' in window.status_label.text()
+        assert e.latest_field_state.preview.dtype==np.float32
+        assert e.latest_field_state.preview.nbytes<=65536
+    out=window._run_registered(window.build_request(),progress_callback=callback)
+    assert [e.completed_units for e in events]==[1,2]
+    assert events[-1].current_coordinate==out.result.run.scientific.reached_z_um
+    window._on_finished(out)
+    selector=window.results_panel.workspace.image_pane.field_selector
+    names=[selector.itemText(i) for i in range(selector.count())]
+    for name in ('Output Plane Intensity','Intensity xz','Intensity yz','Intensity Cut X','Intensity Cut Y','Output Far-Field Intensity'):
+        assert any(name in s for s in names),names
+    assert window.results_panel.workspace.longitudinal_pane.field_selector.count()>0
+    restored=codec.decode_result(codec.encode_result(out.result.run))
+    view=a.unified_to_run_data(a.UnifiedExecutionResult(restored,'fast','numpy'))
+    for axis in ('x','y'):
+        field=view.fields['intensity_'+axis+'z']
+        exact(field.data,restored.arrays['intensity_cut_'+axis])
+        exact(field.coordinates['z'],restored.coordinates['boundary_z_um'])
+        assert field.coordinates['paired_cut_key']=='intensity_'+('y' if axis=='x' else 'x')+'z'
+    assert 'Execution target:' in window.describe_request(r)
+    assert window.describe_request(r).count('Execution target:')==1
+    record_property('selector_entries',json.dumps(names))
+
+
+def test_progress_gui_cancellation_consistent(window):
+    token=CancellationToken();events=[]
+    def callback(event):
+        events.append(event);window._on_progress(event);token.cancel()
+    out=window._run_registered(fresh(scatter=True),progress_callback=callback,cancellation_token=token)
+    assert out.result.status=='cancelled'
+    assert len(events)==out.result.run.scientific.completed_cells==1
+    assert events[-1].current_coordinate==out.result.run.scientific.reached_z_um
+    window._on_finished(out)
+    assert window.run_status=='stopped'
+
+
+def test_preexisting_minimal_archive_remains_readable():
+    # Old M6 fast envelopes intentionally had no far-field selection.
+    old=products.run_unified_products(independent_prepared(fresh()),
+        selection=products.UnifiedSelection(boundary_intensity=True,intensity_cuts=True))
+    from tests.test_pr_unified_codec import rewrite
+    package=np.frombuffer(rewrite(codec.encode_result(old),lambda m:m.update(products_schema='pr_unified_static_products_v1')),dtype=np.uint8)
+    decoded=a._decode_result({'backend':'numpy','result_policy':'fast'},{'unified_package':package})
+    assert 'far_field_intensity' not in decoded.run.arrays
+
+
+def test_progress_and_cut_resource_breakdown():
+    r=fresh();plan=a.resource_plan(r)
+    presentation=plan['presentation']
+    assert presentation['longitudinal_intensity_cut_bytes']==3*(r.grid.Nx+r.grid.Ny)*8
+    assert presentation['ephemeral_preview_max_bytes']==65536
+    assert presentation['retained_progress_history_bytes']==0
+    assert plan['longitudinal_full_volume_bytes']==0

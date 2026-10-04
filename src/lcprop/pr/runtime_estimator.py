@@ -915,6 +915,9 @@ def _estimate_unified(request):
         peak_host_memory=EstimateRange(low,b['host_serialization_array_and_archive_scenario'],'bytes'),
         fast_result_size=EstimateRange(low,low,'bytes'),full_result_size=EstimateRange(high,high,'bytes'),
         recommendation='Full x-y limited to 12,288 active nodes on every execution target',
-        qualifications=(fast['limitations'],'Output sizes are array-only; archive/metadata overhead additional.',
-            'No longitudinal scientific volumes. Reduced y columns are independent batches.',
+        qualifications=(fast['limitations'],
+            f"Longitudinal intensity cuts: {fast['presentation']['longitudinal_intensity_cut_bytes']} bytes; exact far field: {fast['presentation']['far_field_bytes']} bytes.",
+            f"Ephemeral progress: at most 65,536 preview bytes plus 2,048 axis bytes; backend workspace scenario {fast['presentation']['backend_preview_workspace_scenario_bytes']} bytes, additional to base planning.",
+            'No retained progress history. Output sizes are array-only; archive/metadata overhead additional.',
+            f"Full/Interactive selected result-volume bytes: {full['longitudinal_product_bytes']}. No longitudinal solver/replay volumes. Reduced y columns are independent batches.",
             'Bounded native certification is not a large-2D peak/runtime calibration.'))

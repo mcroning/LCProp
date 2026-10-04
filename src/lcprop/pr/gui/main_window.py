@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from lcprop.pr.unified.integration import UnifiedFreshRequest, UNIFIED_OPERATION, WORKFLOW_ID as UNIFIED_WORKFLOW, core_request
+from lcprop.pr.unified.integration import UnifiedFreshRequest, UNIFIED_OPERATION, WORKFLOW_ID as UNIFIED_WORKFLOW, core_request, ANALYSIS_PRODUCTS as UNIFIED_ANALYSIS_PRODUCTS
 from lcprop.pr.published_static import PublishedStaticRequest, PR_PUBLISHED_STATIC_WORKFLOW, PR_PUBLISHED_STATIC_ARITHMETIC
 from lcprop.pr.published_static_integration import PUBLISHED_STATIC_OPERATION, PUBLISHED_STATIC_ANALYSIS_PRODUCTS
 
@@ -677,18 +677,22 @@ class PRMainWindow(QWidget):
         local_plane = self.evolution_panel.workflow_id() in (PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW)
         supported = self.evolution_panel.workflow_id() in (PR_STATIC_WORKFLOW, PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW)
         for name, action in self._analysis_actions.items():
-            action.setEnabled(not local_plane or name in PUBLISHED_STATIC_ANALYSIS_PRODUCTS)
-            if local_plane and name not in PUBLISHED_STATIC_ANALYSIS_PRODUCTS:
+            allowed = (name in UNIFIED_ANALYSIS_PRODUCTS) if unified else (name in PUBLISHED_STATIC_ANALYSIS_PRODUCTS if local_plane else not name.startswith('unified_'))
+            action.setEnabled(allowed)
+            if not allowed:
                 with QSignalBlocker(action):
                     action.setChecked(False)
         current = policy or self.result_policy_selector.currentData() or "fast"
+        if unified and policy is None and not getattr(self,'_unified_products_active',False) and self.execution_target_selector.currentData()=='local':
+            current='interactive'
+        self._unified_products_active=unified
         kind, _ = static_product_selection(current)
         names = sorted(name for name, action in self._analysis_actions.items() if action.isChecked())
         analysis = "analysis:" + ",".join(names) if names else "analysis"
         if supported:
             interactive = current if kind == "interactive" else "fast"
-            items = [("Interactive", interactive), ("Analysis", analysis), ("Full", "full")]
-            selected = analysis if kind == "analysis" else ("full" if kind == "full" else interactive)
+            items = ([("Minimal", "fast"),("Interactive", "interactive"),("Analysis",analysis),("Full","full")] if unified else [("Interactive", interactive), ("Analysis", analysis), ("Full", "full")])
+            selected = analysis if kind == "analysis" else ("full" if kind == "full" else (current if unified else interactive))
         else:
             items = [("Fast / Exploratory", "fast"), ("Full", "full")]
             selected = "full" if kind == "full" else "fast"
@@ -1162,7 +1166,7 @@ class PRMainWindow(QWidget):
                 f'Scattering: {request.scattering}',
                 f'Grid: {request.grid}; wavelength={r.wavelength_um}; gain-length={request.material.gain_length_product}',
                 'Full x-y reference solver: maximum 12,288 active nodes, independent of execution target.',
-                self._execution_summary(request, runner=runner),*preflight.warnings])
+                *preflight.warnings])
         workflow_id = self._workflow_id_for_request(request)
         lines = [
             "Material: photorefractive",
@@ -1878,8 +1882,33 @@ class PRMainWindow(QWidget):
             return "use_slurm"
         return "cancel"
 
+    def _unified_volume_guard(self, request) -> bool:
+        """Presentation budget warning, not a measured RAM or solver capacity bound."""
+        if not isinstance(request, UnifiedFreshRequest):
+            return True
+        from lcprop.pr.unified.integration import resource_plan
+        plan = resource_plan(request, str(self.result_policy_selector.currentData()))
+        size = plan['longitudinal_full_volume_bytes']
+        # Default interactive retention must remain a conscious choice for large runs.
+        if size <= 512 * 1024**2:
+            return True
+        message = (
+            f"Selected longitudinal result volumes require {size / 1024**3:.2f} GiB "
+            "of retained array storage, exceeding the 512 MiB interactive warning budget. "
+            "Assembly can temporarily hold a second copy; scientific working memory, "
+            "viewer/export copies and archive overhead are additional.\n\n"
+            f"Volume bytes: {plan['longitudinal_product_bytes']}\n"
+            "Choose Minimal or fewer Analysis products to reduce storage, or explicitly "
+            "continue with this selection. No grid or scientific settings will be changed."
+        )
+        return QMessageBox.question(self, "Large selected result volumes", message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
+
     def _local_run_cost_guard(self, request) -> bool:
         target = str(self.execution_target_selector.currentData())
+        if target == "local" and not self._unified_volume_guard(request):
+            return False
         assessment = classify_pr_run_cost(
             self._request_for_local_cost(request), execution_target=target
         )
@@ -2050,6 +2079,15 @@ class PRMainWindow(QWidget):
                 phase,
             ):
                 self.results_panel.append_console(message)
+            return
+        if progress.workflow == UNIFIED_WORKFLOW:
+            from lcprop.pr.unified.integration import progress_to_run_data
+            event = progress.latest_field_state
+            maximum = max((abs(v) for k,v in event.diagnostics.items() if k.endswith('_rms')), default=0.)
+            text = f'Accepted cells {event.completed_cells}/{event.total_cells}; z={event.z_um:g} µm; material residual RMS max={maximum:g}'
+            self.results_panel.set_run_data(progress_to_run_data(event), state="Current accepted state")
+            self.status_label.setText(text)
+            self.results_panel.set_td_time_indicator(text)
             return
         if progress.workflow == PR_PUBLISHED_STATIC_WORKFLOW:
             residual = (progress.diagnostics or {}).get("material_residual_rms")
@@ -2255,7 +2293,7 @@ class PRMainWindow(QWidget):
                 self.run_status='stopped' if scientific.status=='cancelled' else scientific.status
                 self.status_label.setText(self.run_status.title());message=scientific.reason
                 residuals=scientific.ledger[-1]['observations'] if scientific.ledger else {}
-                maximum=max((abs(v) for k,v in residuals.items() if k.endswith('_rms')),default=0.)
+                maximum=max((abs(v) for k,v in residuals.items() if k.endswith('_rms') and 'iteration_' not in k),default=0.)
                 self.results_panel.set_td_time_indicator(f'{scientific.status}: cells {scientific.completed_cells}; accepted z={scientific.reached_z_um:g} µm; material residual RMS max={maximum:g}')
                 if scientific.failure:self.results_panel.append_console(str(scientific.failure))
             elif runner_result.kind == PR_PUBLISHED_STATIC_WORKFLOW:

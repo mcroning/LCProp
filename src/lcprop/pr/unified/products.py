@@ -11,7 +11,7 @@ from .operators import Geometry, flux
 from .projection import PROJECTION_ID, electric_field_face, electric_field_optical_node
 from .workflow import UnifiedProductSelection, run_unified_static
 
-PRODUCTS_SCHEMA = 'pr_unified_static_products_v1'
+PRODUCTS_SCHEMA = 'pr_unified_static_products_v2'
 FIELDS = ('q_log_carrier', 'carrier_node', 'potential_node', 'harmonic_field', 'transport_intensity_node',
           'electric_field_x_face', 'electric_field_y_face', 'hopping_current_x_face',
           'hopping_current_y_face', 'electric_field_x_optical_node',
@@ -20,7 +20,7 @@ FIELDS = ('q_log_carrier', 'carrier_node', 'potential_node', 'harmonic_field', '
 
 @dataclass(frozen=True)
 class UnifiedSelection:
-    """No full z volumes. Canonical accepted state/endpoint are mandatory.
+    """Selected result volumes are observational; canonical endpoint is mandatory.
 
     Fields mean last accepted material plane; cuts mean right-endpoint series.
     Intensities are raw physical optical products, not preview normalization.
@@ -32,21 +32,24 @@ class UnifiedSelection:
     material_fields: tuple[str, ...] = ()
     material_cuts: tuple[str, ...] = ()
     far_field: bool = False
+    intensity_volume: bool = False
+    material_volumes: tuple[str, ...] = ()
 
     def __post_init__(self):
         object.__setattr__(self, 'material_fields', tuple(self.material_fields))
         object.__setattr__(self, 'material_cuts', tuple(self.material_cuts))
-        for key in ('launch','boundary_intensity','optical_cuts','intensity_cuts','far_field'):
+        object.__setattr__(self, 'material_volumes', tuple(self.material_volumes))
+        for key in ('launch','boundary_intensity','optical_cuts','intensity_cuts','far_field','intensity_volume'):
             if type(getattr(self,key)) is not bool:
                 raise ValueError('product selection requires booleans')
-        for names in (self.material_fields,self.material_cuts):
+        for names in (self.material_fields,self.material_cuts,self.material_volumes):
             if len(set(names)) != len(names) or any(n not in FIELDS for n in names):
                 raise ValueError('unknown or duplicate material product')
-        if 'harmonic_field' in self.material_cuts:
+        if 'harmonic_field' in self.material_cuts+self.material_volumes:
             raise ValueError('harmonic field is a domain/batch quantity, not a transverse cut')
 
     def validate(self, spatial):
-        if spatial.dimension == 1 and any('_y_' in n for n in self.material_fields+self.material_cuts):
+        if spatial.dimension == 1 and any('_y_' in n for n in self.material_fields+self.material_cuts+self.material_volumes):
             raise ValueError('reduced transport has no y field/current products')
 
 
@@ -102,16 +105,15 @@ class _Collector:
     """Internal only. Prepare a prospective collection without mutating previous.
 
     M4 owns atomic promotion. Snapshots are detached and mutation-checked.
-    Retain only requested last planes and copied reduced cuts, never snapshots
-    as a longitudinal series. No external user callback is invoked.
+    Retain only requested last planes, reduced cuts and selected result volumes. No external user callback is invoked.
     """
     def __init__(self, selection): self.selection = selection
 
     @property
-    def needs_material(self): return bool(self.selection.material_fields or self.selection.material_cuts)
+    def needs_material(self): return bool(self.selection.material_fields or self.selection.material_cuts or self.selection.material_volumes)
 
     @property
-    def needs_optical(self): return self.selection.optical_cuts or self.selection.intensity_cuts
+    def needs_optical(self): return self.selection.optical_cuts or self.selection.intensity_cuts or self.selection.intensity_volume
 
     def prepare(self, previous, A, state, I, grid, record, identities):
         xp = sys.modules[identities['backend']]
@@ -127,19 +129,30 @@ class _Collector:
         if selection.optical_cuts: append('optical',A)
         if selection.intensity_cuts:
             append('intensity',total_intensity(A,coherence_groups=identities['coherence_groups'],xp=xp))
+        pending = {}
+        if selection.intensity_volume:
+            pending['intensity_volume'] = total_intensity(A,coherence_groups=identities['coherence_groups'],xp=xp)
         last = previous['last']
         if state is not None:
-            names = tuple(dict.fromkeys(selection.material_fields+selection.material_cuts))
+            names = tuple(dict.fromkeys(selection.material_fields+selection.material_cuts+selection.material_volumes))
             values = material_products(state,I,names,identities,record['material_weight_um'])
             for name in selection.material_cuts: append(name,values[name])
             last = {name:values[name] for name in selection.material_fields}
-        return dict(previous,series=series,last=last)
+            pending.update({name+'_volume':values[name] for name in selection.material_volumes})
+        return dict(previous,series=series,last=last,pending_volumes=pending)
+
+    def accept(self, collection):
+        """Publish prepared planes only after M4 atomic scientific acceptance."""
+        volumes = dict(collection.get('volumes', {}))
+        for name,value in collection.get('pending_volumes', {}).items():
+            volumes[name] = volumes.get(name, ()) + (value,)
+        return dict(collection, volumes=volumes, pending_volumes={})
 
 
 def product_locations(selection, spatial, dx, dy):
     """Semantic locations; explicit transverse coordinates are stored separately."""
     result = {}
-    for name in set(selection.material_fields+selection.material_cuts):
+    for name in set(selection.material_fields+selection.material_cuts+selection.material_volumes):
         axis = 'y' if '_y_' in name else 'x'
         face = name.endswith('_face')
         result[name] = dict(transverse='oriented_face' if face else ('harmonic_domain' if name=='harmonic_field' else 'node'),
@@ -148,13 +161,17 @@ def product_locations(selection, spatial, dx, dy):
             offset_um=[dx/2 if face and axis=='x' else 0.,dy/2 if face and axis=='y' else 0.],
             longitudinal='material_z_um',
             projection=PROJECTION_ID if name.endswith('_optical_node') else None)
+    if selection.intensity_volume:
+        result['intensity_volume'] = dict(transverse='node', longitudinal='boundary_z_um')
+    for name in selection.material_volumes:
+        result[name+'_volume'] = dict(result[name], gauge='zero_mean_potential_per_active_domain_v1' if name=='potential_node' else None)
     return result
 
 
-def run_unified_products(request, *, selection=UnifiedSelection(), cancellation_token=None):
+def run_unified_products(request, *, selection=UnifiedSelection(), cancellation_token=None, observer=None):
     context = request.initial_A.device if request.backend == 'cupy' else nullcontext()
     with context:
-        return _run_products(request,selection,cancellation_token)
+        return _run_products(request,selection,cancellation_token,observer)
 
 
 def next_address(request, count, ledger):
@@ -166,13 +183,13 @@ def next_address(request, count, ledger):
     return dict(cell_index=count,canonical_slab=slab)
 
 
-def _run_products(request, selection, cancellation_token):
+def _run_products(request, selection, cancellation_token, observer=None):
     selection.validate(request.spatial)
     collector = _Collector(selection)
     observing = collector.needs_material or collector.needs_optical or selection.launch
     result = run_unified_static(request,
         selection=UnifiedProductSelection(material_state=True,far_field=selection.far_field),
-        cancellation_token=cancellation_token,_collector=collector if observing else None)
+        cancellation_token=cancellation_token,observer=observer,_collector=collector if observing else None)
     xp = sys.modules[request.backend]
     arrays = {}
     collection = result.collection
@@ -199,6 +216,15 @@ def _finish_products(request,selection,result,xp,arrays,coordinates,collection):
         coordinates.update(x_um=collection['x'],y_um=collection['y'])
         if selection.launch: arrays['launch'] = collection['launch']
         arrays.update(collection['last'])
+        for name, planes in collection.get('volumes', {}).items():
+            expected = result.completed_cells + (1 if name=='intensity_volume' else 0)
+            if len(planes) != expected:
+                raise ValueError('accepted product-volume ledger incomplete')
+            arrays[name] = xp.stack(planes)
+        for name in selection.material_volumes:
+            if result.completed_cells == 0:
+                dtype = ('complex64' if request.precision.state_dtype=='float32' else 'complex128') if name=='material_phase_optical_node' else request.precision.state_dtype
+                arrays[name+'_volume'] = xp.empty((0,)+request.spatial.field_shape,dtype=dtype)
         for name,pairs in collection['series'].items():
             for axis,index in (('x',0),('y',1)):
                 arrays[name+'_cut_'+axis] = xp.stack([pair[index] for pair in pairs])

@@ -28,8 +28,8 @@ def estimate_resources(request, *, selection=UnifiedSelection()):
     mixed=nnz*(8+4)+(unknowns+1)*4+4*unknowns*8
     face_flux=2*dim*n*r
     scattering=3*n*r+n*c if request.scattering is not None else 0
-    material_observation=bool(selection.material_fields or selection.material_cuts)
-    optical_observation=selection.optical_cuts or selection.intensity_cuts
+    material_observation=bool(selection.material_fields or selection.material_cuts or selection.material_volumes)
+    optical_observation=selection.optical_cuts or selection.intensity_cuts or selection.intensity_volume
     observation=((nch*n*c if optical_observation or selection.launch else 0)
         + ((3*n+b)*r if material_observation else 0)
         + ((nx+ny)*r if material_observation or optical_observation or selection.launch else 0))
@@ -43,6 +43,12 @@ def estimate_resources(request, *, selection=UnifiedSelection()):
         last_fields+=(b if name=='harmonic_field' else n)*(c if name=='material_phase_optical_node' else r)
         selected+=(b if name=='harmonic_field' else n)*(c if name=='material_phase_optical_node' else r)
     for name in selection.material_cuts:selected+=cells*(nx+ny)*(c if name=='material_phase_optical_node' else r)
+    volumes={}
+    if selection.intensity_volume:volumes['intensity_volume']=(cells+1)*n*r
+    for name in selection.material_volumes:
+        volumes[name+'_volume']=cells*n*(c if name=='material_phase_optical_node' else r)
+    volume_bytes=sum(volumes.values())
+    selected+=volume_bytes
     if selection.far_field:selected+=n*r+(nx+ny)*8
     coordinates=(2*cells+1)*8+(nx+ny)*r
     canonical_endpoint=nch*n*c+(2*n+b)*r
@@ -59,6 +65,8 @@ def estimate_resources(request, *, selection=UnifiedSelection()):
         direct_solver=dict(domain_nodes=domain,estimated_unknowns=unknowns,
             dense_factorization_scenario_bytes=3*unknowns*unknowns*8,
             note='Fill/workspace is solver dependent; dense scenario is not a guaranteed peak bound.'),
-        longitudinal_full_volume_bytes=0,full_volumes_supported=False,
+        longitudinal_full_volume_bytes=volume_bytes,full_volumes_supported=True,
+        longitudinal_product_bytes=volumes,
+        host_retrieval_array_bytes=output,serialized_package_array_bytes=output,
         measured_native_peak=None,
         limitations='Array/workspace planning only. Excludes allocator caches, FFT plans, library overhead and metadata JSON bytes. No large-2D feasibility claim.')
