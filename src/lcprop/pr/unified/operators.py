@@ -90,9 +90,9 @@ def field(g, p, b):
     return tuple(b[j]-v for j, v in enumerate(g.gradient(p)))
 
 
-def flux(g, I, q, p, b):
+def flux(g, I, q, p, b, *, arithmetic=None):
     xp = g.xp
-    w = I*carrier(xp, q)
+    w = I*carrier(xp, q) if arithmetic is None else arithmetic.weight(xp, I, q)
     result = []
     for j, h in enumerate(g.spacing):
         v = g.neighbor(p, j)-p-b[j]*h

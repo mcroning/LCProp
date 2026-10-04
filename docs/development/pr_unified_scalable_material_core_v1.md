@@ -1,0 +1,99 @@
+# Unified scalable material core: S4-M1
+
+This is a standalone material API, not an enabled workflow. Import
+`lcprop.pr.unified._scalable.solve_material` explicitly and supply a
+`PRTransportIntensity`, named electrical closure and `PRUnifiedSolverSpec`.
+It returns an owned canonical `PRUnifiedMaterialState` and bounded scalar
+Newton/Krylov/physical evidence. No optical propagation, persistence, GUI,
+resource planning or workflow registration is introduced.
+
+Solver identities:
+
+- `pr_unified_reduced_columns_direct_v1`: existing independent x-column solver;
+- `pr_unified_connected_direct_v1`: existing ≤12,288-node connected direct solver;
+- `pr_unified_connected_scalable_v1`: genuine x-y matrix-free iterative solver.
+
+The scalable policy is `s2_pcg_gmres_constant_schur_fft_forcing_v1`, with
+`unified_static_physical_acceptance_v1` and `unified_static_cold_start_v1`.
+No `auto`, tolerance override, warm start, rescue or fallback is available.
+Existing workflows do not import or select this core. Their old material entry
+point rejects the new precision identity; it does not reinterpret it as v1.
+The direct Newton/system functions and their arithmetic remain unchanged.
+
+## Arithmetic
+
+`state32_carrier64_coeff64_linear64_bernoulli64_v3` stores q/ψ/b in float32.
+It evaluates exp(q promoted to float64), retains n64 and uses wide
+carrier-dependent coefficients, fluxes and sensitive linear algebra. The
+certified Bernoulli function evaluates in float64 and retains its established
+return rounding for state32 face drops. Field/geometry arithmetic is not
+indiscriminately promoted. Existing v1 float32 and float64 policies keep their
+meaning. V3 may only accompany the explicit scalable genuine-2D identity.
+
+The supported q32 interval is inclusive
+`[-103.972076416015625, 88.72283172607421875]`. Outside it the carrier evaluator
+raises before exp; trial-domain rejection occurs before trial residual
+evaluation. This is an arithmetic-domain contract, not a physical carrier
+floor. No clipping or replacement occurs.
+
+`_positive.carrier_product` returns a detached float64 array on the input
+backend, with no dtype override. `precision.carrier_dtype` identifies this
+quantitative dtype separately from canonical-state/output dtype. This prevents
+the native subnormal float32-output FTZ issue. A frozen state record borrows its
+arrays; it does not make their buffers immutable. Inputs must remain unchanged
+during a synchronous solve; the solver copies intensity and owns returned state.
+Later workflow/product/codec integration is outside M1.
+
+## Shared equations and iteration
+
+Product operators provide fitted face flux, compatible incidence, Gauss,
+neutrality, gauge and closure. The shared residual/physical diagnostic accepts
+an explicit arithmetic object; the default retains the legacy expressions.
+No second copy of transport equations or runtime research import is used.
+
+Unbiased closure uses q elimination and SPD PCG with the periodic FFT
+preconditioner. Fixed mean field, prescribed mean current and fixed-x/open-y
+use bordered analytic Jv and Schur/FFT-preconditioned GMRES. A7 is still reduced
+1D only. State64 promotion preserves the certified predecessor expressions;
+no spatial direct factorization is invoked. The small harmonic 2×2 solve is
+allowed. The existing backend's native sparse-QR prerequisite remains intact.
+
+Frozen policy: PCG 600 iterations; GMRES restart 60 with 20 cycles, two-pass
+MGS; true unpreconditioned residual checks including after correction casting;
+Newton 60; Armijo 1e-4 and 30 trials; the existing forcing and stagnation tests.
+Failure exposes the last solver iterate and scalar trace without accepting a
+workflow state. No full iteration history of scientific arrays is retained.
+
+## Allocation classes
+
+Reduced M2 retains its independent 1D sparse solves; no y faces/FFT/GMRES basis.
+Direct 2D retains bounded sparse Jacobian/factorization and its node guard.
+Scalable unbiased holds transverse state, n64/coefficient planes, PCG vectors
+and FFT symbol/workspaces. Scalable biased additionally holds cached Jv arrays
+(`136N+32` bytes of unique storage in 2D), Schur workspace, a float64 GMRES basis
+`(2N+2,61)`, Hessenberg `(61,60)` and length-61 RHS. Construction temporaries and
+FFT vendor workspace are additional; do not sum overlapping lifetime maxima.
+There are no z-volume allocations. These are source/CPU structural facts, not
+new native peak measurements or a large-grid Product qualification.
+
+## Validation and provenance
+
+The fixtures in `tests/data/pr_unified_scalable_v3` contain 12 frozen roots and
+32 primitive records selected from reviewed S2/v3 evidence. The compressed NPZ
+container has suffix `.npz.fixture` so it is visible despite the repository's
+output-NPZ ignore rule. Its manifest binds original archives, array bytes and
+S3 certification `2808aa7f7509bb2a8061355413004b3989b24c6dfe9da28b39798ef6234cedc5`
+(job 4880828). Expected roots were copied, not regenerated by Product.
+
+Tests compare independent direct/scalable roots, including 384×32 in both
+precisions, and use independently indexed/integrated-edge physical oracles.
+Frozen root gates remain rtol=2e-4/atol=2e-5 for state32 and 1e-8/1e-8 for
+state64, with only the existing face-current cancellation allowance. Primitive
+gates remain 2e-6/2e-7 and 3e-13/3e-14 respectively. High-precision exp edges
+use strict positivity and zero absolute tolerance. The prior q=80/upper-endpoint
+extra pointwise Jv cancellation discrepancies remain diagnostic evidence, not
+new mandatory pointwise gates or hidden passes.
+
+Native Product certification is pending. No existing GUI/workflow can select
+this solver, and no scalable size/resource or persistence promise is made by
+M1. Future S4-M2 dispatch and S4-M3 schema/GUI work require separate review.

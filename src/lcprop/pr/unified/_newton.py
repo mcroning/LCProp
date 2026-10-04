@@ -45,20 +45,20 @@ def system(g, I, q, p, b, closure):
 
 
 
-def residual(g, I, q, p, b, electrical):
+def residual(g, I, q, p, b, electrical, *, arithmetic=None):
     xp = g.xp
     U, V, target = electrical
-    n = carrier(xp, q)
-    J = flux(g, I, q, p, b)
+    n = carrier(xp, q) if arithmetic is None else arithmetic.carrier(xp, q)
+    J = flux(g, I, q, p, b) if arithmetic is None else arithmetic.flux(g, I, q, p, b)
     return xp.concatenate(((g.poisson(p)-n+1).ravel(), g.divergence(J).ravel()[:-1],
                            xp.mean(p).reshape(1), U @ b+V @ xp.stack([xp.mean(j) for j in J])-target))
 
 
-def diagnose(g, I, q, p, b, electrical, zero):
+def diagnose(g, I, q, p, b, electrical, zero, *, arithmetic=None):
     xp, B = g.xp, g.backend
     U, V, target = electrical
-    n = carrier(xp, q)
-    J = flux(g, I, q, p, b)
+    n = carrier(xp, q) if arithmetic is None else arithmetic.carrier(xp, q)
+    J = flux(g, I, q, p, b) if arithmetic is None else arithmetic.flux(g, I, q, p, b)
     G, D = g.poisson(p)-n+1, g.divergence(J)
     C = U @ b+V @ xp.stack([xp.mean(j) for j in J])-target
     vals = []
@@ -66,7 +66,7 @@ def diagnose(g, I, q, p, b, electrical, zero):
         vals += [xp.sqrt(xp.mean(a*a)), xp.max(abs(a))]
     # Floating-point stencil cancellation scales, reduced on backend.
     gs = 1+xp.max(n)+4*xp.max(abs(p))*sum(1/h**2 for h in g.spacing)
-    js = 1+4*xp.max(abs(I*n))*sum(1/h**2 for h in g.spacing)+sum(2*xp.max(abs(j))/h for j, h in zip(J, g.spacing))
+    js = 1+4*xp.max(abs(I*n if arithmetic is None else arithmetic.diagnostic_weight(xp, I, n)))*sum(1/h**2 for h in g.spacing)+sum(2*xp.max(abs(j))/h for j, h in zip(J, g.spacing))
     vals += [abs(xp.mean(n)-1), abs(xp.mean(p)), xp.min(n), xp.max(n),
              xp.all(xp.isfinite(q)) & xp.all(xp.isfinite(p)) & xp.all(xp.isfinite(n)) & xp.all(xp.isfinite(b)),
              gs, js, xp.max(xp.stack([xp.max(abs(j)) for j in J]))]

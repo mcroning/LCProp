@@ -35,6 +35,9 @@ def solve_static_material(intensity: PRTransportIntensity, *, closure):
         raise TypeError('PRTransportIntensity required')
     intensity.validate_structure()
     spatial, precision = intensity.spatial, intensity.precision
+    from .specs import POSITIVE_PRECISION
+    if precision.identity == POSITIVE_PRECISION:
+        raise ValueError("v3 requires the explicit scalable material API; legacy dispatch is unchanged")
     if not isinstance(closure, PRElectricalClosureSpec):
         raise TypeError('PRElectricalClosureSpec required')
     closure.validate_spatial(spatial)

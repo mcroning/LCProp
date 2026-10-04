@@ -16,6 +16,7 @@ PRESCRIBED_CURRENT = "periodic_prescribed_mean_current_v1"
 OPEN_TRANSVERSE = "periodic_fixed_x_field_zero_y_current_v1"
 A7_CURRENT = "periodic_a7_reservoir_current_1d_v1"
 MIXED_PRECISION = "state32_linear64_bernoulli64_v1"
+POSITIVE_PRECISION = "state32_carrier64_coeff64_linear64_bernoulli64_v3"
 DOUBLE_PRECISION = "state64_linear64_bernoulli64_v1"
 TRANSPORT_INTENSITY_ID = "pr_local_total_transport_intensity_v1"
 NORMALIZATION_ID = "pr_channel_peak_reference_v1"
@@ -166,7 +167,16 @@ class PRMaterialPrecisionSpec:
         self.validate()
 
     def validate(self):
-        expected = {MIXED_PRECISION: "float32", DOUBLE_PRECISION: "float64"}.get(self.identity)
+        expected = {MIXED_PRECISION: "float32", POSITIVE_PRECISION: "float32", DOUBLE_PRECISION: "float64"}.get(self.identity)
         if (expected is None or self.state_dtype != expected or self.output_dtype != expected
                 or self.linear_dtype != "float64" or self.bernoulli_dtype != "float64"):
             raise ValueError("unknown or contradictory material precision policy")
+
+    @property
+    def carrier_dtype(self):
+        """Derived scientific and quantitative product dtype; never a cast hint."""
+        return "float64" if self.identity == POSITIVE_PRECISION else self.state_dtype
+
+    @property
+    def coefficient_dtype(self):
+        return self.carrier_dtype
