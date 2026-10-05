@@ -415,7 +415,10 @@ def _geometry_from_grid_summary(
 
 
 def _geometry_from_pr_result(result: PRRunResult) -> Geometry:
-    return _geometry_from_grid_summary(result.grid_summary)
+    geometry = _geometry_from_grid_summary(result.grid_summary)
+    if result.diagnostics.get('optical_coupling')=='frozen_material_published_optical_first_v1':
+        return Geometry(x=geometry.x,y=geometry.y,z=geometry.z+float(result.grid_summary['dz_um']),units=geometry.units)
+    return geometry
 
 
 def _image_amplification_default_display_extent(
@@ -568,9 +571,10 @@ def pr_result_to_run_data(result: PRRunResult) -> RunData:
 
     geometry = _geometry_from_pr_result(result)
     if _is_fast_result(result):
-        return _fast_optical_run_data(
+        from lcprop.pr.material_previews import add_fields
+        return add_fields(_fast_optical_run_data(
             result, workflow=PR_TIMEDEPENDENT_WORKFLOW, geometry=geometry
-        )
+        ),result.diagnostics.get("material_previews",{}))
     (
         A_initial,
         A_final,

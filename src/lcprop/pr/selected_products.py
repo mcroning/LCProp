@@ -14,6 +14,9 @@ from lcprop.pr.visualization import _bin_edges, _block_centers
 from lcprop.transport.result_policy import static_product_selection
 
 DISPLAY_MAX_SIDE = 1024
+# Historical reduced-Static optical catalog; unified material IDs belong to a
+# different workflow and must not change this persisted availability mapping.
+OPTICAL_PRODUCTS = ("input_intensity", "output_intensity", "far_field_intensity", "complex_input", "complex_output")
 
 
 def display_shape(shape):
@@ -62,6 +65,8 @@ def preview_record(data, xe, ye, axes, coordinates, shape, *, far_field=False):
 
 def construct_selected_products(initial, final, *, policy, grid, launch, xp, asnumpy):
     kind, selection = static_product_selection(policy)
+    if set(selection)-set(OPTICAL_PRODUCTS):
+        raise ValueError('product is unavailable for legacy reduced Static')
     shape = initial.shape[-2:]
     coords = [(np.arange(n) - (n - 1) / 2) * float(grid[d])
               for n, d in zip(shape, ("dx_um", "dy_um"))]
@@ -98,11 +103,11 @@ def construct_selected_products(initial, final, *, policy, grid, launch, xp, asn
             "previews": previews, "exact": exact,
             "exact_coordinates": {"x": coords[0], "y": coords[1], "s_x": angular[0], "s_y": angular[1]},
             "availability": {name: ("selected" if name in selection else "not_selected")
-                             for name in ("input_intensity", "output_intensity", "far_field_intensity", "complex_input", "complex_output")}}
+                             for name in OPTICAL_PRODUCTS}}
 
 
 def validate_selected_products(products, *, shape, policy):
-    from lcprop.transport.result_policy import ANALYSIS_PRODUCTS
+    ANALYSIS_PRODUCTS = OPTICAL_PRODUCTS
     if products["version"] != 1 or products["policy"] != policy or policy not in ("interactive", "analysis"):
         raise ValueError("selected product contract version/policy mismatch")
     selection = products["selection"]

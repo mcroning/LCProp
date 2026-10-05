@@ -1,5 +1,5 @@
 """Selected runtime products, on isolated M4 observations; no public dispatch."""
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, replace, field
 from contextlib import nullcontext
 import sys
 from types import SimpleNamespace
@@ -62,6 +62,7 @@ class UnifiedSelectedResult:
     locations: dict
     schema: str = PRODUCTS_SCHEMA
     next_address: dict | None = None
+    viewer_previews: dict = field(default_factory=dict)
 
 
 def material_carrier(state, xp):
@@ -120,13 +121,13 @@ class _Collector:
     M4 owns atomic promotion. Snapshots are detached and mutation-checked.
     Retain only requested last planes, reduced cuts and selected result volumes. No external user callback is invoked.
     """
-    def __init__(self, selection): self.selection = selection
+    def __init__(self, selection, preview=None): self.selection, self.preview = selection, preview
 
     @property
-    def needs_material(self): return bool(self.selection.material_fields or self.selection.material_cuts or self.selection.material_volumes)
+    def needs_material(self): return self.preview is not None or bool(self.selection.material_fields or self.selection.material_cuts or self.selection.material_volumes)
 
     @property
-    def needs_optical(self): return self.selection.optical_cuts or self.selection.intensity_cuts or self.selection.intensity_volume
+    def needs_optical(self): return self.preview is not None or self.selection.optical_cuts or self.selection.intensity_cuts or self.selection.intensity_volume
 
     def prepare(self, previous, A, state, I, grid, record, identities):
         xp = sys.modules[identities['backend']]
@@ -152,7 +153,8 @@ class _Collector:
             for name in selection.material_cuts: append(name,values[name])
             last = {name:values[name] for name in selection.material_fields}
             pending.update({name+'_volume':values[name] for name in selection.material_volumes})
-        return dict(previous,series=series,last=last,pending_volumes=pending)
+        bounded = self.preview.prepare(previous.get("bounded_previews"),A,state,I,grid,record,identities,xp) if self.preview else {}
+        return dict(previous,series=series,last=last,pending_volumes=pending,bounded_previews=bounded)
 
     def accept(self, collection):
         """Publish prepared planes only after M4 atomic scientific acceptance."""
@@ -181,10 +183,10 @@ def product_locations(selection, spatial, dx, dy):
     return result
 
 
-def run_unified_products(request, *, selection=UnifiedSelection(), cancellation_token=None, observer=None):
+def run_unified_products(request, *, selection=UnifiedSelection(), cancellation_token=None, observer=None, preview=False):
     context = request.initial_A.device if request.backend == 'cupy' else nullcontext()
     with context:
-        return _run_products(request,selection,cancellation_token,observer)
+        return _run_products(request,selection,cancellation_token,observer,preview)
 
 
 def next_address(request, count, ledger):
@@ -196,9 +198,11 @@ def next_address(request, count, ledger):
     return dict(cell_index=count,canonical_slab=slab)
 
 
-def _run_products(request, selection, cancellation_token, observer=None):
+def _run_products(request, selection, cancellation_token, observer=None, preview=False):
     selection.validate(request.spatial)
-    collector = _Collector(selection)
+    from lcprop.pr.material_previews import StaticPreviews
+    preview_builder = StaticPreviews(request) if preview else None
+    collector = _Collector(selection,preview_builder)
     observing = collector.needs_material or collector.needs_optical or selection.launch
     result = run_unified_static(request,
         selection=UnifiedProductSelection(material_state=True,far_field=selection.far_field),
@@ -212,7 +216,8 @@ def _run_products(request, selection, cancellation_token, observer=None):
     coordinates = dict(boundary_z_um=xp.asarray(result.boundary_z_um,dtype=xp.float64),
                        material_z_um=xp.asarray(result.material_z_um,dtype=xp.float64))
     try:
-        return _finish_products(request,selection,result,xp,arrays,coordinates,collection)
+        selected = _finish_products(request,selection,result,xp,arrays,coordinates,collection)
+        return replace(selected,viewer_previews=preview_builder.finish(collection,result,xp)) if preview_builder else selected
     except Exception as exc:
         failure=dict(result.failure) if result.failure is not None else dict(
             stage='selected_products',cell_index=None,type=type(exc).__name__,reason=str(exc))

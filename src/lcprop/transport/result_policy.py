@@ -8,6 +8,7 @@ from enum import Enum
 class ResultRetrievalPolicy(str, Enum):
     """Select the portable result projection returned by remote execution."""
 
+    MINIMAL = "minimal"
     FAST = "fast"
     FULL = "full"
     INTERACTIVE = "interactive"

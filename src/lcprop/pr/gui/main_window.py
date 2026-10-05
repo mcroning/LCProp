@@ -300,7 +300,8 @@ class PRMainWindow(QWidget):
         menu = QMenu(self.analysis_products_button)
         self._analysis_actions = {}
         for name in ANALYSIS_PRODUCTS:
-            action = menu.addAction(name.replace("_", " ").title())
+            from lcprop.pr.material_previews import ANALYSIS_LABELS
+            action = menu.addAction(ANALYSIS_LABELS.get(name,name.replace("_", " ").title()))
             action.setCheckable(True)
             action.toggled.connect(self._analysis_selection_changed)
             self._analysis_actions[name] = action
@@ -683,6 +684,8 @@ class PRMainWindow(QWidget):
         supported = self.evolution_panel.workflow_id() in (PR_STATIC_WORKFLOW, PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW)
         for name, action in self._analysis_actions.items():
             allowed = (name in UNIFIED_ANALYSIS_PRODUCTS) if unified else (name in PUBLISHED_STATIC_ANALYSIS_PRODUCTS if local_plane else not name.startswith('unified_'))
+            if unified and name=="unified_face_y_volume":
+                allowed = self.evolution_panel.unified_closure.closure(self.material_panel.material().background_intensity).dimension==2
             action.setEnabled(allowed)
             if not allowed:
                 with QSignalBlocker(action):
@@ -696,7 +699,7 @@ class PRMainWindow(QWidget):
         analysis = "analysis:" + ",".join(names) if names else "analysis"
         if supported:
             interactive = current if kind == "interactive" else "fast"
-            items = ([("Minimal", "fast"),("Interactive", "interactive"),("Analysis",analysis),("Full","full")] if unified else [("Interactive", interactive), ("Analysis", analysis), ("Full", "full")])
+            items = ([("Minimal", "minimal"),("Fast / Exploratory", "fast"),("Interactive", "interactive"),("Analysis",analysis),("Full","full")] if unified else [("Interactive", interactive), ("Analysis", analysis), ("Full", "full")])
             selected = analysis if kind == "analysis" else ("full" if kind == "full" else (current if unified else interactive))
         else:
             items = [("Fast / Exploratory", "fast"), ("Full", "full")]
@@ -1955,18 +1958,19 @@ class PRMainWindow(QWidget):
         self.results_panel.set_request_summary(summary)
         workflow_id = self._workflow_id_for_request(request)
         self.results_panel.append_console(
-            f"{run_label} {workflow_id} "
+            f"{'Validating/Preparing' if execution_runner is self.slurm_runner else run_label} {workflow_id} "
             f"with {execution_runner.name}..."
         )
         self._active_request = request
         self._background_running = True
         self._outcome_received = False
         self._thread_done = False
-        self.run_status = "running"
+        remote = execution_runner is self.slurm_runner
+        self.run_status = "preparing" if remote else "running"
         self.last_progress = None
         self.last_remote_status = None
         self._progress_console_state.clear()
-        self.status_label.setText("Running…")
+        self.status_label.setText("Validating/Preparing…" if remote else "Running…")
         self.tabs.setCurrentWidget(self.results_panel)
         self._set_configuration_enabled(False)
 
@@ -1995,7 +1999,7 @@ class PRMainWindow(QWidget):
         if execution_runner is self.slurm_runner:
             self.results_panel.workspace.operation_boundary("Slurm submission / remote execution")
         thread.start()
-        self.results_panel.workspace.set_operation_status("Running")
+        self.results_panel.workspace.set_operation_status("Validating/Preparing" if remote else "Running")
 
     def _append_image_amplification_validation_warning(
         self,
@@ -2070,6 +2074,7 @@ class PRMainWindow(QWidget):
         self.last_progress = progress
         self.last_progress_thread = QThread.currentThread()
         if isinstance(progress, RemoteRunStatus):
+            self.results_panel.workspace.set_operation_status(progress.state.value.replace("_", " ").title())
             self.last_remote_status = progress
             self.remote_status_history.append(progress)
             message = remote_status_text(progress)
@@ -2295,7 +2300,10 @@ class PRMainWindow(QWidget):
                 else "Completed result"
             )
             self.results_panel.set_run_data(runner_result.run_data)
-            self.results_panel.workspace.finish_attempt(state)
+            from lcprop.pr.material_previews import displayed_policy
+            policy_label = displayed_policy(ordinary_result)
+            self.results_panel.workspace.finish_attempt(state+" — retrieval: "+policy_label)
+            self.results_panel.append_console("Displayed result retrieval: "+policy_label)
             if runner_result.kind == UNIFIED_WORKFLOW:
                 scientific=result.run.scientific
                 self.last_checkpoint=None

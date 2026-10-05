@@ -287,6 +287,7 @@ def test_reduced_td_fast_projection_keeps_optics_and_omits_full_volumes():
         "retained_fast_optical_intensity_yz",
         "far_field_intensity",
         "far_field_zero_order_masked",
+        "preview_E_x", "preview_E_x_xy",
     )
     assert products.longitudinal_enabled is True
     assert "downsampled preview" in products.longitudinal_message

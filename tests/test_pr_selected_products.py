@@ -9,7 +9,7 @@ from tests.test_pr_static_fast_construction import request_for
 from lcprop.pr.static_workflow import run_pr_static
 from lcprop.pr.static_transport_codec import encode_pr_static_transport_result, decode_pr_static_transport_result
 from lcprop.pr.operations import PR_STATIC_OPERATION
-from lcprop.pr.selected_products import construct_selected_products, display_shape
+from lcprop.pr.selected_products import construct_selected_products, display_shape, OPTICAL_PRODUCTS
 from lcprop.transport.result_policy import ANALYSIS_PRODUCTS, static_product_selection
 from lcprop.pr.visualization import block_average_2d
 from lcprop.optics.splitstep import total_intensity
@@ -26,7 +26,7 @@ def selected_from(full, policy):
         grid=full.grid_summary, launch=full.launch_summary, xp=np, asnumpy=np.asarray)
 
 
-@pytest.mark.parametrize('name', ANALYSIS_PRODUCTS)
+@pytest.mark.parametrize('name', OPTICAL_PRODUCTS)
 def test_analysis_independent_exact_products(name, full):
     result = run_pr_static(request_for(True, True), result_policy='analysis:' + name)
     encoded = encode_pr_static_transport_result(result, 'analysis:' + name)
@@ -175,18 +175,18 @@ def test_gui_analysis_intent_roundtrip(window, tmp_path):
     from lcprop.pr.static_workflow import PR_STATIC_WORKFLOW
     w = window
     w.evolution_panel.set_workflow_id(PR_STATIC_WORKFLOW)
-    w._set_product_policy('analysis:complex_output,output_intensity')
+    w._set_product_policy('analysis:complex_output,far_field_intensity')
     before = w.build_request()
     path = tmp_path/'analysis.json'
     w.save_experiment_to(path)
     w._set_product_policy('full')
     w.load_experiment_from(path)
     assert w.build_request() == before
-    assert w._current_execution_intent().retrieval_policy == 'analysis:complex_output,output_intensity'
-    assert w._analysis_actions['output_intensity'].isChecked()
+    assert w._current_execution_intent().retrieval_policy == 'analysis:complex_output,far_field_intensity'
+    assert w._analysis_actions['far_field_intensity'].isChecked()
     assert not w._analysis_actions['input_intensity'].isChecked()
     w._set_product_policy('fast')
-    assert w.result_policy_selector.currentText() == 'Interactive'
+    assert w.result_policy_selector.currentText() == 'Fast / Exploratory'
 
 
 # Reuse the catalog-isolated GUI fixture; no machine profile or SSH access.
@@ -323,8 +323,10 @@ def test_policy_switch_has_workflow_valid_payload(window, tmp_path, policy):
     assert w.result_policy_selector.currentData() == ('full' if policy == 'full' else 'fast')
     assert w._current_execution_intent().retrieval_policy in ('fast', 'full')
     w.evolution_panel.set_workflow_id('pr_static')
-    assert w.result_policy_selector.currentData() == ('full' if policy == 'full' else 'fast')
-    assert w.result_policy_selector.itemText(0) == 'Interactive'
+    from lcprop.pr.unified.integration import WORKFLOW_ID
+    assert w.evolution_panel.workflow_id()==WORKFLOW_ID  # Fresh nonlinear Static, not historical midpoint.
+    assert w.result_policy_selector.currentData() == 'interactive'  # Existing fresh-unified default.
+    assert w.result_policy_selector.itemText(0) == 'Minimal'
 
 
 @pytest.mark.parametrize('policy', ['interactive', 'analysis:complex_input', 'analysis:complex_output'])
@@ -416,7 +418,9 @@ def test_optional_analysis_pre_run_product_advice(window, monkeypatch):
     window.evolution_panel.set_workflow_id('pr_static')
     monkeypatch.setattr(window.input_panel, 'requests_optional_image_analysis', lambda: True)
     window._set_product_policy('interactive')
-    assert 'requires complex_input and complex_output' in window.describe_request(window.build_request())
+    # The advice is defined for retained historical midpoint requests, not the
+    # fresh unified workflow selected by today's GUI.
+    assert 'requires complex_input and complex_output' in window.describe_request(request_for(True,False))
     assert window.result_policy_selector.currentData() == 'interactive'
 
 
@@ -433,3 +437,9 @@ def test_far_field_click_does_not_link_angle_to_spatial_volume():
     pane._position_selected(0, 0)
     assert workspace.longitudinal_pane.guide_coordinates() == before
     workspace.close()
+
+
+@pytest.mark.parametrize('name',sorted(set(ANALYSIS_PRODUCTS)-set(OPTICAL_PRODUCTS)))
+def test_unified_material_products_not_offered_by_legacy_static(name):
+    with pytest.raises(ValueError,match='unavailable'):
+        construct_selected_products(None,None,policy='analysis:'+name,grid={},launch={},xp=np,asnumpy=np.asarray)

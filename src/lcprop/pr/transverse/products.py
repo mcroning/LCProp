@@ -678,10 +678,11 @@ def pr_transverse_result_to_run_data(result: PRTransverseRunResult) -> RunData:
     z = (np.arange(nz) + offset) * float(summary["dz_um"])
     geometry = Geometry(x=x, y=y, z=z, units="um")
     if result.retention_summary.get("policy", "full") == "fast":
-        return _fast_optical_run_data(
+        from lcprop.pr.material_previews import add_fields
+        return add_fields(_fast_optical_run_data(
             result, workflow=PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
             geometry=geometry,
-        )
+        ),result.diagnostics.get("material_previews",{}))
     psi = np.asarray(result.psi_final)
     if psi.shape != (nz, nx, ny):
         raise ValueError("psi_final does not match grid_summary")

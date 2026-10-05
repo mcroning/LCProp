@@ -7,6 +7,7 @@ import math
 from typing import Any, Mapping
 
 import numpy as np
+from lcprop.pr.material_previews import td_previews, validate as validate_material_previews
 
 from lcprop.core.backend import BackendSpec
 from lcprop.core.context import GridSpec
@@ -283,6 +284,7 @@ def encode_pr_timedependent_transport_result(
             preview = make_fast_intensity_preview(
                 result.source_intensity_stack,
                 grid_summary=result.grid_summary,
+                z_offset_fraction=1.0 if result.diagnostics.get('optical_coupling')=='frozen_material_published_optical_first_v1' else 0.0,
                 peak_intensity_reference=channel_peak_intensity_reference(
                     np.asarray(result.A_initial), xp=np
                 ),
@@ -338,7 +340,7 @@ def encode_pr_timedependent_transport_result(
         "requested_steps": int(result.requested_steps),
         "checkpoint": None,
         "diagnostics": pack_portable(
-            result.diagnostics, arrays, "result.diagnostics"
+            dict(result.diagnostics,material_previews=td_previews(result,transverse=False)) if policy == FAST_RESULT_POLICY else result.diagnostics, arrays, "result.diagnostics"
         ),
         "retention_summary": (
             fast_retention_summary(
@@ -617,6 +619,7 @@ def decode_pr_timedependent_transport_result(
         if retention["policy"] == FULL_RESULT_POLICY:
             checkpoint = _decode_checkpoint(values["checkpoint"], arrays)
             _validate_checkpoint_consistency(values, checkpoint)
+        validate_material_previews(values.get('diagnostics',{}).get('material_previews',{}))
         return PRRunResult(
             A_initial=values["A_initial"],
             A_final=values["A_final"],

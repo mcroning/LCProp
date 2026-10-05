@@ -123,6 +123,9 @@ def resource_plan(request,policy='fast'):
         ephemeral_preview_axes_max_bytes=2*128*8,
         backend_preview_workspace_scenario_bytes=nx*ny*(real_bytes+4*8),
         retained_progress_history_bytes=0)
+    if normalize_result_policy(policy)=='fast':
+        nfields=6 if request.closure.dimension==2 else 5
+        plan['presentation']['fast_material_and_optical_preview_upper_bytes']=nfields*4*1024*1024
     return plan
 
 
@@ -243,7 +246,8 @@ def execute_unified(request, *, result_policy='fast', cancellation_token=None, p
             event.total_cells, event.z_um, 'z', 'um', perf_counter()-started,
             latest_field_state=event, diagnostics=event.diagnostics))
     result=products.run_unified_products(prepared,selection=selection_for_policy(policy),
-        cancellation_token=cancellation_token,observer=accepted if progress_callback is not None else None)
+        cancellation_token=cancellation_token,observer=accepted if progress_callback is not None else None,
+        preview=policy=='fast')
     return UnifiedExecutionResult(result,policy,prepared.backend)
 
 
@@ -306,13 +310,16 @@ def unified_to_run_data(result):
             values=np.asarray([reduce(v for k,v in record.items() if relevant(k)) for record in observations])
             curves.append((key,CurveData(key,label,z,values,'Material z',label.split(' vs ')[0],{'x':'um'})))
     coords=r.coordinates
-    return RunData(WORKFLOW_ID,geometry=Geometry(asnumpy(coords.get('x_um',np.array([]))),
+    run_data = RunData(WORKFLOW_ID,geometry=Geometry(asnumpy(coords.get('x_um',np.array([]))),
         asnumpy(coords.get('y_um',np.array([]))),asnumpy(coords['boundary_z_um'])),fields=FieldCollection(items),curves=CurveCollection(curves),
         diagnostics=DiagnosticCollection([('summary',DiagnosticData('summary','Accepted unified result',
             dict(status=s.status,completed_cells=s.completed_cells,reached_z_um=s.reached_z_um,reason=s.reason,
                  solver=s.identities.get('solver'),material_failure=(codec._failure_metadata(s.failure) or {}).get('material_failure'),
                  material_iterations=[{k:v for k,v in row['observations'].items() if k in ('iterations','inner_iterations_total','linear_pcg','linear_gmres')} for row in s.ledger],
+                 retrieval_policy=result.result_policy,
                  presentation_state=f'{s.status.title()} result — accepted z={s.reached_z_um:g} µm')))]))
+    from lcprop.pr.material_previews import add_fields
+    return add_fields(run_data,r.viewer_previews)
 
 
 def _encode_request(r):return EncodedRequest(PortablePayload(encode_fresh(r),{}),r.backend.backend)
@@ -322,11 +329,19 @@ def _decode_request(m,a):
 def _encode_result(r,policy=None):
     if policy is not None and normalize_result_policy(policy)!=r.result_policy:raise ValueError('Result policy mismatch')
     s=r.run.scientific
-    p=PortablePayload(dict(result_policy=r.result_policy,backend=r.backend),
-        {'unified_package':np.frombuffer(codec.encode_result(r.run),dtype=np.uint8)})
+    from lcprop.pr.transport_common import pack_portable
+    from lcprop.pr.material_previews import validate
+    arrays={'unified_package':np.frombuffer(codec.encode_result(r.run),dtype=np.uint8)}
+    metadata=dict(result_policy=r.result_policy,backend=r.backend)
+    if r.run.viewer_previews:
+        if r.result_policy!='fast':raise ValueError('bounded previews require Fast policy')
+        validate(r.run.viewer_previews)
+        metadata['viewer_previews']=pack_portable(r.run.viewer_previews,arrays,'viewer_previews')
+    p=PortablePayload(metadata,arrays)
     return EncodedResult(p,s.status,None,s.status=='cancelled',s.reason,r.backend,result_policy=r.result_policy)
 def _decode_result(m,a):
-    if set(m)!={'result_policy','backend'} or set(a)!={'unified_package'}:raise ValueError('Invalid unified result envelope')
+    if not {'result_policy','backend'}<=set(m) or set(m)-{'result_policy','backend','viewer_previews'} or 'unified_package' not in a:raise ValueError('Invalid unified result envelope')
+    if 'viewer_previews' not in m and set(a)!={'unified_package'}:raise ValueError('Unexpected viewer arrays')
     payload=a['unified_package'].tobytes()
     run=codec.decode_result(payload);policy=normalize_result_policy(m['result_policy'])
     import io, json, zipfile
@@ -342,6 +357,20 @@ def _decode_result(m,a):
         raise ValueError('Result selection/policy mismatch')
     if m['backend'] not in ('numpy','cupy') or m['backend']!=run.scientific.identities['backend']:
         raise ValueError('Unified execution backend provenance mismatch')
+    if 'viewer_previews' in m:
+        from lcprop.pr.transport_common import unpack_portable
+        from lcprop.pr.material_previews import validate
+        if policy!='fast':raise ValueError('bounded previews require Fast policy')
+        from lcprop.pr.transport_common import ARRAY_MARKER
+        def references(value):
+            if isinstance(value,dict):
+                if set(value)=={ARRAY_MARKER}:return {value[ARRAY_MARKER]}
+                return set().union(*(references(v) for v in value.values()))
+            if isinstance(value,list):return set().union(*(references(v) for v in value))
+            return set()
+        if references(m['viewer_previews']) != set(a)-{'unified_package'}:raise ValueError('Unexpected viewer arrays')
+        previews=unpack_portable(m['viewer_previews'],a);validate(previews)
+        run=replace(run,viewer_previews=previews)
     return UnifiedExecutionResult(run,policy,m['backend'])
 
 UNIFIED_OPERATION=WorkflowOperation('pr',WORKFLOW_ID,execute_unified,unified_to_run_data,supports_result_policy=True)
