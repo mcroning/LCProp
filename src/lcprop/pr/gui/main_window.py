@@ -1846,6 +1846,12 @@ class PRMainWindow(QWidget):
             request = self.build_request()
             summary = self.describe_request(request)
             self._validate_execution_request(request)
+        except ValueError as exc:
+            self.status_label.setText("Invalid request")
+            self.results_panel.append_console("Invalid request: " + str(exc))
+            report_failure(self, "Invalid request: " + str(exc))
+            self.tabs.setCurrentWidget(self.results_panel)
+            return
         except Exception:
             self.status_label.setText("Invalid request")
             self.results_panel.append_console("ERROR")

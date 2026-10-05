@@ -1004,10 +1004,16 @@ def continue_pr_timedependent(
     ):
         raise ValueError("additional_steps must be a nonnegative integer")
     validate_pr_continuation(request, checkpoint)
+    if request.material.normalization_identity != "pr_channel_peak_reference_v1" and request.initial_A is not None:
+        raise ValueError("physical TD prepared initial_A requires an explicit physical scale; use the physical launch configuration")
     continuation_request = replace(
         request,
         solver=replace(request.solver, Nt=resolved_additional_steps),
-        initial_A=np.asarray(checkpoint.A0).copy(),
+        # Physical launches must retain beam-power/irradiance authority.
+        # A0 is the fixed launch, not an evolving optical checkpoint state.
+        initial_A=(np.asarray(checkpoint.A0).copy()
+                   if request.material.normalization_identity == "pr_channel_peak_reference_v1"
+                   else None),
         initial_E=np.asarray(checkpoint.E_current).copy(),
     )
     return run_pr_timedependent(
