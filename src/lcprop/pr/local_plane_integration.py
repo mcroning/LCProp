@@ -3,6 +3,8 @@
 No continuation or migration of midpoint requests. Only committed streaming
 products are exposed; unsupported exact Analysis selections fail explicitly.
 """
+from lcprop.pr.specs import material_metadata
+
 from dataclasses import asdict, dataclass, replace
 from time import monotonic
 
@@ -64,7 +66,7 @@ def encode_local_plane_request(request):
         raise ValueError('saved fresh local-plane requests cannot contain runtime arrays; continuation is unsupported')
     return dict(schema_version=1, workflow_id=PR_LOCAL_PLANE_WORKFLOW,
         arithmetic_id=PR_LOCAL_PLANE_ARITHMETIC, grid=asdict(request.grid),
-        beams=encode_beam_stack(request.beams), material=asdict(request.material),
+        beams=encode_beam_stack(request.beams), material=material_metadata(request.material),
         backend=asdict(request.backend), material_response=request.material_response.to_payload(),
         optical_boundary=asdict(request.optical_boundary),
         scattering=None if request.scattering is None else asdict(request.scattering),

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from lcprop.pr.specs import material_metadata
+
+from dataclasses import asdict, replace
 from time import perf_counter
 from typing import Callable
 
@@ -15,6 +17,7 @@ from lcprop.optics.launch import OpticalLaunchContext, build_launch, normalized_
 from lcprop.optics.launch_configuration import reject_prepared_launch_conflict
 from lcprop.optics.screens import validate_channel_launch_elements
 from lcprop.optics.splitstep import scalar_angular_spectrum_kernel, total_intensity
+from lcprop.pr.illumination import resolve_material_illumination, PhysicalIlluminationReference
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.longitudinal_cuts import (
     extract_backend_longitudinal_optical_intensity_cuts,
@@ -83,6 +86,8 @@ def _validate_request(request: PRTransverseRunRequest) -> None:
     request.grid.validate()
     request.beams.validate()
     request.material.validate()
+    if request.material.normalization_identity != "pr_channel_peak_reference_v1" and request.initial_A is not None:
+        raise ValueError("physical TD prepared initial_A requires an explicit physical scale; use the physical launch configuration")
     request.transport.validate()
     request.dielectric.validate()
     request.boundary.validate()
@@ -315,7 +320,13 @@ def run_pr_transverse_timedependent(
         xp=xp,
         complex_dtype=backend.complex_dtype,
     )
-    peak_reference = channel_peak_intensity_reference(A0, xp=xp)
+    input_request = request
+    source_reference, runtime_material = resolve_material_illumination(
+        request.material, A0,
+        grid=grid, optical_scale_W_cm2=launch.physical_total_power_mW * 1e5,
+        coherence_groups=request.beams.coherence_groups, xp=grid.xp)
+    request = replace(request, material=runtime_material)
+    peak_reference = source_reference
     scattering_phase_stack = _canonical_scattering_phase_stack(
         request.scattering,
         grid=grid,
@@ -691,7 +702,8 @@ def run_pr_transverse_timedependent(
         "material_response": asdict(request.material_response),
         "grid_request": asdict(request.grid),
         "beam_request": asdict(request.beams),
-        "material": asdict(request.material),
+        "material": material_metadata(input_request.material),
+        **({"source_normalization": source_reference.metadata()} if isinstance(source_reference, PhysicalIlluminationReference) else {}),
         "transport": asdict(request.transport),
         "dielectric": asdict(request.dielectric),
         "boundary": asdict(request.boundary),

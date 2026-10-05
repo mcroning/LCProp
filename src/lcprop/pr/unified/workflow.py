@@ -5,6 +5,8 @@ requests, register dispatch, encode results, or offer continuation. All arrays
 returned are runtime backend arrays, never implicit host presentation payloads.
 M5's private product collector observes isolated snapshots without new arithmetic.
 """
+from lcprop.pr.specs import material_metadata
+
 from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
@@ -24,6 +26,8 @@ from lcprop.pr.scattering import (
     PR_CANONICAL_SCATTERING_V2, PRCanonicalScatteringSpec,
     canonical_scattering_phase_increment, canonical_slab_range,
 )
+from lcprop.pr.illumination import (resolve_material_illumination, PhysicalIlluminationReference,
+    LEGACY_NORMALIZATION, INTEGRAL_NORMALIZATION)
 from lcprop.pr.source import channel_peak_intensity_reference, pr_driving_intensity
 from lcprop.pr.specs import PRMaterialSpec
 from .projection import PROJECTION_ID, electric_field_face, electric_field_optical_node
@@ -65,6 +69,7 @@ class UnifiedStaticRequest:
     projection_identity: str = PROJECTION_ID
     persistence_schema: str = "pr_unified_static_request_v2"
     solver: PRUnifiedSolverSpec | None = None
+    optical_scale_W_cm2: float | None = None
 
     def __post_init__(self):
         if self.solver is None:
@@ -116,6 +121,9 @@ def _validate(r, selection):
         raise ValueError("unknown unified workflow/arithmetic/projection identity")
     r.grid.validate(); r.spatial.validate(); r.precision.validate()
     r.material.validate(); r.closure.validate_spatial(r.spatial)
+    if r.material.normalization_identity == INTEGRAL_NORMALIZATION:
+        from lcprop.pr.illumination import nonnegative
+        nonnegative(r.optical_scale_W_cm2, "prepared optical irradiance scale")
     validate_execution(r.solver, r.spatial, r.closure, r.precision, r.backend)
     if r.backend not in ("numpy", "cupy"):
         raise ValueError("explicit backend required; no scientific fallback")
@@ -133,7 +141,8 @@ def _validate(r, selection):
     expected_bias = r.closure.reservoir_field if r.closure.identity == A7_CURRENT else 0.
     if r.material.applied_field != expected_bias:
         raise ValueError("legacy applied field conflicts with explicit electrical closure")
-    if r.closure.identity == A7_CURRENT and r.closure.background_intensity != r.material.background_intensity:
+    if (r.closure.identity == A7_CURRENT and r.material.normalization_identity == LEGACY_NORMALIZATION
+            and r.closure.background_intensity != r.material.background_intensity):
         raise ValueError("A7 reservoir and transport backgrounds disagree")
     for components in (selection.electric_faces, selection.electric_nodes):
         if len(set(components)) != len(components) or any(c not in r.spatial.active_axes for c in components):
@@ -262,7 +271,7 @@ def _run(r, selection, count, backend, token, collector=None, observer=None):
         spatial=asdict(r.spatial), closure=asdict(r.closure), precision=asdict(r.precision),
         backend=r.backend, electro_optic="existing_scalar_x_delta_n",
         optical_boundary="periodic", wavelength_um=r.wavelength_um,
-        material_parameters=asdict(r.material), grid=asdict(r.grid),
+        material_parameters=material_metadata(r.material), grid=asdict(r.grid),
         scattering=asdict(r.scattering) if r.scattering else None)
     if r.solver.identity == SCALABLE:
         identities["solver"] = asdict(r.solver)
@@ -274,7 +283,21 @@ def _run(r, selection, count, backend, token, collector=None, observer=None):
         identities['coherence_groups'] = groups
         candidate = r.initial_A.copy()
         _finite(candidate, xp, "launch")
-        peak = channel_peak_intensity_reference(candidate, xp=xp)
+        source_reference, runtime_material = resolve_material_illumination(
+            r.material, candidate, grid=grid, optical_scale_W_cm2=r.optical_scale_W_cm2,
+            coherence_groups=groups, xp=xp)
+        peak = (float(xp.sum(xp.max(xp.abs(candidate)**2, axis=(-2,-1))).item())
+            if isinstance(source_reference, PhysicalIlluminationReference)
+            else source_reference)
+        closure = r.closure
+        if isinstance(source_reference, PhysicalIlluminationReference):
+            identities['source_normalization'] = source_reference.metadata()
+            identities['optical_scale_W_cm2'] = r.optical_scale_W_cm2
+            if closure.identity == A7_CURRENT:
+                closure = PRElectricalClosureSpec.a7(closure.reservoir_field,
+                                                    source_reference.background_fraction)
+                identities['closure'] = asdict(closure)
+        r = replace(r, material=runtime_material, closure=closure)
         if not math.isfinite(peak):
             raise ValueError("nonfinite launch reference")
         identities['peak_intensity_reference'] = peak
@@ -302,10 +325,13 @@ def _run(r, selection, count, backend, token, collector=None, observer=None):
             candidate = accepted.copy()
             hop_linear_inplace(candidate, kernel, xp=xp)
             stage = "arriving_intensity"
-            intensity = pr_driving_intensity(candidate, peak_intensity_reference=peak,
+            intensity = pr_driving_intensity(candidate, peak_intensity_reference=source_reference,
                 background_intensity=r.material.background_intensity, coherence_groups=groups, xp=xp)
             transport = PRTransportIntensity(intensity, r.spatial, r.precision, r.backend,
-                peak, r.material.dark_intensity, r.material.uniform_background_intensity)
+                (source_reference.reference_irradiance_W_cm2 if isinstance(source_reference, PhysicalIlluminationReference) else peak),
+                r.material.dark_intensity, r.material.uniform_background_intensity,
+                normalization_id=(INTEGRAL_NORMALIZATION if isinstance(source_reference, PhysicalIlluminationReference)
+                                  else LEGACY_NORMALIZATION))
             stage = "material_equilibrium"
             if r.solver.identity == SCALABLE:
                 from .scalable_workflow import solve_with_diagnostics

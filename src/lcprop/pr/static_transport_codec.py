@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lcprop.pr.specs import material_metadata
+
 from dataclasses import asdict, replace
 from typing import Any, Mapping
 
@@ -106,7 +108,7 @@ def encode_pr_static_transport_request(
         "scattering": None if request.scattering is None else asdict(request.scattering),
         "grid": asdict(request.grid),
         "beams": encode_beam_stack(request.beams),
-        "material": asdict(request.material),
+        "material": material_metadata(request.material),
         "solver": pack_portable(request.solver, arrays, "solver"),
         "backend": asdict(request.backend),
         "material_response": request.material_response.to_payload(),

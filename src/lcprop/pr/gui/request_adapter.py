@@ -118,7 +118,7 @@ def validate_pr_gui_request(request: PRRunRequest) -> PRRequestPreflight:
         raise TypeError("request must be a PRRunRequest")
     aperture = _validate_pr_gui_common(request)
     grid = grid_metadata(request.grid)
-    if grid.Nx > PR_GUI_TIMESTEP_SCAN_MAX_MODES:
+    if grid.Nx > PR_GUI_TIMESTEP_SCAN_MAX_MODES or request.material.normalization_identity != "pr_channel_peak_reference_v1":
         dt_limit = None
         assessment = "pending"
     else:
@@ -252,6 +252,9 @@ def build_pr_request(
     workflow_id = evolution_panel.workflow_id()
     grid = grid_panel.grid()
     material = material_panel.material()
+    if material.normalization_identity != "pr_channel_peak_reference_v1" and workflow_id not in (
+            UNIFIED_WORKFLOW, PR_TIMEDEPENDENT_WORKFLOW, PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW):
+        raise ValueError("physical normalization supports unified Static and TD; choose explicit legacy mode for this workflow")
     launch = beam_panel.launch_configuration()
     beam_panel.set_optical_context(
         n_ref=float(material.refractive_index),
@@ -270,7 +273,8 @@ def build_pr_request(
     scattering = evolution_panel.scattering_spec()
     if workflow_id == UNIFIED_WORKFLOW:
         common.pop('initial_A');common.pop('initial_E')
-        closure=evolution_panel.unified_closure.closure(material.background_intensity)
+        closure=evolution_panel.unified_closure.closure(material.background_intensity
+            if material.normalization_identity=="pr_channel_peak_reference_v1" else 0.)
         common['material']=replace(material,applied_field=closure.reservoir_field or 0.)
         from lcprop.pr.unified.solver_specs import PRUnifiedSolverSpec, REDUCED, SCALABLE, DIRECT_POLICY, ITERATIVE_POLICY
         identity=evolution_panel.unified_solver.currentData() if closure.dimension==2 else REDUCED

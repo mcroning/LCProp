@@ -13,6 +13,7 @@ from lcprop.core.beams import BeamChannel
 from lcprop.optics.farfield import direction_cosine_spectrum
 from lcprop.optics.splitstep import total_intensity
 from lcprop.pr.carrier_power import carrier_power_diagnostic_from_summary
+from lcprop.pr.illumination import result_source_inverse
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.transverse.projection import project_active_field
 from lcprop.pr.transverse.specs import (
@@ -89,6 +90,8 @@ def _physical_intensity_volume(result, source) -> np.ndarray:
         material["uniform_background_intensity"]
     )
     reference = channel_peak_intensity_reference(result.A_initial, xp=np)
+    inverse = result_source_inverse(result)
+    if inverse is not None: reference, background = inverse
     return (np.asarray(source) - background) * float(reference)
 
 
@@ -476,6 +479,8 @@ def _static_presentation_products(
     background = float(material["dark_intensity"]) + float(
         material["uniform_background_intensity"]
     )
+    inverse = result_source_inverse(result)
+    if inverse is not None: peak_reference, background = inverse
     source = np.asarray(result.source_intensity_stack)
     optical_xz = (source[:, :, iy] - background) * peak_reference
     optical_yz = (source[:, ix, :] - background) * peak_reference

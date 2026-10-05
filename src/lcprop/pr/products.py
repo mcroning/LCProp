@@ -32,6 +32,7 @@ from lcprop.pr.image_amplification import (
     PRImageAmplificationResult,
     PRImageAmplificationRunRequest,
 )
+from lcprop.pr.illumination import result_source_inverse
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.specs import PRRunResult, PR_TIMEDEPENDENT_WORKFLOW
 from lcprop.pr.static_workflow import (
@@ -360,10 +361,14 @@ def _physical_optical_intensity_volume(
     reference = channel_peak_intensity_reference(
         np.asarray(result.A_initial), xp=np
     )
+    inverse = result_source_inverse(result)
+    if inverse is not None: reference, background = inverse
     return (np.asarray(source) - float(background)) * float(reference)
 
 
 def _material_background(result: Any) -> float | None:
+    inverse = result_source_inverse(result)
+    if inverse is not None: return inverse[1]
     checkpoint = getattr(result, "checkpoint", None)
     if checkpoint is not None:
         return float(checkpoint.request.material.background_intensity)

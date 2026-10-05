@@ -5,6 +5,8 @@ from lcprop.gui.numeric_widgets import CompactDoubleSpinBox
 
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
+    QLineEdit,
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
@@ -13,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from lcprop.pr.specs import PRMaterialSpec
+from lcprop.pr.illumination import INTEGRAL_NORMALIZATION, LEGACY_NORMALIZATION
 
 
 def _double_spin(
@@ -38,6 +41,16 @@ class PRMaterialPanel(QWidget):
         layout = QVBoxLayout(self)
         primary = readable_form(QFormLayout())
 
+        self.normalization_mode = QComboBox()
+        self.normalization_mode.addItem("Physical total illumination", INTEGRAL_NORMALIZATION)
+        self.normalization_mode.addItem("Legacy channel-peak reference", LEGACY_NORMALIZATION)
+        self.dark_irradiance = QLineEdit()
+        self.uniform_irradiance = QLineEdit()
+        for edit in (self.dark_irradiance, self.uniform_irradiance):
+            edit.setPlaceholderText("Required: enter a value or explicit 0")
+        primary.addRow("Intensity normalization", self.normalization_mode)
+        primary.addRow("Dark-equivalent irradiance (mW/cm²)", self.dark_irradiance)
+        primary.addRow("Uniform background irradiance (mW/cm²)", self.uniform_irradiance)
         self.dark_intensity = _double_spin(0.0, 1e9, defaults.dark_intensity)
         self.uniform_background_intensity = _double_spin(
             0.0,
@@ -66,6 +79,14 @@ class PRMaterialPanel(QWidget):
         )
         primary.addRow("Gain-length product", self.gain_length_product)
         primary.addRow("Refractive index", self.refractive_index)
+        def update_normalization():
+            physical = self.normalization_mode.currentData() == INTEGRAL_NORMALIZATION
+            for control in (self.dark_irradiance, self.uniform_irradiance):
+                control.setEnabled(physical)
+            for control in (self.dark_intensity, self.uniform_background_intensity):
+                control.setEnabled(not physical)
+        self.normalization_mode.currentIndexChanged.connect(update_normalization)
+        update_normalization()
         layout.addLayout(primary)
 
         advanced_box = QGroupBox("Advanced material normalization")
@@ -116,16 +137,34 @@ class PRMaterialPanel(QWidget):
         layout.addWidget(advanced_box)
         layout.addStretch(1)
 
-    def material(self) -> PRMaterialSpec:
+    def closure_background(self):
+        """A7 physical requests defer the derived fraction until launch acceptance."""
+        if self.normalization_mode.currentData() == INTEGRAL_NORMALIZATION:
+            return 0.
+        return self.dark_intensity.value() + self.uniform_background_intensity.value()
+
+    def material(self, *, allow_incomplete=False) -> PRMaterialSpec:
         override = (
             self.characteristic_wavenumber_per_um_override.value()
             if self.use_characteristic_wavenumber_override.isChecked()
             else None
         )
+        physical = self.normalization_mode.currentData() == INTEGRAL_NORMALIZATION
+        def irradiance(edit):
+            from decimal import Decimal, InvalidOperation
+            text = edit.text().strip()
+            if not text: return None
+            try: return float(Decimal(text) / Decimal(1000))
+            except InvalidOperation as exc:
+                if allow_incomplete: return None  # GUI rollback snapshot, never execution.
+                raise ValueError("physical irradiance must be numeric") from exc
         return PRMaterialSpec(
-            dark_intensity=self.dark_intensity.value(),
+            normalization_identity=self.normalization_mode.currentData(),
+            dark_irradiance_W_cm2=irradiance(self.dark_irradiance) if physical else None,
+            uniform_irradiance_W_cm2=irradiance(self.uniform_irradiance) if physical else None,
+            dark_intensity=0. if physical else self.dark_intensity.value(),
             uniform_background_intensity=(
-                self.uniform_background_intensity.value()
+                0. if physical else self.uniform_background_intensity.value()
             ),
             applied_field=self.applied_field.value(),
             gain_length_product=self.gain_length_product.value(),
@@ -136,8 +175,14 @@ class PRMaterialPanel(QWidget):
             characteristic_wavenumber_per_um_override=override,
         )
 
-    def set_material(self, material: PRMaterialSpec) -> None:
-        material.validate()
+    def set_material(self, material: PRMaterialSpec, *, validate=True) -> None:
+        if validate: material.validate()
+        self.normalization_mode.setCurrentIndex(self.normalization_mode.findData(material.normalization_identity))
+        from decimal import Decimal
+        self.dark_irradiance.setText("" if material.dark_irradiance_W_cm2 is None else
+            str(Decimal(str(material.dark_irradiance_W_cm2))*1000))
+        self.uniform_irradiance.setText("" if material.uniform_irradiance_W_cm2 is None else
+            str(Decimal(str(material.uniform_irradiance_W_cm2))*1000))
         self.dark_intensity.setValue(material.dark_intensity)
         self.uniform_background_intensity.setValue(
             material.uniform_background_intensity

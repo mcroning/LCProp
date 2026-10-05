@@ -190,6 +190,19 @@ class _UnresolvedExecutionRunner:
     name = "Slurm (saved target unavailable/unresolved)"
 
 
+def illumination_summary(material):
+    from lcprop.pr.illumination import INTEGRAL_NORMALIZATION
+    if material.normalization_identity == INTEGRAL_NORMALIZATION:
+        return (f'Normalization: {material.normalization_identity}; physical irradiance authority\n'
+                f'Dark-equivalent irradiance: {material.dark_irradiance_W_cm2} W/cm²; '
+                f'uniform background: {material.uniform_irradiance_W_cm2} W/cm²\n'
+                'Transport = (optical + dark + uniform)/aperture-mean total illumination; '
+                'background fractions derived at launch; characteristic time only')
+    return (f'Normalization: {material.normalization_identity} (legacy)\n'
+            f'Normalized intensities: dark={material.dark_intensity:g}, '
+            f'uniform background={material.uniform_background_intensity:g}')
+
+
 def electrical_closure_summary(closure):
     """Describe validated electrical metadata without changing the request."""
     from lcprop.pr.unified.specs import (
@@ -573,14 +586,15 @@ class PRMainWindow(QWidget):
         return {
             "loaded_unified_request": getattr(self.evolution_panel, "_loaded_unified_request", None),
             "unified_solver": self.evolution_panel.unified_solver.currentData(),
-            "unified_closure": self.evolution_panel.unified_closure.closure(self.material_panel.material().background_intensity),
+            "unified_closure": self.evolution_panel.unified_closure.closure(self.material_panel.closure_background()),
             "legacy_static": self.evolution_panel.legacy_static,
             "transport": self.evolution_panel.transport_model.currentData(),
             "execution_controls": self._capture_execution_controls(),
             "input_mode": self.input_panel.mode_id(),
             "workflow_id": workflow_id,
             "grid": self.grid_panel.grid(),
-            "material": self.material_panel.material(),
+            "material": self.material_panel.material(allow_incomplete=True),
+            "physical_input_texts": (self.material_panel.dark_irradiance.text(),self.material_panel.uniform_irradiance.text()),
             "solver": solver,
             "material_response": (
                 self.evolution_panel.transverse_material_response()
@@ -606,7 +620,9 @@ class PRMainWindow(QWidget):
         mode_index = self.input_panel.input_mode.findData(state["input_mode"])
         self.input_panel.input_mode.setCurrentIndex(mode_index)
         self.grid_panel.set_grid(state["grid"])
-        self.material_panel.set_material(state["material"])
+        self.material_panel.set_material(state["material"],validate=False)
+        self.material_panel.dark_irradiance.setText(state["physical_input_texts"][0])
+        self.material_panel.uniform_irradiance.setText(state["physical_input_texts"][1])
         workflow_id = state["workflow_id"]
         self.evolution_panel.set_workflow_id(workflow_id)
         self.evolution_panel.transport_model.setCurrentIndex(self.evolution_panel.transport_model.findData(state['transport']))
@@ -685,7 +701,7 @@ class PRMainWindow(QWidget):
         for name, action in self._analysis_actions.items():
             allowed = (name in UNIFIED_ANALYSIS_PRODUCTS) if unified else (name in PUBLISHED_STATIC_ANALYSIS_PRODUCTS if local_plane else not name.startswith('unified_'))
             if unified and name=="unified_face_y_volume":
-                allowed = self.evolution_panel.unified_closure.closure(self.material_panel.material().background_intensity).dimension==2
+                allowed = self.evolution_panel.unified_closure.dimension==2
             action.setEnabled(allowed)
             if not allowed:
                 with QSignalBlocker(action):
@@ -1169,8 +1185,10 @@ class PRMainWindow(QWidget):
                 f'Workflow: {UNIFIED_WORKFLOW}',f'Arithmetic: {r.arithmetic_identity}',
                 f'Transport: {r.spatial.dimension}D active; batch axes {r.spatial.batch_axes}',
                 'Material response: fully nonlinear unified transport',
-                electrical_closure_summary(c),
-                f'Dark={request.material.dark_intensity}; uniform={request.material.uniform_background_intensity}',
+                (f'A7 E_app={c.reservoir_field}; normalized current is derived at launch from physical background/reference irradiance; b is solved independently'
+                 if request.material.normalization_identity != "pr_channel_peak_reference_v1" and c.reservoir_field is not None
+                 else electrical_closure_summary(c)),
+                illumination_summary(request.material),
                 f'Precision: {r.precision.identity}',f'Projection: {r.projection_identity}',
                 'Published optical-first: P → I → material → projection → M → S; no replay',
                 f'Scattering: {request.scattering}',
@@ -1199,12 +1217,7 @@ class PRMainWindow(QWidget):
                 f"Interaction length: {request.grid.z_length_um:g} µm; "
                 f"optical dz={request.grid.dz_um:g} µm"
             ),
-            (
-                "Normalized intensities: "
-                f"dark={request.material.dark_intensity:g}, "
-                "uniform background="
-                f"{request.material.uniform_background_intensity:g}"
-            ),
+            illumination_summary(request.material),
             f"Normalized applied field: {request.material.applied_field:g}",
             f"Gain-length product: {request.material.gain_length_product:g}",
             f"Refractive index: {request.material.refractive_index:g}",

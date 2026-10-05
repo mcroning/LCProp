@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 import math
 from typing import TYPE_CHECKING, Any
 
@@ -13,11 +13,36 @@ from lcprop.optics.screens import ChannelLaunchElements
 from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.pr.carrier_power import carrier_channels_from_beams
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
+from lcprop.pr.illumination import LEGACY_NORMALIZATION, INTEGRAL_NORMALIZATION, nonnegative
 
 
 _ELEMENTARY_CHARGE_C = 1.602e-19
 _VACUUM_PERMITTIVITY_F_PER_M = 8.854e-12
 _BOLTZMANN_J_PER_K = 1.380649e-23
+
+_ILLUMINATION_FIELDS = {"normalization_identity", "dark_irradiance_W_cm2", "uniform_irradiance_W_cm2"}
+
+
+def material_metadata(material):
+    """Keep historical material vocabulary intact; new identity is explicit."""
+    result = asdict(material)
+    if material.normalization_identity == LEGACY_NORMALIZATION:
+        for key in _ILLUMINATION_FIELDS:
+            result.pop(key)
+    return result
+
+
+def material_values(value):
+    """Strictly decode historical or explicitly versioned physical metadata."""
+    expected = {f.name for f in fields(PRMaterialSpec)}
+    if not isinstance(value, dict):
+        raise ValueError("material record required")
+    if set(value) == expected - _ILLUMINATION_FIELDS:
+        return dict(value)
+    if set(value) != expected or value.get("normalization_identity") not in (LEGACY_NORMALIZATION, INTEGRAL_NORMALIZATION):
+        raise ValueError("incomplete or unknown PR normalization metadata")
+    PRMaterialSpec(**value).validate()
+    return dict(value)
 
 PR_MATERIAL_ID = "pr"
 PR_TIMEDEPENDENT_WORKFLOW = "pr_timedependent"
@@ -59,8 +84,35 @@ class PRMaterialSpec:
     mobile_charge_density_m3: float = 6.4e22
     temperature_K: float = 293.0
     characteristic_wavenumber_per_um_override: float | None = None
+    normalization_identity: str = LEGACY_NORMALIZATION
+    dark_irradiance_W_cm2: float | None = None
+    uniform_irradiance_W_cm2: float | None = None
+
+    @classmethod
+    def physical(cls, *, dark_irradiance_W_cm2, uniform_irradiance_W_cm2, **parameters):
+        """New physical requests require explicit irradiances, including zeros.
+
+        The historical constructor retains its explicit legacy identity for
+        existing callers; GUI fresh requests select physical mode instead.
+        """
+        result = cls(normalization_identity=INTEGRAL_NORMALIZATION,
+            dark_intensity=0., uniform_background_intensity=0.,
+            dark_irradiance_W_cm2=dark_irradiance_W_cm2,
+            uniform_irradiance_W_cm2=uniform_irradiance_W_cm2, **parameters)
+        result.validate()
+        return result
 
     def validate(self) -> None:
+        if self.normalization_identity == INTEGRAL_NORMALIZATION:
+            nonnegative(self.dark_irradiance_W_cm2, "dark irradiance W/cm²")
+            nonnegative(self.uniform_irradiance_W_cm2, "uniform irradiance W/cm²")
+            if self.dark_intensity != 0 or self.uniform_background_intensity != 0:
+                raise ValueError("physical normalization cannot contain legacy intensity ratios")
+        elif self.normalization_identity == LEGACY_NORMALIZATION:
+            if self.dark_irradiance_W_cm2 is not None or self.uniform_irradiance_W_cm2 is not None:
+                raise ValueError("legacy normalization cannot contain physical irradiances")
+        else:
+            raise ValueError("unknown PR normalization identity")
         for name in (
             "dark_intensity",
             "uniform_background_intensity",
@@ -95,6 +147,8 @@ class PRMaterialSpec:
     def background_intensity(self) -> float:
         """Total normalized dark plus externally applied uniform background."""
 
+        if self.normalization_identity != LEGACY_NORMALIZATION:
+            raise ValueError("physical background fraction requires the accepted launch reference")
         return float(self.dark_intensity) + float(
             self.uniform_background_intensity
         )

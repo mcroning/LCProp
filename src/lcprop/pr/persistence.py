@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lcprop.pr.specs import material_metadata
+
 from dataclasses import asdict
 from datetime import datetime, timezone
 import json
@@ -40,7 +42,7 @@ PR_CHECKPOINT_FORMAT = "lcprop-checkpoint"
 def _request_to_dict(request: PRRunRequest) -> dict[str, Any]:
     return {
         "grid": asdict(request.grid),
-        "material": asdict(request.material),
+        "material": material_metadata(request.material),
         "beams": {
             "coherence": request.beams.coherence,
             "channels": [asdict(channel) for channel in request.beams.channels],

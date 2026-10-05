@@ -3,6 +3,8 @@
 No scientific implementation lives here. Prepared requests/results use M5 codecs;
 fresh request definitions preserve launch provenance without allocating a plane.
 """
+from lcprop.pr.specs import material_metadata
+
 from dataclasses import asdict, dataclass, replace
 from types import SimpleNamespace
 import numpy as np
@@ -13,7 +15,7 @@ from lcprop.core.grid import make_grid
 from lcprop.optics.boundaries import TransverseBoundarySpec
 from lcprop.optics.launch import OpticalLaunchContext, build_launch
 from lcprop.optics.launch_configuration import LaunchConfiguration
-from lcprop.pr.specs import PRMaterialSpec
+from lcprop.pr.specs import PRMaterialSpec, material_values
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.products.data_model import RunData, Geometry, FieldCollection, make_field
 from lcprop.runners.base import WorkflowOperation
@@ -74,7 +76,8 @@ def core_request(request, initial_A=None, *, backend=None):
         wavelength_um=request.beams.channels[0].wavelength_um,coherence_groups=request.beams.coherence_groups,
         scattering=request.scattering,workflow_identity=request.workflow_identity,
         arithmetic_identity=request.arithmetic_identity,projection_identity=request.projection_identity,
-        solver=request.solver,persistence_schema=codec.LEGACY_REQUEST_SCHEMA if request.schema==LEGACY_FRESH_SCHEMA else codec.REQUEST_SCHEMA)
+        solver=request.solver,optical_scale_W_cm2=(sum(ch.power_mW for ch in request.beams.channels)*1e5
+            if request.material.normalization_identity != "pr_channel_peak_reference_v1" else None),persistence_schema=codec.LEGACY_REQUEST_SCHEMA if request.schema==LEGACY_FRESH_SCHEMA else codec.REQUEST_SCHEMA)
 
 
 def validate_fresh(request):
@@ -138,7 +141,7 @@ def encode_fresh(request):
     validate_fresh(request)
     result = dict(schema=request.schema,workflow_identity=request.workflow_identity,
         arithmetic_identity=request.arithmetic_identity,projection_identity=request.projection_identity,
-        grid=asdict(request.grid),beams=encode_beam_stack(request.beams),material=asdict(request.material),
+        grid=asdict(request.grid),beams=encode_beam_stack(request.beams),material=material_metadata(request.material),
         closure=asdict(request.closure),backend=asdict(request.backend),optical_boundary=asdict(request.optical_boundary),
         scattering=None if request.scattering is None else asdict(request.scattering),
         launch_elements=encode_launch_elements(request.launch_elements))
@@ -187,7 +190,8 @@ def _validate_fresh_v2_tree(payload):
         ('backend',BackendSpec,()),('optical_boundary',TransverseBoundarySpec,()),
         ('closure',PRElectricalClosureSpec,('reservoir_field','background_intensity')),
         ('solver',PRUnifiedSolverSpec,()),('precision',PRMaterialPrecisionSpec,())):
-        record(payload[key],cls,key,nullable)
+        if cls is PRMaterialSpec: material_values(payload[key])
+        else: record(payload[key],cls,key,nullable)
     if payload['scattering'] is not None:
         record(payload['scattering'],PRCanonicalScatteringSpec,'scattering')
     beams=payload['beams'];_raw_record(beams,{'coherence','channels'},'beams')

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lcprop.pr.specs import material_metadata
+
 from dataclasses import asdict, replace
 import math
 from typing import Any, Mapping
@@ -123,7 +125,7 @@ def encode_pr_transverse_static_transport_request(request: PRTransverseStaticRun
     metadata = {
         "grid": asdict(request.grid),
         "beams": encode_beam_stack(request.beams),
-        "material": asdict(request.material),
+        "material": material_metadata(request.material),
         "transport": asdict(request.transport),
         "dielectric": asdict(request.dielectric),
         "boundary": asdict(request.boundary),

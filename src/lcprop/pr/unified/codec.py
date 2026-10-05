@@ -14,7 +14,7 @@ import zipfile
 import numpy as np
 
 from lcprop.core.context import GridSpec
-from lcprop.pr.specs import PRMaterialSpec
+from lcprop.pr.specs import PRMaterialSpec, material_values, material_metadata
 from lcprop.pr.scattering import PRCanonicalScatteringSpec, canonical_slab_range
 from .specs import (PRUnifiedSpatialSpec,PRElectricalClosureSpec,PRMaterialPrecisionSpec,
                     MATERIAL_ID,NORMALIZATION_ID,STATE_ID)
@@ -86,6 +86,7 @@ def _keys(value, expected):
 
 
 def _construct(cls, value, *, legacy_selection=False):
+    if cls is PRMaterialSpec: return PRMaterialSpec(**material_values(value))
     if cls is UnifiedSelection and legacy_selection:
         legacy = {f.name for f in fields(cls)} - {'intensity_volume','material_volumes'}
         if isinstance(value,dict) and set(value)==legacy:
@@ -104,14 +105,17 @@ def request_metadata(r):
         raise ValueError('legacy request cannot represent scalable solver')
     result={f.name:getattr(r,f.name) for f in fields(r) if f.name not in ('initial_A','solver','persistence_schema')}
     for key in ('grid','spatial','closure','precision','material'):
-        result[key]=asdict(result[key])
+        result[key]=material_metadata(result[key]) if key=='material' else asdict(result[key])
     if not legacy: result['solver']=asdict(r.solver)
     result['scattering']=asdict(r.scattering) if r.scattering is not None else None
+    if r.optical_scale_W_cm2 is None: result.pop('optical_scale_W_cm2')
     return result
 
 
 def _request(config, launch):
     from .solver_specs import PRUnifiedSolverSpec
+    config=dict(config)
+    if 'optical_scale_W_cm2' not in config: config['optical_scale_W_cm2']=None
     modern = 'solver' in config
     _keys(config,[f.name for f in fields(UnifiedStaticRequest) if f.name not in ('initial_A','persistence_schema') and (modern or f.name != 'solver')])
     values=dict(config)
@@ -151,7 +155,7 @@ def encode_request(request, *, selection=UnifiedSelection()):
     config=request_metadata(request)
     _validate(request,UnifiedProductSelection());selection.validate(request.spatial)
     payload=_pack(dict(schema=request.persistence_schema,material_identity=MATERIAL_ID,
-        normalization=NORMALIZATION_ID,config=config,selection=asdict(selection)),{'launch':request.initial_A})
+        normalization=request.material.normalization_identity,config=config,selection=asdict(selection)),{'launch':request.initial_A})
     decode_request(payload)  # Same strict acceptance for encode/decode.
     return payload
 
@@ -159,10 +163,11 @@ def encode_request(request, *, selection=UnifiedSelection()):
 def _decode_request(payload):
     meta,arrays=_unpack(payload,(REQUEST_SCHEMA,LEGACY_REQUEST_SCHEMA))
     _keys(meta,('schema','material_identity','normalization','config','selection'))
-    if meta['material_identity']!=MATERIAL_ID or meta['normalization']!=NORMALIZATION_ID or set(arrays)!={'launch'}:
+    if meta['material_identity']!=MATERIAL_ID or meta['normalization'] not in (NORMALIZATION_ID, 'pr_integral_total_illumination_mean_irradiance_v1') or set(arrays)!={'launch'}:
         raise ValueError('incompatible material/normalization/launch record')
     if ('solver' in meta['config']) != (meta['schema']==REQUEST_SCHEMA): raise ValueError('solver/schema mismatch')
     r=_request(meta['config'],arrays['launch'])
+    if r.material.normalization_identity!=meta['normalization']: raise ValueError('normalization metadata mismatch')
     selection=_construct(UnifiedSelection,meta['selection'],
         legacy_selection=meta['schema']==LEGACY_REQUEST_SCHEMA);selection.validate(r.spatial)
     a=arrays['launch'];dtype='complex64' if r.precision.state_dtype=='float32' else 'complex128'
@@ -177,7 +182,7 @@ def _identity_request(identity):
     # M4 result provenance, not an old request with extension flags.
     required={'workflow','arithmetic','projection','material','spatial','closure','precision','backend',
               'electro_optic','optical_boundary','wavelength_um','material_parameters','grid','scattering'}
-    if not required<=set(identity) or set(identity)-required-{'coherence_groups','peak_intensity_reference','solver'}:
+    if not required<=set(identity) or set(identity)-required-{'coherence_groups','peak_intensity_reference','solver','source_normalization','optical_scale_W_cm2'}:
         raise ValueError('incomplete or unknown execution provenance')
     if (identity['material']!=MATERIAL_ID or identity['optical_boundary']!='periodic'
             or identity['electro_optic']!='existing_scalar_x_delta_n'):
@@ -187,6 +192,7 @@ def _identity_request(identity):
         wavelength_um=identity['wavelength_um'],coherence_groups=identity.get('coherence_groups'),
         scattering=identity['scattering'],workflow_identity=identity['workflow'],
         arithmetic_identity=identity['arithmetic'],projection_identity=identity['projection'])
+    if 'optical_scale_W_cm2' in identity: config['optical_scale_W_cm2']=identity['optical_scale_W_cm2']
     if "solver" in identity: config["solver"]=identity["solver"]
     return _request(config,None)
 
@@ -212,8 +218,34 @@ def _launch_provenance(identity, endpoint, launch=None):
         raise ValueError('accepted launch requires explicit coherence groups')
     normalize_coherence_groups(endpoint.shape[0],coherent=False,coherence_groups=groups)
     peak=identity.get('peak_intensity_reference')
-    if type(peak) not in (int,float) or not math.isfinite(peak) or peak<=0:
+    physical = identity['material_parameters'].get('normalization_identity',NORMALIZATION_ID) != NORMALIZATION_ID
+    if type(peak) not in (int,float) or not math.isfinite(peak) or peak<0 or (not physical and peak==0):
         raise ValueError('accepted launch requires a finite positive numeric peak reference')
+    if identity['material_parameters'].get('normalization_identity',NORMALIZATION_ID) != NORMALIZATION_ID:
+        from lcprop.pr.illumination import reference_from_metadata, physical_reference
+        ref=reference_from_metadata(identity.get('source_normalization'))
+        if ref.optical_scale_W_cm2 != identity.get('optical_scale_W_cm2'):
+            raise ValueError('physical optical scale/provenance mismatch')
+        material=identity['material_parameters']
+        if (ref.dark_irradiance_W_cm2 != material['dark_irradiance_W_cm2'] or
+                ref.uniform_irradiance_W_cm2 != material['uniform_irradiance_W_cm2']):
+            raise ValueError('physical illumination/input mismatch')
+        from .specs import A7_CURRENT
+        closure=identity['closure']
+        if closure['identity']==A7_CURRENT and (
+                closure['background_intensity'] != ref.background_fraction or
+                tuple(closure['target']) != (closure['reservoir_field']*ref.background_fraction,)):
+            raise ValueError('physical A7 current/reference mismatch')
+        import sys
+        xp=sys.modules.get(identity['backend'])
+        if launch is not None and xp is not None and isinstance(launch,xp.ndarray):
+            grid=identity['grid']
+            expected=physical_reference(launch,optical_scale_W_cm2=ref.optical_scale_W_cm2,
+                dx_um=grid['x_aperture_um']/grid['Nx'],dy_um=grid['y_aperture_um']/grid['Ny'],
+                dark_irradiance_W_cm2=ref.dark_irradiance_W_cm2,
+                uniform_irradiance_W_cm2=ref.uniform_irradiance_W_cm2,
+                coherence_groups=groups,xp=xp)
+            if expected != ref: raise ValueError('accepted physical launch reference mismatch')
     if launch is not None:
         import sys
         backend=identity['backend']
@@ -221,7 +253,9 @@ def _launch_provenance(identity, endpoint, launch=None):
         if xp is not None and isinstance(launch,xp.ndarray):
             if launch.shape!=endpoint.shape or launch.dtype!=endpoint.dtype:
                 raise ValueError('retained launch layout mismatch')
-            if channel_peak_intensity_reference(launch,xp=xp)!=peak:
+            actual=(float(xp.sum(xp.max(xp.abs(launch)**2,axis=(-2,-1))).item())
+                if physical else channel_peak_intensity_reference(launch,xp=xp))
+            if actual!=peak:
                 raise ValueError('accepted-launch peak reference mismatch')
 
 
@@ -277,7 +311,7 @@ def encode_result(result):
     science["failure"]=_failure_metadata(science["failure"])
     meta=dict(schema=RESULT_SCHEMA if modern else LEGACY_RESULT_SCHEMA,products_schema=result.schema,scientific=science,
         selection=selection,locations=result.locations,state=state,next_address=result.next_address,
-        normalization=NORMALIZATION_ID)
+        normalization=s.identities['material_parameters'].get('normalization_identity',NORMALIZATION_ID))
     payload=_pack(meta,arrays)
     decode_result(payload)
     return payload
@@ -290,11 +324,12 @@ def _decode_result(payload):
     if (meta['schema']==RESULT_SCHEMA) != (meta['products_schema']==PRODUCTS_SCHEMA): raise ValueError('result schema mismatch')
     if meta['products_schema'] in (PRODUCTS_SCHEMA,'pr_unified_static_products_v2'):
         _keys(meta['selection'],[f.name for f in fields(UnifiedSelection)])
-    if meta['normalization']!=NORMALIZATION_ID: raise ValueError('unknown source normalization')
+    if meta['normalization'] not in (NORMALIZATION_ID, 'pr_integral_total_illumination_mean_irradiance_v1'): raise ValueError('unknown source normalization')
     s=meta['scientific']
     _keys(s,('status','reason','completed_cells','reached_z_um','boundary_z_um','material_z_um','ledger','identities','failure'))
     if ('solver' in s['identities']) != (meta['schema']==RESULT_SCHEMA): raise ValueError('solver/schema mismatch')
     r=_identity_request(s['identities'])
+    if r.material.normalization_identity!=meta['normalization']: raise ValueError('normalization metadata mismatch')
     selection=_construct(UnifiedSelection,meta['selection'],
         legacy_selection=meta['products_schema']=='pr_unified_static_products_v1');selection.validate(r.spatial)
     if meta['products_schema']=='pr_unified_static_products_v1' and (selection.intensity_volume or selection.material_volumes):

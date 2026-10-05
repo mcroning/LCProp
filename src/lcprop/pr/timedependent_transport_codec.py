@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lcprop.pr.specs import material_metadata
+
 from dataclasses import asdict
 import math
 from typing import Any, Mapping
@@ -28,6 +30,7 @@ from lcprop.pr.longitudinal_cuts import (
     retained_longitudinal_intensity_cuts,
     validate_longitudinal_cut_coordinates,
 )
+from lcprop.pr.illumination import result_source_inverse
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.visualization import (
     make_fast_intensity_preview,
@@ -104,7 +107,7 @@ def _encode_request_metadata(
     return {
         "grid": asdict(request.grid),
         "beams": encode_beam_stack(request.beams),
-        "material": asdict(request.material),
+        "material": material_metadata(request.material),
         "solver": asdict(request.solver),
         "backend": asdict(request.backend),
         "launch_elements": encode_launch_elements(request.launch_elements),
@@ -276,19 +279,21 @@ def encode_pr_timedependent_transport_result(
             cuts = extract_longitudinal_optical_intensity_cuts(
                 result.source_intensity_stack,
                 grid_summary=result.grid_summary,
-                peak_intensity_reference=channel_peak_intensity_reference(
-                    np.asarray(result.A_initial), xp=np
-                ),
-                background_intensity=float(request.material.background_intensity),
+                peak_intensity_reference=(result_source_inverse(result)[0]
+                    if result_source_inverse(result) is not None else channel_peak_intensity_reference(
+                        np.asarray(result.A_initial), xp=np)),
+                background_intensity=(result_source_inverse(result)[1] if result_source_inverse(result) is not None
+                    else float(request.material.background_intensity)),
             )
             preview = make_fast_intensity_preview(
                 result.source_intensity_stack,
                 grid_summary=result.grid_summary,
                 z_offset_fraction=1.0 if result.diagnostics.get('optical_coupling')=='frozen_material_published_optical_first_v1' else 0.0,
-                peak_intensity_reference=channel_peak_intensity_reference(
-                    np.asarray(result.A_initial), xp=np
-                ),
-                background_intensity=float(request.material.background_intensity),
+                peak_intensity_reference=(result_source_inverse(result)[0]
+                    if result_source_inverse(result) is not None else channel_peak_intensity_reference(
+                        np.asarray(result.A_initial), xp=np)),
+                background_intensity=(result_source_inverse(result)[1] if result_source_inverse(result) is not None
+                    else float(request.material.background_intensity)),
             )
             preview_data = preview.intensity
             preview_metadata = preview.metadata
@@ -620,7 +625,7 @@ def decode_pr_timedependent_transport_result(
             checkpoint = _decode_checkpoint(values["checkpoint"], arrays)
             _validate_checkpoint_consistency(values, checkpoint)
         validate_material_previews(values.get('diagnostics',{}).get('material_previews',{}))
-        return PRRunResult(
+        result = PRRunResult(
             A_initial=values["A_initial"],
             A_final=values["A_final"],
             E_initial=values["E_initial"],
@@ -657,6 +662,8 @@ def decode_pr_timedependent_transport_result(
                 )
             ),
         )
+        result_source_inverse(result)
+        return result
     except TransportCodecError:
         raise
     except (KeyError, TypeError, ValueError) as exc:

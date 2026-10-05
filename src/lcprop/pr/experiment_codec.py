@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lcprop.pr.specs import material_metadata
+
 from dataclasses import asdict, replace
 from typing import Any
 
@@ -21,6 +23,7 @@ from lcprop.persistence.experiments import (
     require_exact_keys,
     require_mapping,
 )
+from lcprop.pr.specs import material_values
 from lcprop.pr.specs import (
     PRMaterialSpec,
     PRRunRequest,
@@ -142,7 +145,7 @@ def _encode_common(request: PRRunRequest | PRStaticRunRequest) -> dict:
     return {
         "schema_version": PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         "grid": asdict(request.grid),
-        "material": asdict(request.material),
+        "material": material_metadata(request.material),
         "beams": encode_beam_stack(request.beams),
         "solver": asdict(request.solver),
         "backend": asdict(request.backend),
@@ -220,7 +223,7 @@ def encode_pr_transverse_static_request(
     return {
         "schema_version": PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         "grid": asdict(request.grid),
-        "material": asdict(request.material),
+        "material": material_metadata(request.material),
         "beams": encode_beam_stack(request.beams),
         "transport": asdict(request.transport),
         "dielectric": asdict(request.dielectric),
@@ -259,7 +262,7 @@ def encode_pr_transverse_timedependent_request(
     return {
         "schema_version": PR_EXPERIMENT_REQUEST_SCHEMA_VERSION,
         "grid": asdict(request.grid),
-        "material": asdict(request.material),
+        "material": material_metadata(request.material),
         "beams": encode_beam_stack(request.beams),
         "transport": asdict(request.transport),
         "dielectric": asdict(request.dielectric),
@@ -355,11 +358,7 @@ def _decode_common(payload: dict[str, Any]) -> dict[str, Any]:
             )
         ),
         "material": PRMaterialSpec(
-            **dataclass_values(
-                PRMaterialSpec,
-                payload["material"],
-                name="PR request_payload.material",
-            )
+            **material_values(payload["material"])
         ),
         "beams": beams,
         "backend": BackendSpec(
@@ -547,11 +546,7 @@ def decode_pr_transverse_static_request(
             ),
             beams=beams,
             material=PRMaterialSpec(
-                **dataclass_values(
-                    PRMaterialSpec,
-                    payload["material"],
-                    name="PR transverse-static request_payload.material",
-                )
+                **material_values(payload["material"])
             ),
             transport=PRTransverseTransportProfile(
                 **dataclass_values(
@@ -713,11 +708,7 @@ def decode_pr_transverse_timedependent_request(
             ),
             beams=beams,
             material=PRMaterialSpec(
-                **dataclass_values(
-                    PRMaterialSpec,
-                    payload["material"],
-                    name="PR transverse-TD request_payload.material",
-                )
+                **material_values(payload["material"])
             ),
             transport=PRTransverseTransportProfile(
                 **dataclass_values(

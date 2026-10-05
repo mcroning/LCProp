@@ -169,6 +169,7 @@ def test_fresh_gui_and_inspect_identify_published_second_order():
     app=QApplication.instance() or QApplication([])
     from lcprop.pr.gui.main_window import PRMainWindow
     window=PRMainWindow()
+    window.material_panel.normalization_mode.setCurrentIndex(1)  # Historical fixture.
     try:
         window.grid_panel.Nx.setValue(8);window.grid_panel.Ny.setValue(8)
         window.grid_panel.dz_um.setValue(10.)

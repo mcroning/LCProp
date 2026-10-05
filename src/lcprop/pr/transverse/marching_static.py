@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lcprop.pr.specs import material_metadata
+
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
@@ -328,7 +330,7 @@ def _request_fingerprint(
     payload = {
         "grid": asdict(request.grid),
         "beams": asdict(request.beams),
-        "material": asdict(request.material),
+        "material": material_metadata(request.material),
         "transport": asdict(request.transport),
         "dielectric": asdict(request.dielectric),
         "boundary": asdict(request.boundary),
@@ -1033,7 +1035,7 @@ def run_pr_transverse_static_marching(
         "workflow": PR_TRANSVERSE_MARCHING_STATIC_WORKFLOW,
         "grid_request": asdict(request.grid),
         "beam_request": asdict(request.beams),
-        "material": asdict(request.material),
+        "material": material_metadata(request.material),
         "transport": asdict(request.transport),
         "dielectric": asdict(request.dielectric),
         "boundary": asdict(request.boundary),

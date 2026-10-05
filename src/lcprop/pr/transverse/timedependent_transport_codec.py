@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lcprop.pr.specs import material_metadata
+
 from dataclasses import asdict
 import math
 from typing import Any, Mapping
@@ -27,6 +29,7 @@ from lcprop.pr.longitudinal_cuts import (
     validate_longitudinal_cut_coordinates,
 )
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
+from lcprop.pr.illumination import result_source_inverse
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.visualization import (
     make_fast_intensity_preview,
@@ -143,7 +146,7 @@ def encode_pr_transverse_timedependent_transport_request(
     metadata = {
         "grid": asdict(request.grid),
         "beams": encode_beam_stack(request.beams),
-        "material": asdict(request.material),
+        "material": material_metadata(request.material),
         "transport": asdict(request.transport),
         "dielectric": asdict(request.dielectric),
         "boundary": asdict(request.boundary),
@@ -273,10 +276,10 @@ def encode_pr_transverse_timedependent_transport_result(
                 result.source_intensity_stack,
                 grid_summary=result.grid_summary,
                 z_offset_fraction=1.0 if result.diagnostics.get('optical_coupling')=='frozen_material_published_optical_first_v1' else 0.0,
-                peak_intensity_reference=channel_peak_intensity_reference(
-                    np.asarray(result.A_initial), xp=np
-                ),
-                background_intensity=(
+                peak_intensity_reference=(result_source_inverse(result)[0]
+                    if result_source_inverse(result) is not None else channel_peak_intensity_reference(
+                        np.asarray(result.A_initial), xp=np)),
+                background_intensity=(result_source_inverse(result)[1] if result_source_inverse(result) is not None else
                     float(material["dark_intensity"])
                     + float(material["uniform_background_intensity"])
                 ),
@@ -672,7 +675,7 @@ def decode_pr_transverse_timedependent_transport_result(
         })
         _validate_result(values)
         validate_material_previews(values.get('diagnostics',{}).get('material_previews',{}))
-        return PRTransverseRunResult(
+        result = PRTransverseRunResult(
             A_initial=values["A_initial"],
             A_final=values["A_final"],
             psi_initial=values["psi_initial"],
@@ -700,6 +703,8 @@ def decode_pr_transverse_timedependent_transport_result(
             td_preview_movie=values["td_preview_movie"],
             td_preview_movie_metadata=values["td_preview_movie_metadata"],
         )
+        result_source_inverse(result)
+        return result
     except TransportCodecError:
         raise
     except (KeyError, TypeError, ValueError) as exc:

@@ -183,6 +183,8 @@ def test_local_i_legacy_and_td_isolation(window):
 
 def test_fresh_gui_nonlinear_defaults_unified(window):
     window.evolution_panel.evolution.setCurrentIndex(0)
+    window.material_panel.dark_irradiance.setText('0')
+    window.material_panel.uniform_irradiance.setText('0')
     assert isinstance(window.build_request(),a.UnifiedFreshRequest)
     window.evolution_panel.transport_model.setCurrentIndex(1)
     assert window.evolution_panel.workflow_id()==a.WORKFLOW_ID
@@ -224,7 +226,7 @@ def test_dispatch_calls_certified_owners_exactly_once_per_cell(window,monkeypatc
 
 def test_prelaunch_failure_has_no_fabricated_image(monkeypatch):
     def fail(*args,**kwargs):raise RuntimeError('bad launch')
-    monkeypatch.setattr(workflow,'channel_peak_intensity_reference',fail)
+    monkeypatch.setattr(workflow,'resolve_material_illumination',fail)
     out=a.execute_unified(fresh(),result_policy='analysis:far_field_intensity')
     assert out.status=='failed' and out.run.scientific.boundary_field is None
     assert 'far_field_intensity' not in a.unified_to_run_data(out).fields
@@ -296,6 +298,8 @@ def test_unrepresentable_closure_target_is_rejected_without_rounding(window):
 
 def test_loaded_td_does_not_pin_new_static_to_legacy(window):
     from lcprop.pr.specs import PR_TIMEDEPENDENT_WORKFLOW
+    window.material_panel.dark_irradiance.setText('0')
+    window.material_panel.uniform_irradiance.setText('0')
     panel=window.evolution_panel
     panel.set_workflow_id(PR_TIMEDEPENDENT_WORKFLOW)
     td=window.build_request();apply(window,td)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lcprop.pr.specs import material_metadata
+
 from dataclasses import asdict, dataclass, field, replace
 import math
 from time import perf_counter
@@ -1551,7 +1553,7 @@ def _run_pr_transverse_static_at_visibility(
         "precision": request.backend.precision,
         "grid_request": asdict(request.grid),
         "beam_request": asdict(request.beams),
-        "material": asdict(request.material),
+        "material": material_metadata(request.material),
         "transport": asdict(request.transport),
         "dielectric": asdict(request.dielectric),
         "boundary": asdict(request.boundary),

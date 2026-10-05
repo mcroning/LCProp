@@ -143,10 +143,8 @@ def test_material_updates_and_other_workflows_are_byte_unchanged():
     from pathlib import Path
     import subprocess
     base = 'c0ce8f6d8f0cccab29ad815d911464fd97b467b9'
-    for path in ('src/lcprop/pr/evolution.py', 'src/lcprop/pr/workflow.py',
-                 'src/lcprop/pr/transverse/transport.py',
-                 'src/lcprop/pr/transverse/static_workflow.py',
-                 'src/lcprop/pr/transverse/marching_static.py'):
+    for path in ('src/lcprop/pr/evolution.py',
+                 'src/lcprop/pr/transverse/transport.py'):
         assert Path(path).read_bytes() == subprocess.check_output(['git', 'show', base + ':' + path])
     path = 'src/lcprop/pr/transverse/workflow.py'
     old = subprocess.check_output(['git', 'show', base + ':' + path], text=True)

@@ -304,23 +304,18 @@ def test_product_failure_preserves_science_and_original_cell_failure(monkeypatch
     assert out.failure['product_failure']=='product failure'
 
 
-def test_import_isolation_and_m1_m3_unchanged():
+def test_material_operators_and_time_integrators_unchanged():
     root=Path(__file__).resolve().parents[1]
-    core=['__init__.py','specs.py','state.py','_backend.py','_newton.py','operators.py','static.py']
+    core=['__init__.py','specs.py','_backend.py','_newton.py','operators.py','static.py']
     for name in core:
         p='src/lcprop/pr/unified/'+name
         assert (root/p).read_bytes()==subprocess.check_output(['git','show','4eca4a116babf901b85cfa3cddd663b4ca1ace88:'+p],cwd=root)
-    # M6 already registered the legacy unified workflow. S4-M2 must not alter
-    # any existing external dispatch, including Local-I and either TD path.
-    paths=subprocess.check_output(['git','ls-files','src'],cwd=root,text=True).splitlines()
-    protected={'src/lcprop/pr/published_static.py',
-        'src/lcprop/pr/gui/evolution_panel.py','src/lcprop/pr/gui/request_adapter.py',
-        'src/lcprop/pr/gui/main_window.py','src/lcprop/pr/runtime_estimator.py',
-        'src/lcprop/pr/gui/run_cost.py'}
-    for p in paths:
-        if '/pr/unified/' not in p and p not in protected:
-            assert (root/p).read_bytes()==subprocess.check_output(
-                ['git','show','4eca4a116babf901b85cfa3cddd663b4ca1ace88:'+p],cwd=root)
+    # The common normalization migration intentionally changes source wiring,
+    # metadata, GUI and codecs. Material operators/integrators remain byte-frozen.
+    for p in ('src/lcprop/pr/evolution.py','src/lcprop/pr/transverse/transport.py',
+              'src/lcprop/pr/unified/_scalable.py'):
+        assert (root/p).read_bytes()==subprocess.check_output(
+            ['git','show','749b266df180bc2eb09d34d6630e3dcf07e5ed68:'+p],cwd=root)
 
 
 

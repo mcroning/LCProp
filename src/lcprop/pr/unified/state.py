@@ -9,6 +9,8 @@ from dataclasses import dataclass
 import sys
 from typing import Any
 
+from lcprop.pr.illumination import LEGACY_NORMALIZATION, INTEGRAL_NORMALIZATION
+
 from .specs import (
     DIAGNOSTICS_ID, MATERIAL_ID, NORMALIZATION_ID, NORMALIZED_UNITS, STATE_ID,
     TRANSPORT_INTENSITY_ID, PRElectricalClosureSpec, PRMaterialPrecisionSpec,
@@ -79,6 +81,11 @@ class PRTransportIntensity:
     Validation checks scalar metadata and layout only. It does not recompute I,
     inspect its values, or certify that the caller used the declared convention.
     Dark intensity is not a carrier floor; peak reference is not dark intensity.
+    The historical scalar field name ``peak_intensity_reference`` is retained
+    for compatibility. Under integral normalization it carries the positive
+    physical mean reference irradiance in W/cm², not an optical peak. The dark
+    and uniform values here are derived dimensionless fractions; physical
+    input irradiances and the complete reference live in workflow provenance.
     """
 
     values: Any
@@ -94,10 +101,10 @@ class PRTransportIntensity:
 
     def validate_structure(self):
         _specs(self.spatial, self.precision)
-        if (self.intensity_id != TRANSPORT_INTENSITY_ID or self.normalization_id != NORMALIZATION_ID
+        if (self.intensity_id != TRANSPORT_INTENSITY_ID or self.normalization_id not in (LEGACY_NORMALIZATION, INTEGRAL_NORMALIZATION)
                 or self.units != NORMALIZED_UNITS):
             raise ValueError("unsupported transport intensity/normalization identity or units")
-        _real(self.peak_intensity_reference, "peak reference", positive=True)
+        _real(self.peak_intensity_reference, "transport reference", positive=True)
         _real(self.dark_intensity, "dark intensity", nonnegative=True)
         _real(self.uniform_background, "uniform background", nonnegative=True)
         _real(self.total_background, "total background", nonnegative=True)

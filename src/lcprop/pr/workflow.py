@@ -40,6 +40,7 @@ from lcprop.pr.scattering import (
     canonical_slab_range,
 )
 
+from lcprop.pr.illumination import resolve_material_illumination, PhysicalIlluminationReference
 from lcprop.pr.source import (
     channel_peak_intensity_reference,
     pr_driving_intensity,
@@ -435,6 +436,8 @@ def run_pr_timedependent(
     request.grid.validate()
     request.beams.validate()
     request.material.validate()
+    if request.material.normalization_identity != "pr_channel_peak_reference_v1" and request.initial_A is not None:
+        raise ValueError("physical TD prepared initial_A requires an explicit physical scale; use the physical launch configuration")
     request.solver.validate()
     request.backend.validate()
     validate_pr_timedependent_configuration(request)
@@ -494,7 +497,13 @@ def run_pr_timedependent(
             raise ValueError(
                 "origin E shape does not match continuation state shape"
             )
-    peak_reference = channel_peak_intensity_reference(A0, xp=grid.xp)
+    input_request = request
+    source_reference, runtime_material = resolve_material_illumination(
+        request.material, A0,
+        grid=grid, optical_scale_W_cm2=launch.physical_total_power_mW * 1e5,
+        coherence_groups=request.beams.coherence_groups, xp=grid.xp)
+    request = replace(request, material=runtime_material)
+    peak_reference = source_reference
     timestep_limit = validate_timestep(
         request.solver.dt_normalized, grid, request.material,
         integrator=request.solver.integrator,
@@ -519,7 +528,7 @@ def run_pr_timedependent(
     )
     completed_steps = int(_completed_steps_offset)
     checkpoint_request = _checkpoint_request or replace(
-        request,
+        input_request,
         initial_A=None,
         initial_E=None,
     )
@@ -724,7 +733,7 @@ def run_pr_timedependent(
                 if due:
                     field_state = reduced_pr_live_snapshot(
                         E=E, A=A_display, source=display_source_stack, grid=grid,
-                        groups=launch.coherence_groups, peak_reference=peak_reference,
+                        groups=launch.coherence_groups, peak_reference=float(peak_reference),
                         background=request.material.background_intensity,
                         policy=live_preview_policy, completed_steps=completed_steps,
                         segment_completed_steps=segment_completed_steps,
@@ -772,7 +781,7 @@ def run_pr_timedependent(
         _, display_A, display_source = accepted_observation
         snapshot = reduced_pr_live_snapshot(
             E=E, A=display_A, source=display_source, grid=grid,
-            groups=launch.coherence_groups, peak_reference=peak_reference,
+            groups=launch.coherence_groups, peak_reference=float(peak_reference),
             background=request.material.background_intensity,
             policy=live_preview_policy, completed_steps=completed_steps,
             segment_completed_steps=segment_completed_steps,
@@ -869,7 +878,8 @@ def run_pr_timedependent(
         "characteristic_wavenumber_per_um": (
             request.material.characteristic_wavenumber_per_um
         ),
-        "peak_intensity_reference": peak_reference,
+        "peak_intensity_reference": float(peak_reference),
+        **({"source_normalization": source_reference.metadata(), "normalization_identity": source_reference.identity} if isinstance(source_reference, PhysicalIlluminationReference) else {}),
         "integrator": request.solver.integrator,
         "optical_coupling": request.optical_coupling,
         "source_z_um": (

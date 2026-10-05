@@ -10,8 +10,8 @@ from lcprop.optics.splitstep import total_intensity
 def channel_peak_intensity_reference(A, *, xp: Any) -> float:
     """Return the sum of individual channel peak intensities.
 
-    This is the intensity normalization specified by the PR paper. Coherent
-    interference is deliberately excluded from the reference value.
+    This is the explicit legacy PR channel-peak normalization. Coherent
+    interference is deliberately excluded from this historical reference.
     """
 
     if A.ndim != 3:
@@ -32,6 +32,13 @@ def pr_driving_intensity(
     xp: Any,
 ):
     """Return normalized optical intensity plus total uniform background."""
+
+    from .illumination import PhysicalIlluminationReference
+    if isinstance(peak_intensity_reference, PhysicalIlluminationReference):
+        if float(background_intensity) != peak_intensity_reference.background_fraction:
+            raise ValueError("physical reference/background fractions disagree")
+        return peak_intensity_reference.driving_intensity(
+            A, coherence_groups=coherence_groups, xp=xp)
 
     reference = float(peak_intensity_reference)
     if reference <= 0.0:
