@@ -126,6 +126,9 @@ def resource_plan(request,policy='fast'):
     if normalize_result_policy(policy)=='fast':
         nfields=6 if request.closure.dimension==2 else 5
         plan['presentation']['fast_material_and_optical_preview_upper_bytes']=nfields*4*1024*1024
+    if request.backend.backend=='numpy' and request.solver.identity==SCALABLE:
+        from .local_planning import assess_local_resources, physical_memory_bytes
+        plan['local_assessment']=assess_local_resources(plan,(nx,ny),physical_ram_bytes=physical_memory_bytes())
     return plan
 
 

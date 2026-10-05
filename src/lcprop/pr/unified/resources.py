@@ -77,7 +77,9 @@ def estimate_resources(request, *, selection=UnifiedSelection()):
         face_flux=2*dim*n*8
     envelope=('reduced independent columns' if dim==1 else
         'reference/direct <=12,288 active nodes' if not scalable else
-        ('NumPy <=96 per axis' if request.backend=='numpy' else
+        (('NumPy state32 <=96 per axis' if wide else
+          'NumPy state64 qualified <=512 per axis; <=256 recommended for interactive use')
+         if request.backend=='numpy' else
          'CuPy state32 <=256 per axis' if wide else 'CuPy state64 <=512 per axis')+
         '; explicit unbiased 384x32 bridge; no 1024 squared qualification')
     result = dict(schema=RESOURCE_SCHEMA,active_dimensions=dim,independent_columns=ny if dim==1 else 1,

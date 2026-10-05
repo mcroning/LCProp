@@ -542,7 +542,7 @@ class PREvolutionPanel(QWidget):
 
         if workflow_id == UNIFIED_WORKFLOW:
             self.algorithm_status.setText('Unified nonlinear Static: published optical-first; certified mixed precision. No coupled passes or replay.')
-            self.execution_guidance.setText('Reduced x-only: independent y columns. Reference/direct: 12,288 nodes. Scalable: NumPy ≤96 per axis; CuPy state32 ≤256, state64 ≤512 per axis; unbiased 384×32 bridge. Inspect Request validates the selected solver/backend envelope.')
+            self.execution_guidance.setText('Reduced x-only: independent y columns. Reference/direct: 12,288 nodes. Scalable: NumPy state64 qualified ≤512 per axis (≤256 interactive recommendation), state32 ≤96; CuPy state32 ≤256, state64 ≤512 per axis; unbiased 384×32 bridge. Inspect Request validates the selected solver/backend envelope.')
 
     def _refresh_integrator_choices(self) -> None:
         workflow_id = self.workflow_id()

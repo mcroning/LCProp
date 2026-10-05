@@ -177,3 +177,11 @@ and residual/carrier curves. Carrier raw Fields data stays float64 for v3.
 Accepted diagnostics include Newton and inner iteration counts/linear-method
 flags; failed records expose material stage/cause metadata. No GUI scientific
 path, FFT, replay, material re-solve or TD modification is introduced.
+
+### Local qualification update
+
+The historical initial NumPy limit above is superseded for float64 by the
+[local large-grid qualification](pr_local_large_grid_qualification.md): through
+512 per axis, with a 256-per-axis interactive recommendation and memory-aware
+advice. State32 and H200 envelopes, the direct bound and scientific identities
+are unchanged.

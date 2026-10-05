@@ -230,7 +230,7 @@ def test_real_run_cost_preflight(window,monkeypatch,target,identity):
 def test_real_run_unsupported_scalable(window,monkeypatch):
     import lcprop.pr.gui.main_window as gui
     r=replace(fresh(2),solver=SOLVER);apply(window,r)
-    window.grid_panel.set_grid(replace(r.grid,Nx=128,Ny=128))
+    window.grid_panel.set_grid(replace(r.grid,Nx=1024,Ny=1024))
     errors=[]
     monkeypatch.setattr(gui,'report_failure',lambda *args:errors.append(str(args)))
     monkeypatch.setattr(window,'_start_background',lambda *a,**k:pytest.fail('unsupported dispatch'))

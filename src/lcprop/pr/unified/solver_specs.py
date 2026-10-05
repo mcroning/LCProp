@@ -69,7 +69,10 @@ def validate_execution(solver, spatial, closure, precision, backend):
     if backend not in ('numpy', 'cupy'):
         raise ValueError('unknown scalable backend')
     bridge = spatial.active_shape == (384, 32) and closure.identity == UNBIASED
-    limit = 96 if backend == 'numpy' else (256 if precision.identity == POSITIVE_PRECISION else 512)
+    # Local float64 ladder qualified through 512² with PCG and GMRES.
+    # State32 keeps its prior ordinary local envelope; no inferred qualification.
+    limit = ((96 if precision.identity == POSITIVE_PRECISION else 512)
+             if backend == 'numpy' else (256 if precision.identity == POSITIVE_PRECISION else 512))
     if not bridge and (max(spatial.active_shape) > limit or
                        spatial.active_shape[0]*spatial.active_shape[1] > limit*limit):
         raise ValueError('outside scalable commissioned envelope')

@@ -1178,6 +1178,7 @@ class PRMainWindow(QWidget):
                 f'Material solver: {r.solver.identity}; backend: {request.backend.backend}; execution target: {self.execution_target_selector.currentData()}',
                 f'Support envelope: {plan["support_envelope"]}',
                 f'Resource formula: {plan["schema"]}; working bytes: {plan["bytes"]}',
+                *([f'Local resource assessment: {plan["local_assessment"]}'] if 'local_assessment' in plan else []),
                 *preflight.warnings])
         workflow_id = self._workflow_id_for_request(request)
         lines = [
@@ -1900,6 +1901,15 @@ class PRMainWindow(QWidget):
             return True
         from lcprop.pr.unified.integration import resource_plan
         plan = resource_plan(request, str(self.result_policy_selector.currentData()))
+        local = plan.get('local_assessment')
+        if local and local['warnings']:
+            message = '\n'.join(local['warnings'])
+            self.results_panel.append_console('Local planning: ' + message)
+            if local['classification']=='memory-risk':
+                if QMessageBox.question(self, 'Local memory risk', message,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+                    return False
         size = plan['longitudinal_full_volume_bytes']
         # Default interactive retention must remain a conscious choice for large runs.
         if size <= 512 * 1024**2:

@@ -121,7 +121,8 @@ def test_metadata_routing_without_device(monkeypatch):
     assert r.solver.identity==SCALABLE
     with pytest.raises(ValueError,match='12,288'):w._validate(replace(r,solver=legacy_solver(r.spatial)),w.UnifiedProductSelection())
     with pytest.raises(ValueError,match='envelope'):w._validate(geometry(r,(1024,1024),'cupy'),w.UnifiedProductSelection())
-    with pytest.raises(ValueError,match='envelope'):w._validate(replace(r,backend='numpy'),w.UnifiedProductSelection())
+    assert w._validate(replace(r,backend='numpy'),w.UnifiedProductSelection())==1
+    with pytest.raises(ValueError,match='envelope'):w._validate(geometry(r,(1024,1024),'numpy'),w.UnifiedProductSelection())
     with pytest.raises(ValueError,match='solver/precision'):w._validate(replace(r,precision=PRMaterialPrecisionSpec(MIXED_PRECISION,'float32',output_dtype='float32')),w.UnifiedProductSelection())
 
 

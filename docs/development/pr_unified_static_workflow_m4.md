@@ -169,3 +169,11 @@ state64 1e-8/1e-8). Float32 face-current comparisons alone retain the prior
 cancellation-aware absolute allowance
 `max(2e-5,16*eps32*Imax*n_reference_max/min(h))`, with rtol 2e-4.
 This does not relax physical residual, root, phase or optical-product gates.
+
+### Local support-policy qualification update
+
+The original ordinary NumPy 96×96 support boundary is superseded for float64
+by qualification through 512×512. This changes only metadata eligibility and
+planning; see [local qualification](pr_local_large_grid_qualification.md).
+Scientific algorithms, state32/H200 bounds and the direct/reference guard
+remain unchanged.
