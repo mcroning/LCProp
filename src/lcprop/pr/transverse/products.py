@@ -89,8 +89,8 @@ def _physical_intensity_volume(result, source) -> np.ndarray:
     background = float(material["dark_intensity"]) + float(
         material["uniform_background_intensity"]
     )
-    reference = channel_peak_intensity_reference(result.A_initial, xp=np)
     inverse = result_source_inverse(result)
+    reference = channel_peak_intensity_reference(result.A_initial, xp=np) if inverse is None else inverse[0]
     if inverse is not None: reference, background = inverse
     return (np.asarray(source) - background) * float(reference)
 
@@ -100,7 +100,7 @@ def _td_scalar_curves(result) -> CurveCollection:
     curves = CurveCollection()
     if not rows:
         return curves
-    time = np.asarray([row["material_time_normalized"] for row in rows])
+    time = np.asarray([row.get("cumulative_time", row["material_time_normalized"]) for row in rows])
     for key, title, y_label in (
         (
             "material_state_change_rms",
@@ -119,7 +119,7 @@ def _td_scalar_curves(result) -> CurveCollection:
                 display_name=title,
                 x=time,
                 y=np.asarray([row[key] for row in rows]),
-                x_label="Material time",
+                x_label="Cumulative characteristic time" if "cumulative_time" in rows[0] else "Material time",
                 y_label=y_label,
                 units={"x": "normalized", "y": "1"},
             ))
@@ -473,9 +473,9 @@ def _static_presentation_products(
     ix = int(np.argmin(np.abs(x)))
     iy = int(np.argmin(np.abs(y)))
     iz = len(z) // 2
-    peak_reference = channel_peak_intensity_reference(
-        np.asarray(result.A_initial), xp=np
-    )
+    inverse = result_source_inverse(result)
+    peak_reference = (channel_peak_intensity_reference(np.asarray(result.A_initial), xp=np)
+                      if inverse is None else inverse[0])
     background = float(material["dark_intensity"]) + float(
         material["uniform_background_intensity"]
     )

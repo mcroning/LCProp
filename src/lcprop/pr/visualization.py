@@ -71,6 +71,7 @@ def make_fast_intensity_preview(
     *,
     grid_summary: Mapping[str, Any],
     peak_intensity_reference: float,
+    allow_zero_reference: bool = False,
     background_intensity: float,
     asnumpy: Callable[[Any], Any] = np.asarray,
     z_offset_fraction: float = 0.0,
@@ -86,7 +87,7 @@ def make_fast_intensity_preview(
     nz = int(shape[0])
     reference = float(peak_intensity_reference)
     background = float(background_intensity)
-    if not np.isfinite(reference) or reference <= 0.0:
+    if not np.isfinite(reference) or (reference < 0.0 or (reference == 0.0 and not allow_zero_reference)):
         raise ValueError("peak intensity reference must be finite and positive")
     if not np.isfinite(background) or background < 0.0:
         raise ValueError("background intensity must be finite and nonnegative")

@@ -255,6 +255,8 @@ def encode_pr_transverse_timedependent_transport_result(
 
     if not isinstance(result, PRTransverseRunResult):
         raise TypeError("result must be a PRTransverseRunResult")
+    from .continuation import validate_result_lineage
+    validate_result_lineage(result)
     policy = normalize_result_policy(result_policy)
     arrays: dict[str, np.ndarray] = {}
     cuts = None
@@ -274,6 +276,7 @@ def encode_pr_transverse_timedependent_transport_result(
             material = result.resolved_profile["material"]
             preview = make_fast_intensity_preview(
                 result.source_intensity_stack,
+                allow_zero_reference=(result_source_inverse(result) is not None and result_source_inverse(result)[0] == 0),
                 grid_summary=result.grid_summary,
                 z_offset_fraction=1.0 if result.diagnostics.get('optical_coupling')=='frozen_material_published_optical_first_v1' else 0.0,
                 peak_intensity_reference=(result_source_inverse(result)[0]
@@ -704,6 +707,8 @@ def decode_pr_transverse_timedependent_transport_result(
             td_preview_movie_metadata=values["td_preview_movie_metadata"],
         )
         result_source_inverse(result)
+        from .continuation import validate_result_lineage
+        validate_result_lineage(result)
         return result
     except TransportCodecError:
         raise

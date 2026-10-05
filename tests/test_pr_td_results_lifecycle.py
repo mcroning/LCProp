@@ -93,6 +93,9 @@ def test_real_worker_A_to_B_invalidates_before_first_progress(app,monkeypatch,no
     from lcprop.pr.live_results import PRLivePreviewPolicy
     import lcprop.pr.gui.main_window as gui
     w=_tiny_window(app,steps=3);ws=w.results_panel.workspace
+    # This historical reduced-TD fixture retains its predecessor input semantics.
+    w.material_panel.normalization_mode.setCurrentIndex(1)
+    w.evolution_panel.set_workflow_id("pr_timedependent")
     entered,release=Event(),Event();deliveries=[];starts=[]
     original_run=w.local_runner.run_registered
     def run(*a,**k):
@@ -130,7 +133,7 @@ def test_real_worker_A_to_B_invalidates_before_first_progress(app,monkeypatch,no
         np.testing.assert_array_equal(a.fields['output_intensity'].data,a_output)
         release.set();_wait_for(app,lambda:not w._background_running)
         b=w.last_runner_result.run_data
-        assert ws.result_ownership.text()=='Completed result'
+        assert ws.result_ownership.text().startswith('Completed result')
         assert ws.image_pane.field_selector.currentData()=='far_field_intensity'
         np.testing.assert_array_equal(ws.image_pane.image_view.image.get_array(),b.fields['far_field_intensity'].data.T)
         assert not np.array_equal(a_output,b.fields['output_intensity'].data)

@@ -13,11 +13,11 @@ import numpy as np
 from lcprop.core.backend import asnumpy, get_backend, scalar_float
 from lcprop.core.execution import CancellationToken, RunProgress
 from lcprop.core.grid import make_grid
-from lcprop.optics.launch import OpticalLaunchContext, build_launch, normalized_power
+from lcprop.optics.launch import OpticalLaunchContext, LaunchResult, build_launch, normalized_power
 from lcprop.optics.launch_configuration import reject_prepared_launch_conflict
 from lcprop.optics.screens import validate_channel_launch_elements
 from lcprop.optics.splitstep import scalar_angular_spectrum_kernel, total_intensity
-from lcprop.pr.illumination import resolve_material_illumination, PhysicalIlluminationReference
+from lcprop.pr.illumination import resolve_material_illumination, PhysicalIlluminationReference, INTEGRAL_NORMALIZATION
 from lcprop.pr.source import channel_peak_intensity_reference
 from lcprop.pr.longitudinal_cuts import (
     extract_backend_longitudinal_optical_intensity_cuts,
@@ -269,6 +269,8 @@ def run_pr_transverse_timedependent(
     *,
     cancellation_token: CancellationToken | None = None,
     progress_callback: ProgressCallback | None = None,
+    _continuation_psi=None,
+    _accepted_callback=None,
 ) -> PRTransverseRunResult:
     """Run the full-transverse PR workflow on the requested backend.
 
@@ -289,17 +291,37 @@ def run_pr_transverse_timedependent(
         grid=grid,
         z_length_um=request.grid.z_length_um,
     )
-    launch = build_launch(
-        request.beams,
-        grid,
-        complex_dtype=complex_dtype,
-        launch_elements=request.launch_elements,
-        context=OpticalLaunchContext(
-            grid=grid,
-            n_ref=float(request.material.refractive_index),
-            interaction_length_um=float(request.grid.z_length_um),
-        ),
-    )
+    if _continuation_psi is not None:
+        from .continuation import _eligible
+        _eligible(request)
+        expected = (grid.Nz, grid.Nx, grid.Ny)
+        if _continuation_psi.shape != expected or _continuation_psi.dtype != np.dtype(real_dtype):
+            raise ValueError("accepted continuation state shape/dtype mismatch")
+    dark_launch = (request.material.normalization_identity == INTEGRAL_NORMALIZATION
+                   and sum(ch.power_mW for ch in request.beams.channels) == 0)
+    if dark_launch:
+        # No fractional-power launch is defined at zero power. The physical
+        # optical field is exactly zero; passive launch elements cannot change it.
+        n = len(request.beams.channels)
+        launch = LaunchResult(
+            A0=xp.zeros((n, grid.Nx, grid.Ny), dtype=complex_dtype),
+            physical_powers_mW=xp.zeros(n, dtype=real_dtype),
+            power_fractions=xp.zeros(n, dtype=real_dtype), physical_total_power_mW=0.,
+            wavelengths_um=xp.asarray([ch.wavelength_um for ch in request.beams.channels]),
+            coherence=request.beams.coherence, coherence_groups=request.beams.coherence_groups,
+            power_metadata={"convention":"exact_zero_physical_optical_launch_v1"})
+    else:
+        launch = build_launch(
+            request.beams,
+            grid,
+            complex_dtype=complex_dtype,
+            launch_elements=request.launch_elements,
+            context=OpticalLaunchContext(
+                grid=grid,
+                n_ref=float(request.material.refractive_index),
+                interaction_length_um=float(request.grid.z_length_um),
+            ),
+        )
     A0, psi = _initial_fields(
         request,
         launch=launch,
@@ -307,6 +329,9 @@ def run_pr_transverse_timedependent(
         complex_dtype=complex_dtype,
         real_dtype=real_dtype,
     )
+    if _continuation_psi is not None:
+        # The accepted state is authoritative: do not repeat gauge subtraction.
+        psi = _continuation_psi.copy()
     psi_initial = psi.copy()
     wavelengths = tuple(float(ch.wavelength_um) for ch in request.beams.channels)
     if any(value != wavelengths[0] for value in wavelengths[1:]):
@@ -394,6 +419,8 @@ def run_pr_transverse_timedependent(
         else None
     )
 
+    if _accepted_callback is not None:
+        _accepted_callback(psi, 0, source_reference.metadata())
     for step_index in range(int(request.solver.Nt)):
         try:
             _check_cancel(cancellation_token, "material_step_boundary")
@@ -494,6 +521,8 @@ def run_pr_transverse_timedependent(
                 xp.min(accepted_state.carrier_density)
             )
         td_scalar_history.append(scalar_row)
+        if _accepted_callback is not None:
+            _accepted_callback(psi, completed_steps, source_reference.metadata())
         if progress_callback is not None:
             material_time = completed_steps * float(request.solver.dt_normalized)
             progress_callback(
@@ -569,7 +598,8 @@ def run_pr_transverse_timedependent(
     diagnostics.update(
         {
             "carrier_relative_drift_max": scalar_float(max_carrier_drift),
-            "optical_power_relative_drift": (power_final - power_initial) / power_initial,
+            "optical_power_relative_drift": ((power_final - power_initial) / power_initial
+                if power_initial else 0.0),
             "finite_optical_state": bool(asnumpy(xp.all(xp.isfinite(A_final)))),
             "cancellation_observed_stage": cancellation_stage,
             "integrator_policy": (
@@ -713,6 +743,14 @@ def run_pr_transverse_timedependent(
         "dx_normalized": dx_normalized,
         "dy_normalized": dy_normalized,
     }
+    if isinstance(source_reference, PhysicalIlluminationReference):
+        from .continuation import request_metadata
+        try:
+            resolved_profile['continuation_request'] = request_metadata(input_request)
+        except ValueError:
+            # Array-backed launch elements need their own portable checkpoint
+            # contract; their ordinary execution/products remain supported.
+            pass
     if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
         resolved_profile.update({
             "linearized_model_id": (
@@ -730,7 +768,8 @@ def run_pr_transverse_timedependent(
     longitudinal_cuts = extract_backend_longitudinal_optical_intensity_cuts(
         final_source,
         grid_summary=grid.summary(),
-        peak_intensity_reference=peak_reference,
+        peak_intensity_reference=0.0 if dark_launch else peak_reference,
+        allow_zero_reference=dark_launch,
         background_intensity=(
             float(request.material.dark_intensity)
             + float(request.material.uniform_background_intensity)

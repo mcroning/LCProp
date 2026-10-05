@@ -155,6 +155,19 @@ def _image_amplification_validation_status(capability, base_request) -> str:
     return capability.validation_status
 
 
+def _continue_transverse_operation(request, *, checkpoint, cancellation_token=None, progress_callback=None):
+    from lcprop.pr.transverse.continuation import continue_transverse_td, ContinuationFailure, notify_failure_checkpoint
+    try:
+        result = continue_transverse_td(request, checkpoint, cancellation_token=cancellation_token,
+                                       progress_callback=progress_callback)
+    except ContinuationFailure as exc:
+        notify_failure_checkpoint(exc, progress_callback)
+        raise
+    return RunnerResult(kind=PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW, result=result,
+        message="Cancelled locally" if result.status == "cancelled" else "Completed locally",
+        run_data=PR_TRANSVERSE_TIMEDEPENDENT_OPERATION.to_run_data(result), material_id=PR_MATERIAL_ID)
+
+
 def _continue_pr_operation(
     request,
     *,
@@ -510,6 +523,14 @@ class PRMainWindow(QWidget):
 
     def _refresh_checkpoint_controls(self) -> None:
         checkpoint = self.last_checkpoint
+        from lcprop.pr.transverse.continuation import TransverseTDCheckpoint
+        if isinstance(checkpoint, TransverseTDCheckpoint):
+            ready = not self._background_running
+            self.continue_button.setEnabled(ready)
+            self.save_checkpoint_button.setEnabled(ready)
+            self.continue_button.setToolTip("Edit physical illumination for a new local segment; inherited state parameters are locked.")
+            self.checkpoint_compatibility_reason = None
+            return
         workflow_id = self.evolution_panel.workflow_id()
         reason = None
         if self.input_panel.is_image_amplification():
@@ -1603,12 +1624,25 @@ class PRMainWindow(QWidget):
 
         if self.last_checkpoint is None:
             raise ValueError("no PR checkpoint is available to save")
+        from lcprop.pr.transverse.continuation import TransverseTDCheckpoint, save_checkpoint
+        if isinstance(self.last_checkpoint, TransverseTDCheckpoint):
+            return save_checkpoint(self.last_checkpoint, run_dir)
         return save_run_checkpoint(self.last_checkpoint, run_dir)
 
     def load_checkpoint_from(self, run_dir) -> PRTimeDependentCheckpoint:
         """Load, validate, and hydrate one PR checkpoint directory."""
         self.results_panel.workspace.operation_boundary("Load Checkpoint")
 
+        from pathlib import Path
+        if (Path(run_dir) / 'transverse-continuation.json').is_file():
+            from lcprop.pr.transverse.continuation import load_checkpoint
+            checkpoint = load_checkpoint(run_dir)
+            self.last_checkpoint = checkpoint
+            self.results_panel.set_request_summary(
+                f"Transverse continuation checkpoint {checkpoint.identity}\nCumulative τ={checkpoint.time_normalized:.12g}; "
+                "Continue opens the inherited, locked-state segment editor.")
+            self._refresh_checkpoint_controls()
+            return checkpoint
         checkpoint = load_run_checkpoint(run_dir)
         if not isinstance(checkpoint, PRTimeDependentCheckpoint):
             raise TypeError(
@@ -1678,6 +1712,22 @@ class PRMainWindow(QWidget):
 
     @Slot()
     def continue_clicked(self) -> None:
+        from lcprop.pr.transverse.continuation import TransverseTDCheckpoint, describe_continuation
+        if isinstance(self.last_checkpoint, TransverseTDCheckpoint):
+            if self._background_running or self._close_requested:
+                return
+            from .transverse_continuation import TransverseContinuationDialog
+            import json
+            dialog = TransverseContinuationDialog(self.last_checkpoint, self)
+            if not dialog.exec():
+                return
+            request = dialog.request
+            self._scientific_preflight(request)
+            summary = json.dumps(describe_continuation(request, self.last_checkpoint), indent=2)
+            self._start_background(request, summary=summary,
+                runner_callable=partial(_continue_transverse_operation, checkpoint=self.last_checkpoint),
+                run_label="Continuing transverse TD locally", execution_runner=self.local_runner)
+            return
         if (
             self._background_running
             or self._close_requested
@@ -2094,6 +2144,17 @@ class PRMainWindow(QWidget):
 
     @Slot(object)
     def _on_progress(self, progress: RunProgress) -> None:
+        if (isinstance(progress, RunProgress) and isinstance(progress.latest_field_state, dict)
+                and 'accepted_continuation_checkpoint' in progress.latest_field_state):
+            from lcprop.pr.transverse.continuation import TransverseTDCheckpoint
+            checkpoint=progress.latest_field_state['accepted_continuation_checkpoint']
+            if not isinstance(checkpoint, TransverseTDCheckpoint):
+                raise TypeError('invalid accepted failure checkpoint')
+            checkpoint.validate()
+            self.last_checkpoint=checkpoint
+            self.results_panel.set_td_time_indicator(
+                f"Last accepted cumulative τ={checkpoint.time_normalized:.12g}; steps={checkpoint.completed_steps}")
+            return
         self.last_progress = progress
         self.last_progress_thread = QThread.currentThread()
         if isinstance(progress, RemoteRunStatus):
@@ -2439,6 +2500,12 @@ class PRMainWindow(QWidget):
                 )
             elif runner_result.kind == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
                 self.last_checkpoint = None
+                from lcprop.pr.transverse.continuation import checkpoint_from_result
+                if isinstance(self._active_request, PRTransverseRunRequest):
+                    try:
+                        self.last_checkpoint = checkpoint_from_result(self._active_request, result)
+                    except (ValueError, TypeError) as exc:
+                        self.results_panel.append_console("Continuation unavailable: " + str(exc))
                 if result.status == "cancelled":
                     self.run_status = "stopped"
                     self.status_label.setText("Stopped")
@@ -2450,8 +2517,9 @@ class PRMainWindow(QWidget):
                     prefix = "Final PR transverse time"
                     message = "2D zero-flux time-dependent run complete"
                 self.results_panel.set_td_time_indicator(
-                    f"{prefix}: {float(result.time_normalized):.6g} normalized; "
-                    f"steps: {result.completed_steps}/{result.requested_steps}"
+                    f"{prefix}: {float(result.time_normalized):.6g} segment τ; "
+                    f"steps: {result.completed_steps}/{result.requested_steps}; "
+                    f"cumulative τ={result.resolved_profile.get('continuation_segment', {}).get('cumulative_time', result.time_normalized):.6g}"
                 )
             elif runner_result.kind == PR_TRANSVERSE_STATIC_WORKFLOW:
                 diagnostics = result.diagnostics

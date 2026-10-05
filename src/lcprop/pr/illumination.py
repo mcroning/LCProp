@@ -155,7 +155,8 @@ def result_source_inverse(result):
     if material is not None and (material.get("dark_irradiance_W_cm2") != ref.dark_irradiance_W_cm2
             or material.get("uniform_irradiance_W_cm2") != ref.uniform_irradiance_W_cm2):
         raise ValueError("physical TD reference conflicts with material input")
-    return float(ref), ref.background_fraction
+    # Exact zero physical optical power has identically zero optical products.
+    return (0.0 if ref.optical_scale_W_cm2 == 0 else float(ref)), ref.background_fraction
 
 
 def reference_from_metadata(record):

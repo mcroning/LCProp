@@ -6,7 +6,7 @@ from lcprop.pr.transverse.products import (
     pr_transverse_static_result_to_run_data,
 )
 from lcprop.pr.transverse.specs import PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
-from lcprop.pr.transverse.workflow import run_pr_transverse_timedependent
+from lcprop.pr.transverse.continuation import run_continuable_transverse_td
 from lcprop.pr.transverse.static_workflow import (
     PR_TRANSVERSE_STATIC_WORKFLOW,
     run_pr_transverse_static,
@@ -17,7 +17,7 @@ from lcprop.runners.base import WorkflowOperation
 PR_TRANSVERSE_TIMEDEPENDENT_OPERATION = WorkflowOperation(
     material_id=PR_MATERIAL_ID,
     workflow_id=PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
-    run=run_pr_transverse_timedependent,
+    run=run_continuable_transverse_td,
     to_run_data=pr_transverse_result_to_run_data,
 )
 
