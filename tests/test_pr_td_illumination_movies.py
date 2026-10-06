@@ -85,11 +85,11 @@ def test_movie_ui_irregular_scale_and_controls():
         'application/x-lcprop-trajectory','x',{'times':[.1,.13,.8],'segment_start':.1,'value_unit':'1/um^2',
         'coordinates':{'x':[-1.,1.],'y':[-1.,1.]},'availability':'Optical xy only.'})
     data=RunData(workflow='pr_timedependent',geometry=Geometry(),artifacts={'td_trajectory':a})
-    p.set_run_data(data);p.show_frame(0);p.scale.setCurrentIndex(1)
+    p.set_run_data(data);p.show_frame(0)
     key=scale_key(w.image_pane.image_view._field) if hasattr(w.image_pane,'image_view') else next(iter(w.display_scales.settings))
     assert w.display_scales.settings[key][1]==(0.,30.)
-    p.scale.setCurrentIndex(0);assert w.display_scales.settings[key][0]=='auto'
-    w.display_scales.configure(key,'fixed',(1.,9.));p.scale.setCurrentIndex(1)
+    p.show_frame(1);assert w.display_scales.settings[key]==('locked',(0.,30.))
+    w.display_scales.configure(key,'fixed',(1.,9.));p.show_frame(0)
     assert w.display_scales.settings[key]==('fixed',(1.,9.))
     p.step(1);assert 'τ=0.13' in p.label.text();p.toggle();assert p.timer.isActive();p.toggle();assert not p.timer.isActive()
     p.slider.setValue(2);p.step(1);assert p.slider.value()==2 and not p.timer.isActive()

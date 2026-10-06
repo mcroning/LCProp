@@ -390,12 +390,14 @@ def run_pr_transverse_timedependent(
     optical_passes_completed = 0
     td_scalar_history: list[dict[str, float]] = []
     movie_indices = set(td_movie_frame_indices(int(request.solver.Nt)).tolist())
+    from lcprop.pr.td_movie_products import AcceptedMovieProducts
+    extra_movies = AcceptedMovieProducts()
     movie_frames: list[np.ndarray] = []
     material_movie_frames: list[np.ndarray] = []
     movie_frame_indices: list[int] = []
     movie_times: list[float] = []
 
-    def retain_movie_frame(index: int, optical_field) -> None:
+    def retain_movie_frame(index: int, optical_field, accepted_source) -> None:
         if progress_callback is None or index not in movie_indices:
             return
         if movie_frame_indices and movie_frame_indices[-1] == int(index):
@@ -410,6 +412,8 @@ def run_pr_transverse_timedependent(
         )
         material_movie_frames.append(downsample_td_movie_frame(
             psi[grid.Nz // 2], xp=grid.xp, asnumpy=asnumpy))
+        extra_movies.append(optical_field, accepted_source, grid=grid, request=request,
+                            reference=peak_reference, groups=launch.coherence_groups, asnumpy=asnumpy)
         movie_frame_indices.append(int(index))
         movie_times.append(int(index) * float(request.solver.dt_normalized))
     linearized_spec = (
@@ -441,7 +445,7 @@ def run_pr_transverse_timedependent(
                 scattering_phase_stack=scattering_phase_stack,
             )
             optical_passes_completed += 1
-            retain_movie_frame(completed_steps, observed_A)
+            retain_movie_frame(completed_steps, observed_A, source)
             if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
                 candidate = _linearized_material_step(
                     psi,
@@ -580,7 +584,7 @@ def run_pr_transverse_timedependent(
         scattering_phase_stack=scattering_phase_stack,
     )
     optical_passes_completed += 1
-    retain_movie_frame(completed_steps, A_final)
+    retain_movie_frame(completed_steps, A_final, final_source)
     final_state = state_from_potential(
         psi,
         dx_normalized=dx_normalized,
@@ -789,6 +793,7 @@ def run_pr_transverse_timedependent(
         original_grid=grid.summary(),
         original_cadence=float(request.solver.dt_normalized),
     )
+    extra_movies.attach(movie.metadata)
     if movie.warning is not None:
         diagnostics["td_preview_warning"] = movie.warning
     return PRTransverseRunResult(

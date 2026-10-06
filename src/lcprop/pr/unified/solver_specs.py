@@ -75,4 +75,13 @@ def validate_execution(solver, spatial, closure, precision, backend):
              if backend == 'numpy' else (256 if precision.identity == POSITIVE_PRECISION else 512))
     if not bridge and (max(spatial.active_shape) > limit or
                        spatial.active_shape[0]*spatial.active_shape[1] > limit*limit):
-        raise ValueError('outside scalable commissioned envelope')
+        raise ValueError(
+            'outside scalable commissioned envelope: requested '
+            f'{spatial.active_shape[0]}x{spatial.active_shape[1]}, {backend}, '
+            f'{precision.state_dtype}; supported ordinary grid <= {limit} per axis '
+            f'and <= {limit*limit:,} active nodes. '
+            'The 384x32 exception requires the unbiased closure. '
+            'Selecting Slurm does not enlarge the selected backend/precision envelope; '
+            'CuPy float64 supports up to 512x512, CuPy state32 up to 256x256. '
+            'Resource planning and the selected retrieval policy still apply.'
+        )

@@ -556,13 +556,23 @@ def _result_sizes(
     size_policy = _planning_policy()["result_size"]
     metadata_allowance = int(size_policy["metadata_allowance_bytes"])
     fast_raw = endpoints + optical_products + cuts + preview + metadata_allowance
+    # Accepted-time presentation history is bounded and retained by Fast too.
+    # Three transverse movies (optical/material/far field) and two z cuts;
+    # include conservative base64/zlib overhead, independent of full volumes.
+    movie_allowance = 0
+    if not static:
+        frames = min(int(request.solver.Nt) + 1, 36)
+        px, py, pz = min(nx, 128), min(ny, 128), min(nz, 128)
+        movie_raw = frames * 4 * (3*px*py + px*pz + py*pz)
+        movie_allowance = 2*movie_raw + 65536
+        fast_raw += movie_allowance
     retained_volumes = 5 if (static and full_transverse) else 4 if static else 3
     full_raw = max(
         fast_raw - preview,
         endpoints
         + optical_products
         + retained_volumes * volume * real_bytes
-        + metadata_allowance,
+        + metadata_allowance + movie_allowance,
     )
     fast_factors = tuple(float(value) for value in size_policy["fast_range_factors"])
     full_factors = tuple(float(value) for value in size_policy["full_range_factors"])

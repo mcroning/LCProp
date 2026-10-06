@@ -31,7 +31,7 @@ def unpack_frames(value):
 def movie_artifacts(result):
     metadata=getattr(result,'td_preview_movie_metadata',None)
     if not isinstance(metadata,dict):return {}
-    out={};meta={k:v for k,v in metadata.items() if k not in ('interactive_frames','interactive_material_frames')}
+    out={};meta={k:v for k,v in metadata.items() if k not in ('interactive_frames','interactive_material_frames','additional_movies')}
     movie=getattr(result,'td_preview_movie',None)
     if movie is not None:
         out['td_preview_movie']=ArtifactData('td_preview_movie','Downsampled TD Preview (MP4)',
@@ -53,7 +53,7 @@ def movie_artifacts(result):
     lineage=getattr(result,'diagnostics',{}).get('segment_lineage',())
     start=(float(lineage[-1]['source_cumulative_time']) if lineage else offset)
     meta.update(times=(times+offset).tolist(),coordinates=coords,segment_start=start,
-        availability='Optical xy and, when retained, a sampled material plane. xz/yz and other material trajectories unavailable.',
+        availability='Bounded accepted-time observations only; unretained quantities are unavailable.',
         playback='frame_uniform; labels are actual accepted characteristic times')
     out['td_trajectory']=ArtifactData('td_trajectory','Accepted optical trajectory',frames,
         'application/x-lcprop-trajectory','td_trajectory.npy',meta)
@@ -65,4 +65,22 @@ def movie_artifacts(result):
             label=sample['label']+' — plane '+str(sample['material_plane_index']))
         out['td_trajectory_material']=ArtifactData('td_trajectory_material',material_meta['label'],material,
             'application/x-lcprop-trajectory','td_material_trajectory.npy',material_meta)
+    for key, record in metadata.get('additional_movies', {}).items():
+        if key not in ('xz', 'yz', 'far_field'):
+            raise ValueError('unknown additional TD movie')
+        samples = unpack_frames(record['frames'])
+        if len(samples) != len(frames):
+            raise ValueError('trajectory sample count mismatch')
+        axes = tuple(record['axes'])
+        expected = {'xz': ('x', 'z'), 'yz': ('y', 'z'), 'far_field': ('s_x', 's_y')}[key]
+        if axes != expected:
+            raise ValueError('invalid trajectory axes')
+        for axis, size in zip(axes, samples.shape[1:]):
+            values = np.asarray(record['coordinates'][axis], dtype=float)
+            if values.shape != (size,) or not np.isfinite(values).all() or np.any(np.diff(values) <= 0):
+                raise ValueError('invalid trajectory coordinates')
+        m = dict(meta, **{k: v for k, v in record.items() if k != 'frames'})
+        artifact_key = 'td_trajectory_' + key
+        out[artifact_key] = ArtifactData(artifact_key, record['display_name'], samples,
+            'application/x-lcprop-trajectory', artifact_key + '.npy', m)
     return out
