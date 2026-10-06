@@ -108,6 +108,8 @@ def make_slurm_runner(
         default_resource_profile=cluster.default_resource_profile,
         poll_interval=cluster.poll_interval,
         cleanup_remote_on_success=cluster.cleanup_remote_on_success,
+        notification_email=cluster.notification_email,
+        notification_events=cluster.notification_events,
     )
     return SlurmRunner(
         config,

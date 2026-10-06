@@ -163,6 +163,18 @@ class RemoteExecutionDialog(QDialog):
         self.poll_interval = QDoubleSpinBox()
         self.poll_interval.setRange(0.1, 3600)
         self.poll_interval.setValue(5)
+        self.notification_events = QComboBox()
+        for label, events in (
+            ("Off", ""), ("End", "END"), ("Failure", "FAIL"),
+            ("End + Failure", "END,FAIL"),
+            ("Begin + End + Failure", "BEGIN,END,FAIL"),
+        ):
+            self.notification_events.addItem(label, events)
+        self.notification_email = QLineEdit()
+        self.notification_email.setPlaceholderText("Required when notifications are enabled")
+        self.notification_email.setToolTip(
+            "LCProp requests Slurm mail; delivery depends on the cluster mail infrastructure."
+        )
         self.cleanup_remote_on_success = QCheckBox(
             "Delete remote run artifacts after successful retrieval"
         )
@@ -175,6 +187,8 @@ class RemoteExecutionDialog(QDialog):
             ("Remote Python", self.remote_python),
             ("Remote source root", self.source_root),
             ("Polling interval (s)", self.poll_interval),
+            ("Email notifications", self.notification_events),
+            ("Notification email", self.notification_email),
             ("Successful-run cleanup", self.cleanup_remote_on_success),
         ):
             form.addRow(label, widget)
@@ -263,6 +277,8 @@ class RemoteExecutionDialog(QDialog):
             self.remote_python,
             self.source_root,
             self.poll_interval,
+            self.notification_events,
+            self.notification_email,
             self.cleanup_remote_on_success,
             self.saved_resource,
             self.new_resource_button,
@@ -316,6 +332,8 @@ class RemoteExecutionDialog(QDialog):
         ):
             widget.clear()
         self.poll_interval.setValue(5)
+        self.notification_events.setCurrentIndex(0)
+        self.notification_email.clear()
         self.cleanup_remote_on_success.setChecked(True)
         self.saved_resource.clear()
         self._new_resource()
@@ -338,6 +356,10 @@ class RemoteExecutionDialog(QDialog):
             (self.source_root, cluster.source_root),
         ):
             widget.setText(value)
+        self.notification_events.setCurrentIndex(
+            self.notification_events.findData(cluster.notification_events)
+        )
+        self.notification_email.setText(cluster.notification_email)
         self.poll_interval.setValue(cluster.poll_interval)
         self.cleanup_remote_on_success.setChecked(
             cluster.cleanup_remote_on_success
@@ -454,6 +476,8 @@ class RemoteExecutionDialog(QDialog):
             self.poll_interval.value(),
             default_resource,
             self.cleanup_remote_on_success.isChecked(),
+            notification_email=self.notification_email.text(),
+            notification_events=self.notification_events.currentData(),
         )
 
     @Slot()

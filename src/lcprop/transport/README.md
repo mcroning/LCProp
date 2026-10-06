@@ -243,3 +243,22 @@ running, scientific-process completion, retrieval, verification,
 reconstruction, GUI-ready completion, cancellation, timeout, out-of-memory,
 and failure states. Scheduler completion alone is therefore never reported as
 GUI-ready completion.
+
+### Optional Slurm email notifications
+
+In **Configure Remote Execution**, select **Email notifications** (Off, End,
+Failure, End + Failure, or Begin + End + Failure) and enter **Notification email**.
+Enabled notifications require one plain email address; no address is inferred.
+Settings are saved with the existing user-local cluster profile. TOML equivalents:
+
+```toml
+notification_email = "user@example.org"
+notification_events = "END,FAIL"
+```
+
+Omitted/empty `notification_events` means Off and emits no mail directives, even
+if an address is saved. The runner emits `--mail-user` and `--mail-type` only when
+enabled. These are execution preferences, not scientific request, continuation,
+result or source-snapshot identity fields. Delivery depends on the cluster's
+Slurm mail configuration and mail infrastructure: LCProp requests notification
+but cannot guarantee delivery. No additional scientific dependency is required.

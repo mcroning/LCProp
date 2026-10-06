@@ -153,6 +153,29 @@ def _device_pattern_preflight(pattern: str) -> tuple[str, str]:
     )
 
 
+SLURM_NOTIFICATION_EVENTS = ("", "END", "FAIL", "END,FAIL", "BEGIN,END,FAIL")
+
+
+def validate_slurm_notifications(email: str, events: str) -> None:
+    """Validate one optional address and an allowlisted Slurm event selection."""
+    if not isinstance(events, str) or events not in SLURM_NOTIFICATION_EVENTS:
+        raise ValueError("unsupported Slurm notification events")
+    if not isinstance(email, str):
+        raise ValueError("notification email must be a string")
+    if events and not email:
+        raise ValueError("Notification email is required when email notifications are enabled")
+    if email and (
+        len(email) > 254
+        or not re.fullmatch(
+            r"[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@"
+            r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+            r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+",
+            email,
+        )
+    ):
+        raise ValueError("Notification email must be one plain email address without whitespace")
+
+
 @dataclass(frozen=True)
 class SlurmExecutionConfig:
     host: str
@@ -166,8 +189,11 @@ class SlurmExecutionConfig:
     default_resource_profile: str | None = None
     poll_interval: float = 5.0
     cleanup_remote_on_success: bool = True
+    notification_email: str = ""
+    notification_events: str = ""
 
     def __post_init__(self) -> None:
+        validate_slurm_notifications(self.notification_email, self.notification_events)
         if not re.fullmatch(r"[A-Za-z0-9_.@-]+", self.host):
             raise ValueError("host must be an SSH hostname or user@hostname")
         for value in (self.remote_run_root, self.remote_python):
@@ -462,6 +488,11 @@ class SlurmRunner:
             f"#SBATCH --output={remote_run}/stdout.txt",
             f"#SBATCH --error={remote_run}/stderr.txt",
         ]
+        if self.config.notification_events:
+            lines.extend((
+                f"#SBATCH --mail-user={self.config.notification_email}",
+                f"#SBATCH --mail-type={self.config.notification_events}",
+            ))
         if profile.gpus:
             if profile.gres is not None:
                 lines.append(f"#SBATCH --gres={profile.gres}")

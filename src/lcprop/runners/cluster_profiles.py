@@ -16,7 +16,9 @@ try:  # Python 3.11+
 except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
     import tomli as tomllib
 
-from lcprop.runners.slurm import SlurmResourceProfile, validate_remote_path
+from lcprop.runners.slurm import (
+    SlurmResourceProfile, validate_remote_path, validate_slurm_notifications,
+)
 
 
 _CLUSTER_FIELDS = {
@@ -26,6 +28,8 @@ _CLUSTER_FIELDS = {
     "source_root",
     "poll_interval",
     "cleanup_remote_on_success",
+    "notification_email",
+    "notification_events",
     "default_resource_profile",
     "profiles",
 }
@@ -160,8 +164,11 @@ class ClusterProfile:
     poll_interval: float = 5.0
     default_resource_profile: str | None = None
     cleanup_remote_on_success: bool = True
+    notification_email: str = ""
+    notification_events: str = ""
 
     def __post_init__(self) -> None:
+        validate_slurm_notifications(self.notification_email, self.notification_events)
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", self.name):
             raise ValueError(
                 "cluster name must contain only letters, digits, '.', '_', '-'"
@@ -323,6 +330,8 @@ def _parse_cluster(name: str, values: object, *, path: Path) -> ClusterProfile:
                 values.get("source_root"), context=context, field="source_root"
             ),
             resource_profiles=profile_values,
+            notification_email=values.get("notification_email", ""),
+            notification_events=values.get("notification_events", ""),
             poll_interval=float(poll),
             default_resource_profile=default_profile,
             cleanup_remote_on_success=_boolean(
@@ -454,6 +463,10 @@ def _catalog_toml(catalog: ClusterCatalog) -> str:
                 + ("true" if cluster.cleanup_remote_on_success else "false"),
             ]
         )
+        if cluster.notification_email:
+            lines.append(f"notification_email = {_toml_string(cluster.notification_email)}")
+        if cluster.notification_events:
+            lines.append(f"notification_events = {_toml_string(cluster.notification_events)}")
         if cluster.default_resource_profile is not None:
             lines.append(
                 "default_resource_profile = "
