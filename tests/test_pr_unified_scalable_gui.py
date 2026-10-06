@@ -92,7 +92,7 @@ def test_metadata_envelopes(n,precision,backend,monkeypatch,window):
     assert plan['measured_native_peak'] is None
     if backend=='cupy':
         with pytest.raises(ValueError,match='12,288'):a.validate_fresh(replace(r,solver=PRUnifiedSolverSpec(DIRECT,DIRECT_POLICY)))
-    with pytest.raises(ValueError,match='envelope'):a.validate_fresh(replace(r,grid=replace(r.grid,Nx=1024,Ny=1024)))
+    with pytest.raises(ValueError,match='envelope'):a.validate_fresh(replace(r,grid=replace(r.grid,Nx=4096,Ny=4096)))
 
 
 @pytest.mark.parametrize('kind',[UNBIASED,FIXED_FIELD,PRESCRIBED_CURRENT,OPEN_TRANSVERSE])
@@ -230,7 +230,7 @@ def test_real_run_cost_preflight(window,monkeypatch,target,identity):
 def test_real_run_unsupported_scalable(window,monkeypatch):
     import lcprop.pr.gui.main_window as gui
     r=replace(fresh(2),solver=SOLVER);apply(window,r)
-    window.grid_panel.set_grid(replace(r.grid,Nx=1024,Ny=1024))
+    window.grid_panel.set_grid(replace(r.grid,Nx=4096,Ny=4096))
     errors=[]
     monkeypatch.setattr(gui,'report_failure',lambda *args:errors.append(str(args)))
     monkeypatch.setattr(window,'_start_background',lambda *a,**k:pytest.fail('unsupported dispatch'))

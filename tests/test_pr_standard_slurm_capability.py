@@ -10,7 +10,7 @@ from tests.test_pr_unified_integration import fresh, app, window, apply
 
 
 @pytest.mark.parametrize('shape,precision', [((128,128),'float64'),((256,256),'float64'),
-    ((512,512),'float64'),((256,256),'float32'),((384,32),'float64')])
+    ((512,512),'float64'),((1024,1024),'float64'),((2048,2048),'float64'),((256,256),'float32'),((384,32),'float64')])
 def test_qualified_slurm_gui_request(window,monkeypatch,shape,precision):
     from lcprop.pr.gui import main_window as gui
     r=fresh(2,precision=precision)
@@ -32,7 +32,7 @@ def test_qualified_slurm_gui_request(window,monkeypatch,shape,precision):
     assert any(op.workflow_id==WORKFLOW_ID for op in default_transport_operations())
 
 
-@pytest.mark.parametrize('shape,precision', [((513,512),'float64'),((1024,1024),'float64'),((512,512),'float32')])
+@pytest.mark.parametrize('shape,precision', [((2049,2048),'float64'),((4096,4096),'float64'),((512,512),'float32')])
 def test_outside_qualified_envelope_remains_rejected(shape,precision):
     r=fresh(2,precision=precision)
     r=replace(r,grid=replace(r.grid,Nx=shape[0],Ny=shape[1]),backend=BackendSpec('cupy',precision,False),

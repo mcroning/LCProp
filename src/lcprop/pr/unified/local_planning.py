@@ -35,7 +35,9 @@ def assess_local_resources(plan, shape, *, physical_ram_bytes=None):
     warnings = []
     if large:
         warnings.append('Above the 256-per-axis interactive recommendation; local runtime can be large. '
-                        'Float64 is qualified through 512 per axis, not a convergence or runtime guarantee.')
+                        'Supported but expensive/not recommended interactively. '
+                        'Scientific support is closure/backend/precision-specific; see the support envelope. '
+                        'Bounded qualification does not guarantee long multi-plane runtime.')
     if risk:
         warnings.append('Estimated array/workspace scenarios reach 60% of physical RAM. '
                         'Close other workloads or select fewer retained products; no settings are changed.')

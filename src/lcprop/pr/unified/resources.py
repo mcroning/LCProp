@@ -16,7 +16,7 @@ def estimate_resources(request, *, selection=UnifiedSelection()):
     nch=request.initial_A.shape[0]
     if nch<1: raise ValueError('channel count must be positive')
     r=4 if request.precision.state_dtype=='float32' else 8;c=2*r
-    from .solver_specs import SCALABLE, DIRECT
+    from .solver_specs import SCALABLE, DIRECT, scalable_axis_limit
     from .specs import POSITIVE_PRECISION, UNBIASED
     scalable=request.solver.identity==SCALABLE
     wide=request.precision.identity==POSITIVE_PRECISION
@@ -76,12 +76,16 @@ def estimate_resources(request, *, selection=UnifiedSelection()):
         mixed=0
         face_flux=2*dim*n*8
     envelope=('reduced independent columns' if dim==1 else
-        'reference/direct <=12,288 active nodes' if not scalable else
-        (('NumPy state32 <=96 per axis' if wide else
-          'NumPy state64 qualified <=512 per axis; <=256 recommended for interactive use')
-         if request.backend=='numpy' else
-         'CuPy state32 <=256 per axis' if wide else 'CuPy state64 <=512 per axis')+
-        '; explicit unbiased 384x32 bridge; no 1024 squared qualification')
+        'reference/direct <=12,288 active nodes')
+    if scalable:
+        limit=scalable_axis_limit(request.backend,request.precision,request.closure)
+        envelope=(f"Supported: {'NumPy' if request.backend=='numpy' else 'H200/CuPy'} "
+            f"state{'32' if wide else '64'} qualified <={limit} per axis "
+            f"and <={limit*limit:,} active nodes for the selected closure; "
+            'explicit unbiased 384x32 bridge. Outside these bounds is outside the commissioned scientific envelope.')
+        if request.backend=='numpy':
+            envelope+=(' <=256 recommended for interactive use; larger supported grids are expensive. '
+                'Qualification is not a runtime guarantee; check RAM and retained products.')
     result = dict(schema=RESOURCE_SCHEMA,active_dimensions=dim,independent_columns=ny if dim==1 else 1,
         cells=cells,precision_identity=request.precision.identity,solver_identity=request.solver.identity,support_envelope=envelope,
         bytes=dict(scientific_state=state,optical_working_field=optical,

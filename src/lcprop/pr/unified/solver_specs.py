@@ -59,6 +59,23 @@ def legacy_solver(spatial):
     return PRUnifiedSolverSpec(REDUCED if spatial.dimension == 1 else DIRECT, DIRECT_POLICY)
 
 
+def scalable_axis_limit(backend, precision, closure):
+    """Qualified square-grid bound; independent of interactive recommendations.
+
+    H200 job 4968776 qualified all four float64 closures at 2048 squared.
+    Local carrier-remediation evidence covers all closures at 1024 squared
+    and unbiased at 2048 squared. State32 qualification is unchanged.
+    Call after material-spec validation; this is metadata, not a device probe.
+    """
+    if backend not in ('numpy', 'cupy'):
+        raise ValueError('unknown scalable backend')
+    if precision.identity == POSITIVE_PRECISION:
+        return 96 if backend == 'numpy' else 256
+    if precision.identity != DOUBLE_PRECISION:
+        raise ValueError('solver/precision combination not supported')
+    return 2048 if backend == 'cupy' or closure.identity == UNBIASED else 1024
+
+
 def validate_execution(solver, spatial, closure, precision, backend):
     """Metadata-only qualification; never probe or allocate a device."""
     if not isinstance(solver, PRUnifiedSolverSpec):
@@ -69,10 +86,7 @@ def validate_execution(solver, spatial, closure, precision, backend):
     if backend not in ('numpy', 'cupy'):
         raise ValueError('unknown scalable backend')
     bridge = spatial.active_shape == (384, 32) and closure.identity == UNBIASED
-    # Local float64 ladder qualified through 512² with PCG and GMRES.
-    # State32 keeps its prior ordinary local envelope; no inferred qualification.
-    limit = ((96 if precision.identity == POSITIVE_PRECISION else 512)
-             if backend == 'numpy' else (256 if precision.identity == POSITIVE_PRECISION else 512))
+    limit = scalable_axis_limit(backend, precision, closure)
     if not bridge and (max(spatial.active_shape) > limit or
                        spatial.active_shape[0]*spatial.active_shape[1] > limit*limit):
         raise ValueError(
@@ -82,6 +96,8 @@ def validate_execution(solver, spatial, closure, precision, backend):
             f'and <= {limit*limit:,} active nodes. '
             'The 384x32 exception requires the unbiased closure. '
             'Selecting Slurm does not enlarge the selected backend/precision envelope; '
-            'CuPy float64 supports up to 512x512, CuPy state32 up to 256x256. '
+            'H200/CuPy float64 is qualified through 2048x2048 for all four closures; '
+            'NumPy float64 through 1024x1024 for all four and 2048x2048 unbiased. '
+            'CuPy state32 remains <=256 per axis; NumPy state32 remains <=96. '
             'Resource planning and the selected retrieval policy still apply.'
         )

@@ -69,7 +69,7 @@ def test_existing_dispatch_has_no_scalable_import():
                     'pr/unified/workflow.py': {'from .solver_specs import PRUnifiedSolverSpec, SCALABLE, legacy_solver, validate_execution'},
                     'pr/unified/codec.py': {'from .solver_specs import legacy_solver','from .solver_specs import PRUnifiedSolverSpec'},
                     'pr/unified/integration.py': {'from .solver_specs import PRUnifiedSolverSpec, REDUCED, DIRECT, SCALABLE, DIRECT_POLICY, ITERATIVE_POLICY'},
-                    'pr/unified/resources.py': {'from .solver_specs import SCALABLE, DIRECT'},
+                    'pr/unified/resources.py': {'from .solver_specs import SCALABLE, DIRECT, scalable_axis_limit'},
                     'pr/gui/request_adapter.py': {'from lcprop.pr.unified.solver_specs import PRUnifiedSolverSpec, REDUCED, SCALABLE, DIRECT_POLICY, ITERATIVE_POLICY'},
                 }
                 if text in permitted.get(path.relative_to(root).as_posix(), set()):

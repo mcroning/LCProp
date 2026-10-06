@@ -21,6 +21,10 @@ def inspect_request(window, builder) -> None:
         request = builder()
         window._validate_execution_request(request)
         summary = window.describe_request(request)
+    except ValueError as exc:
+        # Expected editor/capability rejection is a user-facing validation result.
+        # Keep unexpected implementation failures on the diagnostic traceback path.
+        report_failure(window, 'Invalid request: ' + str(exc))
     except Exception:
         report_failure(window, traceback.format_exc())
     else:

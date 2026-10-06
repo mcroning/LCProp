@@ -11,18 +11,40 @@ precision, tolerances and persistence identities did not change.
 
 | Path | Support | Advice |
 |---|---|---|
-| Scalable NumPy float64 | Through 512 per axis | Up to 256 per axis recommended for ordinary interactive use; larger qualified requests warn |
+| Scalable NumPy float64 | Through 1024 per axis for all four closures; 2048 for unbiased | Up to 256 per axis recommended for ordinary interactive use; larger qualified requests warn |
 | Scalable NumPy state32 v3 | Existing 96 per axis | The parity-only float32 checks do not qualify all larger-grid use |
-| Scalable CuPy | Existing state32 256 / state64 512 per axis | H200 envelope unchanged |
+| Scalable H200/CuPy | State32 256 / float64 2048 per axis, all four closures | RAM, selected products and runtime planning still apply |
 | Connected direct/reference | 12,288 active nodes | Algorithmic direct/reference guard unchanged |
 | Reduced independent columns | Existing support | Not subject to the genuine-2D envelope |
 | Reduced/full-transverse TD | Existing support | No new grid ceiling; existing timestep/physical checks still apply |
 
 The explicit unbiased 384×32 scalable bridge remains unchanged. Shapes beyond
 the qualified ordinary envelope remain unsupported, rather than silently
-selecting a different backend, precision or solver. In particular 1024² was
-not qualified. These bounds do not promise convergence for every illumination,
+selecting a different backend, precision or solver. 4096² is not qualified.
+These bounds do not promise convergence for every illumination,
 closure or gain.
+
+The carrier-coordinate remediation qualification extends the local float64
+evidence to all four closures at 512²/1024² and unbiased at 2048². Its two-cell
+local workflow times were approximately 3.67 s (1024² unbiased), 20.6–21.4 s
+(1024² biased), and 17.82 s (2048² unbiased). These are bounded smooth-fixture
+measurements, not a guarantee for an 80-plane interactive run. Local 2048²
+biased support is not inferred from native evidence.
+
+Native H200 job 4968776 qualified all four closures at 2048² with unchanged
+physical gates, 3 Newton/4 PCG iterations per unbiased cell and 4 Newton/7
+GMRES iterations per biased cell. Sampled GPU peak was 11,541 MiB. The source
+resource estimator remains unchanged and does not replace its workspace
+inventory with that single measured peak. At 4096² its biased conservative
+admission scenario is 95.50 GiB, exceeding the retained 40%-of-H200 margin;
+no 4096² qualification or envelope expansion is inferred. See
+`results/Research/pr-unified-static-support-envelope-finalization-v1/REPORT.md`.
+
+Scientific support and interactive advice are separate. Supported large
+local requests warn above 256 per axis, and memory-risk warnings still use
+the selected-product/workspace estimate. Inspect Request presents expected
+invalid-request/capability errors without an internal traceback; unexpected
+implementation exceptions retain diagnostic tracebacks.
 
 ## Evidence
 

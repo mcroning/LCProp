@@ -22,17 +22,17 @@ def test_local_supported_and_memory_metadata(n,monkeypatch):
     a.validate_fresh(r);plan=a.resource_plan(r,policy='minimal')
     assert plan['local_assessment']['classification']==('comfortable' if n<=256 else 'large/slow')
     assert a.encode_fresh(r)==before
-    assert 'qualified <=512' in plan['support_envelope']
+    assert 'qualified <=2048' in plan['support_envelope']
     direct=replace(r,solver=PRUnifiedSolverSpec(DIRECT,DIRECT_POLICY))
     if n>=128:
         with pytest.raises(ValueError,match='12,288'):a.validate_fresh(direct)
     else:a.validate_fresh(direct)
 
 
-def test_precision_and_native_limits_unchanged():
+def test_state32_unchanged_and_float64_limits_qualified():
     with pytest.raises(ValueError,match='envelope'):a.validate_fresh(local(128,'float32'))
-    with pytest.raises(ValueError,match='envelope'):a.validate_fresh(local(513))
-    for n,precision in [(256,'float32'),(512,'float64')]:
+    with pytest.raises(ValueError,match='envelope'):a.validate_fresh(local(2049))
+    for n,precision in [(256,'float32'),(2048,'float64')]:
         r=replace(local(n,precision),backend=BackendSpec('cupy',precision,False))
         a.validate_fresh(r)
         with pytest.raises(ValueError,match='envelope'):a.validate_fresh(replace(r,grid=replace(r.grid,Nx=n+1)))
@@ -64,7 +64,7 @@ def test_actual_gui_run_preflight_dispatch(n,window,monkeypatch):
     window._set_product_policy('minimal');window.run_clicked()
     assert len(calls)==1
     assert a.encode_fresh(calls[0])==a.encode_fresh(r)
-    assert 'qualified <=512' in window.describe_request(r)
+    assert 'qualified <=2048' in window.describe_request(r)
 
 
 def test_gui_memory_warning_does_not_dispatch_on_no(window,monkeypatch):
