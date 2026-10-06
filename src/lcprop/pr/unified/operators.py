@@ -83,6 +83,10 @@ def normalized_log_carrier(g, p, I):
     xp = g.xp
     v = -p-xp.log(I)
     mx = xp.max(v)
+    if g.backend.precision == 'float64':
+        # Normalize by the mean directly: avoid losing spatial bits by
+        # subtracting log(N) and adding it back to a small carrier coordinate.
+        return v-(mx+xp.log(xp.mean(xp.exp(v-mx))))
     return v-(mx+xp.log(xp.sum(xp.exp(v-mx))))+math.log(g.size)
 
 

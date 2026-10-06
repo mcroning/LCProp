@@ -306,12 +306,23 @@ def test_product_failure_preserves_science_and_original_cell_failure(monkeypatch
 
 def test_material_operators_and_time_integrators_unchanged():
     root=Path(__file__).resolve().parents[1]
-    core=['__init__.py','specs.py','_backend.py','_newton.py','operators.py','static.py']
+    core=['__init__.py','specs.py','_backend.py','_newton.py','static.py']
     for name in core:
         p='src/lcprop/pr/unified/'+name
         assert (root/p).read_bytes()==subprocess.check_output(['git','show','4eca4a116babf901b85cfa3cddd663b4ca1ace88:'+p],cwd=root)
-    # The common normalization migration intentionally changes source wiring,
-    # metadata, GUI and codecs. Material operators/integrators remain byte-frozen.
+    # Only float64 carrier log-normalization arithmetic is intentionally changed.
+    # All other operator definitions, including flux and discrete derivatives,
+    # must retain their original AST; the carrier regression tests cover the
+    # revised function and exact legacy float32/v3 evaluation separately.
+    import ast
+    path='src/lcprop/pr/unified/operators.py'
+    before=subprocess.check_output(['git','show','4eca4a116babf901b85cfa3cddd663b4ca1ace88:'+path],cwd=root).decode()
+    def other_operators(source):
+        tree=ast.parse(source)
+        tree.body=[node for node in tree.body if not (
+            isinstance(node,ast.FunctionDef) and node.name=='normalized_log_carrier')]
+        return ast.dump(tree,include_attributes=False)
+    assert other_operators(before)==other_operators((root/path).read_text())
     for p in ('src/lcprop/pr/evolution.py','src/lcprop/pr/transverse/transport.py',
               'src/lcprop/pr/unified/_scalable.py'):
         assert (root/p).read_bytes()==subprocess.check_output(

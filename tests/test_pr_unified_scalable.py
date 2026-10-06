@@ -61,7 +61,7 @@ def metrics(a, b):
 
 
 @pytest.mark.parametrize('case', MANIFEST['roots'], ids=lambda c: c['id'])
-def test_frozen_and_independent_direct_overlap(case, record_property):
+def test_frozen_and_independent_direct_overlap(case, record_property, monkeypatch):
     f = frozen(case['id']); I = f['I']; dt = case['precision']; ck = case['closure']
     c = closure(ck); req = request(I, tuple(case['lengths'])); before = I.tobytes()
     state, trace = core.solve_material(req, closure=c, solver=SOLVER)
@@ -70,10 +70,20 @@ def test_frozen_and_independent_direct_overlap(case, record_property):
     tol = dict(rtol=2e-4, atol=2e-5) if dt == 'float32' else dict(rtol=1e-8, atol=1e-8)
     for k in ('q', 'psi', 'b'):
         np.testing.assert_allclose(getattr(state, k), f[k], **tol)
-        # Same-backend promoted algorithm must preserve retained state64 bits.
-        if dt == 'float64': np.testing.assert_array_equal(getattr(state, k), f[k])
+        # Nonzero closures retain the promoted arithmetic exactly. Unbiased
+        # float64 now normalizes via log(mean), so use the unchanged physical
+        # overlap tolerance above and separately verify the historical bits.
+        if dt == 'float64' and ck != 'zero':
+            np.testing.assert_array_equal(getattr(state, k), f[k])
         assert getattr(state, k).dtype == np.dtype(dt)
         record_property('frozen_'+k+'_max', metrics(getattr(state,k), f[k]))
+    if dt == 'float64' and ck == 'zero':
+        from tests.test_pr_unified_carrier_normalization import legacy
+        with monkeypatch.context() as patch:
+            patch.setattr(operators, 'normalized_log_carrier', legacy)
+            historical, _ = core.solve_material(req, closure=c, solver=SOLVER)
+        for k in ('q', 'psi', 'b'):
+            np.testing.assert_array_equal(getattr(historical, k), f[k])
     direct_precision = PRMaterialPrecisionSpec() if dt == 'float64' else PRMaterialPrecisionSpec(
         MIXED_PRECISION, 'float32', output_dtype='float32')
     direct, diagnostics = solve_static_material(replace(req, precision=direct_precision), closure=c)
