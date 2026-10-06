@@ -10,13 +10,14 @@ from lcprop.pr.transverse.continuation import describe_continuation
 class TransverseContinuationDialog(QDialog):
     beam_fields=('power_mW','x0_um','y0_um','theta_ext_rad','phi_rad','phase_rad')
 
-    def __init__(self, checkpoint, parent=None):
+    def __init__(self, checkpoint, parent=None, *, describe=describe_continuation, reduced=False):
         super().__init__(parent);self.checkpoint=checkpoint;self.request=None
-        self.setWindowTitle('Continue accepted transverse TD state');self.resize(900,650)
+        self.describe=describe
+        self.setWindowTitle('Continue accepted reduced TD state' if reduced else 'Continue accepted transverse TD state');self.resize(900,650)
         layout=QVBoxLayout(self);r=checkpoint.request
         layout.addWidget(QLabel(
-            f'Source segment {len(checkpoint.record["lineage"])}; cumulative τ={checkpoint.time_normalized:.12g}\n'
-            f'{checkpoint.record["normalization_identity"]}\n'
+            f'Source segment {(len(checkpoint.segment_lineage) if reduced else len(checkpoint.record["lineage"]))}; cumulative τ={checkpoint.time_normalized:.12g}\n'
+            f'{r.material.normalization_identity}\n'
             'Locked: grid/z layout, material scales, wavelength/index, model, integrator, precision, scattering.\n'
             'Additional time is characteristic τ, not laboratory seconds. Set beam power to 0 to disable it.'))
         self.beams=QTableWidget(len(r.beams.channels),len(self.beam_fields))
@@ -28,6 +29,8 @@ class TransverseContinuationDialog(QDialog):
         self.uniform=QLineEdit(str(Decimal(str(r.material.uniform_irradiance_W_cm2))*1000))
         self.steps=QSpinBox();self.steps.setRange(0,1000000000);self.steps.setValue(r.solver.Nt)
         self.dt=QLineEdit(str(r.solver.dt_normalized))
+        self.dt.setEnabled(not reduced)
+        if reduced: self.dt.setToolTip('Reduced checkpoint cadence is locked; cumulative τ = accepted steps × Δτ.')
         form.addRow('Dark-equivalent irradiance (mW/cm²)',self.dark)
         form.addRow('Uniform background irradiance (mW/cm²)',self.uniform)
         form.addRow('Additional material steps',self.steps);form.addRow('Step Δτ',self.dt)
@@ -46,13 +49,13 @@ class TransverseContinuationDialog(QDialog):
             material=replace(r.material,dark_irradiance_W_cm2=float(Decimal(self.dark.text())/1000),
                 uniform_irradiance_W_cm2=float(Decimal(self.uniform.text())/1000)),
             solver=replace(r.solver,Nt=self.steps.value(),dt_normalized=float(self.dt.text())))
-        describe_continuation(request,self.checkpoint)
+        self.describe(request,self.checkpoint)
         return request
 
     def inspect_request(self):
         try:
             request=self.build_request()
-            self.preview.setPlainText(json.dumps(describe_continuation(request,self.checkpoint),indent=2,allow_nan=False))
+            self.preview.setPlainText(json.dumps(self.describe(request,self.checkpoint),indent=2,allow_nan=False))
         except Exception as exc:self.preview.setPlainText('Invalid continuation: '+str(exc))
 
     def accept_request(self):

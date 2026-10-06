@@ -111,6 +111,10 @@ class Workspace(QWidget):
             self.image_pane.select_source_volume
         )
 
+        from lcprop.gui.trajectory_player import TrajectoryPlayer
+        self.trajectory_player = TrajectoryPlayer(self)
+        layout.addWidget(self.trajectory_player)
+
         self.curve_pane = CurvePane()
         self.tabs.addTab(self.curve_pane, "Curves")
 
@@ -276,6 +280,8 @@ class Workspace(QWidget):
         except Exception:
             # A partially updated product has no coherent displayed ownership.
             # Keep the selected tab, but make all result content unavailable.
+            self.trajectory_player.pause()
+            self.trajectory_player.artifact = None
             self.image_pane.hide()
             self.longitudinal_pane.hide()
             self.curve_pane.curve_view.hide()
@@ -311,6 +317,7 @@ class Workspace(QWidget):
             self.setUpdatesEnabled(True)
 
     def _render_run_data(self, run_data) -> None:
+        self.trajectory_player.set_run_data(run_data)
         if self._artifact_directory is not None:
             self._artifact_directory.cleanup()
             self._artifact_directory = None

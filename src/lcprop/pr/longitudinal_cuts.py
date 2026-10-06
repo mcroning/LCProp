@@ -100,6 +100,7 @@ def extract_longitudinal_optical_intensity_cuts(
     grid_summary: Mapping[str, Any],
     peak_intensity_reference: float,
     background_intensity: float,
+    allow_zero_reference: bool = False,
 ) -> PRLongitudinalIntensityCuts:
     """Extract physical ``(z, x)`` and ``(z, y)`` cuts nearest zero.
 
@@ -121,7 +122,7 @@ def extract_longitudinal_optical_intensity_cuts(
         raise TypeError("source_intensity_stack must be a real floating array")
     reference = float(peak_intensity_reference)
     background = float(background_intensity)
-    if not np.isfinite(reference) or reference <= 0.0:
+    if not np.isfinite(reference) or (reference < 0.0 or (reference == 0.0 and not allow_zero_reference)):
         raise ValueError("peak_intensity_reference must be finite and positive")
     if not np.isfinite(background) or background < 0.0:
         raise ValueError("background_intensity must be finite and nonnegative")

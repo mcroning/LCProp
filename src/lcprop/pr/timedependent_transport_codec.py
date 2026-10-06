@@ -215,6 +215,7 @@ def _encode_checkpoint(
         "E_dtype": checkpoint.E_dtype,
         "A0_dtype": checkpoint.A0_dtype,
         "status": checkpoint.status,
+        "segment_lineage": checkpoint.segment_lineage,
     }
 
 
@@ -234,6 +235,7 @@ def _decode_checkpoint(
         E_dtype=values["E_dtype"],
         A0_dtype=values["A0_dtype"],
         status=values["status"],
+        segment_lineage=tuple(values.get("segment_lineage", ())),
     )
     validate_pr_checkpoint(checkpoint)
     return checkpoint
@@ -278,6 +280,7 @@ def encode_pr_timedependent_transport_result(
                 )
             cuts = extract_longitudinal_optical_intensity_cuts(
                 result.source_intensity_stack,
+                allow_zero_reference=(result_source_inverse(result) is not None and result_source_inverse(result)[0] == 0),
                 grid_summary=result.grid_summary,
                 peak_intensity_reference=(result_source_inverse(result)[0]
                     if result_source_inverse(result) is not None else channel_peak_intensity_reference(
@@ -287,6 +290,7 @@ def encode_pr_timedependent_transport_result(
             )
             preview = make_fast_intensity_preview(
                 result.source_intensity_stack,
+                allow_zero_reference=(result_source_inverse(result) is not None and result_source_inverse(result)[0] == 0),
                 grid_summary=result.grid_summary,
                 z_offset_fraction=1.0 if result.diagnostics.get('optical_coupling')=='frozen_material_published_optical_first_v1' else 0.0,
                 peak_intensity_reference=(result_source_inverse(result)[0]

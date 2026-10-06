@@ -468,17 +468,22 @@ def run_pr_timedependent(
         grid=grid,
         z_length_um=request.grid.z_length_um,
     )
-    launch = build_launch(
-        request.beams,
-        grid,
-        complex_dtype=backend.complex_dtype,
-        launch_elements=request.launch_elements,
-        context=OpticalLaunchContext(
-            grid=grid,
-            n_ref=float(request.material.refractive_index),
-            interaction_length_um=float(request.grid.z_length_um),
-        ),
-    )
+    if (request.material.normalization_identity != "pr_channel_peak_reference_v1"
+            and sum(ch.power_mW for ch in request.beams.channels) == 0):
+        from lcprop.pr.reduced_continuation import physical_launch
+        launch = physical_launch(request, grid, backend.complex_dtype)
+    else:
+        launch = build_launch(
+            request.beams,
+            grid,
+            complex_dtype=backend.complex_dtype,
+            launch_elements=request.launch_elements,
+            context=OpticalLaunchContext(
+                grid=grid,
+                n_ref=float(request.material.refractive_index),
+                interaction_length_um=float(request.grid.z_length_um),
+            ),
+        )
     A0, E = _initial_fields(
         request,
         launch=launch,
@@ -546,6 +551,7 @@ def run_pr_timedependent(
         min(segment_total_steps + 1, TD_MOVIE_MAX_FRAMES),
     )).astype(int)).tolist())
     movie_frames: list[np.ndarray] = []
+    material_movie_frames: list[np.ndarray] = []
     movie_frame_indices: list[int] = []
     movie_times: list[float] = []
 
@@ -562,6 +568,8 @@ def run_pr_timedependent(
         movie_frames.append(
             downsample_td_movie_frame(intensity, xp=grid.xp, asnumpy=asnumpy)
         )
+        material_movie_frames.append(downsample_td_movie_frame(
+            E[grid.Nz // 2], xp=grid.xp, asnumpy=asnumpy))
         movie_frame_indices.append(int(index))
         movie_times.append(
             float(_cumulative_start_time)
@@ -733,7 +741,7 @@ def run_pr_timedependent(
                 if due:
                     field_state = reduced_pr_live_snapshot(
                         E=E, A=A_display, source=display_source_stack, grid=grid,
-                        groups=launch.coherence_groups, peak_reference=float(peak_reference),
+                        groups=launch.coherence_groups, peak_reference=(0.0 if isinstance(peak_reference, PhysicalIlluminationReference) and peak_reference.optical_scale_W_cm2 == 0 else float(peak_reference)),
                         background=request.material.background_intensity,
                         policy=live_preview_policy, completed_steps=completed_steps,
                         segment_completed_steps=segment_completed_steps,
@@ -781,7 +789,7 @@ def run_pr_timedependent(
         _, display_A, display_source = accepted_observation
         snapshot = reduced_pr_live_snapshot(
             E=E, A=display_A, source=display_source, grid=grid,
-            groups=launch.coherence_groups, peak_reference=float(peak_reference),
+            groups=launch.coherence_groups, peak_reference=(0.0 if isinstance(peak_reference, PhysicalIlluminationReference) and peak_reference.optical_scale_W_cm2 == 0 else float(peak_reference)),
             background=request.material.background_intensity,
             policy=live_preview_policy, completed_steps=completed_steps,
             segment_completed_steps=segment_completed_steps,
@@ -878,7 +886,7 @@ def run_pr_timedependent(
         "characteristic_wavenumber_per_um": (
             request.material.characteristic_wavenumber_per_um
         ),
-        "peak_intensity_reference": float(peak_reference),
+        "peak_intensity_reference": (0.0 if isinstance(peak_reference, PhysicalIlluminationReference) and peak_reference.optical_scale_W_cm2 == 0 else float(peak_reference)),
         **({"source_normalization": source_reference.metadata(), "normalization_identity": source_reference.identity} if isinstance(source_reference, PhysicalIlluminationReference) else {}),
         "integrator": request.solver.integrator,
         "optical_coupling": request.optical_coupling,
@@ -943,6 +951,9 @@ def run_pr_timedependent(
 
     movie = encode_td_preview_movie(
         movie_frames,
+        material_frames=material_movie_frames,
+        material_metadata={"quantity": "E", "label": "Reduced material E",
+                           "material_plane_index": grid.Nz // 2},
         frame_indices=movie_frame_indices,
         material_times=movie_times,
         original_grid=grid.summary(),

@@ -33,6 +33,7 @@ class PRTimeDependentCheckpoint:
     E_dtype: str
     A0_dtype: str
     status: PRCheckpointStatus = "completed"
+    segment_lineage: tuple[dict[str, Any], ...] = ()
 
 
 def validate_pr_checkpoint(checkpoint: PRTimeDependentCheckpoint) -> None:
@@ -47,6 +48,24 @@ def validate_pr_checkpoint(checkpoint: PRTimeDependentCheckpoint) -> None:
         raise ValueError("checkpoint completed_steps must be nonnegative")
     if int(checkpoint.requested_steps) < int(checkpoint.completed_steps):
         raise ValueError("checkpoint requested_steps must be >= completed_steps")
+
+    if checkpoint.segment_lineage:
+        from lcprop.pr.illumination import INTEGRAL_NORMALIZATION, reference_from_metadata
+        import json
+        if checkpoint.request.material.normalization_identity != INTEGRAL_NORMALIZATION:
+            raise ValueError("physical segment lineage cannot label a legacy checkpoint")
+        json.dumps(checkpoint.segment_lineage, allow_nan=False)
+        end = -1.0
+        for segment in checkpoint.segment_lineage:
+            if segment.get("identity") != "pr_reduced_accepted_E_physical_illumination_segments_v1":
+                raise ValueError("unknown reduced continuation identity")
+            start = float(segment["source_cumulative_time"])
+            stop = float(segment["cumulative_time"])
+            if start < end or stop < start or stop > checkpoint.time_normalized:
+                raise ValueError("invalid reduced segment time ordering")
+            reference_from_metadata(segment["old_reference"])
+            reference_from_metadata(segment["new_reference"])
+            end = stop
 
     E_initial = _host_array(checkpoint.E_initial)
     E_current = _host_array(checkpoint.E_current)

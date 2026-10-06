@@ -94,20 +94,8 @@ def _td_scalar_curves(result: Any) -> CurveCollection:
 
 
 def _td_preview_artifacts(result: Any) -> dict[str, ArtifactData]:
-    movie = getattr(result, "td_preview_movie", None)
-    metadata = getattr(result, "td_preview_movie_metadata", None)
-    if movie is None or not isinstance(metadata, dict):
-        return {}
-    return {
-        "td_preview_movie": ArtifactData(
-            key="td_preview_movie",
-            display_name="Downsampled TD Preview (MP4)",
-            data=np.asarray(movie, dtype=np.uint8),
-            media_type="video/mp4",
-            filename="pr_td_preview.mp4",
-            metadata=deepcopy(metadata),
-        )
-    }
+    from lcprop.pr.trajectory import movie_artifacts
+    return movie_artifacts(result)
 
 
 def _add_carrier_power_diagnostic(
@@ -358,11 +346,11 @@ def _copied_array(value: Any) -> np.ndarray:
 def _physical_optical_intensity_volume(
     source: Any, result: Any, *, background: float
 ) -> np.ndarray:
-    reference = channel_peak_intensity_reference(
-        np.asarray(result.A_initial), xp=np
-    )
     inverse = result_source_inverse(result)
-    if inverse is not None: reference, background = inverse
+    if inverse is not None:
+        reference, background = inverse
+    else:
+        reference = channel_peak_intensity_reference(np.asarray(result.A_initial), xp=np)
     return (np.asarray(source) - float(background)) * float(reference)
 
 

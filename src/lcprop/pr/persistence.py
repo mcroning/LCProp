@@ -33,8 +33,8 @@ from lcprop.pr.specs import (
 from lcprop.pr.transverse.specs import PRTransverseMaterialResponseSpec
 
 
-PR_CHECKPOINT_SCHEMA_VERSION = 4
-PR_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3, PR_CHECKPOINT_SCHEMA_VERSION)
+PR_CHECKPOINT_SCHEMA_VERSION = 5
+PR_CHECKPOINT_SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3, 4, PR_CHECKPOINT_SCHEMA_VERSION)
 PR_CHECKPOINT_MATERIAL = PR_MATERIAL_ID
 PR_CHECKPOINT_FORMAT = "lcprop-checkpoint"
 
@@ -152,6 +152,7 @@ def save_pr_checkpoint(
     provenance = {
         **identity,
         "status": checkpoint.status,
+        "segment_lineage": checkpoint.segment_lineage,
         "completed_steps": int(checkpoint.completed_steps),
         "requested_steps": int(checkpoint.requested_steps),
         "time_normalized": float(checkpoint.time_normalized),
@@ -200,6 +201,8 @@ def load_pr_checkpoint(run_dir: str | Path) -> PRTimeDependentCheckpoint:
     if request_version != provenance_version:
         raise ValueError("PR checkpoint schema versions do not agree")
 
+    if provenance_version >= 5 and "segment_lineage" not in provenance:
+        raise ValueError("checkpoint schema 5 requires explicit segment_lineage")
     with np.load(directory / "checkpoint.npz", allow_pickle=False) as arrays:
         expected_arrays = {"E_initial", "E_current", "A0"}
         if set(arrays.files) != expected_arrays:
@@ -225,6 +228,7 @@ def load_pr_checkpoint(run_dir: str | Path) -> PRTimeDependentCheckpoint:
         E_dtype=str(provenance["E_dtype"]),
         A0_dtype=str(provenance["A0_dtype"]),
         status=str(provenance["status"]),
+        segment_lineage=tuple(provenance.get("segment_lineage", ())),
     )
     validate_pr_checkpoint(checkpoint)
     return checkpoint

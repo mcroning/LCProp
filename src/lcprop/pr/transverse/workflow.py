@@ -391,6 +391,7 @@ def run_pr_transverse_timedependent(
     td_scalar_history: list[dict[str, float]] = []
     movie_indices = set(td_movie_frame_indices(int(request.solver.Nt)).tolist())
     movie_frames: list[np.ndarray] = []
+    material_movie_frames: list[np.ndarray] = []
     movie_frame_indices: list[int] = []
     movie_times: list[float] = []
 
@@ -407,6 +408,8 @@ def run_pr_transverse_timedependent(
         movie_frames.append(
             downsample_td_movie_frame(intensity, xp=grid.xp, asnumpy=asnumpy)
         )
+        material_movie_frames.append(downsample_td_movie_frame(
+            psi[grid.Nz // 2], xp=grid.xp, asnumpy=asnumpy))
         movie_frame_indices.append(int(index))
         movie_times.append(int(index) * float(request.solver.dt_normalized))
     linearized_spec = (
@@ -778,6 +781,9 @@ def run_pr_transverse_timedependent(
     )
     movie = encode_td_preview_movie(
         movie_frames,
+        material_frames=material_movie_frames,
+        material_metadata={"quantity": "psi", "label": "Material potential ψ",
+                           "material_plane_index": grid.Nz // 2},
         frame_indices=movie_frame_indices,
         material_times=movie_times,
         original_grid=grid.summary(),

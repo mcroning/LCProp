@@ -178,7 +178,11 @@ def _continue_pr_operation(
 ) -> RunnerResult:
     """Adapt PR continuation to the workflow-neutral worker result."""
 
-    result = continue_pr_timedependent(
+    from lcprop.pr.reduced_continuation import continue_physical_pr
+    continuation = (continue_physical_pr
+                    if request.material.normalization_identity != "pr_channel_peak_reference_v1"
+                    else continue_pr_timedependent)
+    result = continuation(
         request,
         checkpoint,
         additional_steps,
@@ -529,6 +533,15 @@ class PRMainWindow(QWidget):
             self.continue_button.setEnabled(ready)
             self.save_checkpoint_button.setEnabled(ready)
             self.continue_button.setToolTip("Edit physical illumination for a new local segment; inherited state parameters are locked.")
+            self.checkpoint_compatibility_reason = None
+            return
+        if (isinstance(checkpoint, PRTimeDependentCheckpoint)
+                and checkpoint.request.material.normalization_identity != "pr_channel_peak_reference_v1"):
+            ready = (not self._background_running and not self.input_panel.is_image_amplification()
+                     and self.evolution_panel.workflow_id() == PR_TIMEDEPENDENT_WORKFLOW)
+            self.continue_button.setEnabled(ready)
+            self.save_checkpoint_button.setEnabled(not self._background_running)
+            self.continue_button.setToolTip("Edit physical illumination; reduced state, closure and cadence stay locked.")
             self.checkpoint_compatibility_reason = None
             return
         workflow_id = self.evolution_panel.workflow_id()
@@ -1736,6 +1749,27 @@ class PRMainWindow(QWidget):
             or self.evolution_panel.workflow_id()
             != PR_TIMEDEPENDENT_WORKFLOW
         ):
+            return
+        if self.last_checkpoint.request.material.normalization_identity != "pr_channel_peak_reference_v1":
+            from lcprop.pr.reduced_continuation import describe_continuation as describe_reduced
+            from .transverse_continuation import TransverseContinuationDialog
+            import json
+            dialog = TransverseContinuationDialog(self.last_checkpoint, self,
+                describe=describe_reduced, reduced=True)
+            if not dialog.exec():
+                return
+            request = dialog.request
+            try:
+                self._scientific_preflight(request)
+                summary = json.dumps(describe_reduced(request, self.last_checkpoint), indent=2)
+            except ValueError as exc:
+                self.status_label.setText("Invalid continuation")
+                report_failure(self, str(exc))
+                return
+            self._start_background(request, summary=summary,
+                runner_callable=partial(_continue_pr_operation, checkpoint=self.last_checkpoint,
+                    additional_steps=request.solver.Nt), run_label="Continuing reduced TD locally",
+                execution_runner=self.local_runner)
             return
         begin_request(self, "Continue")
         checkpoint = self.last_checkpoint

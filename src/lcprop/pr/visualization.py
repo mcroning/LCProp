@@ -264,6 +264,8 @@ def encode_td_preview_movie(
     original_grid: Mapping[str, Any],
     original_cadence: float,
     ffmpeg_path: str | None = None,
+    material_frames: Sequence[np.ndarray] | None = None,
+    material_metadata: Mapping[str, Any] | None = None,
 ) -> PRTDPreviewMovie:
     """Encode a bounded fixed-scale MP4; failure is explicitly non-scientific."""
 
@@ -312,6 +314,14 @@ def encode_td_preview_movie(
         "codec": "h264",
         "frame_rate_fps": 6,
     }
+    from lcprop.pr.trajectory import pack_frames
+    metadata["interactive_frames"] = pack_frames(stack)
+    if material_frames is not None:
+        material_stack = np.asarray(material_frames, dtype=np.float32)
+        if material_stack.shape != stack.shape:
+            raise ValueError("material and optical trajectory samples must match")
+        metadata["interactive_material_frames"] = pack_frames(material_stack)
+        metadata["material_sample"] = dict(material_metadata or {})
     if executable is None:
         warning = "TD preview MP4 unavailable: ffmpeg executable not found"
         metadata.update({"status": "encoding_failed", "warning": warning})
