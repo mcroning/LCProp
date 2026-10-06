@@ -173,6 +173,133 @@ Critical requirements:
 -   provide convergence tests in angle, x, and z;
 -   recover the existing LCProp solution in the small-angle limit.
 
+#### Candidate: material-time evolution with a global isotropic optical solve
+
+Investigate material time as the only evolution variable, without choosing
+x or z as an optical marching coordinate. At each accepted material-time
+state:
+
+1. hold the material distribution fixed;
+2. solve the steady monochromatic optical problem globally over the full
+   x-z plane;
+3. derive optical intensity, grating information, and material drive from
+   that solution;
+4. advance the PR material state by one material-time step;
+5. repeat.
+
+This candidate exploits the separation between optical transit time and PR
+response time. Forward, grazing, sideways, and backward radiation would be
+directions within one global optical solution rather than separate spatial
+marching algorithms. The validity of that time-scale separation remains part
+of the model assessment. This is one candidate alongside the angular-sector
+and coupled-wave candidates above, not a selected implementation architecture.
+
+For the 2-D Track-A problem, investigate the outgoing Helmholtz Green function
+
+\[
+G_{2D}(r)=\frac{i}{4}H_0^{(1)}(k_0r),
+\]
+
+with the eventual 3-D analogue
+
+\[
+G_{3D}(r)=\frac{e^{ik_0r}}{4\pi r}.
+\]
+
+Here \(k_0\) denotes the homogeneous background optical wavenumber for this
+candidate; its mapping to Product conventions must be specified in a future
+derivation. Track A thus uses an isotropic outgoing cylindrical-wave kernel;
+the eventual 3-D problem has spherical-wave propagation. Outgoing labels here
+assume a compatible time-harmonic convention, to be made explicit below.
+
+A Lippmann–Schwinger-type candidate is
+
+\[
+E=E_{\rm inc}+G*(VE),
+\]
+
+where \(E\) denotes the monochromatic **optical** field and \(V\) the optical
+scattering potential, with sign and normalization to be derived from the
+chosen Helmholtz convention. Strong multiple scattering and PR feedback
+generally require a self-consistent solution, not a single Born application.
+Self-consistency of the fixed-material optical solve must be distinguished
+from the subsequent material-time update.
+
+**Real-space singularity.** The Green function is singular at its origin:
+logarithmically in 2-D and as \(1/r\) in 3-D. These singularities are locally
+integrable and must not be implemented by evaluating \(G(0)\) pointwise.
+Investigate finite-cell/self-term integration or an equivalent controlled
+diagonal correction, for example the 2-D cell average
+
+\[
+G_{\rm self}=\frac{1}{\Delta A}\int_{\rm cell}G(\mathbf r)\,dA,
+\]
+
+with the appropriate cell-area weight in the discrete convolution and explicit
+convergence tests. Preserve the central distinction:
+
+- **Green-function singularity:** a controllable operator/discretization
+  problem, requiring a justified self-term treatment;
+- **\(k_z\to0\) in a one-way z march:** potentially a coordinate/representation
+  problem, not simply a local kernel value needing regularization.
+
+This distinction may be a central reason to investigate material-time
+marching with a global optical solve; it does not itself establish that the
+candidate is accurate or practical.
+
+**Fourier-space pole and radiation condition.** Record the Fourier
+representation schematically as
+
+\[
+\widetilde G(k_x,k_z)\propto
+\frac{1}{k_0^2-k_x^2-k_z^2+i0},
+\qquad +i0\equiv\lim_{\epsilon\to0^+}+i\epsilon.
+\]
+
+The denominator vanishes on \(k_x^2+k_z^2=k_0^2\). The infinitesimal
+displacement is a radiation/pole prescription, not an arbitrary numerical
+stabilizer. It specifies how the Fourier inversion contour passes the pole.
+Cauchy's theorem/residue calculus, together with the adopted Fourier and
+time-harmonic sign conventions, determines whether the solution is outgoing
+or incoming. For the displayed plus prescription, the distribution identity is
+
+\[
+\frac{1}{x+i0}=\operatorname{PV}\frac{1}{x}-i\pi\delta(x).
+\]
+
+The delta-term sign reverses for the minus prescription. The sign of \(i0\),
+the overall Green-function normalization, and the choice of \(H_0^{(1)}\)
+versus \(H_0^{(2)}\) must be derived consistently from the adopted conventions;
+the schematic denominator is not a convention-independent implementation rule.
+
+An implementation must **not** simply substitute an arbitrarily small
+floating-point epsilon for \(i0\). Finite epsilon introduces damping and
+changes the problem. The discrete solver must demonstrate convergence to the
+appropriate outgoing-radiation, zero-loss limit, accounting for domain and
+resolution as well as damping.
+
+**Future Track-A validation.** Include:
+
+- small-angle parity with conventional LCProp, whose homogeneous optical
+  kernel already uses full scalar angular-spectrum dispersion;
+- behavior approaching grazing and backward propagation;
+- self-cell singularity convergence;
+- spatial, material-time, and iterative-solver convergence;
+- equivalence with an independent 2-D Helmholtz/PML oracle;
+- convergence as finite damping/regularization tends to the outgoing
+  zero-loss limit;
+- conditioning and scientifically neutral preconditioning of the
+  Lippmann–Schwinger solve under strong PR feedback;
+- whether transmission/reflection-grating physics emerges naturally or
+  requires explicit grating variables.
+
+Because Track A is only two-dimensional, FFT-accelerated global optical
+operators may be extremely fast and permit extensive convergence matrices
+and independent-oracle comparisons. This is a **hypothesis to benchmark**,
+not a performance claim or Product performance requirement. High throughput
+is a proposed means of making scientific validation thorough. All existing
+implementation prohibitions remain in force.
+
 ### Track B --- true 3-D arbitrary-angle model
 
 Goal: ultimately allow a fan to develop on the full wavevector sphere
