@@ -213,6 +213,9 @@ def test_gui_requires_explicit_physical_inputs_and_legacy_load():
     panel=PRMaterialPanel()
     try:
         assert panel.material().normalization_identity==INTEGRAL_NORMALIZATION
+        panel.material().validate()
+        assert panel.material().dark_irradiance_W_cm2 == .01
+        panel.dark_irradiance.clear()
         with pytest.raises(ValueError):panel.material().validate()
         panel.dark_irradiance.setText('250');panel.uniform_irradiance.setText('0')
         m=panel.material();m.validate()
@@ -237,7 +240,7 @@ def test_gui_physical_reduced_td_preflight_and_request_roundtrip():
         window.material_panel.dark_irradiance.setText('100')
         window._restore_experiment_gui_state(original)
         assert window.material_panel.dark_irradiance.text()=='not yet entered'
-        assert window.material_panel.uniform_irradiance.text()==''
+        assert window.material_panel.uniform_irradiance.text()=='0'
         window.material_panel.dark_irradiance.setText('100')
         window.material_panel.uniform_irradiance.setText('0')
         window.grid_panel.Nx.setValue(8);window.grid_panel.Ny.setValue(8)

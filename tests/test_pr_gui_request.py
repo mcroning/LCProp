@@ -91,7 +91,7 @@ def test_pr_gui_defaults_are_pr_owned_valid_and_well_sampled(app):
     assert request.grid != GridSpec()
     assert request.solver == PRSolverOptions(
         Nt=10,
-        dt_normalized=1e-3,
+        dt_normalized=.01,
         optical_substeps=1,
         integrator=PR_SEMI_IMPLICIT_INTEGRATOR,
     )
@@ -102,8 +102,9 @@ def test_pr_gui_defaults_are_pr_owned_valid_and_well_sampled(app):
     )
     assert request.initial_A is None
     assert request.initial_E is None
-    assert preflight.warnings == ()
-    assert request.solver.dt_normalized < preflight.conservative_dt_limit
+    assert preflight.timestep_assessment == "pending"
+    assert preflight.conservative_dt_limit is None
+    assert all("timestep assessment pending" in w for w in preflight.warnings)
     assert min(
         value
         for pair in preflight.aperture.samples_per_waist
@@ -378,7 +379,9 @@ def test_pr_gui_preflight_rejects_unsupported_physical_profiles(app, profile):
 
 
 def test_pr_gui_preflight_uses_implemented_timestep_guard(app):
-    request = _build(_controls(app))
+    controls = _controls(app)
+    controls[0].set_material(PRMaterialSpec())  # Legacy scan remains a preflight guard.
+    request = _build(controls)
     unstable = replace(
         request,
         solver=replace(request.solver, dt_normalized=1.0),

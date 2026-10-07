@@ -102,6 +102,8 @@ class PREvolutionPanel(QWidget):
         self.dt_normalized.setRange(1e-12, 1e6)
         self.dt_normalized.setDecimals(12)
         self.dt_normalized.setValue(defaults.dt_normalized)
+        self._timestep_uses_startup_default = True
+        self.dt_normalized.valueChanged.connect(self._timestep_edited)
         self.optical_substeps = spin_box(1, 1_000_000, defaults.optical_substeps)
         self.integrator = QComboBox()
         self.integrator.addItem(
@@ -135,11 +137,11 @@ class PREvolutionPanel(QWidget):
         self.scattering_epsilon = QDoubleSpinBox()
         self.scattering_epsilon.setRange(0.0, 1.0e9)
         self.scattering_epsilon.setDecimals(12)
-        self.scattering_epsilon.setValue(1.0e-8)
+        self.scattering_epsilon.setValue(0.02)
         self.scattering_correlation_um = QDoubleSpinBox()
         self.scattering_correlation_um.setRange(1.0e-12, 1.0e9)
         self.scattering_correlation_um.setDecimals(12)
-        self.scattering_correlation_um.setValue(2.0)
+        self.scattering_correlation_um.setValue(0.4)
         self.scattering_seed = QDoubleSpinBox()
         self.scattering_seed.setRange(0.0, float(2**32 - 1))
         self.scattering_seed.setDecimals(0)
@@ -467,6 +469,14 @@ class PREvolutionPanel(QWidget):
             and is_linearized,
         )
         self._refresh_integrator_choices()
+        if self._timestep_uses_startup_default:
+            # New-session convenience only. Loaded or edited values are owned
+            # by the request/user; full-transverse defaults remain unqualified .001.
+            value = (.01 if workflow_id == PR_TIMEDEPENDENT_WORKFLOW
+                     and self.integrator.currentData() == PR_SEMI_IMPLICIT_INTEGRATOR else .001)
+            blocked = self.dt_normalized.blockSignals(True)
+            self.dt_normalized.setValue(value)
+            self.dt_normalized.blockSignals(blocked)
         for widget in (self.Nt, self.dt_normalized, self.integrator):
             self._set_row_visible(widget, is_time_dependent)
         self._set_row_visible(
@@ -764,8 +774,12 @@ class PREvolutionPanel(QWidget):
             else "automatic_target_default"
         )
 
+    def _timestep_edited(self, *_):
+        self._timestep_uses_startup_default = False
+
     def set_solver(self, solver: PRSolverOptions) -> None:
         solver.validate()
+        self._timestep_uses_startup_default = False
         self.Nt.setValue(solver.Nt)
         self.dt_normalized.setValue(solver.dt_normalized)
         self.optical_substeps.setValue(solver.optical_substeps)
@@ -776,6 +790,7 @@ class PREvolutionPanel(QWidget):
 
     def set_transverse_solver(self, solver: PRTransverseSolverOptions) -> None:
         solver.validate()
+        self._timestep_uses_startup_default = False
         self.Nt.setValue(solver.Nt)
         self.dt_normalized.setValue(solver.dt_normalized)
         self.optical_substeps.setValue(solver.optical_substeps)

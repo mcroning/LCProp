@@ -44,8 +44,8 @@ class PRMaterialPanel(QWidget):
         self.normalization_mode = QComboBox()
         self.normalization_mode.addItem("Physical total illumination", INTEGRAL_NORMALIZATION)
         self.normalization_mode.addItem("Legacy channel-peak reference", LEGACY_NORMALIZATION)
-        self.dark_irradiance = QLineEdit()
-        self.uniform_irradiance = QLineEdit()
+        self.dark_irradiance = QLineEdit("10")
+        self.uniform_irradiance = QLineEdit("0")
         for edit in (self.dark_irradiance, self.uniform_irradiance):
             edit.setPlaceholderText("Required: enter a value or explicit 0")
         primary.addRow("Intensity normalization", self.normalization_mode)
