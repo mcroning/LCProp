@@ -29,6 +29,7 @@ from lcprop.pr.visualization import (
 )
 from lcprop.pr.scattering import canonical_scattering_provenance
 from lcprop.pr.transverse.diagnostics import state_diagnostics
+from lcprop.pr.transverse.storage import TDStoragePolicy, BoundedStorage
 from lcprop.pr.transverse.linearized_reference import (
     FIXED_MEAN_FIELD_ENSEMBLE,
     PRBiasedLinearizedReferenceSpec,
@@ -59,6 +60,7 @@ from lcprop.pr.transverse.transport import (
 from lcprop.pr.workflow import (
     _apply_canonical_scattering_after_slice,
     _canonical_scattering_phase_stack,
+    _canonical_scattering_phase_for_slice,
     _validate_canonical_scattering_for_grid,
     advance_pr_slice_with_midpoint_source,
     advance_pr_published_frozen_slice,
@@ -170,7 +172,7 @@ def _linearized_material_step(
     return candidate
 
 
-def _initial_fields(request, *, launch, grid, complex_dtype, real_dtype):
+def _initial_fields(request, *, launch, grid, complex_dtype, real_dtype, storage=None):
     xp = grid.xp
     if request.initial_A is None:
         A0 = launch.A0.copy()
@@ -181,6 +183,8 @@ def _initial_fields(request, *, launch, grid, complex_dtype, real_dtype):
         if not bool(asnumpy(xp.all(xp.isfinite(A0)))):
             raise ValueError("initial_A must contain only finite values")
     expected = (grid.Nz, grid.Nx, grid.Ny)
+    if storage is not None:
+        return A0, storage.initial(request.initial_psi)
     if request.initial_psi is None:
         psi = xp.zeros(expected, dtype=real_dtype)
     else:
@@ -206,33 +210,33 @@ def _optical_pass(
     dy_normalized,
     cancellation_token=None,
     scattering_phase_stack=None,
+    storage=None,
 ):
     xp = grid.xp
     A = A0.copy()
-    source = xp.empty(psi.shape, dtype=grid.real_dtype)
+    source = (xp if storage is None else np).empty(psi.shape, dtype=grid.real_dtype)
     intensity_before = None
-    state = state_from_potential(
-        psi,
-        dx_normalized=dx_normalized,
-        dy_normalized=dy_normalized,
-        h_y=request.dielectric.h_y,
-        applied_field_x=request.boundary.applied_field_x,
-        xp=xp,
-    )
-    active = project_active_field(
-        state.E_x, state.E_y, profile=request.projection, xp=xp
-    )
+    def project(block):
+        state = state_from_potential(
+            block, dx_normalized=dx_normalized, dy_normalized=dy_normalized,
+            h_y=request.dielectric.h_y, applied_field_x=request.boundary.applied_field_x, xp=xp)
+        return project_active_field(state.E_x, state.E_y, profile=request.projection, xp=xp)
+    active = project(psi) if storage is None else None
     for z_index in range(grid.Nz):
         _check_cancel(cancellation_token, "material_source_optical_z_march")
+        if storage is not None and z_index % storage.k == 0:
+            active = None  # release previous chunk before constructing its replacement
+            active = project(storage.upload(psi[z_index:z_index+storage.k]))
+        active_plane = active[z_index if storage is None else z_index % storage.k]
         if request.resolved_optical_coupling == PR_TD_PUBLISHED_COUPLING:
-            A, source[z_index] = advance_pr_published_frozen_slice(
-                A, active[z_index], request=request, grid=grid, kernel=kernel,
+            A, source_plane = advance_pr_published_frozen_slice(
+                A, active_plane, request=request, grid=grid, kernel=kernel,
                 peak_reference=peak_reference, wavelength_um=wavelength_um,
             )
         else:
-            A, source[z_index], intensity_before = advance_pr_slice_with_midpoint_source(
+            A, source_plane, intensity_before = advance_pr_slice_with_midpoint_source(
                 A,
-                active[z_index],
+                active_plane,
                 kernel=kernel,
                 optical_substeps=request.solver.optical_substeps,
                 dz_um=grid.dz_um,
@@ -248,6 +252,7 @@ def _optical_pass(
                 _intensity_before=intensity_before,
                 _return_exit_intensity=True,
             )
+        source[z_index] = source_plane if storage is None else asnumpy(source_plane)
         _apply_canonical_scattering_after_slice(
             A,
             scattering=request.scattering,
@@ -258,7 +263,8 @@ def _optical_pass(
             phase=(
                 None
                 if scattering_phase_stack is None
-                else scattering_phase_stack[z_index]
+                else (scattering_phase_stack[z_index] if storage is None
+                      else storage.upload(scattering_phase_stack[z_index]))
             ),
         )
     return A, source
@@ -271,6 +277,7 @@ def run_pr_transverse_timedependent(
     progress_callback: ProgressCallback | None = None,
     _continuation_psi=None,
     _accepted_callback=None,
+    storage_policy: TDStoragePolicy | None = None,
 ) -> PRTransverseRunResult:
     """Run the full-transverse PR workflow on the requested backend.
 
@@ -285,7 +292,18 @@ def run_pr_transverse_timedependent(
     xp = backend.xp
     real_dtype = backend.real_dtype
     complex_dtype = backend.complex_dtype
+    policy = storage_policy or TDStoragePolicy()
+    policy.validate()
+    if policy.mode == "bounded" and (
+        request.material_response.model != PR_MATERIAL_RESPONSE_NONLINEAR
+        or request.solver.integrator != PR_TRANSVERSE_IMEX_EULER
+        or request.backend.precision != "float64"
+    ):
+        raise ValueError("bounded TD requires nonlinear float64 spectral_imex_euler")
     grid = make_grid(request.grid, xp=xp, real_dtype=real_dtype)
+    storage = (BoundedStorage(policy, (grid.Nz, grid.Nx, grid.Ny), real_dtype, xp)
+               if policy.mode == "bounded" else None)
+    mxp = np if storage is not None else xp
     _validate_canonical_scattering_for_grid(
         request.scattering,
         grid=grid,
@@ -327,7 +345,7 @@ def run_pr_transverse_timedependent(
         launch=launch,
         grid=grid,
         complex_dtype=complex_dtype,
-        real_dtype=real_dtype,
+        real_dtype=real_dtype, storage=storage,
     )
     if _continuation_psi is not None:
         # The accepted state is authoritative: do not repeat gauge subtraction.
@@ -352,37 +370,52 @@ def run_pr_transverse_timedependent(
         coherence_groups=request.beams.coherence_groups, xp=grid.xp)
     request = replace(request, material=runtime_material)
     peak_reference = source_reference
-    scattering_phase_stack = _canonical_scattering_phase_stack(
-        request.scattering,
-        grid=grid,
-        z_length_um=request.grid.z_length_um,
-        xp=xp,
-    )
+    if storage is None:
+        scattering_phase_stack = _canonical_scattering_phase_stack(
+            request.scattering, grid=grid, z_length_um=request.grid.z_length_um, xp=xp)
+    else:
+        scattering_phase_stack = None
+        if request.scattering is not None:
+            scattering_phase_stack = np.empty(storage.shape, dtype=real_dtype)
+            for z in range(grid.Nz):
+                phase = _canonical_scattering_phase_for_slice(request.scattering,
+                    z_index=z, grid=grid, z_length_um=request.grid.z_length_um, xp=xp)
+                scattering_phase_stack[z] = asnumpy(phase)
+                del phase
     k0 = request.material.characteristic_wavenumber_per_um
     dx_normalized = k0 * grid.dx_um
     dy_normalized = k0 * grid.dy_um
-    initial_state = state_from_potential(
-        psi,
-        dx_normalized=dx_normalized,
-        dy_normalized=dy_normalized,
-        h_y=request.dielectric.h_y,
-        applied_field_x=request.boundary.applied_field_x,
-        xp=xp,
-    )
-    if request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR:
-        initial_state_is_physical = xp.all(
-            xp.isfinite(initial_state.psi)
-            & xp.isfinite(initial_state.carrier_density)
-            & xp.isfinite(initial_state.E_x)
-            & xp.isfinite(initial_state.E_y)
-            & (initial_state.carrier_density > 0.0)
+    state_kwargs = dict(dx_normalized=dx_normalized, dy_normalized=dy_normalized,
+                        h_y=request.dielectric.h_y, applied_field_x=request.boundary.applied_field_x)
+    if storage is not None:
+        initial_summary = storage.summarize(psi, **state_kwargs)
+        if not initial_summary['physical']:
+            raise ValueError("initial_psi must reconstruct a finite positive carrier state")
+        initial_carrier = initial_summary['carrier_sums']
+        max_carrier_drift = np.asarray(0., dtype=real_dtype)
+    else:
+        initial_state = state_from_potential(
+            psi,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=request.dielectric.h_y,
+            applied_field_x=request.boundary.applied_field_x,
+            xp=xp,
         )
-        if not bool(asnumpy(initial_state_is_physical)):
-            raise ValueError(
-                "initial_psi must reconstruct a finite positive carrier state"
+        if request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR:
+            initial_state_is_physical = xp.all(
+                xp.isfinite(initial_state.psi)
+                & xp.isfinite(initial_state.carrier_density)
+                & xp.isfinite(initial_state.E_x)
+                & xp.isfinite(initial_state.E_y)
+                & (initial_state.carrier_density > 0.0)
             )
-    initial_carrier = xp.sum(initial_state.carrier_density, axis=(-2, -1))
-    max_carrier_drift = xp.asarray(0.0, dtype=real_dtype)
+            if not bool(asnumpy(initial_state_is_physical)):
+                raise ValueError(
+                    "initial_psi must reconstruct a finite positive carrier state"
+                )
+        initial_carrier = xp.sum(initial_state.carrier_density, axis=(-2, -1))
+        max_carrier_drift = xp.asarray(0.0, dtype=real_dtype)
     completed_steps = 0
     cancelled = False
     cancellation_stage = None
@@ -411,9 +444,9 @@ def run_pr_transverse_timedependent(
             downsample_td_movie_frame(intensity, xp=grid.xp, asnumpy=asnumpy)
         )
         material_movie_frames.append(downsample_td_movie_frame(
-            psi[grid.Nz // 2], xp=grid.xp, asnumpy=asnumpy))
+            psi[grid.Nz // 2], xp=mxp, asnumpy=asnumpy))
         extra_movies.append(optical_field, accepted_source, grid=grid, request=request,
-                            reference=peak_reference, groups=launch.coherence_groups, asnumpy=asnumpy)
+                            reference=peak_reference, groups=launch.coherence_groups, asnumpy=asnumpy, source_xp=mxp)
         movie_frame_indices.append(int(index))
         movie_times.append(int(index) * float(request.solver.dt_normalized))
     linearized_spec = (
@@ -443,6 +476,7 @@ def run_pr_transverse_timedependent(
                 dy_normalized=dy_normalized,
                 cancellation_token=cancellation_token,
                 scattering_phase_stack=scattering_phase_stack,
+                **({"storage": storage} if storage is not None else {}),
             )
             optical_passes_completed += 1
             retain_movie_frame(completed_steps, observed_A, source)
@@ -465,17 +499,23 @@ def run_pr_transverse_timedependent(
                     raise ValueError(
                         f"unknown transverse PR integrator: {request.solver.integrator}"
                     )
-                candidate = step_function(
-                    psi,
-                    source,
-                    dt_normalized=request.solver.dt_normalized,
-                    dx_normalized=dx_normalized,
-                    dy_normalized=dy_normalized,
-                    m_y=request.transport.m_y,
-                    h_y=request.dielectric.h_y,
-                    applied_field_x=request.boundary.applied_field_x,
-                    xp=xp,
-                )
+                if storage is not None:
+                    candidate = storage.step(step_function, psi, source,
+                        check=lambda stage: _check_cancel(cancellation_token, stage),
+                        dt_normalized=request.solver.dt_normalized,
+                        m_y=request.transport.m_y, **state_kwargs)
+                else:
+                    candidate = step_function(
+                        psi,
+                        source,
+                        dt_normalized=request.solver.dt_normalized,
+                        dx_normalized=dx_normalized,
+                        dy_normalized=dy_normalized,
+                        m_y=request.transport.m_y,
+                        h_y=request.dielectric.h_y,
+                        applied_field_x=request.boundary.applied_field_x,
+                        xp=xp,
+                    )
                 material_response_calls[0] += 1
             _check_cancel(cancellation_token, "after_material_candidate")
         except _CancellationRequested as exc:
@@ -483,40 +523,43 @@ def run_pr_transverse_timedependent(
             cancellation_stage = exc.stage
             break
 
-        accepted_state = state_from_potential(
-            candidate,
-            dx_normalized=dx_normalized,
-            dy_normalized=dy_normalized,
-            h_y=request.dielectric.h_y,
-            applied_field_x=request.boundary.applied_field_x,
-            xp=xp,
-        )
-        if request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR:
-            candidate_is_physical = xp.all(
-                xp.isfinite(accepted_state.psi)
-                & xp.isfinite(accepted_state.carrier_density)
-                & xp.isfinite(accepted_state.E_x)
-                & xp.isfinite(accepted_state.E_y)
-                & (accepted_state.carrier_density > 0.0)
+        if storage is not None:
+            summary = storage.summarize(candidate, **state_kwargs)
+            if not summary['physical']:
+                raise FloatingPointError("nonlinear transverse TD candidate is nonfinite or has nonpositive carrier density")
+            current_carrier = summary['carrier_sums']
+            minimum_carrier = summary['carrier_minimum']
+        else:
+            accepted_state = state_from_potential(
+                candidate,
+                dx_normalized=dx_normalized,
+                dy_normalized=dy_normalized,
+                h_y=request.dielectric.h_y,
+                applied_field_x=request.boundary.applied_field_x,
+                xp=xp,
             )
-            if not bool(asnumpy(candidate_is_physical)):
-                raise FloatingPointError(
-                    "nonlinear transverse TD candidate is nonfinite or has "
-                    "nonpositive carrier density"
+            if request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR:
+                candidate_is_physical = xp.all(
+                    xp.isfinite(accepted_state.psi)
+                    & xp.isfinite(accepted_state.carrier_density)
+                    & xp.isfinite(accepted_state.E_x)
+                    & xp.isfinite(accepted_state.E_y)
+                    & (accepted_state.carrier_density > 0.0)
                 )
+                if not bool(asnumpy(candidate_is_physical)):
+                    raise FloatingPointError(
+                        "nonlinear transverse TD candidate is nonfinite or has "
+                        "nonpositive carrier density"
+                    )
+            current_carrier = xp.sum(accepted_state.carrier_density, axis=(-2, -1))
+            minimum_carrier = scalar_float(xp.min(accepted_state.carrier_density))
         material_change_rms = scalar_float(
-            xp.sqrt(xp.mean((candidate - psi) * (candidate - psi)))
+            mxp.sqrt(mxp.mean((candidate - psi) * (candidate - psi)))
         )
         psi = candidate
         completed_steps = step_index + 1
-        current_carrier = xp.sum(accepted_state.carrier_density, axis=(-2, -1))
-        max_carrier_drift = xp.maximum(
-            max_carrier_drift,
-            xp.max(
-                xp.abs(current_carrier - initial_carrier)
-                / xp.abs(initial_carrier)
-            ),
-        )
+        max_carrier_drift = mxp.maximum(max_carrier_drift,
+            mxp.max(mxp.abs(current_carrier - initial_carrier) / mxp.abs(initial_carrier)))
         scalar_row = {
             "material_time_normalized": (
                 completed_steps * float(request.solver.dt_normalized)
@@ -524,9 +567,7 @@ def run_pr_transverse_timedependent(
             "material_state_change_rms": material_change_rms,
         }
         if request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR:
-            scalar_row["minimum_carrier_density"] = scalar_float(
-                xp.min(accepted_state.carrier_density)
-            )
+            scalar_row["minimum_carrier_density"] = minimum_carrier
         td_scalar_history.append(scalar_row)
         if _accepted_callback is not None:
             _accepted_callback(psi, completed_steps, source_reference.metadata())
@@ -546,7 +587,7 @@ def run_pr_transverse_timedependent(
                     # explicitly sample before requesting host presentation data.
                     latest_field_state={
                         "psi_current": psi.copy(),
-                        "psi_current_backend": backend.name
+                        "psi_current_backend": "numpy" if storage is not None else backend.name
                     },
                     message="transverse PR material-time step accepted",
                     diagnostics={
@@ -582,24 +623,29 @@ def run_pr_transverse_timedependent(
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         scattering_phase_stack=scattering_phase_stack,
+        **({"storage": storage} if storage is not None else {}),
     )
     optical_passes_completed += 1
     retain_movie_frame(completed_steps, A_final, final_source)
-    final_state = state_from_potential(
-        psi,
-        dx_normalized=dx_normalized,
-        dy_normalized=dy_normalized,
-        h_y=request.dielectric.h_y,
-        applied_field_x=request.boundary.applied_field_x,
-        xp=xp,
-    )
-    diagnostics = state_diagnostics(
-        final_state,
-        dx_normalized=dx_normalized,
-        dy_normalized=dy_normalized,
-        h_y=request.dielectric.h_y,
-        xp=xp,
-    )
+    if storage is not None:
+        final_summary = storage.summarize(psi, diagnostics=True, **state_kwargs)
+        diagnostics = final_summary['diagnostics']
+    else:
+        final_state = state_from_potential(
+            psi,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=request.dielectric.h_y,
+            applied_field_x=request.boundary.applied_field_x,
+            xp=xp,
+        )
+        diagnostics = state_diagnostics(
+            final_state,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=request.dielectric.h_y,
+            xp=xp,
+        )
     power_initial = normalized_power(A0, grid)
     power_final = normalized_power(A_final, grid)
     diagnostics.update(
@@ -643,8 +689,8 @@ def run_pr_transverse_timedependent(
         rhs_cells = 0
         for plane_index in range(final_source.shape[0]):
             rhs_plane = linearized_timedependent_rhs(
-                psi[plane_index],
-                final_source[plane_index],
+                psi[plane_index] if storage is None else storage.upload(psi[plane_index]),
+                final_source[plane_index] if storage is None else storage.upload(final_source[plane_index]),
                 spec=linearized_spec,
                 backend=request.backend,
             )
@@ -671,8 +717,8 @@ def run_pr_transverse_timedependent(
         rhs_cells = 0
         for plane_index in range(final_source.shape[0]):
             rhs_plane = potential_rhs(
-                psi[plane_index],
-                final_source[plane_index],
+                psi[plane_index] if storage is None else storage.upload(psi[plane_index]),
+                final_source[plane_index] if storage is None else storage.upload(final_source[plane_index]),
                 dx_normalized=dx_normalized,
                 dy_normalized=dy_normalized,
                 m_y=request.transport.m_y,
@@ -683,7 +729,8 @@ def run_pr_transverse_timedependent(
             rhs_sum_squares += scalar_float(xp.sum(rhs_plane * rhs_plane))
             rhs_max = max(rhs_max, scalar_float(xp.max(xp.abs(rhs_plane))))
             rhs_cells += int(rhs_plane.size)
-        carrier_minimum = scalar_float(xp.min(final_state.carrier_density))
+        carrier_minimum = (scalar_float(xp.min(final_state.carrier_density)) if storage is None
+                           else final_summary["carrier_minimum"])
         diagnostics.update({
             "frozen_intensity_material_equation": (
                 "full_transverse_nonlinear_potential_rate"
@@ -714,6 +761,10 @@ def run_pr_transverse_timedependent(
                 "retained_material_time_history": False,
             },
         })
+    if storage is not None:
+        diagnostics['storage_execution'] = dict(storage.plan,
+            max_uploaded_planes=storage.max_uploaded_planes, observed_array_samples=storage.samples,
+            reduction_contract="chunk RMS recombination; existing backend numerical parity contract")
     scattering_provenance = None
     if request.scattering is not None:
         scattering_provenance = canonical_scattering_provenance(
@@ -799,8 +850,8 @@ def run_pr_transverse_timedependent(
     return PRTransverseRunResult(
         A_initial=np.asarray(asnumpy(A0)).copy(),
         A_final=np.asarray(asnumpy(A_final)).copy(),
-        psi_initial=np.asarray(asnumpy(psi_initial)).copy(),
-        psi_final=np.asarray(asnumpy(psi)).copy(),
+        psi_initial=np.asarray(asnumpy(psi_initial)).copy() if storage is None else psi_initial,
+        psi_final=np.asarray(asnumpy(psi)).copy() if storage is None else psi,
         power_initial=power_initial,
         power_final=power_final,
         completed_steps=completed_steps,
@@ -816,7 +867,7 @@ def run_pr_transverse_timedependent(
         longitudinal_intensity_yz=longitudinal_cuts.yz,
         x_cut_um=longitudinal_cuts.x_cut_um,
         y_cut_um=longitudinal_cuts.y_cut_um,
-        source_intensity_stack=np.asarray(asnumpy(final_source)).copy(),
+        source_intensity_stack=np.asarray(asnumpy(final_source)).copy() if storage is None else final_source,
         td_scalar_history=tuple(td_scalar_history),
         td_preview_movie=movie.data,
         td_preview_movie_metadata=movie.metadata,

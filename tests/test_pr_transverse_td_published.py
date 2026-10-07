@@ -146,9 +146,25 @@ def test_material_updates_and_other_workflows_are_byte_unchanged():
     for path in ('src/lcprop/pr/evolution.py',
                  'src/lcprop/pr/transverse/transport.py'):
         assert Path(path).read_bytes() == subprocess.check_output(['git', 'show', base + ':' + path])
+    # Storage orchestration now branches, but the resident operation must still
+    # reproduce the pre-storage Product and the material operators above remain
+    # byte-identical. Execute the committed authority, not a copied expectation.
+    import types
+    from tests.test_pr_transverse_continuation import request
+    from lcprop.pr.transverse.workflow import run_pr_transverse_timedependent
     path = 'src/lcprop/pr/transverse/workflow.py'
-    old = subprocess.check_output(['git', 'show', base + ':' + path], text=True)
-    new = Path(path).read_text()
-    start = '                if request.solver.integrator == PR_TRANSVERSE_IMEX_EULER:'
-    end = '        td_scalar_history.append(scalar_row)'
-    assert old[old.index(start):old.index(end)] == new[new.index(start):new.index(end)]
+    old = subprocess.check_output(['git', 'show',
+        'b888e6d3ccd7cfeae2612623697a08a2d358ac74:' + path], text=True)
+    authority = types.ModuleType('lcprop.pr.transverse.resident_authority')
+    exec(compile(old, '<committed-resident-authority>', 'exec'), authority.__dict__)
+    r = request()
+    expected = authority.run_pr_transverse_timedependent(r)
+    actual = run_pr_transverse_timedependent(r)
+    for name in ('psi_initial', 'psi_final', 'A_initial', 'A_final', 'source_intensity_stack'):
+        np.testing.assert_array_equal(getattr(actual, name), getattr(expected, name))
+    assert actual.td_scalar_history == expected.td_scalar_history
+    for key, value in expected.diagnostics.items():
+        if isinstance(value, np.ndarray):
+            np.testing.assert_array_equal(actual.diagnostics[key], value)
+        else:
+            assert actual.diagnostics[key] == value

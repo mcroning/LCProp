@@ -122,11 +122,14 @@ class TransverseTDCheckpoint:
             raise ValueError('checkpoint physical illumination mismatch')
         from .transport import state_from_potential
         k=self.request.material.characteristic_wavenumber_per_um
-        state=state_from_potential(self.psi,dx_normalized=k*self.request.grid.x_aperture_um/self.request.grid.Nx,
-            dy_normalized=k*self.request.grid.y_aperture_um/self.request.grid.Ny,
-            h_y=self.request.dielectric.h_y,applied_field_x=self.request.boundary.applied_field_x,xp=np)
-        if not np.isfinite(state.carrier_density).all() or not np.all(state.carrier_density>0):
-            raise ValueError('checkpoint is not a physical accepted carrier state')
+        # Each z plane has independent periodic physics. Validation need not
+        # reconstruct four complete host volumes just to check carrier positivity.
+        for plane in self.psi:
+            state=state_from_potential(plane,dx_normalized=k*self.request.grid.x_aperture_um/self.request.grid.Nx,
+                dy_normalized=k*self.request.grid.y_aperture_um/self.request.grid.Ny,
+                h_y=self.request.dielectric.h_y,applied_field_x=self.request.boundary.applied_field_x,xp=np)
+            if not np.isfinite(state.carrier_density).all() or not np.all(state.carrier_density>0):
+                raise ValueError('checkpoint is not a physical accepted carrier state')
         return self
 
 
@@ -213,7 +216,7 @@ class ContinuationFailure(RuntimeError):
         super().__init__(str(cause));self.checkpoint=checkpoint
 
 
-def continue_transverse_td(request, checkpoint, *, cancellation_token=None, progress_callback=None):
+def continue_transverse_td(request, checkpoint, *, cancellation_token=None, progress_callback=None, storage_policy=None):
     from .workflow import run_pr_transverse_timedependent
     segment=describe_continuation(request,checkpoint)
     latest=[None,0,None]
@@ -230,7 +233,8 @@ def continue_transverse_td(request, checkpoint, *, cancellation_token=None, prog
     try:
         result=run_pr_transverse_timedependent(request,cancellation_token=cancellation_token,
             progress_callback=observe if progress_callback is not None else None,
-            _continuation_psi=checkpoint.psi,_accepted_callback=accepted)
+            _continuation_psi=checkpoint.psi,_accepted_callback=accepted,
+            **({"storage_policy":storage_policy} if storage_policy is not None else {}))
     except Exception as exc:
         state,steps,reference=latest
         if state is None:
@@ -328,7 +332,7 @@ def notify_failure_checkpoint(failure, progress_callback):
         message='Failed segment: last accepted material checkpoint preserved'))
 
 
-def run_continuable_transverse_td(request, *, cancellation_token=None, progress_callback=None):
+def run_continuable_transverse_td(request, *, cancellation_token=None, progress_callback=None, storage_policy=None):
     """Normal registered execution with failure-state retention for eligible runs."""
     from .workflow import run_pr_transverse_timedependent
     try:
@@ -336,12 +340,14 @@ def run_continuable_transverse_td(request, *, cancellation_token=None, progress_
         request_metadata(request)
     except (ValueError,TypeError):
         return run_pr_transverse_timedependent(request,cancellation_token=cancellation_token,
-                                               progress_callback=progress_callback)
+                                               progress_callback=progress_callback,
+                                               **({"storage_policy":storage_policy} if storage_policy is not None else {}))
     latest=[None,0,None]
     def accepted(psi,steps,reference):latest[:]=[psi.copy(),steps,reference]
     try:
         return run_pr_transverse_timedependent(request,cancellation_token=cancellation_token,
-            progress_callback=progress_callback,_accepted_callback=accepted)
+            progress_callback=progress_callback,_accepted_callback=accepted,
+            **({"storage_policy":storage_policy} if storage_policy is not None else {}))
     except Exception as exc:
         state,steps,ref=latest
         if state is None:raise

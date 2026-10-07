@@ -22,7 +22,7 @@ class AcceptedMovieProducts:
         self.frames = {key: [] for key in ('xz', 'yz', 'far_field')}
         self.metadata = {}
 
-    def append(self, field, source, *, grid, request, reference, groups, asnumpy):
+    def append(self, field, source, *, grid, request, reference, groups, asnumpy, source_xp=None):
         if len(self.frames['xz']) >= 36:
             raise ValueError('TD movie frame bound exceeded')
         xp = grid.xp
@@ -42,7 +42,7 @@ class AcceptedMovieProducts:
             ('yz', source[:, ix, :].T, ('y', 'z'), (y, z)),
         ):
             optical = (cut - background) * inverse
-            self.frames[key].append(downsample_td_movie_frame(optical, xp=xp, asnumpy=asnumpy))
+            self.frames[key].append(downsample_td_movie_frame(optical, xp=xp if source_xp is None else source_xp, asnumpy=asnumpy))
             self.metadata[key] = dict(
                 axes=list(axes), coordinates={a: _axis_preview(v, xp=np, asnumpy=np.asarray)
                                              for a, v in zip(axes, coordinates)},

@@ -73,6 +73,7 @@ _PR_TRANSVERSE_TIMEDEPENDENT_PREVIOUS_TRANSPORT_CODEC_VERSION = 1
 PR_TRANSVERSE_TIMEDEPENDENT_RESULT_CODEC_VERSION = 3
 _CANCELLATION_OBSERVED_STAGES = {
     "material_step_boundary",
+    "material_chunk_boundary",
     "material_source_optical_z_march",
     "linearized_material_plane",
     "after_material_candidate",
