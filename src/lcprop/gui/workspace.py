@@ -276,7 +276,7 @@ class Workspace(QWidget):
                     else "Completed result"
                 )
             self._render_run_data(run_data)
-            self.longitudinal_pane.set_progress_state(state.startswith("Current"))
+            self.longitudinal_pane.set_progress_state(state.startswith("Current") or state == "Waiting for current result")
         except Exception:
             # A partially updated product has no coherent displayed ownership.
             # Keep the selected tab, but make all result content unavailable.

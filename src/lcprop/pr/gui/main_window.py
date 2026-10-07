@@ -232,18 +232,18 @@ def electrical_closure_summary(closure):
     elif closure.identity == FIXED_FIELD:
         meaning = f'Prescribed mean-field target b = {closure.target}'
     elif closure.identity == PRESCRIBED_CURRENT:
-        meaning = f'Prescribed mean-current target <J> = {closure.target}; harmonic field b is solved'
+        meaning = f'Prescribed mean-current target <J> = {closure.target}; mean internal field b adjusts to carry this current'
     elif closure.identity == A7_CURRENT:
         meaning = (
             f'A7 reservoir/applied parameter E_app = {closure.reservoir_field}; '
             f'background intensity I_b = {closure.background_intensity}; '
             f'derived prescribed normalized current J_ext = E_app * I_b = {closure.target[0]}; '
-            'harmonic field b is solved independently of the reservoir parameter'
+            'mean internal field b adjusts to carry the current; it need not equal E_app'
         )
     elif closure.identity == OPEN_TRANSVERSE:
         meaning = (
             f'Prescribed x mean-field target b_x = {closure.target[0]}; '
-            'open-circuit y condition: transverse mean current <J_y> = 0; b_y is solved'
+            'open-circuit y condition: transverse mean current <J_y> = 0; the mean y field b_y adjusts to enforce zero net y current'
         )
     else:
         raise ValueError(f'Unsupported electrical closure summary: {closure.identity}')
@@ -356,7 +356,7 @@ class PRMainWindow(QWidget):
         self.continue_button.setEnabled(False)
         self.continue_button.clicked.connect(self.continue_clicked)
         header.addWidget(self.continue_button)
-        self.save_checkpoint_button = QPushButton("Save Checkpoint")
+        self.save_checkpoint_button = QPushButton("Save Checkpoint Folder…")
         self.save_checkpoint_button.setEnabled(False)
         self.save_checkpoint_button.clicked.connect(
             self.save_checkpoint_clicked
@@ -384,6 +384,15 @@ class PRMainWindow(QWidget):
         reserve_button_text(self.run_button, ["Run PR", "Running…"])
         reserve_button_text(self.stop_button, ["Stop", "Stopping…"], retain_hidden=True)
         root.addLayout(header)
+        self.checkpoint_owner_label = QLabel()
+        self.checkpoint_owner_label.setToolTip('Continue uses the retained TD checkpoint, not the current Run PR configuration. Static has no commissioned Continue operation. Fast previews alone are insufficient.')
+        self.checkpoint_owner_label.setWordWrap(True)
+        root.addWidget(self.checkpoint_owner_label)
+        self.checkpoint_source_label = QLabel()
+        self.checkpoint_source_label.setWordWrap(True)
+        self.checkpoint_source_label.hide()
+        root.addWidget(self.checkpoint_source_label)
+        self._loaded_checkpoint_source = None
         root.addWidget(self.remote_execution_controls)
         self.execution_intent_label = QLabel("Execution intent: current selection (not loaded from file)")
         self.execution_intent_label.setWordWrap(True)
@@ -423,6 +432,11 @@ class PRMainWindow(QWidget):
         self.result_policy_selector.currentIndexChanged.connect(
             self.resource_estimator_panel.mark_stale
         )
+        for selector in (self.execution_target_selector, self.result_policy_selector,
+                         self.remote_execution_controls.cluster_selector,
+                         self.remote_execution_controls.resource_selector,
+                         self.evolution_panel.backend, self.evolution_panel.precision):
+            selector.currentIndexChanged.connect(self._mark_request_inspection_stale)
         self.resource_estimator_panel.estimateRequested.connect(
             self._estimate_current_resources
         )
@@ -528,6 +542,21 @@ class PRMainWindow(QWidget):
     def _refresh_checkpoint_controls(self) -> None:
         checkpoint = self.last_checkpoint
         from lcprop.pr.transverse.continuation import TransverseTDCheckpoint
+        from .presentation_guidance import checkpoint_ownership
+        transverse = isinstance(checkpoint, TransverseTDCheckpoint)
+        self.checkpoint_owner_label.setText(checkpoint_ownership(checkpoint, transverse=transverse))
+        owner = 'Full-transverse TD' if transverse else 'Reduced TD'
+        self.continue_button.setText(f'Continue {owner}' if checkpoint is not None else 'Continue TD')
+        from .presentation_guidance import checkpoint_folder_hint
+        source = self._loaded_checkpoint_source
+        if source is not None and source[0] is not checkpoint:
+            self._loaded_checkpoint_source = source = None
+        self.checkpoint_source_label.setText(
+            'Loaded checkpoint source: ' + source[1] if source is not None else '')
+        self.checkpoint_source_label.setVisible(source is not None)
+        self.checkpoint_source_label.setToolTip(
+            'Continue uses this retained checkpoint. Run PR uses the current controls.')
+        self.save_checkpoint_button.setToolTip(checkpoint_folder_hint(transverse=transverse))
         if isinstance(checkpoint, TransverseTDCheckpoint):
             ready = not self._background_running
             self.continue_button.setEnabled(ready)
@@ -1018,7 +1047,14 @@ class PRMainWindow(QWidget):
         )
 
     def preview_request_clicked(self) -> None:
+        workspace = self.results_panel.workspace
+        workspace.begin_request('Inspect current Run PR configuration')
+        workspace.set_request_summary('Current Run PR configuration: inspection pending; not executed.')
         inspect_request(self, self.build_request)
+        if workspace.operation_status.text().startswith('Execution status: Failed'):
+            workspace.set_request_summary(
+                'Current Run PR request rejected; no new result was produced.\n'
+                + workspace.operation_status.text())
 
     def describe_request(self, request, *, runner=None) -> str:
         summary = (
@@ -1356,7 +1392,7 @@ class PRMainWindow(QWidget):
                         "Transverse applied mean field: "
                         f"{request.boundary.applied_field_x:g} normalized"
                     ),
-                    "Electrical ensemble: fixed harmonic mean field",
+                    "Electrical ensemble: fixed mean internal field",
                 ])
         elif workflow_id == PR_PUBLISHED_STATIC_WORKFLOW:
             lines.extend([
@@ -1393,7 +1429,7 @@ class PRMainWindow(QWidget):
                         "Transverse applied mean field: "
                         f"{request.boundary.applied_field_x:g} normalized"
                     ),
-                    "Electrical ensemble: fixed harmonic mean field",
+                    "Electrical ensemble: fixed mean internal field",
                 ])
         else:
             lines.extend([
@@ -1515,6 +1551,16 @@ class PRMainWindow(QWidget):
             target="slurm",
             gpu_capable=profile.gpus > 0 or profile.require_cupy,
         )
+
+    def _mark_request_inspection_stale(self, *_):
+        if not hasattr(self, 'results_panel'):
+            return
+        self._display_current_execution_intent()
+        workspace = self.results_panel.workspace
+        # Historical displayed-result request remains owned by the workspace.
+        workspace.set_request_summary(
+            'Current Run PR configuration changed; use Inspect Request to validate.\n'
+            + self.execution_intent_label.text())
 
     def _remote_runner_kwargs(self) -> dict[str, str]:
         values = self.remote_execution_controls.runner_kwargs()
@@ -1651,8 +1697,11 @@ class PRMainWindow(QWidget):
             from lcprop.pr.transverse.continuation import load_checkpoint
             checkpoint = load_checkpoint(run_dir)
             self.last_checkpoint = checkpoint
+            self._loaded_checkpoint_source = (checkpoint, str(Path(run_dir).resolve()))
             self.results_panel.set_request_summary(
-                f"Transverse continuation checkpoint {checkpoint.identity}\nCumulative τ={checkpoint.time_normalized:.12g}; "
+                f"Loaded checkpoint source directory: {Path(run_dir).resolve()}\n"
+                "Continue uses this checkpoint; Run PR uses the current controls.\n"
+                + f"Transverse continuation checkpoint {checkpoint.identity}\nCumulative τ={checkpoint.time_normalized:.12g}; "
                 "Continue opens the inherited, locked-state segment editor.")
             self._refresh_checkpoint_controls()
             return checkpoint
@@ -1674,8 +1723,11 @@ class PRMainWindow(QWidget):
             self._hydrating_checkpoint = False
         self.resource_estimator_panel.mark_stale()
         self.last_checkpoint = checkpoint
+        self._loaded_checkpoint_source = (checkpoint, str(Path(run_dir).resolve()))
         self.results_panel.set_request_summary(
-            self.describe_request(checkpoint.request)
+            f"Loaded checkpoint source directory: {Path(run_dir).resolve()}\n"
+            "Continue uses this checkpoint; Run PR uses the current controls.\n"
+            + self.describe_request(checkpoint.request)
         )
         self.results_panel.set_td_time_indicator(
             "Loaded PR checkpoint: "
@@ -1687,9 +1739,12 @@ class PRMainWindow(QWidget):
 
     @Slot()
     def save_checkpoint_clicked(self) -> None:
+        from lcprop.pr.transverse.continuation import TransverseTDCheckpoint
+        from lcprop.pr.gui.presentation_guidance import checkpoint_folder_hint
+        hint = checkpoint_folder_hint(transverse=isinstance(self.last_checkpoint, TransverseTDCheckpoint))
         directory = QFileDialog.getExistingDirectory(
             self,
-            "Select PR checkpoint directory",
+            "Save Checkpoint Folder — " + hint,
         )
         if not directory:
             return
@@ -2338,17 +2393,15 @@ class PRMainWindow(QWidget):
                 reduced_pr_live_to_run_data(progress.latest_field_state),
                 state="Current accepted state",
             )
-        self.status_label.setText(
-            f"Step {progress.completed_units}/{progress.total_units}"
-        )
+        from .presentation_guidance import accepted_td_time_text
+        time_text = accepted_td_time_text(progress)
+        self.status_label.setText(time_text)
         # Scalar status can advance while a throttled scientific frame remains
         # at its own accepted step. Never relabel that frame with a later time.
         if (progress.workflow != PR_TIMEDEPENDENT_WORKFLOW
                 or progress.latest_field_state is not None):
             self.results_panel.set_td_time_indicator(
-                "PR material time: "
-                f"{float(progress.current_coordinate):.6g} normalized; "
-                f"step {progress.completed_units}/{progress.total_units}"
+                time_text
             )
         if self._progress_console_due(
             progress.workflow,

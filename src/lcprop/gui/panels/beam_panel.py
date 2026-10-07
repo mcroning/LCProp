@@ -112,6 +112,37 @@ class BeamPanel(QWidget):
             launch_plane=launch_plane,
             parent=self,
         )
+        # Presentation adaptation only; LaunchPlane remains the intent owner.
+        widget = self.launch_plane_widget
+        for number, editor in enumerate((widget.w1_spin, widget.w2_spin), 1):
+            label = f"Principal radius {number}"
+            editor.setAccessibleName(label)
+            for form in widget.findChildren(QFormLayout):
+                field_label = form.labelForField(editor)
+                if field_label is not None:
+                    field_label.setText(label)
+            editor.setToolTip(
+                "Radius along a beam-normal principal axis.\n"
+                "1/e field radius = 1/e² intensity radius.\n"
+                "At startup: normal incidence, zero roll.\n"
+                "Principal radius 1 aligns with x; radius 2 with y.\n"
+                "Away from startup, these need not be laboratory x/y axes.")
+        widget.psi_spin.setToolTip(
+            "Rotates analytic profiles about the beam direction.\n"
+            "Profile Roll does not rotate an applied image;\n"
+            "their orientation stays fixed in image/lab-plane coordinates.")
+        widget.enabled_checkbox.setToolTip(
+            "Enabled includes this channel in the optical stack.\nDisabling retains "
+            "its GUI settings but excludes the channel.\nTo extinguish an existing "
+            "channel during compatible TD continuation, retain it and set power to "
+            "zero; the workflow's continuation compatibility rules still apply.")
+        # QFormLayout labels are separate hover targets from their editors.
+        for form in widget.findChildren(QFormLayout):
+            for row in range(form.rowCount()):
+                label_item = form.itemAt(row, QFormLayout.LabelRole)
+                field_item = form.itemAt(row, QFormLayout.FieldRole)
+                if label_item and field_item and label_item.widget() and field_item.widget():
+                    label_item.widget().setToolTip(field_item.widget().toolTip())
         self.launch_plane_widget.set_inverse_resolver(self._direction_for_exit)
         self.launch_plane_widget.set_beam_stack(default_stack, selected_index=0)
         # Keep embedded choices accessible even when native selectors elide text.
@@ -119,6 +150,10 @@ class BeamPanel(QWidget):
             guidance = selector.toolTip()
             def update_tooltip(text, widget=selector, explanation=guidance):
                 widget.setToolTip(text + ("\n" + explanation if explanation else ""))
+                for form in self.launch_plane_widget.findChildren(QFormLayout):
+                    label = form.labelForField(widget)
+                    if label is not None:
+                        label.setToolTip(widget.toolTip())
             selector.currentTextChanged.connect(update_tooltip)
             update_tooltip(selector.currentText())
             for index in range(selector.count()):

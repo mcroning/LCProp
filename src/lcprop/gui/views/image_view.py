@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from matplotlib.backend_bases import MouseButton
+from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.figure import Figure
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QSizePolicy
@@ -297,6 +297,27 @@ class ImageView(FigureCanvasQTAgg):
         self.ax.set_ylim(*y_limits)
         self.draw_idle()
 
+    def wheelEvent(self, event) -> None:
+        """Use Qt angular wheel steps, never backend-dependent pixel units.
+
+        A conventional notch is 120 eighth-degrees. Keep fractional steps;
+        pixelDelta has no device-independent conversion to angular steps.
+        Qt already supplies the configured scrolling direction.
+        """
+        steps = event.angleDelta().y() / 120.0
+        if not steps or self.figure is None:
+            event.ignore()
+            return
+        scroll = MouseEvent(
+            "scroll_event", self, *self.mouseEventCoords(event), step=steps,
+            modifiers=self._mpl_modifiers(), guiEvent=event,
+        )
+        if scroll.inaxes is not self.ax:
+            event.ignore()
+            return
+        scroll._process()
+        event.accept()
+
     def _on_scroll(self, event) -> None:
         if (
             event.inaxes is not self.ax
@@ -304,16 +325,12 @@ class ImageView(FigureCanvasQTAgg):
             or event.ydata is None
         ):
             return
-        direction = getattr(event, "button", None)
-        if direction == "up":
-            scale = 0.8
-        elif direction == "down":
-            scale = 1.25
-        else:
-            step = float(getattr(event, "step", 0.0))
-            if step == 0.0:
-                return
-            scale = 0.8 if step > 0.0 else 1.25
+        step = float(getattr(event, "step", 0.0))
+        if not np.isfinite(step) or step == 0.0:
+            return
+        # +1 notch reduces the visible span by 10%. Exponentiation preserves
+        # fractional motion, composition, and reciprocal opposite deltas.
+        scale = 0.9 ** step
         x_limits = self._scaled_limits(
             self.ax.get_xlim(),
             center=float(event.xdata),

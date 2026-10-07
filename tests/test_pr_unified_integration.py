@@ -329,17 +329,18 @@ def test_electrical_summary_physical_meaning(window,dimension,kind):
     elif kind==PRESCRIBED_CURRENT:
         assert f'mean-current target <J> = {r.closure.target}' in text
         assert 'mean-field target' not in text and 'fixed' not in text
-        assert 'harmonic field b is solved' in text
+        assert 'mean internal field b adjusts to carry this current' in text
     elif kind==A7_CURRENT:
         assert f'reservoir/applied parameter E_app = {r.closure.reservoir_field}' in text
         assert f'I_b = {r.closure.background_intensity}' in text
         assert f'J_ext = E_app * I_b = {r.closure.target[0]}' in text
-        assert 'harmonic field b is solved independently' in text
+        assert 'mean internal field b adjusts to carry the current' in text
+        assert 'need not equal E_app' in text
         assert 'b = E_app' not in text
     else:
         assert f'x mean-field target b_x = {r.closure.target[0]}' in text
         assert 'open-circuit y' in text and '<J_y> = 0' in text
-        assert 'b_y is solved' in text and 'b_y = 0' not in text
+        assert 'mean y field b_y adjusts to enforce zero net y current' in text and 'b_y = 0' not in text
         assert 'mean-current target' not in text
 
 

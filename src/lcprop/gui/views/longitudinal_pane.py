@@ -180,7 +180,7 @@ class LongitudinalPane(QWidget):
             message = "Stationary soliton results contain transverse fields only."
         self.no_data_label.setText(message or (
             "Longitudinal fields are not available yet."
-            if in_progress and self._run_data.workflow in {"static", "timedependent"}
+            if in_progress
             else "No longitudinal fields are retained in this result."
         ))
 

@@ -15,11 +15,16 @@ class TransverseContinuationDialog(QDialog):
         self.describe=describe
         self.setWindowTitle('Continue accepted reduced TD state' if reduced else 'Continue accepted transverse TD state');self.resize(900,650)
         layout=QVBoxLayout(self);r=checkpoint.request
-        layout.addWidget(QLabel(
-            f'Source segment {(len(checkpoint.segment_lineage) if reduced else len(checkpoint.record["lineage"]))}; cumulative τ={checkpoint.time_normalized:.12g}\n'
-            f'{r.material.normalization_identity}\n'
-            'Locked: grid/z layout, material scales, wavelength/index, model, integrator, precision, scattering.\n'
-            'Additional time is characteristic τ, not laboratory seconds. Set beam power to 0 to disable it.'))
+        owner = 'Reduced TD' if reduced else 'Full-transverse TD'
+        header=QLabel(
+            f'{owner} checkpoint · {checkpoint.completed_steps} cumulative steps · τ = {checkpoint.time_normalized:.12g}\n'
+            'Continue uses this checkpoint, not the current Run PR controls.\n'
+            'Additional time is characteristic τ, not seconds. Set beam power to 0 to disable it.')
+        header.setWordWrap(True)
+        header.setToolTip(
+            f'Normalization: {r.material.normalization_identity}\n'
+            'Locked: grid/z layout, material scales, wavelength/index, model, integrator, precision, scattering.')
+        layout.addWidget(header)
         self.beams=QTableWidget(len(r.beams.channels),len(self.beam_fields))
         self.beams.setHorizontalHeaderLabels(self.beam_fields);layout.addWidget(self.beams)
         for i,c in enumerate(r.beams.channels):
@@ -34,7 +39,12 @@ class TransverseContinuationDialog(QDialog):
         form.addRow('Dark-equivalent irradiance (mW/cm²)',self.dark)
         form.addRow('Uniform background irradiance (mW/cm²)',self.uniform)
         form.addRow('Additional material steps',self.steps);form.addRow('Step Δτ',self.dt)
+        self.inspection_status=QLabel();self.inspection_status.setWordWrap(True)
+        layout.addWidget(self.inspection_status)
+        self.details_button=QPushButton('Technical details (hashes / JSON)')
+        self.details_button.setCheckable(True);layout.addWidget(self.details_button)
         self.preview=QPlainTextEdit();self.preview.setReadOnly(True);layout.addWidget(self.preview)
+        self.preview.hide();self.details_button.toggled.connect(self.preview.setVisible)
         inspect=QPushButton('Inspect continuation request');inspect.clicked.connect(self.inspect_request);layout.addWidget(inspect)
         buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText('Continue locally')
@@ -55,11 +65,15 @@ class TransverseContinuationDialog(QDialog):
     def inspect_request(self):
         try:
             request=self.build_request()
+            self.inspection_status.setText('Valid local continuation from the retained checkpoint; Run PR controls are not used.')
             self.preview.setPlainText(json.dumps(self.describe(request,self.checkpoint),indent=2,allow_nan=False))
-        except Exception as exc:self.preview.setPlainText('Invalid continuation: '+str(exc))
+        except Exception as exc:
+            self.inspection_status.setText('Invalid continuation: '+str(exc))
+            self.preview.setPlainText('Invalid continuation: '+str(exc))
 
     def accept_request(self):
         try:self.request=self.build_request()
         except Exception as exc:
+            self.inspection_status.setText('Invalid continuation: '+str(exc))
             self.preview.setPlainText('Invalid continuation: '+str(exc));return
         self.accept()

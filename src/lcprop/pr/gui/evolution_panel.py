@@ -218,6 +218,9 @@ class PREvolutionPanel(QWidget):
         self.unified_solver = QComboBox()
         self.unified_solver.addItem('Scalable iterative — full x-y', 'pr_unified_connected_scalable_v1')
         self.unified_solver.addItem('Reference/direct — bounded validation', 'pr_unified_connected_direct_v1')
+        self.unified_solver.setToolTip(
+            'Reference/direct is a numerical solver for bounded validation.\n'
+            'It solves the same physical model as the scalable solver.')
         self.unified_solver.currentIndexChanged.connect(self._refresh_workflow_controls)
         form.addRow('Unified material solver', self.unified_solver)
         self.fresh_unified_button=QPushButton('Create fresh unified nonlinear Static request')
@@ -450,6 +453,13 @@ class PREvolutionPanel(QWidget):
             == PR_MATERIAL_RESPONSE_LINEARIZED
         )
         self._refresh_workflow_labels()
+        self.material_response.setToolTip(
+            'Uniform-reference tangent: linearized material model about the specified\n'
+            'uniform total reference intensity I0 and mean internal field.\n'
+            'Distinct from nonlinear hopping and the reduced field-linear model.'
+            if is_linearized else 'Selects the material model, not the numerical solver.')
+        self.reference_intensity.setToolTip(
+            'Uniform total normalized intensity I0 about which the transverse material model is linearized.')
         self._set_row_visible(self.reference_intensity, is_linearized)
         self._set_row_visible(
             self.transverse_applied_field,
@@ -542,7 +552,11 @@ class PREvolutionPanel(QWidget):
 
         if workflow_id == UNIFIED_WORKFLOW:
             self.algorithm_status.setText('Unified nonlinear Static: published optical-first; certified mixed precision. No coupled passes or replay.')
-            self.execution_guidance.setText('Reduced x-only: independent y columns. Reference/direct: 12,288 nodes. Scalable: NumPy state64 qualified ≤512 per axis (≤256 interactive recommendation), state32 ≤96; CuPy state32 ≤256, state64 ≤512 per axis; unbiased 384×32 bridge. Inspect Request validates the selected solver/backend envelope.')
+            from .presentation_guidance import unified_support_guidance
+            self.execution_guidance.setText(unified_support_guidance())
+        elif workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW and not is_linearized:
+            from .presentation_guidance import TD_ELECTRICAL_GUIDANCE
+            self.execution_guidance.setText(self.execution_guidance.text() + '\n' + TD_ELECTRICAL_GUIDANCE)
 
     def _refresh_integrator_choices(self) -> None:
         workflow_id = self.workflow_id()
