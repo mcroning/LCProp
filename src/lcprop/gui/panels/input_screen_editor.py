@@ -16,10 +16,14 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QGroupBox,
+    QLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QStackedWidget,
+    QSizePolicy,
+    QStyle,
+    QStyleOptionSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -89,6 +93,29 @@ def _array_pixmap(values, *, xy_axes: bool, size: QSize) -> QPixmap:
     )
 
 
+class ScreenSpinBox(QDoubleSpinBox):
+    """Reserve the actual style edit rectangle required by the line editor."""
+
+    def sizeHint(self):
+        size = super().sizeHint()
+        option = QStyleOptionSpinBox()
+        self.initStyleOption(option)
+        needed = self.lineEdit().sizeHint().height()
+        # Query the active style, including native frame/button insets.
+        for _ in range(3):
+            option.rect.setSize(size)
+            edit = self.style().subControlRect(QStyle.ComplexControl.CC_SpinBox,
+                option, QStyle.SubControl.SC_SpinBoxEditField, self)
+            deficit = needed - edit.height()
+            if deficit <= 0:
+                break
+            size.setHeight(size.height() + deficit)
+        return size
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
+
 class InputScreenEditor(QGroupBox):
     """Edit declarative B1 screens without invoking material propagation."""
 
@@ -121,6 +148,7 @@ class InputScreenEditor(QGroupBox):
         self._refreshing_preview = False
 
         layout = QVBoxLayout(self)
+        layout.setSizeConstraint(QLayout.SetMinimumSize)
         self.availability = QLabel()
         self.availability.setWordWrap(True)
         layout.addWidget(self.availability)
@@ -166,7 +194,7 @@ class InputScreenEditor(QGroupBox):
         form.addRow("Standard image", self.standard_source)
         form.addRow("Standard status", self.standard_status)
         form.addRow("User image", self.choose_file)
-        form.addRow("Selected source", self.selected_source)
+        form.addRow("Source image", self.selected_source)
         form.addRow("Width (µm)", self.width_um)
         form.addRow("Height (µm)", self.height_um)
         form.addRow("Center x (µm)", self.center_x_um)
@@ -176,8 +204,8 @@ class InputScreenEditor(QGroupBox):
         layout.addLayout(form)
 
         self.preview_mode = QComboBox()
-        self.preview_mode.addItem("Transmission", "transmission")
-        self.preview_mode.addItem("Post-screen beam", "post_screen")
+        self.preview_mode.addItem("Sampled intensity transmission", "transmission")
+        self.preview_mode.addItem("Post-screen optical intensity", "post_screen")
         self.transmission_preview = QLabel("Screen transmission")
         self.transmission_preview.setAlignment(Qt.AlignCenter)
         self.transmission_preview.setMinimumSize(RASTER_PREVIEW_SIZE)
@@ -283,7 +311,8 @@ class InputScreenEditor(QGroupBox):
 
     @staticmethod
     def _length_control(value: float) -> QDoubleSpinBox:
-        control = QDoubleSpinBox()
+        control = ScreenSpinBox()
+        control.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         control.setRange(1e-6, 1e7)
         control.setDecimals(6)
         control.setValue(value)
@@ -291,7 +320,8 @@ class InputScreenEditor(QGroupBox):
 
     @staticmethod
     def _position_control(value: float) -> QDoubleSpinBox:
-        control = QDoubleSpinBox()
+        control = ScreenSpinBox()
+        control.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         control.setRange(-1e7, 1e7)
         control.setDecimals(6)
         control.setValue(value)
@@ -695,24 +725,15 @@ class InputScreenEditor(QGroupBox):
         if not self._editor_enabled or self._refreshing_preview:
             return
         self._refreshing_preview = True
+        transmission_ready = False
         try:
             definitions = self._current_enabled_definitions()
             if not definitions:
                 raise ValueError("no enabled channel is available")
             assignments = self.launch_elements()
-            beams = self._beams()
             grid = self._runtime_grid()
-            launch = build_launch(
-                beams,
-                grid,
-                complex_dtype=np.complex128,
-                launch_elements=assignments,
-                context=(
-                    None if self._launch_context is None else self._launch_context(grid)
-                ),
-            )
             index = self.channel.currentData()
-            if not isinstance(index, int) or not 0 <= index < len(beams.channels):
+            if not isinstance(index, int) or not 0 <= index < len(definitions):
                 raise ValueError("no enabled channel is selected")
             binding = next(
                 (
@@ -734,6 +755,20 @@ class InputScreenEditor(QGroupBox):
                     size=RASTER_PREVIEW_SIZE,
                 )
             )
+            self.status.setToolTip("")
+            transmission_ready = True
+            # A screen's sampled transmission is independent of the optical
+            # carrier. Keep launch validation intact for optical products/Run.
+            beams = self._beams()
+            launch = build_launch(
+                beams,
+                grid,
+                complex_dtype=np.complex128,
+                launch_elements=assignments,
+                context=(
+                    None if self._launch_context is None else self._launch_context(grid)
+                ),
+            )
             self.transformed_preview.setPixmap(
                 _array_pixmap(
                     np.abs(np.asarray(launch.A0[index])) ** 2,
@@ -754,14 +789,29 @@ class InputScreenEditor(QGroupBox):
             self.transmitted_power.setText(f"{transmitted:.9g}" if available else "Unavailable")
             self.throughput.setText(f"{throughput:.9g}" if available else "Unavailable")
             self.status.setText(
+                "Sampled transmission and post-screen intensity updated. "
                 "Central-direction scalar flux estimate; includes aperture loss."
                 if available else "; ".join(qualification["reasons"])
             )
         except Exception as exc:
+            if not transmission_ready:
+                self.transmission_preview.clear()
+                self.transmission_preview.setText("Sampled transmission unavailable")
+            self.transformed_preview.clear()
+            self.transformed_preview.setText("Post-screen optical intensity unavailable")
             self.incident_power.setText("—")
             self.transmitted_power.setText("—")
             self.throughput.setText("—")
-            self.status.setText(str(exc))
+            detail = str(exc)
+            summary = detail.splitlines()[0] if detail else type(exc).__name__
+            if detail.startswith("Optical launch sampling invalid"):
+                summary = "Optical launch sampling invalid; correct Grid Nx/Ny or aperture."
+            elif len(summary) > 180:
+                summary = summary[:177] + "…"
+            prefix = ("Transmission updated; optical preview unavailable. "
+                      if transmission_ready else "Screen preview unavailable. ")
+            self.status.setText(prefix + summary)
+            self.status.setToolTip(detail)
         finally:
             self._refreshing_preview = False
 

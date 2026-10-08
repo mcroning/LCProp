@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QSpinBox,
+    QScrollArea,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
@@ -211,7 +212,13 @@ class BeamPanel(QWidget):
         self.beam_tabs.addTab(self.splitter, "Beams")
         self.beam_tabs.addTab(boundary_box, "Optical edge treatment")
         if input_screens_enabled:
-            self.beam_tabs.addTab(self.input_screen_editor, "Input Screen")
+            # Image controls appear dynamically and can exceed the tab height.
+            # Let Qt honor their size hints instead of compressing form rows.
+            self.input_screen_scroll = QScrollArea(self)
+            self.input_screen_scroll.setWidgetResizable(True)
+            self.input_screen_scroll.setFrameShape(QScrollArea.NoFrame)
+            self.input_screen_scroll.setWidget(self.input_screen_editor)
+            self.beam_tabs.addTab(self.input_screen_scroll, "Input Screen")
         else:
             self.input_screen_editor.hide()
         layout.addWidget(self.beam_tabs)
