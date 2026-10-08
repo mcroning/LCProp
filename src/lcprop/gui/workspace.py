@@ -13,11 +13,13 @@ from PySide6.QtGui import QDesktopServices, QFont, QTextBlockFormat, QTextCharFo
 from PySide6.QtWidgets import (
     QLabel,
     QComboBox,
+    QCheckBox,
     QDialog,
     QHBoxLayout,
     QPushButton,
     QTextEdit,
     QSplitter,
+    QScrollArea,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -79,16 +81,42 @@ class Workspace(QWidget):
 
         self.display_scales = DisplayScales()
         self.image_pane = ImagePane(self.display_scales)
-        self.longitudinal_display_scales = DisplayScales()
+        self.longitudinal_display_scales = self.display_scales
         self.longitudinal_pane = LongitudinalPane(self.longitudinal_display_scales)
 
+        self.spatial_selector = QComboBox()
+        self.spatial_selector.setMinimumContentsLength(28)
+        self.spatial_selector.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.spatial_selector.setAccessibleName('Physical field or independent product')
+        self._explicit_spatial_selection = None
+        self.spatial_selector.activated.connect(self._remember_spatial_selection)
+        self.spatial_selector.currentIndexChanged.connect(self._select_spatial_product)
+        self.linked_log = QCheckBox('Log color scale — linked nonnegative field')
+        self.linked_log.setToolTip('Display only. Zeros are masked; the automatic log range spans up to eight decades below the global maximum.')
+        self.linked_log.toggled.connect(self._apply_linked_norm)
+        self.image_pane.fieldChanged.connect(self._apply_linked_norm)
+        self.longitudinal_pane.cutChanged.connect(self._apply_linked_norm)
+        self.longitudinal_pane.zPlaneChanged.connect(self._apply_linked_norm)
+        self.display_scales.changed.connect(self._apply_linked_norm)
+        self.image_pane.field_selector.hide()
+        self.longitudinal_pane.field_selector.hide()
+        self.longitudinal_pane.field_selector_label.hide()
         self.fields_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.fields_splitter.addWidget(self.image_pane)
         self.fields_splitter.addWidget(self.longitudinal_pane)
+        self.fields_splitter.setChildrenCollapsible(False)
         self.fields_splitter.setStretchFactor(0, 3)
         self.fields_splitter.setStretchFactor(1, 4)
         self.fields_splitter.setSizes([420, 560])
-        self.tabs.addTab(self.fields_splitter, "Fields")
+        self.fields_page = QWidget()
+        fields_layout = QVBoxLayout(self.fields_page)
+        fields_layout.addWidget(self.spatial_selector)
+        fields_layout.addWidget(self.linked_log)
+        fields_layout.addWidget(self.fields_splitter, 1)
+        self.fields_scroll = QScrollArea()
+        self.fields_scroll.setWidgetResizable(True)
+        self.fields_scroll.setWidget(self.fields_page)
+        self.tabs.addTab(self.fields_scroll, "Fields")
 
         self.image_pane.physicalPositionSelected.connect(
             self._image_position_selected
@@ -240,7 +268,8 @@ class Workspace(QWidget):
     def _sync_physical_guides(self):
         view = self.image_pane.image_view
         coords = self.longitudinal_pane.guide_coordinates()
-        if (coords is not None and self.longitudinal_pane.show_guides.isChecked()
+        if (coords is not None and not getattr(self.longitudinal_pane, "_independent", False)
+                and self.longitudinal_pane.show_guides.isChecked()
                 and view._field is not None and view._field.axes == ("x", "y")):
             pane = self.longitudinal_pane
             if (not pane._is_fixed_cut_selection()
@@ -310,11 +339,131 @@ class Workspace(QWidget):
             self.result_ownership.setToolTip(self._displayed_request)
             self._refresh_request_text()
             self.image_pane.show()
-            self.longitudinal_pane.show()
+            selection = self.spatial_selector.currentData()
+            self.longitudinal_pane.setVisible(selection is None or selection[0] != 'plane')
             self.curve_pane.curve_selector.show()
         finally:
             self.convergence_dialog.setUpdatesEnabled(True)
             self.setUpdatesEnabled(True)
+
+    def _apply_linked_norm(self, *_args):
+        if not self.spatial_selector.isEnabled():
+            return
+        from matplotlib.colors import Normalize, LogNorm
+        selection = self.spatial_selector.currentData()
+        linked = selection is not None and selection[0] == 'volume'
+        field = getattr(self, '_endpoint_view_data', None)
+        field = None if field is None or not linked else field.fields.get(selection[1])
+        eligible = False
+        if field is not None:
+            low, high = self.display_scales.global_limits(field)
+            from lcprop.gui.views.display_scale import scale_key
+            global_range = self.display_scales.limits(scale_key(field), (low, high))
+            eligible = (field.kind in ('intensity', 'intensity_preview') or
+                        field.quantity in ('carrier', 'carrier_density', 'n')) and low >= 0 and high > 0 and global_range[0] >= 0 and global_range[1] > 0
+        self.linked_log.setEnabled(eligible)
+        if not eligible:
+            self.linked_log.blockSignals(True)
+            self.linked_log.setChecked(False)
+            self.linked_log.blockSignals(False)
+        for view in (self.image_pane.image_view, self.longitudinal_pane.xz_view,
+                     self.longitudinal_pane.yz_view):
+            limits = global_range if field is not None else view.image.get_clim()
+            if linked and eligible and self.linked_log.isChecked():
+                from lcprop.gui.views.display_scale import scale_key
+                limits = self.display_scales.limits(scale_key(field), (low, high))
+                # Display range only; never floor or rewrite the scientific array.
+                lo, hi = limits
+                norm = LogNorm(max(lo, hi * 1e-8), hi) if hi > 0 else Normalize(*limits)
+            else:
+                norm = Normalize(*limits)
+            view.image.set_norm(norm)
+            view.draw_idle()
+
+    def _select_spatial_product(self, _index=None):
+        selection = self.spatial_selector.currentData()
+        if selection is None:
+            return
+        mode, key = selection
+        # Reset presentation transforms before ImageView installs a signed plane.
+        from lcprop.gui.views.display_scale import reset_display_norm
+        for view in (self.image_pane.image_view, self.longitudinal_pane.xz_view,
+                     self.longitudinal_pane.yz_view):
+            reset_display_norm(view)
+        image, longitudinal = self.image_pane, self.longitudinal_pane
+        if mode == 'volume':
+            longitudinal.show()
+            longitudinal.set_independent(False)
+            longitudinal.select_volume(key)
+            longitudinal._update_views()
+            image.select_source_volume(key)
+            image.set_z_index(longitudinal._iz)
+            image.image_view.show()
+            image.selection_message.setText('Linked spatial field: xy / xz / yz — same retained quantity.')
+        elif mode == 'plane':
+            image._z_index = None
+            image.field_selector.setCurrentIndex(image.field_selector.findData(key))
+            image._field_changed(image.field_selector.currentIndex())
+            longitudinal.set_independent(True)
+            longitudinal.hide()
+            image.image_view.show()
+            image.selection_message.setText('Independent plane product; no linked longitudinal slices.')
+        else:
+            longitudinal.show()
+            longitudinal.set_independent(False)
+            longitudinal.select_volume(key)
+            longitudinal._update_views()
+            image.image_view.clear_field()
+            image.image_view.hide()
+            image.scale_controls.setEnabled(False)
+            image.selection_message.setText('Retained fixed cuts only. Matching arbitrary xy slice unavailable.')
+        self._sync_physical_guides()
+        self._apply_linked_norm()
+
+    def _remember_spatial_selection(self, _index):
+        self._explicit_spatial_selection = self.spatial_selector.currentData()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Stack readable canvases on narrow windows; scroll rather than clip.
+        if hasattr(self, 'fields_splitter'):
+            orientation = (Qt.Orientation.Vertical if self.width() < 1000
+                           else Qt.Orientation.Horizontal)
+            self.fields_splitter.setOrientation(orientation)
+
+    def _populate_spatial_selector(self, view_data):
+        from lcprop.gui.field_selection import spatial_registry
+        previous = self.spatial_selector.currentData()
+        available, unavailable = spatial_registry(view_data)
+        self.spatial_selector.blockSignals(True)
+        self.spatial_selector.clear()
+        for key in available:
+            f = view_data.fields[key]
+            self.spatial_selector.addItem(f'Linked: {f.display_name} [{key}; {f.value_unit}]', ['volume', key])
+        for key, reason in unavailable.items():
+            self.spatial_selector.addItem(f'Unavailable: {key} — {reason}', ['unavailable', key])
+            self.spatial_selector.model().item(self.spatial_selector.count()-1).setEnabled(False)
+        for key, f in view_data.fields.items():
+            if (getattr(f.data, 'ndim', None) == 2 and f.source_volume_key not in available
+                    and not f.coordinates.get('paired_cut_key')):
+                self.spatial_selector.addItem('Independent: ' + f.display_name, ['plane', key])
+        for key in self.longitudinal_pane._fixed_cut_fields:
+            self.spatial_selector.addItem('Fixed cuts: ' + self.longitudinal_pane.field_selector.itemText(
+                self.longitudinal_pane.field_selector.findData(key)), ['cuts', key])
+        preferred = self._explicit_spatial_selection
+        if preferred is None and 'timedependent' in view_data.workflow:
+            if 'optical_intensity_stack' in available:
+                preferred = ['volume', 'optical_intensity_stack']
+        index = self.spatial_selector.findData(preferred or previous)
+        if index < 0:
+            selected = self.image_pane.field_selector.currentData()
+            index = self.spatial_selector.findData(['plane', selected])
+        if index < 0:
+            index = next((i for i in range(self.spatial_selector.count())
+                          if self.spatial_selector.model().item(i).isEnabled()), -1)
+        self.spatial_selector.setCurrentIndex(index)
+        self.spatial_selector.blockSignals(False)
+        self._select_spatial_product()
 
     def _render_run_data(self, run_data) -> None:
         self.trajectory_player.set_run_data(run_data)
@@ -369,6 +518,9 @@ class Workspace(QWidget):
             ).replace("Authoritative Optical", "Optical")))
             for key, field in run_data.fields.items()
         ]))
+        from lcprop.gui.field_selection import with_transverse_aliases
+        view_data = with_transverse_aliases(view_data)
+        self._endpoint_view_data = view_data
         self.image_pane.set_run_data(view_data)
         selected_image = self.image_pane.field_selector.currentData()
         self.longitudinal_pane.set_run_data(view_data)
@@ -377,6 +529,7 @@ class Workspace(QWidget):
         if selected_image is not None:
             self.image_pane.field_selector.setCurrentIndex(
                 self.image_pane.field_selector.findData(selected_image))
+        self._populate_spatial_selector(view_data)
         self._sync_physical_guides()
         self.curve_pane.set_run_data(run_data)
         self.table_pane.set_run_data(run_data)

@@ -105,10 +105,10 @@ def test_live_td_selector_defaults_current_intensity_and_preserves_current_delta
     assert "Intensity at current t" in labels
     assert "Delta Theta at current t" in labels
     assert pane.field_selector.currentData() == "final_intensity_stack"
-    assert pane.xz_view.ax.get_xlabel() == "z (um)"
-    assert pane.xz_view.ax.get_ylabel() == "x (um)"
-    assert pane.yz_view.ax.get_xlabel() == "z (um)"
-    assert pane.yz_view.ax.get_ylabel() == "y (um)"
+    assert pane.xz_view.ax.get_xlabel() == r"z ($\mu\mathrm{m}$)"
+    assert pane.xz_view.ax.get_ylabel() == r"x ($\mu\mathrm{m}$)"
+    assert pane.yz_view.ax.get_xlabel() == r"z ($\mu\mathrm{m}$)"
+    assert pane.yz_view.ax.get_ylabel() == r"y ($\mu\mathrm{m}$)"
 
     pane.field_selector.setCurrentIndex(
         pane.field_selector.findData("final_delta_theta_stack")

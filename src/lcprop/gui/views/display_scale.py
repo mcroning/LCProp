@@ -9,24 +9,47 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 
+def reset_display_norm(view):
+    """Reset display transform before installing possibly signed slice limits."""
+    from matplotlib.colors import Normalize, LogNorm
+    if isinstance(view.image.norm, LogNorm):
+        view.colorbar.ax.set_yscale('linear')
+        view.image.set_norm(Normalize(*view.image.get_clim()))
+
+
 def scale_key(field):
     return (field.source_volume_key or field.key, field.kind, field.quantity, field.value_unit)
 
 
 def volume_limits(*arrays):
-    """Existing full-range Auto policy, with finite/constant-field handling."""
-    bounds = []
+    """Full finite range with at most 1 MiB of numerical input per tile."""
+    lo, hi = math.inf, -math.inf
+    def tiles(array, selection, shape, budget):
+        if math.prod(shape) <= budget:
+            yield np.asarray(array[selection])
+            return
+        axis = max(range(len(shape)), key=shape.__getitem__)
+        width = max(1, shape[axis] // 2)
+        start = selection[axis].start or 0
+        for offset in range(0, shape[axis], width):
+            count = min(width, shape[axis] - offset)
+            part = list(selection)
+            part[axis] = slice(start + offset, start + offset + count)
+            sizes = list(shape)
+            sizes[axis] = count
+            yield from tiles(array, tuple(part), sizes, budget)
     for array in arrays:
-        values = np.asarray(array)
-        finite = np.isfinite(values)
-        # Avoid copying an entire finite scientific volume merely for limits.
-        if not finite.all():
-            values = values[finite]
-        if values.size:
-            bounds.append((float(values.min()), float(values.max())))
-    if not bounds:
+        shape = array.shape
+        budget = max(1, (1024 * 1024) // np.dtype(array.dtype).itemsize)
+        for values in tiles(array, tuple(slice(0, n) for n in shape), shape, budget):
+            finite = np.isfinite(values)
+            if not finite.all():
+                values = values[finite]
+            if values.size:
+                lo = min(lo, float(values.min()))
+                hi = max(hi, float(values.max()))
+    if lo == math.inf:
         return 0., 1.
-    lo, hi = min(x[0] for x in bounds), max(x[1] for x in bounds)
     if lo == hi:
         padding = max(abs(lo) * 1e-12, 1e-15)
         lo, hi = lo - padding, hi + padding
@@ -40,6 +63,21 @@ class DisplayScales(QObject):
         super().__init__()
         self.settings = {}
         self.last = {}
+        self._volume_cache = {}
+
+    def global_limits(self, field):
+        import weakref
+        from lcprop.gui.field_selection import field_identity
+        key = field_identity(field)
+        cached = self._volume_cache.get(key)
+        if cached is None or cached[0]() is not field.data:
+            limits = volume_limits(field.data)
+            try:
+                self._volume_cache[key] = (weakref.ref(field.data), limits)
+            except TypeError:
+                return limits
+            return limits
+        return cached[1]
 
     def limits(self, key, automatic):
         mode, fixed = self.settings.get(key, ("auto", None))

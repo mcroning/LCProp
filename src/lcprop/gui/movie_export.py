@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import numpy as np
+from lcprop.gui.scientific_labels import scientific_text, unit_label, axis_label
 
 
 def movie_display(samples, *, logarithmic=False):
@@ -53,13 +54,14 @@ def save_movie(artifact, destination, *, fps=6.0, logarithmic=False, ffmpeg_path
     image = ax.imshow(values[0].T, origin='lower', aspect='auto',
                       extent=(*extent(coords[0]), *extent(coords[1])),
                       vmin=limits[0], vmax=limits[1])
-    ax.set_xlabel(axes[0] + (' (1)' if axes[0].startswith('s_') else ' (µm)'))
-    ax.set_ylabel(axes[1] + (' (1)' if axes[1].startswith('s_') else ' (µm)'))
-    figure.colorbar(image, ax=ax, label=('log10 ' if logarithmic else '') + metadata['value_unit'])
+    ax.set_xlabel(axis_label(axes[0], {axes[0]: '1' if axes[0].startswith('s_') else 'um'}))
+    ax.set_ylabel(axis_label(axes[1], {axes[1]: '1' if axes[1].startswith('s_') else 'um'}))
+    figure.colorbar(image, ax=ax, label=unit_label(('log10 ' if logarithmic else '') + metadata['value_unit']))
+    title = artifact.display_name.replace("Trajectory", "Time evolution").replace("trajectory", "time evolution")
     frames = []
     for index, frame in enumerate(values):
         image.set_data(frame.T)
-        ax.set_title(f'{artifact.display_name}\naccepted τ={metadata["times"][index]:.8g}; frame-uniform playback')
+        ax.set_title(scientific_text(f'{title}\naccepted τ={metadata["times"][index]:.8g}; frame-uniform playback'))
         figure.tight_layout()
         canvas.draw()
         frames.append(np.asarray(canvas.buffer_rgba())[..., :3].copy().tobytes())

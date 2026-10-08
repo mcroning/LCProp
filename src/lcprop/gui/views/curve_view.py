@@ -1,5 +1,6 @@
 from __future__ import annotations
 from lcprop.gui.number_format import format_number
+from lcprop.gui.scientific_labels import scientific_text, axis_label
 
 import numpy as np
 
@@ -30,7 +31,7 @@ class CurveView(FigureCanvasQTAgg):
                 line.set_label(label)
             self.ax.legend()
 
-        self.ax.set_title(title if title is not None else curve.display_name)
+        self.ax.set_title(scientific_text(title if title is not None else curve.display_name))
         self.ax.set_xlabel(_label_with_unit(curve.x_label, curve.units))
         self.ax.set_ylabel(_label_with_unit(curve.y_label, curve.units))
         requested_scale = getattr(curve, "y_scale", "linear")
@@ -52,7 +53,4 @@ class CurveView(FigureCanvasQTAgg):
 
 
 def _label_with_unit(label: str, units: dict[str, str]) -> str:
-    unit = units.get(label)
-    if unit:
-        return f"{label} ({unit})"
-    return label
+    return axis_label(label, units)

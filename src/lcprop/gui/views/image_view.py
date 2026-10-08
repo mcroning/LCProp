@@ -1,4 +1,5 @@
 from __future__ import annotations
+from lcprop.gui.scientific_labels import scientific_text, unit_label, axis_label
 
 import numpy as np
 
@@ -83,6 +84,7 @@ class ImageView(FigureCanvasQTAgg):
         default_display_extent=None,
         vmin=None,
         vmax=None,
+        swap_axes=False,
     ) -> None:
         raw = np.asarray(field.data)
 
@@ -104,14 +106,22 @@ class ImageView(FigureCanvasQTAgg):
                 self._display_data = raw
             self._display_source = raw
             self._display_revision = revision
-        data = self._display_data.T
+        self._swap_axes = bool(swap_axes)
+        data = self._display_data if swap_axes else self._display_data.T
+        display_axes = field.axes[::-1] if swap_axes else field.axes
+        display_shape = raw.shape[::-1] if swap_axes else raw.shape
+        if swap_axes:
+            if extent is not None:
+                extent = (*extent[2:], *extent[:2])
+            if default_display_extent is not None:
+                default_display_extent = (*default_display_extent[2:], *default_display_extent[:2])
 
         self._field = field
-        self._raw_shape = raw.shape
+        self._raw_shape = display_shape
         self._extent = extent
         coordinates = getattr(field, "coordinates", {}) or {}
         resolved_coordinates = []
-        for axis, size in zip(field.axes, raw.shape):
+        for axis, size in zip(display_axes, display_shape):
             values = coordinates.get(axis)
             array = None if values is None else np.asarray(values)
             resolved_coordinates.append(
@@ -122,7 +132,7 @@ class ImageView(FigureCanvasQTAgg):
         # Figure, axes, image, and colorbar are created once. Live updates only
         # replace artist data and text, preserving the fixed axes rectangles.
         resolved_extent = (
-            (-0.5, raw.shape[0] - 0.5, -0.5, raw.shape[1] - 0.5)
+            (-0.5, display_shape[0] - 0.5, -0.5, display_shape[1] - 0.5)
             if extent is None
             else tuple(float(value) for value in extent)
         )
@@ -145,19 +155,21 @@ class ImageView(FigureCanvasQTAgg):
         self.ax.set_xlim(initial_limits[0], initial_limits[1])
         self.ax.set_ylim(initial_limits[2], initial_limits[3])
 
-        self.ax.set_title(field.display_name + (" — display reduced; exact data retained" if self._display_data.shape != raw.shape else ""), fontsize=10, pad=4)
+        self._title_text = field.display_name + (" — display reduced; exact data retained" if self._display_data.shape != raw.shape else "")
+        self.setToolTip(self._title_text)
 
         if len(field.axes) >= 2:
-            self.ax.set_xlabel(_label_with_unit(field.axes[0], field.units))
-            self.ax.set_ylabel(_label_with_unit(field.axes[1], field.units))
+            self.ax.set_xlabel(_label_with_unit(display_axes[0], field.units))
+            self.ax.set_ylabel(_label_with_unit(display_axes[1], field.units))
         else:
             self.ax.set_xlabel("")
             self.ax.set_ylabel("")
 
         self.colorbar.update_normal(self.image)
         value_unit = getattr(field, "value_unit", "")
-        self.colorbar.set_label(value_unit, fontsize=9)
+        self.colorbar.set_label(unit_label(value_unit), fontsize=9)
 
+        self._layout_axes()
         self.image.set_visible(True)
         if self._crosshair_coordinates is not None:
             self.set_crosshair_coordinates(*self._crosshair_coordinates)
@@ -166,6 +178,45 @@ class ImageView(FigureCanvasQTAgg):
             self.set_crosshair(ix, iy, emit=False)
 
         self.draw_idle()
+
+    def _layout_axes(self):
+        """Reserve font-sized gutters instead of shrinking labels with the canvas."""
+        import textwrap
+        width, height = self.figure.bbox.width, self.figure.bbox.height
+        point = self.figure.dpi / 72.
+        left, right, bottom, top = (v * point for v in (52., 78., 44., 44.))
+        plot_width = max(width - left - right, 20 * point)
+        plot_height = max(height - bottom - top, 20 * point)
+        axes = tuple(getattr(self._field, 'axes', ()))
+        if axes == ('s_x', 's_y') or (axes == ('x', 'y') and
+                                      getattr(self, '_time_evolution_layout', False)):
+            # The field, not the caller, owns angular layout. Center image + gap
+            # + bar together between the label gutters and use all available
+            # height unless the physical angular aspect makes width limiting.
+            gap, bar_width = 14 * point, 9 * point
+            right_labels = right - gap - bar_width
+            available = max(width - left - right_labels, gap + bar_width + 1)
+            x0, x1 = self.ax.get_xlim(); y0, y1 = self.ax.get_ylim()
+            ratio = abs((x1-x0)/(y1-y0)) if y1 != y0 else 1.
+            fitted_width = min(available - gap - bar_width, plot_height * ratio)
+            fitted_height = fitted_width / ratio
+            group_width = fitted_width + gap + bar_width
+            left += (available - group_width) / 2
+            bottom += (plot_height - fitted_height) / 2
+            plot_width, plot_height = fitted_width, fitted_height
+        self.ax.set_position((left / width, bottom / height, plot_width / width, plot_height / height))
+        self.colorbar.ax.set_position(((left + plot_width + 14 * point) / width,
+                                      bottom / height, 9 * point / width, plot_height / height))
+        title = getattr(self, '_title_text', '')
+        columns = max(12, int(plot_width / (5.5 * point)))
+        self.ax.set_title(scientific_text('\n'.join(textwrap.wrap(title, width=columns, max_lines=2,
+                                               placeholder='…'))), fontsize=10, pad=4)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'colorbar'):
+            self._layout_axes()
+            self.draw_idle()
 
     def clear_field(self) -> None:
         """Release old scientific arrays; an unavailable view is not a zero field."""
@@ -176,7 +227,8 @@ class ImageView(FigureCanvasQTAgg):
         self._full_display_extent = self._default_display_extent = None
         self.image.set_data(np.empty((0, 0)))
         self.image.set_visible(False)
-        self.ax.set_title("No current product")
+        self._title_text = "No current product"
+        self.ax.set_title(self._title_text)
         self.draw_idle()
 
     def set_crosshair_coordinates(self, x_value, y_value) -> None:
@@ -440,7 +492,4 @@ def _image_aspect(field) -> str:
 
 
 def _label_with_unit(label: str, units: dict[str, str]) -> str:
-    unit = units.get(label)
-    if unit:
-        return f"{label} ({unit})"
-    return label
+    return axis_label(label, units)

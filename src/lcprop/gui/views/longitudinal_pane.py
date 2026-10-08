@@ -77,6 +77,12 @@ class LongitudinalPane(QWidget):
         self.field_selector.setMinimumContentsLength(20)
         self.field_selector.currentIndexChanged.connect(self._field_changed)
         selector_row.addWidget(self.field_selector, 1)
+        self.orientation = QComboBox()
+        self.orientation.addItem('z horizontal', False)
+        self.orientation.addItem('z vertical', True)
+        self.orientation.setAccessibleName('Longitudinal orientation')
+        self.orientation.currentIndexChanged.connect(self._orientation_changed)
+        controls.addWidget(self.orientation)
         self.position_label = QLabel("x=—, y=—, z=—")
         self.position_label.setWordWrap(True)
         position_row = QHBoxLayout()
@@ -117,7 +123,7 @@ class LongitudinalPane(QWidget):
         xz_layout.addWidget(self.y_cut_slider)
 
         self.xz_view = ImageView(compact_vertical=True)
-        self.xz_view.setMinimumSize(300, 180)
+        self.xz_view.setMinimumSize(360, 240)
         xz_layout.addWidget(self.xz_view, 1)
         self.xz_view.positionSelected.connect(self._xz_position_selected)
         layout.addWidget(self.xz_row, 1)
@@ -138,15 +144,24 @@ class LongitudinalPane(QWidget):
         yz_layout.addWidget(self.x_cut_slider)
 
         self.yz_view = ImageView(compact_vertical=True)
-        self.yz_view.setMinimumSize(300, 180)
+        self.yz_view.setMinimumSize(360, 240)
         yz_layout.addWidget(self.yz_view, 1)
         self.yz_view.positionSelected.connect(self._yz_position_selected)
         layout.addWidget(self.yz_row, 1)
 
         layout.addWidget(self.no_data_label)
 
+    def _orientation_changed(self, _index):
+        self._update_views()
+        self.cutChanged.emit(self._ix, self._iy)
+
+    def _oriented_pair(self, longitudinal, transverse):
+        return (transverse, longitudinal) if self.orientation.currentData() else (longitudinal, transverse)
+
     def _xz_position_selected(self, iz: int, ix: int) -> None:
         """Clicking an x-z view changes the selected x index for the y-z cut."""
+        if self.orientation.currentData():
+            iz, ix = ix, iz
         self._iz = int(iz)
         self._set_z_slider(self._iz)
         if self._is_fixed_cut_selection():
@@ -158,6 +173,8 @@ class LongitudinalPane(QWidget):
 
     def _yz_position_selected(self, iz: int, iy: int) -> None:
         """Clicking a y-z view changes the selected y index for the x-z cut."""
+        if self.orientation.currentData():
+            iz, iy = iy, iz
         self._iz = int(iz)
         self._set_z_slider(self._iz)
         if self._is_fixed_cut_selection():
@@ -195,10 +212,12 @@ class LongitudinalPane(QWidget):
         self.field_selector.blockSignals(True)
         self.field_selector.clear()
 
+        from lcprop.gui.field_selection import spatial_registry
+        available, self.unavailable_fields = spatial_registry(run_data)
         if getattr(run_data, "longitudinal_enabled", True):
             for key, field in run_data.fields.items():
-                data = np.asarray(field.data)
-                if data.ndim == 3 and field.axes == ("z", "x", "y"):
+                data = field.data
+                if key in available:
                     self.field_selector.addItem(field.display_name, key)
                     self.field_selector.setItemData(
                         self.field_selector.count() - 1,
@@ -339,8 +358,9 @@ class LongitudinalPane(QWidget):
         if key in self._fixed_cut_fields:
             self._configure_fixed_cuts()
             return
+        self.set_independent(False)
         field = self._run_data.fields[key]
-        data = np.asarray(field.data)
+        data = field.data
         if data.ndim != 3:
             return
 
@@ -351,9 +371,11 @@ class LongitudinalPane(QWidget):
         self.y_cut_slider.show()
         self.show_guides.show()
 
-        self._iz = data.shape[0] // 2
+        position = getattr(self, '_physical_position', None)
+        self._iz = (data.shape[0] // 2 if position is None else
+                    self._nearest_index(field, 'z', position[2], data.shape[0]))
 
-        self._current_vmin, self._current_vmax = volume_limits(data)
+        self._current_vmin, self._current_vmax = self.scales.global_limits(field)
 
         self._show_guides = self.show_guides.isChecked()
         self.guidesVisibilityChanged.emit(self._show_guides)
@@ -370,8 +392,8 @@ class LongitudinalPane(QWidget):
         self.z_plane_slider.blockSignals(False)
 
         self.set_cut_indices(
-            self._nearest_index(field, "x", 0.0, nx),
-            self._nearest_index(field, "y", 0.0, ny),
+            self._nearest_index(field, "x", 0.0 if position is None else position[0], nx),
+            self._nearest_index(field, "y", 0.0 if position is None else position[1], ny),
             emit=False,
         )
         self.volumeSelectionChanged.emit(str(key))
@@ -432,6 +454,8 @@ class LongitudinalPane(QWidget):
             self.cutChanged.emit(ix, iy)
 
     def _update_views(self) -> None:
+        if getattr(self, "_independent", False):
+            return
         if self._run_data is None:
             return
 
@@ -448,7 +472,7 @@ class LongitudinalPane(QWidget):
             return
 
         field = self._run_data.fields[key]
-        data = np.asarray(field.data)
+        data = field.data
         if data.ndim != 3:
             return
 
@@ -461,12 +485,16 @@ class LongitudinalPane(QWidget):
         y_value = self._coord_value(field, "y", iy)
         z_value = self._coord_value(field, "z", self._iz)
 
-        self.y_cut_label.setText(f"x-z cut at y = {format_number(y_value, quantity='coordinate')} µm")
-        self.x_cut_label.setText(f"y-z cut at x = {format_number(x_value, quantity='coordinate')} µm")
-        self.z_plane_label.setText(f"z = {format_number(z_value, quantity='coordinate')} µm")
+        self.y_cut_label.setText(f"x-z cut at y = {format_number(y_value, quantity='coordinate')} {self._coordinate_unit(field, 'y')}")
+        self.x_cut_label.setText(f"y-z cut at x = {format_number(x_value, quantity='coordinate')} {self._coordinate_unit(field, 'x')}")
+        self.z_plane_label.setText(f"z = {format_number(z_value, quantity='coordinate')} {self._coordinate_unit(field, 'z')}")
         self.position_label.setText(
-            f"x={format_number(x_value, quantity='coordinate')}, y={format_number(y_value, quantity='coordinate')}, z={format_number(z_value, quantity='coordinate')} µm"
+            f"x={format_number(x_value, quantity='coordinate')} {self._coordinate_unit(field, 'x')}, "
+            f"y={format_number(y_value, quantity='coordinate')} {self._coordinate_unit(field, 'y')}, "
+            f"z={format_number(z_value, quantity='coordinate')} {self._coordinate_unit(field, 'z')}"
         )
+
+        self._physical_position = (x_value, y_value, z_value)
 
         xz = data[:, :, iy]   # (z, x)
         yz = data[:, ix, :]   # (z, y)
@@ -507,17 +535,22 @@ class LongitudinalPane(QWidget):
 
         limits = self.scales.limits(scale_key(field), (self._current_vmin, self._current_vmax))
         self.scale_controls.show_scale(scale_key(field), limits)
+        from lcprop.gui.views.display_scale import reset_display_norm
+        reset_display_norm(self.xz_view)
+        reset_display_norm(self.yz_view)
         self.xz_view.set_field(
             xz_field,
             extent=self._field_extent(field, "z", "x"),
             vmin=limits[0],
             vmax=limits[1],
+            swap_axes=bool(self.orientation.currentData()),
         )
         self.yz_view.set_field(
             yz_field,
             extent=self._field_extent(field, "z", "y"),
             vmin=limits[0],
             vmax=limits[1],
+            swap_axes=bool(self.orientation.currentData()),
         )
         self._apply_guides()
 
@@ -525,6 +558,7 @@ class LongitudinalPane(QWidget):
         return self.field_selector.currentData() in getattr(self, "_fixed_cut_fields", {})
 
     def _configure_fixed_cuts(self) -> None:
+        self.set_independent(False)
         xz_key, yz_key = self._fixed_cut_fields[self.field_selector.currentData()]
         xz_field = self._run_data.fields[xz_key]
         yz_field = self._run_data.fields[yz_key]
@@ -567,17 +601,22 @@ class LongitudinalPane(QWidget):
         )
         limits = self.scales.limits(scale_key(xz_field), (self._current_vmin, self._current_vmax))
         self.scale_controls.show_scale(scale_key(xz_field), limits)
+        from lcprop.gui.views.display_scale import reset_display_norm
+        reset_display_norm(self.xz_view)
+        reset_display_norm(self.yz_view)
         self.xz_view.set_field(
             xz_field,
             extent=self._field_extent(xz_field, "z", "x"),
             vmin=limits[0],
             vmax=limits[1],
+            swap_axes=bool(self.orientation.currentData()),
         )
         self.yz_view.set_field(
             yz_field,
             extent=self._field_extent(yz_field, "z", "y"),
             vmin=limits[0],
             vmax=limits[1],
+            swap_axes=bool(self.orientation.currentData()),
         )
         self._apply_guides()
         self.guidesChanged.emit()
@@ -586,15 +625,15 @@ class LongitudinalPane(QWidget):
         if self._is_fixed_cut_selection():
             if self._show_guides:
                 x, y, z = self.guide_coordinates()
-                self.xz_view.set_crosshair_coordinates(z, x)
-                self.yz_view.set_crosshair_coordinates(z, y)
+                self.xz_view.set_crosshair_coordinates(*self._oriented_pair(z, x))
+                self.yz_view.set_crosshair_coordinates(*self._oriented_pair(z, y))
             else:
                 self.xz_view.clear_crosshair()
                 self.yz_view.clear_crosshair()
             return
         if self._show_guides:
-            self.xz_view.set_crosshair(self._iz, self._ix)
-            self.yz_view.set_crosshair(self._iz, self._iy)
+            self.xz_view.set_crosshair(*self._oriented_pair(self._iz, self._ix))
+            self.yz_view.set_crosshair(*self._oriented_pair(self._iz, self._iy))
         else:
             self.xz_view.clear_crosshair()
             self.yz_view.clear_crosshair()
@@ -611,10 +650,26 @@ class LongitudinalPane(QWidget):
         return tuple(self._coord_value(field, axis, i)
                      for axis, i in zip(("x", "y", "z"), (self._ix, self._iy, self._iz)))
 
+    def set_independent(self, independent):
+        self._independent = independent
+        for widget in (self.xz_row, self.yz_row, self.z_plane_label, self.z_plane_slider):
+            widget.setVisible(not independent and self.field_selector.count() > 0)
+        if independent:
+            self.xz_view.clear_field()
+            self.yz_view.clear_field()
+            self.no_data_label.setText('Independent transverse product. No matching retained volume selected; '
+                                       'choose a spatial field or independent retained cuts.')
+        self.no_data_label.setVisible(independent or not self.field_selector.count())
+        self.scale_controls.setEnabled(not independent and self.field_selector.count() > 0)
+
     def select_volume(self, key: str) -> None:
         index = self.field_selector.findData(key)
         if index >= 0 and index != self.field_selector.currentIndex():
             self.field_selector.setCurrentIndex(index)
+
+    def _coordinate_unit(self, field, axis):
+        unit = field.units.get(axis, self._run_data.geometry.units)
+        return 'µm' if unit == 'um' else unit
 
     def _coord_value(self, field, axis: str, index: int) -> float:
         if self._run_data is None:

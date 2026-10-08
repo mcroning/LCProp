@@ -78,6 +78,9 @@ class ImagePane(QWidget):
         self.td_time_label.setVisible(False)
         layout.addWidget(self.td_time_label)
 
+        self.selection_message = QLabel("Independent plane product")
+        self.selection_message.setWordWrap(True)
+        layout.addWidget(self.selection_message)
         self.field_selector = QComboBox()
         self.field_selector.setMinimumWidth(285)
         self.field_selector.setSizeAdjustPolicy(
@@ -171,6 +174,8 @@ class ImagePane(QWidget):
         field = self._field_at_selected_z(self._run_data.fields[key])
         extent = self._field_extent(field)
         vmin, vmax = self._limits_for_field(field)
+        from lcprop.gui.views.display_scale import reset_display_norm
+        reset_display_norm(self.image_view)
         self.image_view.set_field(
             field,
             extent=extent,
@@ -191,7 +196,7 @@ class ImagePane(QWidget):
         horizontal, vertical = field.axes
         coordinates = getattr(field, "coordinates", {}) or {}
         preview = coordinates.get("preview_metadata", {})
-        if "original_extent" in preview:
+        if "original_extent" in preview and field.source_volume_key is None:
             return preview["original_extent"]
         h = coordinates.get(horizontal)
         v = coordinates.get(vertical)
@@ -212,6 +217,11 @@ class ImagePane(QWidget):
         self.scales.reset_locks()
 
     def _limits_for_field(self, field) -> tuple[float, float]:
+        source = self._run_data.fields.get(field.source_volume_key)
+        if source is not None and getattr(source.data, 'ndim', None) == 3:
+            limits = self.scales.limits(scale_key(source), self.scales.global_limits(source))
+            self.scale_controls.show_scale(scale_key(source), limits)
+            return limits
         kind = str(getattr(field, "kind", "field"))
         if not hasattr(self, "_display_limits_cache"):
             self._display_limits_cache = {}
@@ -238,11 +248,17 @@ class ImagePane(QWidget):
         if source_key is None:
             return field
         source = self._run_data.fields[source_key]
-        volume = np.asarray(source.data)
+        volume = source.data
         if self._z_index is None:
             self._z_index = volume.shape[0] // 2
         iz = min(max(self._z_index, 0), volume.shape[0] - 1)
-        return replace(field, data=volume[iz])
+        coordinates = dict(field.coordinates)
+        z = np.asarray(coordinates.get('z', self._run_data.geometry.z))
+        coordinates['selected_z_um'] = float(z[iz])
+        unit = field.units.get('z', 'um')
+        unit = 'µm' if unit == 'um' else unit
+        return replace(field, data=volume[iz], coordinates=coordinates,
+                       display_name=f'{source.display_name} — z={float(z[iz]):g} {unit}')
 
     def select_source_volume(self, source_key: str) -> None:
         """Select the x-y field linked to a chosen MPR source volume."""
