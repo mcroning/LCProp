@@ -38,6 +38,10 @@ def report_failure(window, formatted_traceback: str) -> None:
     """Keep the complete exception while making its cause visible above results."""
     lines = formatted_traceback.strip().splitlines()
     cause = lines[-1] if lines else "Unknown failure"
+    if 'nyquist' in formatted_traceback.lower():
+        cause = 'Optical launch exceeds grid sampling (Nyquist); adjust beam angles or grid/aperture'
+    elif len(cause) > 180:
+        cause = cause[:177] + '…'
     workspace = window.results_panel.workspace
     workspace.finish_attempt("State at failure")
     workspace.set_operation_status(
