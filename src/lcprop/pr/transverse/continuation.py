@@ -216,9 +216,14 @@ class ContinuationFailure(RuntimeError):
         super().__init__(str(cause));self.checkpoint=checkpoint
 
 
-def continue_transverse_td(request, checkpoint, *, cancellation_token=None, progress_callback=None, storage_policy=None):
+def continue_transverse_td(request, checkpoint, *, cancellation_token=None, progress_callback=None, storage_policy=None, optical_preview=None):
     from .workflow import run_pr_transverse_timedependent
     segment=describe_continuation(request,checkpoint)
+    if optical_preview is not None:
+        from .live_preview import next_segment_number
+        optical_preview = optical_preview.with_origin(checkpoint.completed_steps, checkpoint.time_normalized,
+            time_at=lambda steps,dt: _time_ledger(checkpoint,steps,dt)[1],
+            segment_number=next_segment_number(checkpoint))
     latest=[None,0,None]
     def accepted(psi,steps,reference):
         latest[:]=[psi.copy(),steps,reference]
@@ -234,6 +239,7 @@ def continue_transverse_td(request, checkpoint, *, cancellation_token=None, prog
         result=run_pr_transverse_timedependent(request,cancellation_token=cancellation_token,
             progress_callback=observe if progress_callback is not None else None,
             _continuation_psi=checkpoint.psi,_accepted_callback=accepted,
+            optical_preview=optical_preview,
             **({"storage_policy":storage_policy} if storage_policy is not None else {}))
     except Exception as exc:
         state,steps,reference=latest
@@ -332,7 +338,7 @@ def notify_failure_checkpoint(failure, progress_callback):
         message='Failed segment: last accepted material checkpoint preserved'))
 
 
-def run_continuable_transverse_td(request, *, cancellation_token=None, progress_callback=None, storage_policy=None):
+def run_continuable_transverse_td(request, *, cancellation_token=None, progress_callback=None, storage_policy=None, optical_preview=None):
     """Normal registered execution with failure-state retention for eligible runs."""
     from .workflow import run_pr_transverse_timedependent
     try:
@@ -340,13 +346,13 @@ def run_continuable_transverse_td(request, *, cancellation_token=None, progress_
         request_metadata(request)
     except (ValueError,TypeError):
         return run_pr_transverse_timedependent(request,cancellation_token=cancellation_token,
-                                               progress_callback=progress_callback,
+                                               progress_callback=progress_callback, optical_preview=optical_preview,
                                                **({"storage_policy":storage_policy} if storage_policy is not None else {}))
     latest=[None,0,None]
     def accepted(psi,steps,reference):latest[:]=[psi.copy(),steps,reference]
     try:
         return run_pr_transverse_timedependent(request,cancellation_token=cancellation_token,
-            progress_callback=progress_callback,_accepted_callback=accepted,
+            progress_callback=progress_callback,_accepted_callback=accepted, optical_preview=optical_preview,
             **({"storage_policy":storage_policy} if storage_policy is not None else {}))
     except Exception as exc:
         state,steps,ref=latest

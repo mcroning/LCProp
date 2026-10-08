@@ -278,6 +278,7 @@ def run_pr_transverse_timedependent(
     _continuation_psi=None,
     _accepted_callback=None,
     storage_policy: TDStoragePolicy | None = None,
+    optical_preview=None,
 ) -> PRTransverseRunResult:
     """Run the full-transverse PR workflow on the requested backend.
 
@@ -288,6 +289,10 @@ def run_pr_transverse_timedependent(
 
     started = perf_counter()
     _validate_request(request)
+    if optical_preview is not None:
+        from .live_preview import supported
+        if not supported(request):
+            raise ValueError("live optical preview requires Local NumPy nonlinear published IMEX TD")
     backend = get_backend(request.backend)
     xp = backend.xp
     real_dtype = backend.real_dtype
@@ -479,6 +484,11 @@ def run_pr_transverse_timedependent(
                 **({"storage": storage} if storage is not None else {}),
             )
             optical_passes_completed += 1
+            if optical_preview is not None:
+                optical_preview.observe(source, grid=grid, reference=peak_reference,
+                    background=request.material.background_intensity,
+                    step=completed_steps, dt=request.solver.dt_normalized,
+                    pass_id=optical_passes_completed)
             retain_movie_frame(completed_steps, observed_A, source)
             if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
                 candidate = _linearized_material_step(
@@ -626,6 +636,10 @@ def run_pr_transverse_timedependent(
         **({"storage": storage} if storage is not None else {}),
     )
     optical_passes_completed += 1
+    if optical_preview is not None:
+        optical_preview.observe(final_source, grid=grid, reference=peak_reference,
+            background=request.material.background_intensity, step=completed_steps,
+            dt=request.solver.dt_normalized, pass_id=optical_passes_completed, final=True)
     retain_movie_frame(completed_steps, A_final, final_source)
     if storage is not None:
         final_summary = storage.summarize(psi, diagnostics=True, **state_kwargs)

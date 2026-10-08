@@ -155,11 +155,11 @@ def _image_amplification_validation_status(capability, base_request) -> str:
     return capability.validation_status
 
 
-def _continue_transverse_operation(request, *, checkpoint, cancellation_token=None, progress_callback=None):
+def _continue_transverse_operation(request, *, checkpoint, cancellation_token=None, progress_callback=None, optical_preview=None):
     from lcprop.pr.transverse.continuation import continue_transverse_td, ContinuationFailure, notify_failure_checkpoint
     try:
         result = continue_transverse_td(request, checkpoint, cancellation_token=cancellation_token,
-                                       progress_callback=progress_callback)
+                                       progress_callback=progress_callback, optical_preview=optical_preview)
     except ContinuationFailure as exc:
         notify_failure_checkpoint(exc, progress_callback)
         raise
@@ -1794,7 +1794,8 @@ class PRMainWindow(QWidget):
             summary = json.dumps(describe_continuation(request, self.last_checkpoint), indent=2)
             self._start_background(request, summary=summary,
                 runner_callable=partial(_continue_transverse_operation, checkpoint=self.last_checkpoint),
-                run_label="Continuing transverse TD locally", execution_runner=self.local_runner)
+                run_label="Continuing transverse TD locally", execution_runner=self.local_runner,
+                preview_checkpoint=self.last_checkpoint)
             return
         if (
             self._background_running
@@ -2119,10 +2120,43 @@ class PRMainWindow(QWidget):
         runner_callable,
         run_label: str,
         execution_runner=None,
+        preview_checkpoint=None,
     ) -> None:
         execution_runner = self.runner if execution_runner is None else execution_runner
-        self.results_panel.workspace.invalidate_products()
-        self.results_panel.reset_field_color_scales()
+        from lcprop.pr.transverse.live_preview import supported, LatestPreview, AcceptedPassObserver
+        from lcprop.gui.live_optical_preview import LiveOpticalPreview
+        from uuid import uuid4
+        previous_mailbox = getattr(self, '_live_mailbox', None)
+        if previous_mailbox is not None:
+            previous_mailbox.close()
+        if hasattr(self, '_live_timer'):
+            self._live_timer.stop()
+        self._live_mailbox = None
+        live = (execution_runner is not self.slurm_runner
+                and isinstance(request, PRTransverseRunRequest) and supported(request))
+        if live:
+            workspace = self.results_panel.workspace
+            if not hasattr(self, '_live_view'):
+                self._live_view = LiveOpticalPreview()
+                workspace.tabs.addTab(self._live_view, 'Live accepted optical pass')
+                self._live_timer = QTimer(self)
+                self._live_timer.setInterval(100)
+                self._live_timer.timeout.connect(self._poll_live_preview)
+            run_id = uuid4().hex
+            self._live_mailbox = LatestPreview(run_id)
+            from lcprop.pr.transverse.live_preview import next_segment_number, can_preserve_preview
+            number = 1 if preview_checkpoint is None else next_segment_number(preview_checkpoint)
+            preserve = can_preserve_preview(request, preview_checkpoint,
+                getattr(self._live_view, 'checkpoint_identity', None))
+            self._live_view.begin(run_id, segment_number=number, preserve=preserve)
+            observer = AcceptedPassObserver(self._live_mailbox, segment_id=run_id,
+                segment_number=number, total_steps=request.solver.Nt)
+            runner_callable = partial(runner_callable, optical_preview=observer)
+            workspace.tabs.setCurrentWidget(self._live_view)
+            self._live_timer.start()
+        else:
+            self.results_panel.workspace.invalidate_products()
+            self.results_panel.reset_field_color_scales()
         self.results_panel.set_request_summary(summary)
         workflow_id = self._workflow_id_for_request(request)
         self.results_panel.append_console(
@@ -2247,6 +2281,8 @@ class PRMainWindow(QWidget):
                 raise TypeError('invalid accepted failure checkpoint')
             checkpoint.validate()
             self.last_checkpoint=checkpoint
+            if getattr(self, "_live_mailbox", None) is not None:
+                self._live_view.bind_checkpoint(checkpoint.identity)
             self.results_panel.set_td_time_indicator(
                 f"Last accepted cumulative τ={checkpoint.time_normalized:.12g}; steps={checkpoint.completed_steps}")
             return
@@ -2398,7 +2434,11 @@ class PRMainWindow(QWidget):
         self.status_label.setText(time_text)
         # Scalar status can advance while a throttled scientific frame remains
         # at its own accepted step. Never relabel that frame with a later time.
-        if (progress.workflow != PR_TIMEDEPENDENT_WORKFLOW
+        if (progress.workflow == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
+                and getattr(self, '_live_mailbox', None) is not None
+                and not self._live_mailbox.closed):
+            self._live_view.set_latest_progress(time_text)
+        elif (progress.workflow != PR_TIMEDEPENDENT_WORKFLOW
                 or progress.latest_field_state is not None):
             self.results_panel.set_td_time_indicator(
                 time_text
@@ -2435,8 +2475,32 @@ class PRMainWindow(QWidget):
         self._progress_console_state[key] = state
         return True
 
+    def _poll_live_preview(self):
+        mailbox = getattr(self, '_live_mailbox', None)
+        if mailbox is None:
+            return
+        frame = mailbox.take()
+        if frame is not None:
+            try:
+                self._live_view.show_frame(frame)
+            except Exception as exc:
+                mailbox.error = f"Live preview display unavailable: {type(exc).__name__}: {exc}"
+        if mailbox.error:
+            self._live_view.label.setText(mailbox.error)
+
+    def _finish_live_preview(self, status):
+        mailbox = getattr(self, '_live_mailbox', None)
+        if mailbox is not None:
+            self._poll_live_preview()
+            self._live_timer.stop()
+            self._live_view.finish(status)
+            if mailbox.error:
+                self._live_view.label.setText(self._live_view.label.text() + " " + mailbox.error)
+            mailbox.close()
+
     @Slot(object)
     def _on_finished(self, runner_result) -> None:
+        self._finish_live_preview(getattr(runner_result.result, 'status', 'completed'))
         try:
             if runner_result.material_id != PR_MATERIAL_ID:
                 raise ValueError("PR window received a non-PR runner result")
@@ -2597,6 +2661,8 @@ class PRMainWindow(QWidget):
                 if isinstance(self._active_request, PRTransverseRunRequest):
                     try:
                         self.last_checkpoint = checkpoint_from_result(self._active_request, result)
+                        if getattr(self, '_live_mailbox', None) is not None:
+                            self._live_view.bind_checkpoint(self.last_checkpoint.identity)
                     except (ValueError, TypeError) as exc:
                         self.results_panel.append_console("Continuation unavailable: " + str(exc))
                 if result.status == "cancelled":
@@ -2719,6 +2785,7 @@ class PRMainWindow(QWidget):
 
     @Slot(str)
     def _on_failed(self, formatted_traceback: str) -> None:
+        self._finish_live_preview("failed")
         if (
             self.last_remote_status is not None
             and self.last_remote_status.state == RemoteRunState.CANCELLED
