@@ -1,0 +1,14 @@
+............                                                             [100%]
+=============================== warnings summary ===============================
+tests/test_lc_static_interactive.py::test_ui_stale_order_failure_and_repeated_run
+tests/test_lc_static_interactive.py::test_no_save_before_run_and_load
+tests/test_lc_static_interactive.py::test_unsupported_desktop_request_is_not_silently_changed
+tests/test_lc_static_interactive.py::test_layout_warnings_restore_and_voltage_roundtrip
+tests/test_lc_static_interactive.py::test_completed_voltage_and_slices_are_snapshot_owned
+  /tmp/lc-interactive-stage1-env/lib/python3.12/site-packages/traitlets/traitlets.py:1396: DeprecationWarning: Passing unrecognized arguments to super(Layout).__init__(gap='12px').
+  object.__init__() takes exactly one argument (the instance to initialize)
+  This is deprecated in traitlets 4.2.This error will be raised in a future release of traitlets.
+    warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+12 passed, 5 warnings in 34.85s
