@@ -1,17 +1,32 @@
-# Minimal interactive LC CPU notebook
+# Interactive LC CPU notebook — self-installing setup
 
-Open `lc_static_interactive_cpu.ipynb` in local Jupyter or, after separate hosted
-qualification, Colab CPU. Use an installed LCProp kernel. Copy these two files next
-to the notebook (into `/content` in Colab):
+Open the published notebook in a **fresh Colab CPU runtime** and run its single setup
+cell. It retrieves pinned helpers, installs headless LCProp and presentation dependencies,
+verifies 264 installed package files and helper SHA-256 identities, and opens the controls.
+No wheel, script or ZIP upload is required. Setup does not run the solver; press **Run**
+separately. If imports from an earlier session conflict, restart the runtime. A verified
+setup rerun preserves the existing application and completed snapshot.
 
-- `examples/lc_static_nonlinear_cpu.py` — unchanged qualified preset/helper.
-- `examples/lc_static_interactive.py` — new presentation-only controller.
+**Publication pending:** both pinned URLs currently return 404. No moving revision is
+substituted. The eventual immutable link is:
 
-The notebook verifies helper hashes and site-packages imports. Use the exact retained
-Stage 5 wheel (`1322400b31fac3a28d439f281cc189fb790f1526940dc36af9bf50971fdc5c20`)
-from the local qualification bundle; that binary is deliberately not in Git. Manual
-setup is documented in the notebook. NumPy, SciPy, Matplotlib and ipywidgets are
-required; Qt, LaunchPlane and CuPy are not. No installation cell runs automatically.
+```text
+https://colab.research.google.com/github/mcroning/LCProp/blob/<PUBLISHED_NOTEBOOK_COMMIT>/notebooks/lc_static_interactive_cpu.ipynb
+```
+
+Replace the placeholder only after this notebook revision is committed and published.
+This is a link template, not a working deployment badge. The notebook itself pins:
+
+- Engine: `52b00928978a9ec7862a357d38327fd0b9ae857c`.
+- Helpers: `d69ef2bd5b93022dc3a4db6cc7f764d066ce078d`.
+
+Installation builds from the immutable engine archive; it is not claimed to reproduce
+the Stage 5 wheel ZIP hash. Installed source identities must match the qualified wheel
+manifest. NumPy/SciPy are engine dependencies; Matplotlib/ipywidgets are installed for
+presentation. No Qt, LaunchPlane or CuPy extras. Dependency versions are recorded by
+the existing environment provenance; fresh hosted dependency combinations still need
+qualification. Ordinary local Jupyter should use a fresh disposable kernel environment:
+running setup intentionally installs into that kernel, not a separate environment.
 
 Edit numeric x/y position, beam-normal 1/e field radii (µm) or incident power (mW), plus applied voltage (V).
 Only the launch preview updates. Press Run for one bounded self-consistent static
@@ -41,7 +56,7 @@ editor fidelity or multibeam exploration use the desktop GUI/Python APIs.
 
 This synchronous milestone has progress updates but no responsive Stop guarantee.
 A busy notebook kernel may delay browser events. No background workers/custom JavaScript
-are used. The original between-slice 120 s operational budget remains; do not retry
+are used. The selectable between-slice 120/180/300 s wall-time budget remains; do not retry
 with changed physics after failure. Plan at least 1 GiB available RAM and several
 minutes for slower CPU systems. Store one completed snapshot; the snapshot uses
 immutable NPZ bytes and decodes arrays on demand, so temporary copies during plot/export

@@ -97,3 +97,72 @@ Required bounded deployment tests:
 No Product source, candidate, prior evidence, index, commits or remote refs changed.
 No commits, pushes, simulations or installations. The task is blocked on publication,
 not on a scientific or package-architecture deficiency.
+
+## Self-installing notebook implementation after publication-baseline commit
+
+Publication baseline H is now `d69ef2bd5b93022dc3a4db6cc7f764d066ce078d`.
+The notebook has one setup cell containing deployment logic, explicit engine/helper
+pins, two helper SHA-256 identities and all 264 installed-package file hashes from
+the Stage 5 qualified wheel manifest. No new Product API or scientific helper changes.
+The public engine archive is passed to pip for a standard non-editable install with
+Matplotlib/ipywidgets; no GUI/GPU extras. This is a source rebuild, not a claim of
+wheel-byte identity. Every manifest package file must match before helper imports.
+Helper downloads are size-bounded to 1 MB each with a 30-second network timeout.
+
+Setup verifies downloads before installation, provides four progress stages and
+raises actionable errors for unavailable immutable revisions, hash mismatch, installer
+failure, missing dependencies, conflicting imported engine/helpers and checkout imports.
+A verified existing import is reused without reinstalling; the previous application
+and completed snapshot are retained on rerun. A first setup with already-imported
+scientific dependencies requests a fresh runtime to avoid stale binary imports.
+Initialization only constructs controls and the canonical launch preview. Run remains
+explicit. No public install is claimed successful yet.
+
+Public unauthenticated HEAD checks on 2026-10-09 returned **404** for both:
+
+- raw helper at H, `examples/lc_static_interactive.py`;
+- engine source archive at `52b00928978a9ec7862a357d38327fd0b9ae857c`
+  (GitHub redirects to codeload, then 404).
+
+These observations do not distinguish an unpublished commit from repository visibility
+restrictions. Public access must be established for both exact pins. No credentials,
+branch fallback, substitution, push or installation was attempted. Per the stop
+condition, validation uses local download/install fixtures and the already-existing
+qualified disposable environment.
+
+Validation: **7 deployment tests passed**, executing the actual notebook setup-cell
+functions. Coverage includes successful installer invocation, safe rerun, exact helper
+bytes, wrong helper hashes, unavailable revision, missing dependency, installer failure,
+and installed-engine manifest mismatch. Real widget initialization and rerun also passed
+using local helper transport and the existing installed engine: 264 package files verified,
+canonical preset unchanged, no completed run created, and no Qt/LaunchPlane/CuPy imports.
+Scientific solver was never invoked. Installer success is mocked, not an end-to-end
+installation claim. Logs/scripts remain under `.codex-work/stage1d-setup/`.
+
+Changed files: `notebooks/lc_static_interactive_cpu.ipynb`, its usage `.md`,
+`tests/test_lc_interactive_setup.py` (new), and this report. Existing scientific parity
+evidence is unchanged. Stage 1C helper hash remains
+`492d54cf89093742b1436cee7a7aec9a9539a122815e33811f2a21db7a631b80`;
+standalone helper remains
+`2ffed40dfc82d47b73bd1f9770c2ef4a12a2918e32bd2c137f6a252ed07f90a3`.
+
+Remaining: review/commit this notebook separately, publish the reviewed revisions,
+replace the documented Colab link template with the notebook commit, then verify
+fresh hosted installation/widget rendering and exports. No hosted qualification is
+claimed. Dependency versions remain environment-reported rather than a cross-platform
+lockfile; numerical parity qualification remains scoped to previously tested environments.
+
+## Acceptance before automatic-setup commit
+
+Rechecked exact engine/helper pins and helper bytes against the committed publication
+baseline. All 264 embedded package hashes match both the retained qualified manifest
+and the Git-object bytes at the pinned engine revision. Seven deployment tests passed
+again (0.16 s); real widget initialization and setup rerun passed in the existing
+qualified disposable environment using local transport fixtures, without solver work.
+Setup reuses the same application object on rerun, preserving its completed snapshot;
+it does not call Run or the execution helper. Scientific request and helper code are
+unchanged. Installed files resolve from site-packages. Public deployment remains
+unqualified and depends on publishing the exact pins and notebook revision.
+
+Only the notebook, usage documentation, deployment tests and this report are approved
+for this commit. No installation, simulation, engine edits or push during acceptance.
