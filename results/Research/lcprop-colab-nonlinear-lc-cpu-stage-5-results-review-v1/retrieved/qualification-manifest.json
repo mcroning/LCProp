@@ -1,0 +1,18 @@
+{
+  "comparison.json": "337435dd3e8ba4a4ad4c8a94dff8e3d832761d62ce8fe041425d92c5fc86ed60",
+  "executed-example.py": "2ffed40dfc82d47b73bd1f9770c2ef4a12a2918e32bd2c137f6a252ed07f90a3",
+  "execution.json": "8faa4e8c7b0c3a5c1cc2b95505e1420f5da86dd7af8687636a5ccf4ac4849554",
+  "installation.json": "02f872c6e460cb1c936ee4a93615ab30e6d755bf5796512201664d217d135ae7",
+  "numerical-config.txt": "7d8cd15f10b74a4257fd1bf2c505ada002d6209ebbc960bc522011d4698d24d9",
+  "pip-freeze.txt": "41cccf8d6d59efabea9858960d6c1fe117fdacc2786295b3f835aff857187c80",
+  "process.json": "1e946fe1d7df3e789e3697ce609c1a24caeef7bc393a1fdca9434b6c4bf288ab",
+  "result/comparison.png": "f332cb4883ae96a0e3e8adcb548df2efc419e8c6a89bd4973858b4efbb6ccd48",
+  "result/fixed.lcprop.json": "7aa94ff4e54b94105ad82ccb0a0e946e7031366e18c1b8c93e20ac3d2d570718",
+  "result/fixed.npz": "f1aa18ddc21b68c3749e127e6201e536a204577ef17736da6c89400dda771471",
+  "result/nonlinear.lcprop.json": "b620ee2ebd878b89993dbe9ee66645da3aaabe6f793ff94089542ef19ebbbaa2",
+  "result/nonlinear.npz": "1750b35f217f1d17612f552154f11c7d18995e1a0ef42be64090a5e5516a0697",
+  "result/sha256.json": "bc20aa6f2229f254ca6301257453ce1bbade452481dc15590bddbf787b17614b",
+  "result/summary.json": "b6d5e1598846bf031bdd33aef86f2d49883e52783bebeeda567c4978da3b1fbf",
+  "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stdout.txt": "cfa8edcb80320a23227dc7d340db3d5670cc4e52e4b6659033d49871583c2d4e"
+}

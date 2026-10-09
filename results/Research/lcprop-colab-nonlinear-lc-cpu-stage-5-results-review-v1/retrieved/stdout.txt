@@ -1,0 +1,23 @@
+{
+  "environment": {
+    "python": "3.13.16",
+    "platform": "Linux-6.6.122+-x86_64-with-glibc2.39",
+    "numpy": "2.1.3",
+    "scipy": "1.16.3",
+    "lcprop": "0.1.0",
+    "module": "/usr/local/lib/python3.13/dist-packages/lcprop/__init__.py"
+  },
+  "claim": "Self-consistent slice convergence is not stationary soliton formation.",
+  "max_reorientation_rad": 0.08002581124533137,
+  "last_slice_rms_width_um": {
+    "nonlinear": [
+      7.121488748678269,
+      6.3070605625133345
+    ],
+    "fixed": [
+      5.885449242055482,
+      6.013741921381347
+    ]
+  }
+}
+Nonlinear: 69.038s, fixed: 1.003s; all slices converged

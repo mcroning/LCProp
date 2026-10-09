@@ -1,0 +1,92 @@
+{
+  "execution_intent": null,
+  "format": "lcprop-experiment",
+  "material_id": "lc",
+  "presentation_payload": {},
+  "request_payload": {
+    "beams": {
+      "channels": [
+        {
+          "coherence_group": "A",
+          "n_ext": 1.0,
+          "name": "off-axis",
+          "phase_rad": 0.0,
+          "phi_rad": 0.0,
+          "power_mW": 1.0,
+          "profile": "collimated_gaussian",
+          "psi_rad": 0.0,
+          "theta_ext_rad": 0.0,
+          "w1_um": 10.0,
+          "w2_um": 10.0,
+          "wavelength_um": 0.633,
+          "x0_um": -20.0,
+          "y0_um": 0.0
+        }
+      ],
+      "coherence": "incoherent"
+    },
+    "bias": {
+      "V_bias": 0.9144,
+      "b_override": null,
+      "theta_bc": 0.0,
+      "theta_center": null,
+      "theta_max": 1.5707963267948966,
+      "theta_min": 0.0
+    },
+    "grid": {
+      "Nx": 128,
+      "Ny": 128,
+      "dz_um": 5.0,
+      "x_aperture_um": 75.0,
+      "y_aperture_um": 100.0,
+      "z_length_um": 500.0
+    },
+    "material": {
+      "K": 7e-12,
+      "delta_epsilon": 13.0,
+      "name": "generic",
+      "ne": 1.7,
+      "no": 1.5
+    },
+    "optical_boundary": {
+      "attenuation_per_um": 0.05,
+      "mode": "periodic",
+      "profile_order": 2,
+      "tukey_alpha": 0.1,
+      "width_fraction": 0.15
+    },
+    "output": {
+      "run_dir": null,
+      "save_full": false,
+      "save_slices": true
+    },
+    "runtime": {
+      "optical_dn_max_est": 0.02,
+      "optical_max_phase_per_substep_rad": 0.3,
+      "optical_max_substeps": 16,
+      "optical_substeps_enabled": true,
+      "precision": "float64"
+    },
+    "schema_version": 3,
+    "solver": {
+      "max_iterations": 3,
+      "record_iteration_history": true,
+      "static_delta_theta_max_tol": null,
+      "static_delta_theta_rms_tol": null,
+      "static_max_coupled_passes": 3,
+      "static_max_relax_iterations": 200,
+      "static_residual_max_tol": 0.02,
+      "static_residual_rms_tol": 0.005,
+      "tolerance_max": null,
+      "tolerance_rms": null,
+      "workflow": {
+        "coupling": "frozen",
+        "optics_solver": "splitstep",
+        "strategy": "fixed_theta",
+        "theta_solver": "none"
+      }
+    }
+  },
+  "schema_version": 3,
+  "workflow_id": "static"
+}

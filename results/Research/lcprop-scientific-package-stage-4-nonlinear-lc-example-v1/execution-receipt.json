@@ -1,0 +1,9 @@
+{
+  "returncode": 0,
+  "stop_reason": null,
+  "elapsed_process_seconds": 31.75504629209172,
+  "sampled_peak_RSS_KiB": null,
+  "python": "/tmp/lc-static-example-h60l2fc_/venv/bin/python",
+  "installed_source_verification": true,
+  "RSS_note": "External ps unavailable under sandbox; use child resource.json MaxRSS instead"
+}

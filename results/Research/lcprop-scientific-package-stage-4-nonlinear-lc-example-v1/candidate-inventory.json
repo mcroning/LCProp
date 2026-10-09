@@ -1,0 +1,5 @@
+{
+  "examples/lc_static_nonlinear_cpu.py": "2ffed40dfc82d47b73bd1f9770c2ef4a12a2918e32bd2c137f6a252ed07f90a3",
+  "examples/lc_static_nonlinear_cpu.md": "cf5cf44f6be8fafcd211b5ad6053cc4733eb448d166e66c7b1e589ceb988d479",
+  "tests/test_lc_static_nonlinear_example.py": "579179b796cc8270e4dcfc41536720d53cf638f87db2705cc81ee3818f396f6c"
+}
