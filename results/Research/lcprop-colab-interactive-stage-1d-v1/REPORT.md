@@ -166,3 +166,82 @@ unqualified and depends on publishing the exact pins and notebook revision.
 
 Only the notebook, usage documentation, deployment tests and this report are approved
 for this commit. No installation, simulation, engine edits or push during acceptance.
+
+## Unpublished bootstrap/presentation remediation
+
+This section supersedes the old blanket fresh-runtime dependency rejection and visible
+manifest design. No retained hosted traceback was found in the Stage 1D evidence or
+available scratch screenshot paths. The user-reported failure is directly explained
+by the former `if any(n in sys.modules...)` guard: importing NumPy/SciPy/Matplotlib/
+ipywidgets triggered failure regardless of actual compatibility. No specific hosted
+library incompatibility can be inferred from that guard or the report alone.
+
+New `examples/lc_colab_bootstrap.py` owns deployment mechanics. It reuses importable
+installed dependencies, compares loaded and distribution versions, and requests an
+explicit restart only for stale loaded versions or conflicting imported engine/helper
+identities. Pip uses `--no-deps` so the engine install cannot replace loaded numerical
+libraries. Missing direct requirements are installed without upgrading others; broken
+imports/transitive requirements produce actionable errors with the underlying cause.
+This conservative fallback does not guarantee repair of an arbitrary broken environment.
+Routine pip output is captured; error output is capped at 3000 characters. Setup gives
+concise verification/preparation stages and Ready/Failed status. No automatic restart.
+
+The notebook now has a short SHA-verified bootstrap cell with Colab form metadata
+(`cellView: form`, `#@title Prepare interface`). Rendering remains frontend-dependent.
+The complete 264-file manifest is downloaded from the already published qualification
+commit `8c2e8b1f4bc4477787c2e686c38d4636180f3d75` and independently SHA-256 verified
+before engine inspection. Engine/helper pins and helper bytes are unchanged. Completed
+snapshots and scientific Run semantics are unchanged; setup only samples a launch.
+
+The new bootstrap is uncommitted, so the draft deliberately uses `PUBLICATION_PENDING`
+and fails before download rather than naming a moving branch or stale bootstrap.
+Publication requires a bootstrap commit followed by a notebook commit embedding that
+exact bootstrap revision; its content SHA is already embedded. No commit/push here.
+
+Validation: **8 deployment tests passed** without installation or simulation. Tests
+exercise real imported NumPy/SciPy/Matplotlib/ipywidgets reuse; missing dependency,
+stale version and binary-import failures; manifest/helper download identity failure;
+pip failure diagnostics; 264 installed engine hashes; and real widget initialization
+plus rerun preserving the identical application and a sentinel completed snapshot.
+The new bootstrap SHA matches the notebook, and no Qt/LaunchPlane/CuPy imports occur.
+Logs: `.codex-work/stage1d-remediation/tests.txt`. Existing scientific helper code and
+qualified request remain byte-identical to the accepted commit. Retained numerical
+parity evidence is reused, not regenerated. No scientific claim for 2 mW or new hosted
+numerical-library combinations. Hosted setup/rendering remains to be tested after
+publication. Existing unrelated modifications and protected evidence preserved.
+
+Changed candidate: notebook, usage guide, deployment tests, this report, plus the new
+example-level bootstrap. No engine or public API changes. Candidate remains unstaged.
+
+## Final local notebook integration
+
+The notebook now pins bootstrap commit
+`ba9cd9adb5635a88bec8e4a87d650c8e4a9eeb77`, SHA-256
+`1ba52ef44db014ee5821a0aa7be35098777a8a17e0fd06899980e1fbe6c7cc63`.
+The hash was checked against that commit's Git-object bytes. Executable publication
+placeholders and the pending guard are removed; the short setup cell retains Colab form
+metadata. Prior pending-state descriptions above are historical, superseded here.
+Usage instructions explain that publication remains required without an unresolved
+notebook-commit URL placeholder. No publication is claimed by this local commit.
+
+Engine remains `52b00928978a9ec7862a357d38327fd0b9ae857c`, scientific helpers remain
+`d69ef2bd5b93022dc3a4db6cc7f764d066ce078d`, and the package manifest remains pinned
+and hashed as recorded above. Neither bootstrap nor scientific helper bytes changed.
+
+**9 tests passed in 1.54 s**: seven independent bootstrap tests plus two notebook
+integration tests. The new integration test executes the actual cell with verified
+local transport fixtures and the existing qualified installed engine. It initializes
+widgets, checks the canonical request, repeats setup while preserving a completed
+snapshot marker and verifies no Qt/LaunchPlane/CuPy imports. Installation and scientific
+execution are forbidden by test guards; neither occurred. Numerical parity evidence
+is retained unchanged rather than regenerated. Grammar and whitespace checks passed.
+
+Command: existing disposable Python with Agg, bytecode/cache writes disabled,
+`pytest -q -p no:cacheprovider --import-mode=importlib` on
+`tests/test_lc_colab_bootstrap.py tests/test_lc_interactive_setup.py`.
+Temporary test products and log: `.codex-work/stage1d-final/`.
+
+Commit scope: notebook, notebook usage guide, integration tests and this report only.
+Unrelated modifications and protected evidence preserved. No simulations, installations
+or push. Fresh hosted bootstrap download, rendering and setup remain to be tested
+following separately authorized publication of bootstrap and notebook commits.

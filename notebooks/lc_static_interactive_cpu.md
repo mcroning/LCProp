@@ -1,32 +1,33 @@
-# Interactive LC CPU notebook — self-installing setup
+# Interactive LC CPU notebook — prepare, configure, run
 
-Open the published notebook in a **fresh Colab CPU runtime** and run its single setup
-cell. It retrieves pinned helpers, installs headless LCProp and presentation dependencies,
-verifies 264 installed package files and helper SHA-256 identities, and opens the controls.
-No wheel, script or ZIP upload is required. Setup does not run the solver; press **Run**
-separately. If imports from an earlier session conflict, restart the runtime. A verified
-setup rerun preserves the existing application and completed snapshot.
+Choose a Colab CPU runtime and run **Prepare interface**. Setup reuses compatible
+preinstalled numerical libraries, verifies pinned inputs and opens the controls.
+Only **Run** executes the scientific solver. No wheel, script or ZIP uploads.
+Routine pip output is captured; failures show bounded actionable diagnostics.
+Existing completed results survive verified repeated setup.
 
-**Publication pending:** both pinned URLs currently return 404. No moving revision is
-substituted. The eventual immutable link is:
+The setup is pinned to bootstrap commit
+`ba9cd9adb5635a88bec8e4a87d650c8e4a9eeb77` and its independently verified SHA-256.
+The bootstrap and this notebook revision still require authorized publication before
+hosted use. After publication, open this notebook at its immutable Git commit with
+Colab's GitHub notebook opener. No moving-branch fallback is used.
 
-```text
-https://colab.research.google.com/github/mcroning/LCProp/blob/<PUBLISHED_NOTEBOOK_COMMIT>/notebooks/lc_static_interactive_cpu.ipynb
-```
+The short setup cell downloads and hash-checks the bootstrap before executing it.
+Colab's form metadata hides implementation by default where supported; ordinary
+Jupyter may show the short cell. Advanced verification is in the bootstrap source.
+Engine remains pinned to `52b00928978a9ec7862a357d38327fd0b9ae857c`; interactive helpers
+remain pinned to `d69ef2bd5b93022dc3a4db6cc7f764d066ce078d`. The 264-file manifest is
+retrieved from immutable commit `8c2e8b1f4bc4477787c2e686c38d4636180f3d75` and independently
+SHA-256 checked. It is no longer embedded visibly in the notebook.
 
-Replace the placeholder only after this notebook revision is committed and published.
-This is a link template, not a working deployment badge. The notebook itself pins:
-
-- Engine: `52b00928978a9ec7862a357d38327fd0b9ae857c`.
-- Helpers: `d69ef2bd5b93022dc3a4db6cc7f764d066ce078d`.
-
-Installation builds from the immutable engine archive; it is not claimed to reproduce
-the Stage 5 wheel ZIP hash. Installed source identities must match the qualified wheel
-manifest. NumPy/SciPy are engine dependencies; Matplotlib/ipywidgets are installed for
-presentation. No Qt, LaunchPlane or CuPy extras. Dependency versions are recorded by
-the existing environment provenance; fresh hosted dependency combinations still need
-qualification. Ordinary local Jupyter should use a fresh disposable kernel environment:
-running setup intentionally installs into that kernel, not a separate environment.
+Setup uses pip `--no-deps` to avoid changing preinstalled numerical dependencies.
+Missing direct requirements are installed individually; failed imports (including
+missing transitive requirements) give diagnostics rather than silently upgrading the
+runtime. A loaded/on-disk version mismatch or conflicting imported engine/helper
+requires an explicit user restart; setup never restarts automatically. Importability
+is an operational compatibility check, not new numerical qualification of arbitrary
+library versions. Local Jupyter users should use a disposable kernel environment,
+since setup installs into the active kernel. No Qt, LaunchPlane or CuPy required.
 
 Edit numeric x/y position, beam-normal 1/e field radii (µm) or incident power (mW), plus applied voltage (V).
 Only the launch preview updates. Press Run for one bounded self-consistent static
