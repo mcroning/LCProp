@@ -7,7 +7,7 @@ pip `--no-deps`; missing transitive or broken binary dependencies produce diagno
 Pip output is captured; failures retain bounded error details. No automatic restart.
 
 Scientific engine pin: `52b00928978a9ec7862a357d38327fd0b9ae857c`.
-Interactive helper pin: `d69ef2bd5b93022dc3a4db6cc7f764d066ce078d`.
+Interactive helper pin: `6ead2b5746765d865965162d614be8bb79659827`.
 The 264-file package manifest is fetched from immutable commit
 `8c2e8b1f4bc4477787c2e686c38d4636180f3d75` and SHA-256 verified before use.
 Both helper downloads are independently hash-checked. Installed engine bytes must

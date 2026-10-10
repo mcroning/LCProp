@@ -10,8 +10,8 @@ import sys
 from urllib.request import urlopen
 
 ENGINE_REV = '52b00928978a9ec7862a357d38327fd0b9ae857c'
-HELPER_REV = 'd69ef2bd5b93022dc3a4db6cc7f764d066ce078d'
-HELPER_HASHES = {'lc_static_interactive.py': '492d54cf89093742b1436cee7a7aec9a9539a122815e33811f2a21db7a631b80', 'lc_static_nonlinear_cpu.py': '2ffed40dfc82d47b73bd1f9770c2ef4a12a2918e32bd2c137f6a252ed07f90a3'}
+HELPER_REV = '6ead2b5746765d865965162d614be8bb79659827'
+HELPER_HASHES = {'lc_static_interactive.py': '509d64948ebeb5ddbef0600049d081fd71b32689dd838a10a5223a5c46223672', 'lc_static_nonlinear_cpu.py': '2ffed40dfc82d47b73bd1f9770c2ef4a12a2918e32bd2c137f6a252ed07f90a3'}
 ENGINE_URL = f'https://github.com/mcroning/LCProp/archive/{ENGINE_REV}.zip'
 MANIFEST_URL = 'https://raw.githubusercontent.com/mcroning/LCProp/8c2e8b1f4bc4477787c2e686c38d4636180f3d75/results/Research/lcprop-colab-nonlinear-lc-cpu-stage-5-preparation-v1/qualification-inputs/expected-installed-files.json'
 MANIFEST_SHA256 = '71aa29c55973ef422378b7616208e1dea064d64d2fea66cdede22ea567972299'
