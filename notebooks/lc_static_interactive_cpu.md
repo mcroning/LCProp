@@ -7,7 +7,7 @@ Routine pip output is captured; failures show bounded actionable diagnostics.
 Existing completed results survive verified repeated setup.
 
 The setup is pinned to bootstrap commit
-`ba9cd9adb5635a88bec8e4a87d650c8e4a9eeb77` and its independently verified SHA-256.
+`8f2d66a6d778b21c5929ce5196b84a39bfca7a06` and its independently verified SHA-256.
 The bootstrap and this notebook revision still require authorized publication before
 hosted use. After publication, open this notebook at its immutable Git commit with
 Colab's GitHub notebook opener. No moving-branch fallback is used.
@@ -16,7 +16,7 @@ The short setup cell downloads and hash-checks the bootstrap before executing it
 Colab's form metadata hides implementation by default where supported; ordinary
 Jupyter may show the short cell. Advanced verification is in the bootstrap source.
 Engine remains pinned to `52b00928978a9ec7862a357d38327fd0b9ae857c`; interactive helpers
-remain pinned to `d69ef2bd5b93022dc3a4db6cc7f764d066ce078d`. The 264-file manifest is
+remain pinned to `6ead2b5746765d865965162d614be8bb79659827`. The 264-file manifest is
 retrieved from immutable commit `8c2e8b1f4bc4477787c2e686c38d4636180f3d75` and independently
 SHA-256 checked. It is no longer embedded visibly in the notebook.
 
