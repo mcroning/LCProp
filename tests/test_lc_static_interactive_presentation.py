@@ -143,3 +143,17 @@ def test_budget_selection_timeout_preserves_snapshot(snapshot,monkeypatch,tmp_pa
     assert not form.time_budget.disabled
     ui.export_completed(form.completed,tmp_path/'after-timeout')
     assert (tmp_path/'after-timeout/arrays.npz').read_bytes()==snapshot.arrays_npz
+
+
+def test_configure_title_tracks_panel_state(monkeypatch):
+    # Only widget state is under test; do not sample a launch or run the solver.
+    monkeypatch.setattr(ui.InteractiveLC, '_changed', lambda *args, **kwargs: None)
+    form = ui.InteractiveLC()
+    assert form.configure.selected_index == 0
+    assert form.configure.get_title(0) == 'Configure — collapse to focus on results'
+    form.configure.selected_index = None
+    assert form.configure.get_title(0) == 'Configure — expand to show setup pane'
+    form.configure.selected_index = 0
+    assert form.configure.get_title(0) == 'Configure — collapse to focus on results'
+    form.configure.selected_index = None
+    assert form.configure.get_title(0) == 'Configure — expand to show setup pane'

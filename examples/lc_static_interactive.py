@@ -276,7 +276,13 @@ class InteractiveLC:
         results = W.VBox([W.HTML('<h3>Results — completed snapshot</h3>'),self.result_output,
             W.HTML('New export folder'),wrap([self.path,self.save_button])],layout=full())
         self.configure = W.Accordion(children=[configure], selected_index=0,layout=full())
-        self.configure.set_title(0,'Configure — collapse to focus on results')
+        def update_configure_title(change=None):
+            title = ('Configure — collapse to focus on results'
+                     if self.configure.selected_index == 0
+                     else 'Configure — expand to show setup pane')
+            self.configure.set_title(0, title)
+        self.configure.observe(update_configure_title, names='selected_index')
+        update_configure_title()
         self.widget = W.VBox([self.configure,run,results],layout=full())
         self.restore_button.on_click(self._restore)
         self.run_button.on_click(self._run)
