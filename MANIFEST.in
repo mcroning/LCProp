@@ -1,0 +1,13 @@
+# Self-contained source distribution: runtime package, selected examples and tests.
+graft src/lcprop
+prune tests
+include tests/test_notebook_package.py
+include examples/lc_static_interactive.py
+include examples/lc_static_nonlinear_cpu.py
+include docs/notebook_package.md
+prune results
+prune reference
+prune .codex-work
+prune build
+prune notebooks
+global-exclude __pycache__ *.py[cod] *.npz *.npy *.code-workspace

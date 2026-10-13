@@ -30,12 +30,15 @@ def test_actual_setup_cell_and_repeated_snapshot(monkeypatch,tmp_path):
     import sys,subprocess,urllib.request
     import lcprop
     source=''.join(json.loads((ROOT/'notebooks/lc_static_interactive_cpu.ipynb').read_text())['cells'][1]['source'])
+    helper_rev="6ead2b5746765d865965162d614be8bb79659827"
+    payloads={n:subprocess.check_output(["git","show",helper_rev+":examples/"+n],cwd=ROOT)
+              for n in ("lc_static_interactive.py","lc_static_nonlinear_cpu.py")}
     def fetch(url,timeout):
         if url.endswith('/lc_colab_bootstrap.py'):p=ROOT/'examples/lc_colab_bootstrap.py'
         elif url.endswith('/expected-installed-files.json'):
             p=ROOT/'results/Research/lcprop-colab-nonlinear-lc-cpu-stage-5-preparation-v1/qualification-inputs/expected-installed-files.json'
         else:p=ROOT/'examples'/url.rsplit('/',1)[-1]
-        return io.BytesIO(p.read_bytes())
+        return io.BytesIO(payloads[p.name] if p.name in payloads else p.read_bytes())
     monkeypatch.setattr(urllib.request,'urlopen',fetch)
     monkeypatch.setattr(subprocess,'run',lambda *a,**k:pytest.fail('No installation allowed'))
     for name in ('lc_static_interactive','lc_static_nonlinear_cpu'):monkeypatch.delitem(sys.modules,name,raising=False)

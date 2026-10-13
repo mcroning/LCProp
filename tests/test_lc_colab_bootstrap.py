@@ -61,9 +61,14 @@ def test_pip_failure_quiet_actionable(boot,monkeypatch):
 
 def test_real_widget_repeated_setup(boot,monkeypatch,tmp_path):
     import lcprop
+    # Published bootstrap pins historical helpers, not today's compatibility wrappers.
+    import subprocess
+    payloads={n:subprocess.check_output(["git","show",boot.HELPER_REV+":examples/"+n],cwd=ROOT)
+              for n in boot.HELPER_HASHES}
     def download(url,h,**kwargs):
         p=(ROOT/url.split('/8c2e8b1f4bc4477787c2e686c38d4636180f3d75/')[1]) if url==boot.MANIFEST_URL else ROOT/'examples'/url.rsplit('/',1)[-1]
-        b=p.read_bytes();assert hashlib.sha256(b).hexdigest()==h;return b
+        b=p.read_bytes() if url==boot.MANIFEST_URL else payloads[url.rsplit('/',1)[-1]]
+        assert hashlib.sha256(b).hexdigest()==h;return b
     monkeypatch.setattr(boot,'download',download)
     monkeypatch.setattr(boot,'pip_install',lambda args:pytest.fail('No installation needed'))
     monkeypatch.chdir(tmp_path)
