@@ -10,6 +10,31 @@ physical states, equations, solvers, requests, results, persistence codecs,
 and applications while sharing beam launch, runtime grids, NumPy/CuPy backend
 selection, optical propagation, execution, and presentation products.
 
+## Try the interactive LC demonstration
+
+**[Open the published interactive LC demonstration in Colab](https://colab.research.google.com/github/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/notebooks/lc_static_interactive_cpu.ipynb)**
+
+Use a CPU runtime. Setup installs verified, immutable historical engine/helper revisions;
+only **Run** executes a calculation. This existing qualified demonstration is independent
+of the RC2 package and does **not** install or qualify RC2. No manual helper uploads or
+repository checkout are required. Colab runtime compatibility and resource availability
+can change; retain exported results and provenance before the session expires.
+
+## Scientific qualification scope
+
+Retained hosted CPU qualification covers bounded presets for reduced PR time evolution,
+LC fixed-director propagation and LC self-consistent nonlinear static propagation.
+RC1's packaged nonlinear LC preset passed nine scientific-array comparisons and all
+100 slice-convergence checks. RC2 changes documentation/version metadata only; its
+exact versioned artifacts still require their own distribution qualification.
+
+These results do not establish stationary soliton formation, arbitrary beam/voltage
+settings, all workflows, or every backend. Modified demonstration parameters are
+**exploratory**. Broader LC/PR, multibeam, continuation and GPU/Slurm functionality exists,
+with workflow-specific validation/commissioning boundaries; treat combinations lacking
+matching evidence as unqualified. The following is an implementation inventory, not a
+blanket numerical or environment qualification claim.
+
 ## Capabilities
 
 - Multichannel Gaussian beam launch with independent wavelengths, powers,
@@ -77,35 +102,81 @@ src/lcprop/
 
 ## Installation
 
-LCProp's headless core requires Python 3.10 or newer. GUI and normal Product-test
-use with current [LaunchPlane](https://github.com/mcroning/LaunchPlane) requires Python 3.11 or newer.
+**Publication status:** the commands below are for production PyPI and will work only
+**after LCProp is published there**. The `0.3.0rc2` candidate is not yet uploaded;
+use its supplied, checksum-verified artifacts until an explicitly published TestPyPI
+candidate is available. RC1 has been qualified on TestPyPI. TestPyPI is a qualification
+service, not the primary installation route for researchers.
 
-Follow the [Quick Start](docs/user/quick_start.md#install-and-launch) for a complete
-Python environment, LCProp and LaunchPlane acquisition, and installation sequence.
-Ordinary Local use supports non-editable source installation; editable installs
-are for development, not a requirement for running the Product. LaunchPlane is
-installed separately and must support schema 3 or newer.
+### Ordinary package installation (after production publication)
 
-From the LCProp checkout with LaunchPlane already installed:
-
-```bash
-python -m pip install '.[gui]'
-```
-
-For developer work in that checkout:
+No Git checkout is required:
 
 ```bash
-python -m pip install -e '.[gui,test]'
+python -m pip install lcprop
 ```
 
-Automatic Slurm source deployment separately expects a suitable clean deployable
-LCProp Git checkout; see the [User Guide](docs/user/user_guide.md#inspecting-requests-and-identifying-displayed-results).
-The GUI Help menu renders concise topics and links to the full
-[rendered documentation](https://github.com/mcroning/LCProp/blob/feature/pr-second-order-static/docs/README.md).
-Online guides describe the published branch and can lag local development.
+For Jupyter/Colab widgets and plotting:
 
-The `gpu` extra installs the CUDA 12 CuPy distribution. The host CUDA runtime
-and driver must also be compatible with that package.
+```bash
+python -m pip install "lcprop[colab]"
+```
+
+After installation, initialize the packaged interface in a notebook:
+
+```python
+from IPython.display import display
+from lcprop.notebook.interactive_lc import InteractiveLC
+app = InteractiveLC()
+display(app.widget)
+```
+
+Initialization shows the launch preview; only **Run** starts the scientific solver.
+No external helper download is required by this packaged interface.
+
+For desktop GUI dependencies:
+
+```bash
+python -m pip install "lcprop[gui]"
+```
+
+**LaunchPlane is separate:** the GUI extra installs PySide6, pyqtgraph and Matplotlib;
+it does **not** install [LaunchPlane](https://github.com/mcroning/LaunchPlane).
+Install a compatible LaunchPlane separately where the desktop beam editor or saved
+editor metadata requires it (schema 3 or newer). Core scientific and notebook use do
+not require Qt, LaunchPlane or CuPy. GPU dependencies are separately optional via the
+`gpu` extra (CUDA 12 CuPy); installing it does not qualify a GPU/driver/workflow combination.
+
+### Python compatibility and qualification scope
+
+The package declares Python **3.10 or newer**. This is not a claim that every Python
+version/platform has been commissioned: recent release checks cover local macOS arm64
+Python **3.12** and hosted Linux x86-64 Python **3.13** CPU environments. Desktop use
+with current LaunchPlane requires Python **3.11 or newer** and separate GUI dependencies.
+The declared Python range and dependency specifications are unchanged for RC2.
+
+### Candidate artifacts and developer installation
+
+For current candidate review, install the exact supplied wheel (verify its published
+SHA-256 first), optionally selecting `[colab]` or `[gui]`. Candidate instructions and
+identity records accompany the artifacts; do not assume an unpublished RC can be
+obtained from production PyPI. Install into a fresh environment and record dependency
+versions for reproducible research.
+
+For developers only, from an LCProp source checkout:
+
+```bash
+python -m pip install .
+# Editable desktop/test development, with LaunchPlane separately provisioned:
+python -m pip install -e ".[gui,test]"
+```
+
+Source-checkout installation is optional, not a prerequisite for ordinary package use.
+See the [source Quick Start](https://github.com/mcroning/LCProp/blob/publication/colab-lc-stage-1d/docs/user/quick_start.md)
+for desktop environment guidance. These online guides describe their published revision
+and can lag newer candidate artifacts. Installed-distribution Slurm deployment validates
+package resources and provenance; supported checkout deployment is another route.
+Neither a Git checkout nor cluster access is required for local package execution.
 
 ## Graphical applications
 
