@@ -1,7 +1,6 @@
 """Actual researcher-facing setup cells; no solver execution or test installations."""
 import json
 from pathlib import Path
-import subprocess
 import sys
 import importlib.metadata as md
 import pytest
@@ -18,10 +17,15 @@ def cells(monkeypatch):
     monkeypatch.setattr(ui, 'execute', forbidden)
     monkeypatch.setattr(LocalRunner, 'run_operation', forbidden)
     monkeypatch.setattr(IPython.display, 'display', lambda *a, **k: None)
+    monkeypatch.setattr(IPython.display, 'clear_output', lambda **k: None)
     calls = []
-    monkeypatch.setattr(subprocess, 'check_call', lambda command: calls.append(command))
+    from IPython.core.interactiveshell import InteractiveShell
+    shell = InteractiveShell.instance()
+    import builtins
+    monkeypatch.setattr(builtins, "get_ipython", lambda: shell, raising=False)
+    monkeypatch.setattr(shell, 'run_line_magic', lambda name, args: calls.append((name, args)))
     nb = json.loads((ROOT / 'notebooks/lc_static_pypi_cpu.ipynb').read_text())
-    return [''.join(nb['cells'][i]['source']) for i in (1, 2)], calls
+    return [shell.input_transformer_manager.transform_cell(''.join(nb['cells'][i]['source'])) for i in (1, 2)], calls
 
 
 def test_install_and_initialize_qualified_request(cells):
@@ -30,8 +34,7 @@ def test_install_and_initialize_qualified_request(cells):
     from lcprop.notebook.lc_static_demo import build_request
     assert ns['app'].request() == build_request()
     assert ns['app'].completed is None
-    assert calls == [[sys.executable, '-m', 'pip', 'install', '--index-url',
-                      'https://pypi.org/simple', 'lcprop[colab]==0.3.0']]
+    assert calls == [('pip', 'install -q \"lcprop[colab]==0.3.0\"')]
     assert not any(n in sys.modules for n in ('PySide6', 'launchplane', 'cupy'))
 
 
@@ -49,7 +52,7 @@ def test_repeat_preserves_controls_and_completed_snapshot(cells):
 def test_incompatible_loaded_version_blocks_install_and_init(cells, monkeypatch):
     code, calls = cells; original = md.version
     monkeypatch.setattr(md, 'version', lambda name: '0.2.0' if name == 'lcprop' else original(name))
-    with pytest.raises(RuntimeError, match='already loaded'): exec(code[0], {})
+    with pytest.raises(RuntimeError, match='version is loaded'): exec(code[0], {})
     with pytest.raises(RuntimeError, match='0.3.0 is required'): exec(code[1], {})
     assert calls == []
 
@@ -64,9 +67,10 @@ def test_prior_session_version_is_not_silently_replaced(cells):
 def test_install_failure_keeps_completed_app(cells, monkeypatch):
     code, _ = cells; ns = {}; exec(code[1], ns)
     app = ns['app']; marker = object(); app.completed = marker
-    def fail(command): raise subprocess.CalledProcessError(1, command)
-    monkeypatch.setattr(subprocess, 'check_call', fail)
-    with pytest.raises(subprocess.CalledProcessError): exec(code[0], ns)
+    from IPython.core.interactiveshell import InteractiveShell
+    def fail(*args): raise RuntimeError('Installation failed')
+    monkeypatch.setattr(InteractiveShell.instance(), 'run_line_magic', fail)
+    with pytest.raises(RuntimeError, match='Installation failed'): exec(code[0], ns)
     assert ns['app'] is app and app.completed is marker
 
 
@@ -83,3 +87,14 @@ def test_readable_cells_without_integrity_framework(cells):
         assert forbidden not in '\n'.join(code)
     nb = json.loads((ROOT / 'notebooks/lc_static_pypi_cpu.ipynb').read_text())
     assert all(not c.get('outputs') for c in nb['cells'])
+
+
+def test_initialization_replaces_output_without_replacing_app(cells, monkeypatch):
+    import IPython.display
+    code, _ = cells; ns = {}; events = []
+    monkeypatch.setattr(IPython.display, 'clear_output', lambda **k: events.append(('clear', k)))
+    monkeypatch.setattr(IPython.display, 'display', lambda obj: events.append(('display', obj)))
+    exec(code[1], ns); app = ns['app']; events.clear()
+    exec(code[1], ns)
+    assert events == [('clear', {'wait': True}), ('display', app.widget)]
+    assert ns['app'] is app
