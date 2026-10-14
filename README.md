@@ -16,7 +16,7 @@ selection, optical propagation, execution, and presentation products.
 
 Use a CPU runtime. Setup installs verified, immutable historical engine/helper revisions;
 only **Run** executes a calculation. This existing qualified demonstration is independent
-of the RC2 package and does **not** install or qualify RC2. No manual helper uploads or
+of the packaged release and does **not** install or qualify the latest package version. No manual helper uploads or
 repository checkout are required. Colab runtime compatibility and resource availability
 can change; retain exported results and provenance before the session expires.
 
@@ -25,8 +25,8 @@ can change; retain exported results and provenance before the session expires.
 Retained hosted CPU qualification covers bounded presets for reduced PR time evolution,
 LC fixed-director propagation and LC self-consistent nonlinear static propagation.
 RC1's packaged nonlinear LC preset passed nine scientific-array comparisons and all
-100 slice-convergence checks. RC2 changes documentation/version metadata only; its
-exact versioned artifacts still require their own distribution qualification.
+100 slice-convergence checks. Qualification applies to the recorded scientific preset,
+package identity and numerical environment; each release has its own validation scope.
 
 These results do not establish stationary soliton formation, arbitrary beam/voltage
 settings, all workflows, or every backend. Modified demonstration parameters are
@@ -80,8 +80,8 @@ constructs its own optical source, evolves its own state, and converts that
 state into the prepared response consumed by the optical engine.
 
 The canonical architecture decision record is
-[`docs/architecture/LCProp_Target_Architecture.md`](docs/architecture/LCProp_Target_Architecture.md).
-The [documentation index](docs/README.md) distinguishes current references
+[`docs/architecture/LCProp_Target_Architecture.md`](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/architecture/LCProp_Target_Architecture.md).
+The [documentation index](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/README.md) distinguishes current references
 from historical design records.
 
 ## Package layout
@@ -102,13 +102,12 @@ src/lcprop/
 
 ## Installation
 
-**Publication status:** the commands below are for production PyPI and will work only
-**after LCProp is published there**. The `0.3.0rc2` candidate is not yet uploaded;
-use its supplied, checksum-verified artifacts until an explicitly published TestPyPI
-candidate is available. RC1 has been qualified on TestPyPI. TestPyPI is a qualification
-service, not the primary installation route for researchers.
+The ordinary installation commands below use **production PyPI** and apply to versions
+published there. For a release candidate that is not on production PyPI, use its exact
+checksum-verified artifacts and accompanying qualification instructions instead.
+TestPyPI is a qualification service, not the primary installation route for researchers.
 
-### Ordinary package installation (after production publication)
+### Ordinary package installation
 
 No Git checkout is required:
 
@@ -153,7 +152,7 @@ The package declares Python **3.10 or newer**. This is not a claim that every Py
 version/platform has been commissioned: recent release checks cover local macOS arm64
 Python **3.12** and hosted Linux x86-64 Python **3.13** CPU environments. Desktop use
 with current LaunchPlane requires Python **3.11 or newer** and separate GUI dependencies.
-The declared Python range and dependency specifications are unchanged for RC2.
+Select a Python version covered by the validation evidence for your workflow.
 
 ### Candidate artifacts and developer installation
 
@@ -172,7 +171,7 @@ python -m pip install -e ".[gui,test]"
 ```
 
 Source-checkout installation is optional, not a prerequisite for ordinary package use.
-See the [source Quick Start](https://github.com/mcroning/LCProp/blob/publication/colab-lc-stage-1d/docs/user/quick_start.md)
+See the [source Quick Start](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/user/quick_start.md)
 for desktop environment guidance. These online guides describe their published revision
 and can lag newer candidate artifacts. Installed-distribution Slurm deployment validates
 package resources and provenance; supported checkout deployment is another route.
@@ -201,8 +200,8 @@ python -m lcprop.pr.gui.app
 The applications share framework components where useful but retain separate
 material controls and workflows.
 
-Start with the [Quick Start](docs/user/quick_start.md), then use the
-[User Guide](docs/user/user_guide.md) for model choices, execution, result
+Start with the [Quick Start](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/user/quick_start.md), then use the
+[User Guide](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/user/user_guide.md) for model choices, execution, result
 retention, visualization, and current limitations. Both applications also
 provide a **Help** menu with concise topic guidance.
 
@@ -215,7 +214,7 @@ and selectable optical/director profiles for completed sweep members.
 Enabled LC channels currently share one wavelength. LC production workflows
 execute with NumPy; the GUI uses float64, while headless static and TD requests
 also support bounded NumPy float32 execution. See the canonical
-[LC model contracts](docs/science/lc_model_contracts.md) for the exact scope.
+[LC model contracts](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/science/lc_model_contracts.md) for the exact scope.
 
 ## Headless example
 
@@ -265,7 +264,7 @@ result = run_static(request)
 print(result.status)
 ```
 
-See [`src/lcprop/pr/README.md`](src/lcprop/pr/README.md) for the PR state,
+See [`src/lcprop/pr/README.md`](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/src/lcprop/pr/README.md) for the PR state,
 normalization, numerical methods, and workflow contracts.
 
 ## Testing
@@ -285,17 +284,21 @@ local test environment.
 
 ## Documentation
 
-- [Documentation index](docs/README.md)
-- [Current status](docs/STATUS.md)
-- [Canonical architecture](docs/architecture/LCProp_Target_Architecture.md)
-- [Development plan](docs/development_plan.md)
-- [Codex operational prompt library](docs/codex/README.md)
-- [PR package reference](src/lcprop/pr/README.md)
-- [Quick Start](docs/user/quick_start.md)
-- [User Guide](docs/user/user_guide.md)
-- [PR model contracts](docs/science/pr_model_contracts.md)
-- [LC model contracts](docs/science/lc_model_contracts.md)
-- [Third-party notices](THIRD_PARTY_NOTICES.md)
+These links use an immutable, anonymously accessible published documentation snapshot.
+Its historical status and plans may precede the installed release; use the release
+qualification record for the exact tested configuration.
+
+- [Documentation index](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/README.md)
+- [Published status snapshot](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/STATUS.md)
+- [Canonical architecture](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/architecture/LCProp_Target_Architecture.md)
+- [Published development-plan snapshot](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/development_plan.md)
+- [Codex operational prompt library](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/codex/README.md)
+- [PR package reference](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/src/lcprop/pr/README.md)
+- [Quick Start](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/user/quick_start.md)
+- [User Guide](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/user/user_guide.md)
+- [PR model contracts](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/science/pr_model_contracts.md)
+- [LC model contracts](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/science/lc_model_contracts.md)
+- [Third-party notices](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/THIRD_PARTY_NOTICES.md)
 
 ## Contributing
 
@@ -321,4 +324,4 @@ the canonical boundaries rather than reopen them incidentally.
 
 ## License
 
-LCProp is licensed under the BSD 3-Clause License. See [LICENSE](LICENSE).
+LCProp is licensed under the BSD 3-Clause License. See [LICENSE](https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/LICENSE).

@@ -1,4 +1,4 @@
-# Optional installed LC notebook interface (0.3.0rc2 release candidate)
+# Optional installed LC notebook interface (0.3.0)
 
 In an environment containing this candidate distribution and its `colab` extra:
 
@@ -23,8 +23,9 @@ older helpers; do not substitute these wrappers into that historical hash contra
 
 The `colab` extra provides Matplotlib, ipywidgets and IPython. Core scientific imports
 do not require those packages. Jupyter/Colab kernel provisioning is separate.
-The candidate prerelease version is 0.3.0rc2. It is not yet published to a package index;
-install the verified candidate wheel with its `colab` extra for qualification.
+This guide describes version 0.3.0. For release qualification, install the verified
+candidate wheel with its `colab` extra. Indexed installation requires publication
+of that version to the selected package index.
 The source distribution includes runtime source/data and this guide, both wrappers,
 and the self-contained `tests/test_notebook_package.py` suite. Repository-only tests
 and protected qualification artifacts are intentionally excluded from the sdist.
