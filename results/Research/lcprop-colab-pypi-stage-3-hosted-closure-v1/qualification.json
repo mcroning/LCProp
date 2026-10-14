@@ -1,0 +1,26 @@
+{
+  "notebook_commit": "8ca30a25242e31682bf55299d142f8d264a0d912",
+  "notebook_path": "notebooks/lc_static_pypi_cpu.ipynb",
+  "notebook_sha256": "dc2860509f5f5caba8780dbba0f5e8fa04961cf777d62b2ffe6f21c6dab66151",
+  "anonymous_retrieval": "HTTP 200; bytes exactly match committed notebook",
+  "lcprop_version": "0.3.0",
+  "import_path": "lcprop.notebook.interactive_lc.InteractiveLC",
+  "future_import": "lcprop.notebook.InteractiveLC",
+  "future_import_available_in_0_3_0": false,
+  "hosted_observations_source": "User report in acceptance request; no hosted logs or screenshots supplied with this request",
+  "hosted_user_reported": [
+    "Installation and initialization succeeded",
+    "Repeated initialization preserved modified beam controls",
+    "Only one interface was displayed",
+    "Initialization did not execute the scientific solver"
+  ],
+  "new_numerical_comparison": false,
+  "retained_local_tests": "9 passed; initial 1.89 seconds, acceptance 1.98 seconds",
+  "retained_evidence_sha256": {
+    "results/Research/lcprop-notebook-stable-interface-stage-3-v1/REPORT.md": "cb0db00b860af1c2914df71fa582ebda3e15ff2bf69e42adc972aac46289122c",
+    "results/Research/lcprop-notebook-stable-interface-stage-3-v1/tests.txt": "ba00ac696e3cbe0f0524c978336fc8b85db9b720cadc88a8ea66d8b1b19200aa",
+    "results/Research/lcprop-notebook-stable-interface-stage-3-v1/core-only.txt": "056cf2e3839976c95447a7e54a62adb0f66e634a3d4c27e5facd877f5b1dda41",
+    ".codex-work/notebook-stable-acceptance/tests.txt": "6cc2356b94e6d4a3c01f406c2fd2b81883aa7df7274172f83baaef53ec5e4ea4"
+  },
+  "hosted_completed_snapshot_reuse_tested": false
+}
