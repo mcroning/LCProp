@@ -1,0 +1,201 @@
+{
+  "base_commit": "681f669b5ddb41d6bfd829856933d0ad0e23eb83",
+  "candidate_sha256": {
+    "src/lcprop/notebook/interactive_lc.py": "51f403f3f627b0bfa267bdb8944a5d04e258f3f9751aeea64ab9d236bdbfd859",
+    "docs/notebook_package.md": "157ccb2e04653ffffe264f599019eba1f3b4bc0775bcde4ebfe1c6a4c4a71894",
+    "tests/test_interactive_lc_multibeam_presentation.py": "ef887bea6620d287c312c988fa8ee2419d1a25aef7866c266b0c6108d52a10db"
+  },
+  "tests": {
+    "new_presentation": 11,
+    "affected_passing": 19,
+    "multibeam_nonsimulation": 20,
+    "baseline_failure": "tests/test_local_notebook_lifecycle.py::test_notebook_has_one_initialization_and_no_saved_widget_output",
+    "new_failures": 0,
+    "scientific_execution_tests_not_run": 2
+  },
+  "logs": {
+    "final-tests.txt": "ce078c6a673d9a0cac8d04a0880dd95f440b0d3dd37140538a00a69b165862cc",
+    "baseline-tests.txt": "72be2de5a8249ba83b92258fd19420192ea5dd4bdaa798bcf01b7a238b9f8acc",
+    "multibeam-regressions.txt": "c1a94ef0ef4ae042b662d834f03b6e2cc88c0d55e04542da7a838540fc9746e2"
+  },
+  "synthetic_visuals": {
+    "coherent-synthetic.png": "03d0d8a26ce21e110f0f1f3f99fcd4532702f55908d9ecbec1758f10ac5586a2",
+    "incoherent-synthetic.png": "3bb476990de99d25a9f99408ebdcf8ee2c3b21d62fbac6c45058bddd55085946"
+  },
+  "preserved_other_tracked_and_selected_user_files": 903,
+  "unchanged_scientific_functions": [
+    "request_for_controls",
+    "require_bounded_request",
+    "launch_preview",
+    "execute",
+    "environment",
+    "CompletedRun",
+    "slice_selection",
+    "longitudinal_slices",
+    "export_completed",
+    "InteractiveLC.request",
+    "InteractiveLC.load",
+    "InteractiveLC._set_request_controls",
+    "InteractiveLC._changed"
+  ],
+  "retained_stage1_parity": [
+    {
+      "beams": 1,
+      "request_sha256": "46448f7f3dec0af49faf053c8b94426c2ff8c4c6e772e66aba54a71440298ffc",
+      "arrays": {
+        "A_initial": {
+          "shape": [
+            1,
+            128,
+            128
+          ],
+          "dtype": "complex128",
+          "sha256": "d0512443687a3d556ce18790f8dbb669c57a41b8980d0c6595c7fec951b3fba3"
+        },
+        "A_final": {
+          "shape": [
+            1,
+            128,
+            128
+          ],
+          "dtype": "complex128",
+          "sha256": "599b279c096952da2650041d428791c4748810134c0e8e6ae126a8d4cd9fbbaa"
+        },
+        "theta": {
+          "shape": [
+            100,
+            128,
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "b7cf30880d188fcba003c479ea290463080fbd0e854a285660a2c374ce232fb9"
+        },
+        "theta_bias": {
+          "shape": [
+            128,
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "fd4005b4df100022e08758acdbdda85ff7e0a2bb576034b06a1ef6453bdab446"
+        },
+        "intensity_stack": {
+          "shape": [
+            100,
+            128,
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "75547c769c6e275845776a9ebc49effbb7b7c85b2f5f7056c28640d9fe559690"
+        },
+        "widths_um": {
+          "shape": [
+            100,
+            2
+          ],
+          "dtype": "float64",
+          "sha256": "4072720ade767552d46b0698f5de6149e34c0e576df08fa2e0ee5433909a15f5"
+        },
+        "x_um": {
+          "shape": [
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "61fd04d91f7ed8fa5bcb1b047c3748a5edf957eb61bee7d1e9199d1adfc5e064"
+        },
+        "y_um": {
+          "shape": [
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "b460fd98873c22484e76cf22dc5bb35d6faf80ea86bed899c9c9bc4383856780"
+        },
+        "z_um": {
+          "shape": [
+            100
+          ],
+          "dtype": "float64",
+          "sha256": "7d3fd1ec319efad4fa839adeaea318e9853b12a37a979199e067a7d8ac8552f4"
+        }
+      }
+    },
+    {
+      "beams": 2,
+      "request_sha256": "055da1bb1f810cbe5d1c1aa6044245cdff5d3e07333d454c4918003128377db8",
+      "arrays": {
+        "A_initial": {
+          "shape": [
+            2,
+            128,
+            128
+          ],
+          "dtype": "complex128",
+          "sha256": "4affe5d9ff68c436d885d17eb549d5445ae6a0a831b55c8098c2817c91f49bd6"
+        },
+        "A_final": {
+          "shape": [
+            2,
+            128,
+            128
+          ],
+          "dtype": "complex128",
+          "sha256": "a04f5bed62e1900ff568fe264f392020e1e144579bae244b0d6def15640d2ff2"
+        },
+        "theta": {
+          "shape": [
+            100,
+            128,
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "f97c2c9cdf6727b1332175666f9a9b19ed484fbb997fac31202ace69d98f289c"
+        },
+        "theta_bias": {
+          "shape": [
+            128,
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "fd4005b4df100022e08758acdbdda85ff7e0a2bb576034b06a1ef6453bdab446"
+        },
+        "intensity_stack": {
+          "shape": [
+            100,
+            128,
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "64cbac9ea0502f6e130eae272fb95b092248898c7f6da42c8d0e1b3a3039d13e"
+        },
+        "widths_um": {
+          "shape": [
+            100,
+            2
+          ],
+          "dtype": "float64",
+          "sha256": "21e071bea71aa668bf02c5219fabd2c71a5fda2b87464e6274d39d514ccca571"
+        },
+        "x_um": {
+          "shape": [
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "61fd04d91f7ed8fa5bcb1b047c3748a5edf957eb61bee7d1e9199d1adfc5e064"
+        },
+        "y_um": {
+          "shape": [
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "b460fd98873c22484e76cf22dc5bb35d6faf80ea86bed899c9c9bc4383856780"
+        },
+        "z_um": {
+          "shape": [
+            100
+          ],
+          "dtype": "float64",
+          "sha256": "7d3fd1ec319efad4fa839adeaea318e9853b12a37a979199e067a7d8ac8552f4"
+        }
+      }
+    }
+  ]
+}

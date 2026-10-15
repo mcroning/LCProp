@@ -182,6 +182,40 @@ def longitudinal_slices(snapshot):
                            a['theta'][:,ix,:]-a['theta_bias'][ix,:][None,:])
 
 
+def completed_beam_labels(snapshot):
+    """Display effective grouping from the completed request, not edit history."""
+    from lcprop.core.beams import LEGACY_COHERENCE_GROUP
+    stack = snapshot.request.beams
+    groups = stack.coherence_groups
+    count = len(stack.channels)
+    if count == 1:
+        mode = 'Single beam'
+    elif len(set(groups)) == 1:
+        mode = 'Coherent'
+    elif len(set(groups)) == count:
+        mode = 'Incoherent between groups'
+    else:
+        mode = 'Mixed coherence groups'
+    origin = ('Legacy stack' if all(b.coherence_group == LEGACY_COHERENCE_GROUP
+                                   for b in stack.channels) else 'Explicit saved groups')
+    if count == 1:
+        phase = 'Relative phase not applicable'
+        short = mode
+    else:
+        relative = stack.channels[1].phase_rad - stack.channels[0].phase_rad
+        number = f'{relative:.3g}' if np.isfinite(relative) else 'outside display range'
+        phase = f'Relative phase (Beam 2 − Beam 1): {number} rad'
+        short = f'{mode} · Δφ={number} rad'
+        if groups[0] != groups[1]:
+            phase += '; no intensity effect between their distinct groups'
+            short += ' (no inter-group effect)'
+    assignment = ', '.join(f'Beam {i+1}: {group}' for i,group in enumerate(groups))
+    details = f'{mode}. {phase}. {origin}: {assignment}.'
+    if origin == 'Explicit saved groups':
+        details += f' Legacy stack flag: {stack.coherence}; explicit groups take precedence.'
+    return short, details
+
+
 def plot_completed(snapshot):
     import matplotlib.pyplot as plt
     a, selection, slices = longitudinal_slices(snapshot)
@@ -220,8 +254,9 @@ def plot_completed(snapshot):
     ax.set(xlabel=r'$z$ (µm)', ylabel='Combined RMS width (µm)')
     ax.legend(ncol=2, fontsize=9, loc='upper right')
     ax.tick_params(labelsize=9)
-    fig.suptitle(f"Completed: {selection['V_bias']:.3g} V; "
-                 f"slices through Beam 1 input ({selection['requested_x_um']:.2f}, {selection['requested_y_um']:.2f}) µm",fontsize=11)
+    beam_label, _ = completed_beam_labels(snapshot)
+    fig.suptitle(f"Completed · {selection['V_bias']:.3g} V · {beam_label}\n"
+                 f"Slices through Beam 1 input ({selection['requested_x_um']:.2f}, {selection['requested_y_um']:.2f}) µm",fontsize=10)
     return fig
 
 
@@ -288,12 +323,24 @@ class InteractiveLC:
         second_specs = [('x0_um','Input x (µm)'),('y0_um','Input y (µm)'),
                         ('w1_um','Principal radius 1 (µm)'),('w2_um','Principal radius 2 (µm)'),
                         ('power_mW','Incident power (mW)')] + self._beam_specs[:-1] + [
-                        ('phase_rad','Phase relative to Beam 1 (rad)')]
+                        ('phase_rad','Relative phase (rad)')]
         self.beam2_controls, self.beam2_form = beam_form(self._second_template(), second_specs)
+        self.beam2_controls['phase_rad'].tooltip = (
+            'Beam 2 phase minus Beam 1 phase, each at its beam-axis/entrance-plane intersection. '
+            'Affects interference only when both beams share a coherence group.')
         self.second_enabled = W.Checkbox(value=False,description='Include Beam 2',layout=full())
         self.coherence = W.Dropdown(options=[('Preserve saved groups', 'preserve'),
             ('Coherent — same group','coherent'),('Incoherent — distinct groups','incoherent')],
-            value='preserve',layout=W.Layout(width='300px',max_width='100%'))
+            value='preserve',layout=W.Layout(width='420px',max_width='100%',min_width='0'))
+        self.coherence_label = W.HTML('<b>Beam coherence</b>',layout=full())
+        # Native select controls cannot wrap their selected text on narrow screens.
+        # Repeat the full choice in wrapping HTML so it is always readable.
+        self.coherence_selection = W.HTML(layout=full())
+        self.coherence_panel = W.VBox([self.coherence_label,self.coherence,self.coherence_selection],layout=full())
+        def show_coherence_choice(change=None):
+            self.coherence_selection.value = 'Selected: ' + escape(self.coherence.label)
+        self.coherence.observe(show_coherence_choice,names='value')
+        show_coherence_choice()
         self.beam_help = W.HTML('Radii: beam-normal 1/e field (1/e² intensity). '
             'LC requires the same wavelength for both beams. Phase is referenced at each beam axis. '
             'Beam 2 starts at x=20 µm, 1 mW; adding it does not redistribute Beam 1 power. '
@@ -306,6 +353,7 @@ class InteractiveLC:
         self.restore_button = W.Button(description='Restore preset', tooltip='Restore qualified preset', layout=compact(170))
         self.preview_output = W.Output(layout=full())
         self.result_output = W.Output(layout=full())
+        self.completed_summary = W.HTML(value='No completed run yet.',layout=full())
         self.status = W.HTML(value='Qualified preset. Editing updates launch preview only.', layout=full())
         self.advisories = W.HTML(layout=full())
         self.progress = W.IntProgress(min=0,max=100,description='Slices',layout=compact(240))
@@ -313,12 +361,13 @@ class InteractiveLC:
         self.save_button = W.Button(description='Export result',layout=compact(160))
         self.load_path = W.Text(value='',layout=compact(300))
         self.load_button = W.Button(description='Load experiment',layout=compact(160))
-        configure = W.VBox([W.HTML('<h3>Configure — Beam 1 and bias</h3>'),self.control_grid,
-            first_geometry,self.second_enabled,self.beam2_form,self.coherence,self.beam_help,self.restore_button,
+        configure = W.VBox([W.HTML('<h3>Configure</h3>'),self.coherence_panel,
+            W.HTML('<b>Beam 1 and bias</b>'),self.control_grid,
+            first_geometry,self.second_enabled,self.beam2_form,self.beam_help,self.restore_button,
             self.advisories,self.preview_output,W.HTML('Experiment path'),wrap([self.load_path,self.load_button])],layout=full())
         run = W.VBox([W.HTML('<h3>Run</h3>'),W.HTML('Elapsed wall-time budget (not a solver iteration limit)'),wrap([self.time_budget,self.run_button,self.progress,
             W.Box([self.status],layout=compact(420))])],layout=full())
-        results = W.VBox([W.HTML('<h3>Results — completed snapshot</h3>'),self.result_output,
+        results = W.VBox([W.HTML('<h3>Results — completed snapshot</h3>'),self.completed_summary,self.result_output,
             W.HTML('New export folder'),wrap([self.path,self.save_button])],layout=full())
         self.configure = W.Accordion(children=[configure], selected_index=0,layout=full())
         def update_configure_title(change=None):
@@ -410,7 +459,9 @@ class InteractiveLC:
             snapshot = execute(self.request(), progress, time_limit=self.time_budget.value)
             # Render successfully before replacing previous completed ownership.
             fig = plot_completed(snapshot)
+            _, beam_details = completed_beam_labels(snapshot)
             self.completed = snapshot
+            self.completed_summary.value = '<b>Completed run:</b> ' + escape(beam_details)
             self.configure.selected_index = None
             self.result_output.clear_output(wait=True)
             with self.result_output: display_figure(fig)

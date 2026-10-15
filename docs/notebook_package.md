@@ -83,3 +83,20 @@ Local validation is distinct from hosted acceptance. Check wrapping controls, ph
 and coherence feedback, result ownership and export in a fresh hosted runtime after a
 future authorized deployment. Execution remains synchronous and arbitrary exploratory
 configurations are not convergence-qualified or evidence of soliton formation.
+
+### Multibeam presentation refinement (development candidate)
+
+**Beam coherence** appears above the individual beam controls. The three modes and
+initial selection are unchanged. A wrapping text line repeats the selected option
+so it remains readable when the native dropdown is narrow. Beam 2's **Relative phase
+(rad)** means Beam 2 minus Beam 1 at their respective beam-axis/entrance-plane
+intersections; the tooltip retains this definition.
+
+The completed-run summary and exported plot titles derive coherence and relative
+phase from the immutable completed request. They do not follow later draft edits.
+Explicit saved groups take precedence over the legacy stack flag. Distinct groups
+are labeled incoherent between groups, with no inter-group intensity effect from
+relative phase. A single beam has no relative phase. The request does not record
+which dropdown option produced it, so the summary does not claim that “Preserve
+saved groups” was selected. True partially coherent/mixed grouping requires more
+than two beams and is not newly enabled by these presentation changes.
