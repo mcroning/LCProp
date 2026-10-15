@@ -11,6 +11,7 @@ from time import perf_counter
 
 import numpy as np
 import lcprop
+from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.grid import make_grid
 from lcprop.persistence import load_experiment, save_experiment
 from lcprop.lc.experiment_codec import encode_lc_static_request, decode_lc_static_request
@@ -21,12 +22,33 @@ from lcprop.optics.sampling import qualify_launch_sampling
 from lcprop.runners.local import LocalRunner
 from .lc_static_demo import build_request, widths, diagnostics
 
+_KEEP_SECOND = object()
 
-def request_for_controls(x=-20., y=0., w1=10., w2=10., power=1., V_bias=0.9144, *, base=None):
+def request_for_controls(x=-20., y=0., w1=10., w2=10., power=1., V_bias=0.9144, *,
+                         base=None, beam1_options=None, second_beam=_KEEP_SECOND, coherence=None):
     request = build_request() if base is None else base
+    if second_beam is _KEEP_SECOND:
+        second_beam = request.beams.channels[1] if len(request.beams.channels) == 2 else None
+    if not 1 <= len(request.beams.channels) <= 2:
+        raise ValueError('This introductory interface supports one or two beams only.')
     beam = replace(request.beams.channels[0], x0_um=x, y0_um=y,
                    w1_um=w1, w2_um=w2, power_mW=power)
-    request = replace(request, beams=replace(request.beams, channels=(beam,)),
+    if beam1_options:
+        beam = replace(beam, **beam1_options)
+    channels = (beam,) if second_beam is None else (beam, second_beam)
+    stack = BeamStack(channels=channels, coherence=request.beams.coherence)
+    if coherence is not None:
+        if coherence not in ('coherent', 'incoherent'):
+            raise ValueError('Choose coherent, incoherent, or preserve saved groups.')
+        # Explicit groups, not the legacy stack flag, determine interference.
+        groups = stack.coherence_groups
+        if coherence == 'coherent':
+            groups = (groups[0],) * len(channels)
+        elif len(groups) == 2 and groups[0] == groups[1]:
+            groups = (groups[0], groups[0] + ':beam-2')
+        stack = BeamStack(channels=tuple(replace(b, coherence_group=g)
+                          for b, g in zip(channels, groups)), coherence=coherence)
+    request = replace(request, beams=stack,
                       bias=replace(request.bias, V_bias=float(V_bias)))
     if not np.isfinite(request.bias.V_bias):
         raise ValueError("Applied voltage must be finite.")
@@ -37,18 +59,12 @@ def request_for_controls(x=-20., y=0., w1=10., w2=10., power=1., V_bias=0.9144, 
 def require_bounded_request(request):
     """Restrict this teaching UI, not Product support, to the qualified preset shape."""
     preset = build_request()
-    if len(request.beams.channels) != 1:
-        raise ValueError('This introductory interface supports one beam only.')
+    if not 1 <= len(request.beams.channels) <= 2:
+        raise ValueError('This introductory interface supports one or two beams only.')
     if not np.isfinite(request.bias.V_bias):
         raise ValueError("Applied voltage must be finite.")
     if replace(request, beams=preset.beams, bias=replace(request.bias, V_bias=preset.bias.V_bias)) != preset:
         raise ValueError('This interface requires the qualified grid/material/solver preset; use desktop for other configurations.')
-    if request.beams.coherence != preset.beams.coherence:
-        raise ValueError('Unsupported stack coherence; original experiment was not changed.')
-    beam = request.beams.channels[0]
-    allowed = replace(beam, x0_um=-20., y0_um=0., w1_um=10., w2_um=10., power_mW=1.)
-    if allowed != preset.beams.channels[0]:
-        raise ValueError('Only position, radii and power can differ from the preset in this interface.')
     encode_lc_static_request(request)
 
 
@@ -147,6 +163,8 @@ def slice_selection(request, arrays):
     ix = int(np.argmin(np.abs(x-beam.x0_um)))
     iy = int(np.argmin(np.abs(y-beam.y0_um)))
     return dict(V_bias=request.bias.V_bias, requested_x_um=beam.x0_um, requested_y_um=beam.y0_um,
+                slice_beam_index=0, slice_beam_name=beam.name,
+                width_quantity='combined optical intensity RMS width (not per-beam)',
                 x_index=ix, y_index=iy, sampled_x_um=float(x[ix]), sampled_y_um=float(y[iy]),
                 volume_axes=['z','x','y'], z_location='retained slice midpoints',
                 optical_quantity='retained slice-average optical intensity', director_quantity='theta minus corresponding retained theta_bias',
@@ -199,11 +217,11 @@ def plot_completed(snapshot):
     ax = fig.add_subplot(gs[2,:])
     ax.plot(a['z_um'], a['widths_um'][:,0], label='x')
     ax.plot(a['z_um'], a['widths_um'][:,1], label='y')
-    ax.set(xlabel=r'$z$ (µm)', ylabel='RMS width (µm)')
+    ax.set(xlabel=r'$z$ (µm)', ylabel='Combined RMS width (µm)')
     ax.legend(ncol=2, fontsize=9, loc='upper right')
     ax.tick_params(labelsize=9)
     fig.suptitle(f"Completed: {selection['V_bias']:.3g} V; "
-                 f"input ({selection['requested_x_um']:.2f}, {selection['requested_y_um']:.2f}) µm",fontsize=11)
+                 f"slices through Beam 1 input ({selection['requested_x_um']:.2f}, {selection['requested_y_um']:.2f}) µm",fontsize=11)
     return fig
 
 
@@ -254,6 +272,32 @@ class InteractiveLC:
                         layout=W.Layout(flex='0 1 220px',min_width='0',max_width='100%'))
                  for name,value,label in specs]
         self.control_grid = W.Box(boxes, layout=W.Layout(display='flex',flex_flow='row wrap',width='100%'))
+        # Radians preserve native request values on load; no degree round-trip.
+        self._beam_specs = [
+            ('theta_ext_rad', 'External incidence (rad)'),
+            ('phi_rad', 'Azimuth (rad)'), ('psi_rad', 'Profile roll (rad)'),
+            ('wavelength_um', 'Wavelength (µm)'), ('n_ext', 'External index'),
+            ('phase_rad', 'Phase at beam axis (rad)')]
+        def beam_form(beam, specs):
+            controls = {key: W.FloatText(value=getattr(beam,key),layout=full()) for key,label in specs}
+            rows = [W.VBox([W.HTML(escape(label)),controls[key]],
+                          layout=W.Layout(flex='0 1 220px',min_width='0',max_width='100%'))
+                    for key,label in specs]
+            return controls, W.Box(rows,layout=W.Layout(display='flex',flex_flow='row wrap',width='100%'))
+        self.beam1_controls, first_geometry = beam_form(self.base.beams.channels[0], self._beam_specs)
+        second_specs = [('x0_um','Input x (µm)'),('y0_um','Input y (µm)'),
+                        ('w1_um','Principal radius 1 (µm)'),('w2_um','Principal radius 2 (µm)'),
+                        ('power_mW','Incident power (mW)')] + self._beam_specs[:-1] + [
+                        ('phase_rad','Phase relative to Beam 1 (rad)')]
+        self.beam2_controls, self.beam2_form = beam_form(self._second_template(), second_specs)
+        self.second_enabled = W.Checkbox(value=False,description='Include Beam 2',layout=full())
+        self.coherence = W.Dropdown(options=[('Preserve saved groups', 'preserve'),
+            ('Coherent — same group','coherent'),('Incoherent — distinct groups','incoherent')],
+            value='preserve',layout=W.Layout(width='300px',max_width='100%'))
+        self.beam_help = W.HTML('Radii: beam-normal 1/e field (1/e² intensity). '
+            'LC requires the same wavelength for both beams. Phase is referenced at each beam axis. '
+            'Beam 2 starts at x=20 µm, 1 mW; adding it does not redistribute Beam 1 power. '
+            'Multibeam and modified geometry are exploratory; slices use Beam 1 coordinates.',layout=full())
         def compact(width): return W.Layout(width=f'{width}px', max_width='100%', min_width='0')
         def wrap(children): return W.Box(children, layout=W.Layout(display='flex', flex_flow='row wrap', align_items='center', width='100%'))
         self.run_button = W.Button(description='Run', button_style='primary',layout=compact(140))
@@ -269,7 +313,8 @@ class InteractiveLC:
         self.save_button = W.Button(description='Export result',layout=compact(160))
         self.load_path = W.Text(value='',layout=compact(300))
         self.load_button = W.Button(description='Load experiment',layout=compact(160))
-        configure = W.VBox([W.HTML('<h3>Configure</h3>'),self.control_grid,self.restore_button,
+        configure = W.VBox([W.HTML('<h3>Configure — Beam 1 and bias</h3>'),self.control_grid,
+            first_geometry,self.second_enabled,self.beam2_form,self.coherence,self.beam_help,self.restore_button,
             self.advisories,self.preview_output,W.HTML('Experiment path'),wrap([self.load_path,self.load_button])],layout=full())
         run = W.VBox([W.HTML('<h3>Run</h3>'),W.HTML('Elapsed wall-time budget (not a solver iteration limit)'),wrap([self.time_budget,self.run_button,self.progress,
             W.Box([self.status],layout=compact(420))])],layout=full())
@@ -288,15 +333,46 @@ class InteractiveLC:
         self.run_button.on_click(self._run)
         self.save_button.on_click(self._save)
         self.load_button.on_click(self._load)
-        for control in self.controls.values(): control.observe(self._changed, names='value')
+        for control in self._draft_controls(): control.observe(self._changed, names='value')
         self._changed()
 
+    def _second_template(self):
+        if len(self.base.beams.channels) == 2:
+            return self.base.beams.channels[1]
+        first = self.base.beams.channels[0]
+        # Retain legacy grouping consistently if a legacy experiment was loaded.
+        from lcprop.core.beams import LEGACY_COHERENCE_GROUP
+        group = (LEGACY_COHERENCE_GROUP if first.coherence_group == LEGACY_COHERENCE_GROUP
+                 else first.coherence_group + ':beam-2')
+        return BeamChannel(name='beam-2', x0_um=20., w1_um=10., w2_um=10.,
+                           wavelength_um=first.wavelength_um, coherence_group=group)
+
+    def _draft_controls(self):
+        return (*self.controls.values(), *self.beam1_controls.values(),
+                *self.beam2_controls.values(), self.second_enabled, self.coherence)
+
     def request(self):
-        return request_for_controls(base=self.base, **{k:v.value for k,v in self.controls.items()})
+        options = {k:v.value for k,v in self.beam1_controls.items()}
+        second = None
+        if self.second_enabled.value:
+            template = self._second_template()
+            values = {k:v.value for k,v in self.beam2_controls.items()}
+            relative = values['phase_rad']
+            first_phase = options['phase_rad']
+            # Preserve saved phase bytes when controls have not changed: subtraction
+            # followed by addition need not round-trip floating point exactly.
+            original_phase = self.base.beams.channels[0].phase_rad
+            values['phase_rad'] = (template.phase_rad if first_phase == original_phase and
+                relative == template.phase_rad-original_phase else first_phase+relative)
+            second = replace(template, **values)
+        return request_for_controls(base=self.base, beam1_options=options, second_beam=second,
+            coherence=None if self.coherence.value == 'preserve' else self.coherence.value,
+            **{k:v.value for k,v in self.controls.items()})
 
     def _changed(self, change=None):
         if self.loading:
             return
+        self.beam2_form.layout.display = 'flex' if self.second_enabled.value else 'none'
         from IPython.display import display
         import matplotlib.pyplot as plt
         self.preview_output.clear_output(wait=False)
@@ -307,6 +383,8 @@ class InteractiveLC:
             sampling = qualify_launch_sampling(request.beams, request.grid, request.material.no,
                                                boundary=request.optical_boundary)
             self.advisories.value = '<br>'.join('Launch advisory: '+escape(w) for w in sampling.warnings)
+            self.advisories.value += '<br>Effective coherence groups: ' + escape(
+                ', '.join(f'Beam {i+1}: {g}' for i,g in enumerate(launch.coherence_groups)))
             with self.preview_output:
                 fig, ax = plt.subplots(figsize=(3.75,3.75),layout='constrained')
                 artist = ax.pcolormesh(grid.x_um,grid.y_um,intensity.T,shading='nearest')
@@ -322,7 +400,7 @@ class InteractiveLC:
         from IPython.display import display
         import matplotlib.pyplot as plt
         self.busy = True
-        for control in (*self.controls.values(), self.run_button, self.load_button, self.restore_button, self.time_budget): control.disabled = True
+        for control in (*self._draft_controls(), self.run_button, self.load_button, self.restore_button, self.time_budget): control.disabled = True
         self.progress.value = 0
         self.status.value = 'Running; prior completed result remains owned separately.'
         def progress(p):
@@ -342,7 +420,7 @@ class InteractiveLC:
             self.status.value = f'Run rejected/failed: {escape(str(error))}. Previous completed result retained.'
         finally:
             self.busy = False
-            for control in (*self.controls.values(), self.run_button, self.load_button, self.restore_button, self.time_budget): control.disabled = False
+            for control in (*self._draft_controls(), self.run_button, self.load_button, self.restore_button, self.time_budget): control.disabled = False
 
     def _save(self, button=None):
         try:
@@ -359,26 +437,30 @@ class InteractiveLC:
         request = loaded.request
         require_bounded_request(request)
         launch_preview(request)
+        self._set_request_controls(request)
+        self._changed()
+
+    def _set_request_controls(self, request):
         beam = request.beams.channels[0]
         self.loading = True
         try:
             self.base = request
             for name,value in dict(x=beam.x0_um,y=beam.y0_um,w1=beam.w1_um,w2=beam.w2_um,power=beam.power_mW,V_bias=request.bias.V_bias).items():
                 self.controls[name].value=value
+            for name,control in self.beam1_controls.items():
+                control.value = getattr(beam,name)
+            second = self._second_template()
+            for name,control in self.beam2_controls.items():
+                control.value = (second.phase_rad-beam.phase_rad if name == 'phase_rad'
+                                 else getattr(second,name))
+            self.second_enabled.value = len(request.beams.channels) == 2
+            self.coherence.value = 'preserve'
         finally:
             self.loading=False
-        self._changed()
 
     def _restore(self,button=None):
         if self.busy: return
-        preset = build_request()
-        self.loading = True
-        try:
-            self.base = preset
-            for name,value in dict(x=-20.,y=0.,w1=10.,w2=10.,power=1.,V_bias=preset.bias.V_bias).items():
-                self.controls[name].value=value
-        finally:
-            self.loading=False
+        self._set_request_controls(build_request())
         self._changed()
 
     def _load(self,button=None):
