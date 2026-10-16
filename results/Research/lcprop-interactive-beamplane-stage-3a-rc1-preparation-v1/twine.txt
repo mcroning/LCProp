@@ -1,0 +1,2 @@
+Checking .codex-work/beam-rc1/dist/lcprop-0.4.0rc1-py3-none-any.whl: PASSED
+Checking .codex-work/beam-rc1/dist/lcprop-0.4.0rc1.tar.gz: PASSED

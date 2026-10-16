@@ -1,0 +1,18 @@
+
+Fontconfig error: No writable cache directories
+	/usr/local/var/cache/fontconfig
+	/Users/mcroning/.cache/fontconfig
+	/Users/mcroning/.fontconfig
+
+Fontconfig error: No writable cache directories
+	/usr/local/var/cache/fontconfig
+	/Users/mcroning/.cache/fontconfig
+	/Users/mcroning/.fontconfig
+
+Fontconfig error: No writable cache directories
+	/usr/local/var/cache/fontconfig
+	/Users/mcroning/.cache/fontconfig
+	/Users/mcroning/.fontconfig
+Matplotlib is building the font cache; this may take a moment.
+colab PASS: installed 269 files, imports, request, deployment and static/interactive initialization
+No broken requirements found.

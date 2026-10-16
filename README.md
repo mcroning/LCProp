@@ -20,11 +20,42 @@ of the packaged release and does **not** install or qualify the latest package v
 repository checkout are required. Colab runtime compatibility and resource availability
 can change; retain exported results and provenance before the session expires.
 
+## Interactive BeamPlane candidate (0.4.0rc1)
+
+The 0.4.0rc1 candidate adds one/two-beam numeric controls and optional graphical
+**Move/Tilt** editing through the packaged `InteractiveLC` controller. Both static
+and interactive launch previews use canonical combined intensity, beam centers,
+internal-ray tilt arrows and active-beam highlighting. Coherence groups and phase
+retain the scientific engine's conventions. Mouse editing never starts propagation.
+
+For this candidate, `colab` includes optional ipympl; core and desktop GUI extras
+remain independent of it. In a local Jupyter kernel, select `%matplotlib widget`
+**before** creating the controller for mouse editing, or `%matplotlib inline` for
+the complete static preview with numeric editing. In hosted Colab, the standard
+custom widget manager must also be enabled before selecting the widget backend:
+
+```python
+from google.colab import output  # hosted Colab only
+output.enable_custom_widget_manager()
+```
+
+The candidate supports `from lcprop.notebook import InteractiveLC` and preserves
+`from lcprop.notebook.interactive_lc import InteractiveLC`. Reuse an existing
+compatible controller to retain results; backend changes require a fresh controller
+or kernel after exporting needed records. Completed results and exports belong to
+the frozen executed request, not subsequent draft edits.
+
+This release candidate is not yet production-published or hosted-Colab qualified.
+Use its verified artifacts and qualification instructions until separately approved
+publication. The existing published Colab demonstration and 0.3.0 notebook pin are
+unchanged. Local graphical acceptance is not a new numerical physics qualification;
+multibeam/exploratory settings do not establish soliton formation or stability.
+
 ## Scientific qualification scope
 
 Retained hosted CPU qualification covers bounded presets for reduced PR time evolution,
 LC fixed-director propagation and LC self-consistent nonlinear static propagation.
-RC1's packaged nonlinear LC preset passed nine scientific-array comparisons and all
+The 0.3.0 release family's packaged nonlinear LC preset passed nine scientific-array comparisons and all
 100 slice-convergence checks. Qualification applies to the recorded scientific preset,
 package identity and numerical environment; each release has its own validation scope.
 

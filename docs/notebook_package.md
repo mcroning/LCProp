@@ -1,3 +1,20 @@
+# 0.4.0rc1 candidate distribution
+
+The candidate keeps both `from lcprop.notebook import InteractiveLC` and the legacy
+`from lcprop.notebook.interactive_lc import InteractiveLC` paths. Its optional
+`colab` extra adds `ipympl>=0.10.0,<0.11`; core and GUI extras do not require it.
+Select `%matplotlib widget` before creating an interactive controller, or use the
+inline backend for static rendering and numeric controls. Hosted Colab additionally
+needs `google.colab.output.enable_custom_widget_manager()` before backend selection.
+No external helper scripts are needed. Do not switch backends beneath a live
+controller; export needed results before restarting. Repeated initialization should
+reuse the existing compatible controller and its completed snapshot.
+
+This candidate includes accepted two-beam controls, Move/Tilt, shared launch
+rendering and one-click frozen-request execution. Installed-artifact and hosted
+qualification are separate gates; the published 0.3.0 notebook remains pinned and
+unchanged. No new scientific qualification is implied by this version increment.
+
 # Optional installed LC notebook interface (0.3.0)
 
 In an environment containing this candidate distribution and its `colab` extra:

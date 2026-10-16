@@ -1,0 +1,9 @@
+{
+  "accepted_commit": "896c9360129a1123dc922d4799281d6b2d8f43c1",
+  "overlays": [
+    "README.md",
+    "docs/notebook_package.md",
+    "pyproject.toml"
+  ],
+  "source_tar_sha256": "33d7c19ae42233a4fb593a022d12169c6f6461defb5f4c090e6a09499ac49406"
+}
