@@ -1,6 +1,7 @@
 """Example-level ipywidgets presentation; LCProp remains the scientific authority."""
 from dataclasses import dataclass, replace
 from html import escape
+import base64
 import hashlib
 import importlib.metadata as metadata
 import io
@@ -111,6 +112,8 @@ class CompletedRun:
 def execute(request, progress=None, *, time_limit=120.):
     if not np.isfinite(time_limit) or not 0 < time_limit <= 300:
         raise ValueError('Wall-time budget must be positive and at most 300 seconds.')
+    # Detach before callbacks or execution; metadata uses this same request.
+    request = decode_lc_static_request(json.loads(json.dumps(encode_lc_static_request(request), sort_keys=True)))
     require_bounded_request(request)
     # Validate the actual sampled launch, not a hand-normalized GUI approximation.
     launch_preview(request)
@@ -127,6 +130,8 @@ def execute(request, progress=None, *, time_limit=120.):
                 f'configured limit: {time_limit:g} s.')
     completed = LocalRunner().run_operation(LC_STATIC_OPERATION, request, progress_callback=report)
     result = completed.result
+    if encode_lc_static_request(result.request) != encode_lc_static_request(request):
+        raise RuntimeError('Executed result request differs from captured request.')
     if result.status != 'completed' or not result.all_slices_converged:
         raise RuntimeError('Calculation did not converge completely; previous completed result retained.')
     arrays = dict(A_initial=result.A_initial, A_final=result.A_final,
@@ -141,6 +146,9 @@ def execute(request, progress=None, *, time_limit=120.):
     summary = diagnostics(completed, perf_counter()-started, list(sampling.warnings))
     summary['visualization'] = slice_selection(request, arrays)
     summary['environment'] = environment()
+    summary['request_sha256'] = hashlib.sha256(
+        json.dumps(encode_lc_static_request(request), sort_keys=True).encode()).hexdigest()
+    summary['wall_time_budget_seconds'] = time_limit
     summary['claim'] = 'Self-consistent slice convergence is not stationary soliton formation.'
     return CompletedRun(json.dumps(encode_lc_static_request(request), sort_keys=True),
                         buffer.getvalue(), json.dumps(summary, allow_nan=False))
@@ -221,7 +229,8 @@ def plot_completed(snapshot):
     a, selection, slices = longitudinal_slices(snapshot)
     from matplotlib.colors import Normalize
     from matplotlib.ticker import FormatStrFormatter, MaxNLocator
-    fig = plt.figure(figsize=(9, 6.2), layout='constrained')
+    with plt.ioff():
+        fig = plt.figure(figsize=(9, 6.2), layout='constrained')
     gs = fig.add_gridspec(3, 2, height_ratios=(1,1,.65))
     titles = [f"Intensity XZ · y={selection['sampled_y_um']:.2f} µm",
               f"Intensity YZ · x={selection['sampled_x_um']:.2f} µm",
@@ -298,11 +307,14 @@ class InteractiveLC:
         self.base = build_request()
         self.busy = False
         self.loading = False
+        self._position_editor = None
+        self.disposed = False
+        self._locked_values = {}
         def full(): return W.Layout(width='100%', max_width='100%', min_width='0')
         specs = [('x',-20.,'Input x (µm)'),('y',0.,'Input y (µm)'),
                  ('w1',10.,'Principal radius 1 (µm)'),('w2',10.,'Principal radius 2 (µm)'),
                  ('power',1.,'Incident power (mW)'),('V_bias',self.base.bias.V_bias,'Applied voltage (V)')]
-        self.controls = {name: W.FloatText(value=value, layout=full()) for name,value,label in specs}
+        self.controls = {name: W.FloatText(value=value, continuous_update=False, layout=full()) for name,value,label in specs}
         boxes = [W.VBox([W.HTML(value=escape(label)),self.controls[name]],
                         layout=W.Layout(flex='0 1 220px',min_width='0',max_width='100%'))
                  for name,value,label in specs]
@@ -314,7 +326,7 @@ class InteractiveLC:
             ('wavelength_um', 'Wavelength (µm)'), ('n_ext', 'External index'),
             ('phase_rad', 'Phase at beam axis (rad)')]
         def beam_form(beam, specs):
-            controls = {key: W.FloatText(value=getattr(beam,key),layout=full()) for key,label in specs}
+            controls = {key: W.FloatText(value=getattr(beam,key),continuous_update=False,layout=full()) for key,label in specs}
             rows = [W.VBox([W.HTML(escape(label)),controls[key]],
                           layout=W.Layout(flex='0 1 220px',min_width='0',max_width='100%'))
                     for key,label in specs]
@@ -351,8 +363,17 @@ class InteractiveLC:
         self.time_budget = W.Dropdown(options=[('120 seconds',120),('180 seconds',180),('300 seconds',300)],
                                       value=120, layout=compact(170))
         self.restore_button = W.Button(description='Restore preset', tooltip='Restore qualified preset', layout=compact(170))
-        self.preview_output = W.Output(layout=full())
+        self.active_beam = W.Dropdown(options=[('Beam 1', 0)], description='Active Beam:',
+                                    layout=compact(250))
+        self.action = W.Dropdown(options=['Move', 'Tilt'], value='Move', description='Action:', layout=compact(250))
+        self.live_preview = W.Checkbox(value=True, description='Live draft launch (throttled)', layout=full())
+        self.editor_status = W.HTML(layout=full())
+        self.preview_host = W.VBox(layout=full())
+        self._preview_image = W.Image(format='png', layout=W.Layout(
+            width='375px', max_width='100%', height='auto', object_fit='contain'))
+        self._static_figure = self._static_mesh = self._static_preview = None
         self.result_output = W.Output(layout=full())
+        self.executed_parameters = W.HTML(value='')
         self.completed_summary = W.HTML(value='No completed run yet.',layout=full())
         self.status = W.HTML(value='Qualified preset. Editing updates launch preview only.', layout=full())
         self.advisories = W.HTML(layout=full())
@@ -364,10 +385,11 @@ class InteractiveLC:
         configure = W.VBox([W.HTML('<h3>Configure</h3>'),self.coherence_panel,
             W.HTML('<b>Beam 1 and bias</b>'),self.control_grid,
             first_geometry,self.second_enabled,self.beam2_form,self.beam_help,self.restore_button,
-            self.advisories,self.preview_output,W.HTML('Experiment path'),wrap([self.load_path,self.load_button])],layout=full())
-        run = W.VBox([W.HTML('<h3>Run</h3>'),W.HTML('Elapsed wall-time budget (not a solver iteration limit)'),wrap([self.time_budget,self.run_button,self.progress,
+            self.advisories,wrap([self.active_beam,self.action]),self.live_preview,self.editor_status,self.preview_host,W.HTML('Experiment path'),wrap([self.load_path,self.load_button])],layout=full())
+        self.run_row = wrap([self.run_button])
+        run = W.VBox([W.HTML('<h3>Run</h3>'),W.HTML('Elapsed wall-time budget (not a solver iteration limit)'),wrap([self.time_budget,self.run_row,self.progress,
             W.Box([self.status],layout=compact(420))])],layout=full())
-        results = W.VBox([W.HTML('<h3>Results — completed snapshot</h3>'),self.completed_summary,self.result_output,
+        results = W.VBox([W.HTML('<h3>Results — completed snapshot</h3>'),self.completed_summary,self.executed_parameters,self.result_output,
             W.HTML('New export folder'),wrap([self.path,self.save_button])],layout=full())
         self.configure = W.Accordion(children=[configure], selected_index=0,layout=full())
         def update_configure_title(change=None):
@@ -383,7 +405,40 @@ class InteractiveLC:
         self.save_button.on_click(self._save)
         self.load_button.on_click(self._load)
         for control in self._draft_controls(): control.observe(self._changed, names='value')
+        self.active_beam.observe(self._select_moving_beam, names='value')
+        self.action.observe(self._select_moving_beam, names='value')
+        self.live_preview.observe(self._select_moving_beam, names='value')
+        self._initialize_editor()
         self._changed()
+
+    def _select_moving_beam(self, change=None):
+        if self.busy or self.disposed or self.loading:
+            return
+        if self._position_editor is not None:
+            self._position_editor.cancel()
+        elif self._static_preview is not None:
+            self._changed()
+
+    def _cancel_editor(self):
+        if self._position_editor is not None:
+            self._position_editor.cancel()
+
+    def close(self):
+        """Permanently retire this controller, including queued Run endpoints."""
+        self.disposed = True
+        self.run_button.disabled = True
+        if self._position_editor is not None:
+            self._position_editor.close()
+
+    def _initialize_editor(self):
+        # Exactly one attempt per controller; never reconnect a retired endpoint.
+        try:
+            from ._beam_position_editor import BeamPositionEditor
+            self._position_editor = BeamPositionEditor(self)
+            self.preview_host.children = (self._position_editor.canvas,)
+        except (ImportError, RuntimeError) as error:
+            self.editor_status.value = ('Static launch preview: '+escape(str(error))+
+                '. Numeric controls and static preview remain available.')
 
     def _second_template(self):
         if len(self.base.beams.channels) == 2:
@@ -418,13 +473,58 @@ class InteractiveLC:
             coherence=None if self.coherence.value == 'preserve' else self.coherence.value,
             **{k:v.value for k,v in self.controls.items()})
 
+    def _render_static_preview(self, grid, intensity, request):
+        # One full-PNG widget; shared artists/geometry with the optional editor.
+        from ._launch_preview import update_decorations, update_intensity
+        if self._static_preview is None:
+            from types import SimpleNamespace
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_agg import FigureCanvasAgg
+            self._static_figure = Figure(figsize=(3.75, 3.75), layout='constrained')
+            FigureCanvasAgg(self._static_figure)
+            self._static_preview = SimpleNamespace(figure=self._static_figure,
+                ax=self._static_figure.subplots(), mesh=None, colorbar=None,
+                markers=[], labels=[], arrows=[], tips=[])
+        view = self._static_preview
+        first = view.mesh is None
+        update_intensity(view, grid, intensity)
+        update_decorations(view, request, self.active_beam.value)
+        self._static_mesh = view.mesh
+        if first:
+            view.figure.canvas.draw()
+            positions = [ax.get_position().frozen() for ax in view.figure.axes]
+            view.figure.set_layout_engine('none')
+            for ax, position in zip(view.figure.axes, positions):
+                ax.set_position(position)
+        buffer = io.BytesIO()
+        view.figure.savefig(buffer, format='png', dpi=view.figure.dpi)
+        self._preview_image.value = buffer.getvalue()
+        self.preview_host.children = (self._preview_image,)
+
     def _changed(self, change=None):
         if self.loading:
             return
+        if self.busy or self.disposed:
+            if change and change['owner'] in self._locked_values:
+                self.loading = True
+                try:
+                    change['owner'].value = self._locked_values[change['owner']]
+                finally:
+                    self.loading = False
+            return
+        options = (('Beam 1', 0), ('Beam 2', 1)) if self.second_enabled.value else (('Beam 1', 0),)
+        if self.active_beam.options != options:
+            # Selection resets are part of this draft update, not a separate draw.
+            self.loading = True
+            try:
+                self.active_beam.options = options
+            finally:
+                self.loading = False
+        if self._position_editor is not None:
+            # Restore/cancel locally; publish only after the new intensity and
+            # decorations have both been installed by update().
+            self._position_editor.cancel(redraw=False)
         self.beam2_form.layout.display = 'flex' if self.second_enabled.value else 'none'
-        from IPython.display import display
-        import matplotlib.pyplot as plt
-        self.preview_output.clear_output(wait=False)
         self.advisories.value = ""
         try:
             request = self.request()
@@ -434,44 +534,85 @@ class InteractiveLC:
             self.advisories.value = '<br>'.join('Launch advisory: '+escape(w) for w in sampling.warnings)
             self.advisories.value += '<br>Effective coherence groups: ' + escape(
                 ', '.join(f'Beam {i+1}: {g}' for i,g in enumerate(launch.coherence_groups)))
-            with self.preview_output:
-                fig, ax = plt.subplots(figsize=(3.75,3.75),layout='constrained')
-                artist = ax.pcolormesh(grid.x_um,grid.y_um,intensity.T,shading='nearest')
-                ax.set(aspect='equal',xlabel='x (µm)',ylabel='y (µm)',title='Draft launch\nNormalized optical intensity')
-                fig.colorbar(artist,ax=ax,label=r'$1/\mu\mathrm{m}^{2}$')
-                display_figure(fig, width_px=375); plt.close(fig)
+            if self._position_editor is not None:
+                self._position_editor.update(grid, intensity, request)
+            else:
+                self._render_static_preview(grid, intensity, request)
             self.status.value = ('Qualified preset.' if request == build_request() else 'Exploratory configuration.') + ' Draft launch validated; press Run. Existing completed plots/export unchanged.'
         except (ValueError,TypeError) as error:
+            self._cancel_editor()
+            self.editor_status.value = 'Invalid draft: retained launch image is stale.'
             self.status.value = f'Invalid draft: {escape(str(error))}. Completed result unchanged.'
 
     def _run(self, button=None):
-        if self.busy: return
-        from IPython.display import display
+        # A click belongs to one button endpoint. Queued clicks on a consumed
+        # endpoint cannot run again after the synchronous calculation returns.
+        if self.busy or self.disposed or (button is not None and button is not self.run_button):
+            return
+        import ipywidgets as W
         import matplotlib.pyplot as plt
+        consumed = self.run_button
+        self._cancel_editor()
         self.busy = True
-        for control in (*self._draft_controls(), self.run_button, self.load_button, self.restore_button, self.time_budget): control.disabled = True
+        locked = (*self._draft_controls(), self.time_budget)
+        self._locked_values = {c: c.value for c in locked}
+        disabled = (*locked, consumed, self.load_button, self.restore_button,
+                    self.active_beam, self.action, self.live_preview)
+        for control in disabled: control.disabled = True
         self.progress.value = 0
-        self.status.value = 'Running; prior completed result remains owned separately.'
+        self.status.value = 'Running kernel-accepted draft; prior completed result retained.'
         def progress(p):
             self.progress.value = p.completed_units
             self.status.value = f'{p.completed_units}/{p.total_units} slices; elapsed {p.elapsed_wall_time:.1f} s'
+        fig = None
         try:
-            snapshot = execute(self.request(), progress, time_limit=self.time_budget.value)
-            # Render successfully before replacing previous completed ownership.
+            request_json = json.dumps(encode_lc_static_request(self.request()), sort_keys=True)
+            captured = decode_lc_static_request(json.loads(request_json))
+            require_bounded_request(captured)
+            budget = self.time_budget.value
+            snapshot = execute(captured, progress, time_limit=budget)
+            if json.loads(snapshot.request_json) != json.loads(request_json):
+                raise RuntimeError('Completed request differs from admitted request.')
+            # Prepare every rendered payload before changing completed ownership.
             fig = plot_completed(snapshot)
+            buffer = io.BytesIO()
+            fig.savefig(buffer, format='png', dpi=110)
             _, beam_details = completed_beam_labels(snapshot)
-            self.completed = snapshot
-            self.completed_summary.value = '<b>Completed run:</b> ' + escape(beam_details)
+            identity = hashlib.sha256(request_json.encode()).hexdigest()
+            parameters = ('<details><summary>View executed parameters</summary><p>Request SHA-256: '+
+                          identity+'</p><pre>'+escape(json.dumps(json.loads(request_json), indent=2))+
+                          '</pre></details>')
+            outputs = ({'output_type': 'display_data', 'data': {
+                'image/png': base64.b64encode(buffer.getvalue()).decode()},
+                'metadata': {'image/png': {'width': 900}}},)
+            previous = (self.completed, self.completed_summary.value,
+                        self.executed_parameters.value, self.result_output.outputs)
+            try:
+                self.result_output.outputs = outputs
+                self.completed_summary.value = '<b>Completed run:</b> ' + escape(beam_details) + '<br>Request SHA-256: '+identity
+                self.executed_parameters.value = parameters
+                self.completed = snapshot
+            except Exception:
+                self.completed, self.completed_summary.value, self.executed_parameters.value, self.result_output.outputs = previous
+                raise
             self.configure.selected_index = None
-            self.result_output.clear_output(wait=True)
-            with self.result_output: display_figure(fig)
-            plt.close(fig)
             self.status.value = 'Completed: all 100 slices converged. Plots/export belong to this run, not later edits.'
         except Exception as error:
             self.status.value = f'Run rejected/failed: {escape(str(error))}. Previous completed result retained.'
         finally:
+            if fig is not None: plt.close(fig)
             self.busy = False
-            for control in (*self._draft_controls(), self.run_button, self.load_button, self.restore_button, self.time_budget): control.disabled = False
+            for control in disabled:
+                if control is not consumed: control.disabled = self.disposed
+            # Never rearm the consumed model; this rejects buffered double clicks.
+            if not self.disposed:
+                self.run_button = W.Button(description='Run', button_style='primary',
+                                           layout=W.Layout(width='140px', max_width='100%'))
+                self.run_button.on_click(self._run)
+                self.run_row.children = (self.run_button,)
+                self._cancel_editor()
+            consumed.on_click(self._run, remove=True)
+            consumed.close()
 
     def _save(self, button=None):
         try:
@@ -481,6 +622,8 @@ class InteractiveLC:
             self.status.value = f'Export rejected: {escape(str(error))}'
 
     def load(self,path):
+        if self.busy or self.disposed: return
+        self._cancel_editor()
         # Public loader validates any desktop presentation payload; never strip it.
         loaded = load_experiment(path)
         if loaded.material_id != 'lc' or loaded.workflow_id != 'static':
@@ -492,6 +635,8 @@ class InteractiveLC:
         self._changed()
 
     def _set_request_controls(self, request):
+        if self.busy or self.disposed: return
+        self._cancel_editor()
         beam = request.beams.channels[0]
         self.loading = True
         try:
@@ -510,7 +655,7 @@ class InteractiveLC:
             self.loading=False
 
     def _restore(self,button=None):
-        if self.busy: return
+        if self.busy or self.disposed: return
         self._set_request_controls(build_request())
         self._changed()
 

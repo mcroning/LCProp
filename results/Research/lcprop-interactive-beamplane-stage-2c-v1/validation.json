@@ -1,0 +1,144 @@
+{
+  "status": "rendering_corruption_under_diagnosis",
+  "head": "9151e6bc7db8adb1a6788942e7be5bf315063fa2",
+  "source_sha256": {
+    "src/lcprop/notebook/interactive_lc.py": "1c5ba390a52a95e803cc46395718c07ef221e56e11e50fa90425b66aacc59dd0",
+    "src/lcprop/notebook/_beam_position_editor.py": "59e3356958a06cd0054632d7cc901e3d4bb9cad535e00104e1c1c41ec8fca197",
+    "tests/test_interactive_lc_run_isolation.py": "16e66856e2629ddf73fcee37098cf727829c3264130d2dada11c2362a7f6c878",
+    "tests/test_interactive_lc_dragging.py": "f4f95d361b525444c896ea5f3acf5b2de754fe478fac8cdbfa8f4b1042b91134",
+    "tests/test_interactive_lc_preview_lifecycle.py": "e103df2172872fc03bb25d4e5667b8aeadc0c1591629c92722447ae6967f6075",
+    "tests/test_interactive_lc_display_publication.py": "28d4d2f5d60dc72182d3c7221147adccdfe6511bc552416657ecdfdce19ae2d5",
+    "tests/test_interactive_lc_multibeam_presentation.py": "317a16e693c4946442bfa31373b9c37284161e08c896c5ffdfac2345cef72d10",
+    "docs/notebook_package.md": "72c4e7d3ba65e84f386724f43535fdc8980beefde313d8751f32459c6e3326c1",
+    "tests/test_interactive_lc_redraw.py": "dce85e0cc956cfd39444520ccc94247c15a25b4f366c62baf85841b4062805b3"
+  },
+  "evidence_sha256": {
+    ".codex-work/beam-stage2c/final-tests.txt": "e8a14d28fab231ae45c1b2ac1cee4228d6842f506723c5bdb2072208d6b992f1",
+    ".codex-work/beam-stage2c/iopub.txt": "eb53a43e0a10984d6d85093c5dc394e8eb788c3fe23a35d7e0d05bebe790d1a4",
+    ".codex-work/beam-stage2c/isolation-final.txt": "602a2859af41fbf9c7649c8fc4293500f608bf445505ab4f837d930481461306",
+    ".codex-work/beam-stage2c/checks.txt": "be3e921a4912636b480089a1e3a9dab0f42fc4af3ab9e520587175ff8772ade7",
+    ".codex-work/beam-stage2c/safari_probe.py": "614d8db016a23eae86f7f61f9c643bcee366d972984ccaa6fdd466522cb17ee7",
+    ".codex-work/beam-stage2c/safari_acceptance.ipynb": "723494da930b63a5d90ee5ed79607af0171f0a8e873940725dd0106aa161aa77"
+  },
+  "tests": {
+    "focused_passed": 89,
+    "skipped_missing_launchplane": 2,
+    "deselected_propagation": 2,
+    "real_iopub_passed": 1
+  },
+  "simulations_run": false,
+  "historical_gate": {
+    "status": "blocked_before_implementation",
+    "head": "9151e6bc7db8adb1a6788942e7be5bf315063fa2",
+    "candidate_sha256_unchanged": {
+      "src/lcprop/notebook/interactive_lc.py": "1f11e77eccdfdc14d1e4dd7115d70f71cebabbe76dce96e7adb55f0a2c219388",
+      "src/lcprop/notebook/_beam_position_editor.py": "b380ff4e2c474e238584a9e10f4c8f93d1d7336c6ffa6b8a9ef201d99c547af6",
+      "tests/test_interactive_lc_dragging.py": "df634317cb249906bdfb93bdbb892daefd80ddaa0a6cb97600b823dcdb7c63ce",
+      "tests/test_interactive_lc_move_tilt.py": "a91024be7b5ccb6c3552c1a7cb1aaf595a195ec71dd6e1b79bdae0e8ab774bc2",
+      "docs/notebook_package.md": "6a9999061754545538f649886cbf2886c58326ee1ff0c753ce6d38e20cf2b2b8",
+      "tests/test_lc_static_interactive_presentation.py": "ff9fc8be15a66f8475f33b1185fc91a9d0242afb62fe7217b069c5fa8c172755",
+      "tests/test_interactive_lc_preview_lifecycle.py": "5c28d464de9715bbd5d36f750c0491b3c5f2d8083e10a8a1ca131e92025123d1"
+    },
+    "evidence": {
+      "probe.py": "47bd47dda1804fffdebec2391f93276daf852d91e52b8b7162b54a5fb9f10635",
+      "probe.txt": "9a1dfc1a92c3b09dac931c32d8ccc9c5019b18ae7a14b5f014fc78a8899e1364"
+    },
+    "simulations_run": false,
+    "product_changes": false
+  },
+  "pre_rendering_followup_source_sha256": {
+    "src/lcprop/notebook/interactive_lc.py": "bc2840d68f71c06c002ce1057bb91c6591a04cbb8c5adabb41b1f7bc19d2334a",
+    "src/lcprop/notebook/_beam_position_editor.py": "652e71676abbc045a85b31725669bd92633ffe163a194f37f0402ef5ab12c398",
+    "tests/test_interactive_lc_run_isolation.py": "16e66856e2629ddf73fcee37098cf727829c3264130d2dada11c2362a7f6c878",
+    "tests/test_interactive_lc_dragging.py": "07e384f825ac4541c4af3c1ad194dae59950737d655405bb1f60b510fb4a0bef",
+    "tests/test_interactive_lc_preview_lifecycle.py": "909b4121efd4056e2993768156b3da0a7d28efd6a4fa0f7dce66c3b3d9c586be",
+    "tests/test_interactive_lc_display_publication.py": "fc6ca1ff3e14b6eb96fda8d84e0773373e8143e7f1ff4b413817090c6a8bc84d",
+    "tests/test_interactive_lc_multibeam_presentation.py": "317a16e693c4946442bfa31373b9c37284161e08c896c5ffdfac2345cef72d10",
+    "docs/notebook_package.md": "72c4e7d3ba65e84f386724f43535fdc8980beefde313d8751f32459c6e3326c1"
+  },
+  "rendering_followup": {
+    "status": "backend_validated_safari_confirmation_pending",
+    "tests_passed": 92,
+    "skipped_optional_launchplane": 2,
+    "deselected_propagation": 2,
+    "real_iopub_passed": 1,
+    "evidence": {
+      ".codex-work/beam-stage2c-render/final-tests.txt": "337f321b17f7d0db129e870467a907d57d9336acf13c8beaaee1f04ea5284a30",
+      ".codex-work/beam-stage2c-render/iopub.txt": "e3377b48f3b0f14964ba37b84506b187cf4129b4df2d47e52fa053ad88a2d1c2",
+      ".codex-work/beam-stage2c-render/layout.txt": "699909e45175c4ba6dbfe5cd544a8e4de4416e7ba99d1f4b3ecd6b2a40f95c03",
+      ".codex-work/beam-stage2c-render/checks.txt": "f2a518a37e5e02ed24f64268004bdf84b87650f3c3f70ea45a5c9736bbe2b058",
+      ".codex-work/beam-stage2c-render/before.json": "65d513feba315e1b09e1dd1c52ed40775702586c68295807541ea7a021ad5e47"
+    }
+  },
+  "initial_display_investigation": {
+    "status": "blocked_pending_safari_discrimination",
+    "product_changes": false,
+    "initial_frame_regression": "known failure",
+    "real_kernel_protocol_probe": "passed; no browser attached",
+    "evidence_sha256": {
+      ".codex-work/beam-stage2c-initial-display/probe.py": "d2f4d8497e2563f3f10785a519dac4caa76c104742b9f5c232d9a5572743d047",
+      ".codex-work/beam-stage2c-initial-display/protocol.txt": "5441548af147add22938b3ad0f2a5f6ab79d36de378a1bc64900411c4e9aa14c",
+      ".codex-work/beam-stage2c-initial-display/kernel_probe.py": "aac795f6a26dbc4edc421aa1a225e395cf70ba8b1a4ac2c1922bafba49d63ba3",
+      ".codex-work/beam-stage2c-initial-display/kernel.txt": "370ba36bb76a6c78dbccaa58cc5f6a803aa0493b86400c071a844b09a53b843e",
+      ".codex-work/beam-stage2c-initial-display/test_initial_frame_contract.py": "a75b2f920f4d65c28896c1ea040f9687f584ddbf5c73847179d59ab969d21798",
+      ".codex-work/beam-stage2c-initial-display/regression.txt": "049b12f9fc6b285e562281430317152511108ba04f0d45f94dd7be3cf48634f4",
+      ".codex-work/beam-stage2c-initial-display/safari_initial_display.py": "d568325c11931a28024802cd76a30544da3eba454d12602f700eb951dc55fc5d",
+      ".codex-work/beam-stage2c-initial-display/safari_initial_display.ipynb": "52b4ebaf6486997ba00bd5242367d9433e58b31da28391efc55b445961f3b4ae"
+    }
+  },
+  "pre_initial_transmission_fix_source_sha256": {
+    "src/lcprop/notebook/interactive_lc.py": "1c5ba390a52a95e803cc46395718c07ef221e56e11e50fa90425b66aacc59dd0",
+    "src/lcprop/notebook/_beam_position_editor.py": "74800fe222dd6a1674c9c2f4142cb0ff2a603d46cb8c44a84d2b0e076623794a",
+    "tests/test_interactive_lc_run_isolation.py": "16e66856e2629ddf73fcee37098cf727829c3264130d2dada11c2362a7f6c878",
+    "tests/test_interactive_lc_dragging.py": "d6daf735547d2e4b3bf6a5dd2539067b1871754a4b933b4fefde474b31c538fd",
+    "tests/test_interactive_lc_preview_lifecycle.py": "e103df2172872fc03bb25d4e5667b8aeadc0c1591629c92722447ae6967f6075",
+    "tests/test_interactive_lc_display_publication.py": "d572e94d98aba96a415fad8367f560eb1146eb40915906aef6cdefef37d95cae",
+    "tests/test_interactive_lc_multibeam_presentation.py": "317a16e693c4946442bfa31373b9c37284161e08c896c5ffdfac2345cef72d10",
+    "docs/notebook_package.md": "72c4e7d3ba65e84f386724f43535fdc8980beefde313d8751f32459c6e3326c1",
+    "tests/test_interactive_lc_redraw.py": "dce85e0cc956cfd39444520ccc94247c15a25b4f366c62baf85841b4062805b3"
+  },
+  "initial_transmission_fix": {
+    "status": "implemented_pending_final_safari_acceptance",
+    "focused_passed": 92,
+    "optional_skipped": 2,
+    "propagation_deselected": 2,
+    "real_kernel_initialization_passed": 1,
+    "browser_evidence": "user-reported A visible, B absent, C visible before correction",
+    "evidence_sha256": {
+      ".codex-work/beam-stage2c-init-fix/before.json": "8c5dbc4003a0da40f4c1b4f3a9eeae7963796a51d9e5dd5d5a87a6903637929b",
+      ".codex-work/beam-stage2c-init-fix/tests.txt": "b9c338e3c5c806d59979bb0ce02808c57dad473de97481036606cd84ef19380c",
+      ".codex-work/beam-stage2c-init-fix/iopub.txt": "c2587abf08ca16470d37036a94ae103fd2d5e371a20e7235d39b1cca9871b40d",
+      ".codex-work/beam-stage2c-init-fix/checks.txt": "3ee133a11376bcb36d1a9c2eb1cbc47444ab0dcc13a6b13571e55ac46a471f2e"
+    }
+  },
+  "corruption_investigation": {
+    "status": "synthetic_missing_base_reproduced_pending_safari_capture",
+    "product_changes": false,
+    "live_launch_parity": [
+      true,
+      true,
+      true,
+      true
+    ],
+    "ordered_pngs_equal_renderer": true,
+    "full_refresh_repairs_synthetic_missing_base": true,
+    "evidence_sha256": {
+      ".codex-work/beam-stage2c-corruption/missing-base-simulation.png": "7496876db79e556373e65ad61804fab52605d3902b53fdc4ca693bf7f5b02f80",
+      ".codex-work/beam-stage2c-corruption/renderer.png": "ff0f33112009f8ccbefbfdd5663b212ad3400988d171cb223a1c779144ecae18",
+      ".codex-work/beam-stage2c-corruption/refresh-full.png": "ff0f33112009f8ccbefbfdd5663b212ad3400988d171cb223a1c779144ecae18",
+      ".codex-work/beam-stage2c-corruption/safari_capture.py": "1bbffb13cec4ec5f3916a84c334bbeea35a3d7570d35be7b6a5cd66cb3480c8d",
+      ".codex-work/beam-stage2c-corruption/probe.py": "2f1581032e7516a4462488ec5a16a3246b2459fd16c56b0ae27ce2e3ccbe0812",
+      ".codex-work/beam-stage2c-corruption/ordered-transmission.png": "ff0f33112009f8ccbefbfdd5663b212ad3400988d171cb223a1c779144ecae18",
+      ".codex-work/beam-stage2c-corruption/entrance-check.npz": "dae3f9d4b6a736142c4c9b39f48947b09432bd69b1c214f8e0f316b9702697a0",
+      ".codex-work/beam-stage2c-corruption/probe.txt": "9e97deff063061bac070d604bcb6b1d68ff58e2b297a6f38a9ad9c030a4302b4"
+    }
+  },
+  "two_beam_delivery_investigation": {
+    "product_changes": false,
+    "tests_passed": 4,
+    "decision": "NO-GO shipping correction; actual Safari delivery failure unproven",
+    "evidence_manifest": "two-beam-evidence.json",
+    "test_file": "tests/test_interactive_lc_frame_delivery.py",
+    "test_sha256": "d937e73fc0bd2760cfa078bc94763426183fcaa7002a9b58cd28be7342d1f988"
+  }
+}

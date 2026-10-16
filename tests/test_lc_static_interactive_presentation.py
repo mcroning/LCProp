@@ -78,8 +78,10 @@ def test_compact_widgets_and_preview(monkeypatch):
     assert form.path.layout.width==form.load_path.layout.width=='300px'
     for b in (form.run_button,form.restore_button,form.save_button,form.load_button):
         assert 140<=int(b.layout.width[:-2])<=170
-    images=[x for x in captured if type(x).__name__=='Image']
-    assert images and images[0].layout.width=='375px'
+    assert captured == []  # Launch preview is owned by its widget slot, never display output.
+    images=list(form.preview_host.children)
+    assert len(images)==1 and type(images[0]).__name__=='Image'
+    assert images[0].layout.width=='375px'
     assert images[0].layout.max_width=='100%'
     from PIL import Image
     with Image.open(io.BytesIO(images[0].value)) as im:assert abs(im.width-im.height)<=1

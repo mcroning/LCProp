@@ -1,0 +1,7 @@
+{
+  "src/lcprop/notebook/_beam_position_editor.py": "4c5386d8b5d0aadc5d3094aeed210bd7dce86cb5b39b71ee09a40c43a9cc3846",
+  "tests/test_interactive_lc_full_refresh.py": "1261d76c975a635a39a2355d0236d747b55b983152d69aee53d648a50c736d3c",
+  "tests/test_interactive_lc_frame_delivery.py": "d455f9971350d56e176b7aa13e4e5f0721cafea8039b3b9049f934ce6c9cac51",
+  "tests/test_interactive_lc_redraw.py": "f97b95a9f92d8bce93cbad687fecd1ded8baa1a3693c2f70af7b550ff335def1",
+  "tests/test_interactive_lc_display_publication.py": "36718b6985692696e9bb1c4292ca3fd3f8845a726cc0ae345bbe02561aa859fc"
+}

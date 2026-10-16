@@ -107,6 +107,7 @@ def test_completed_summary_survives_edits_failure_and_export(form,monkeypatch,tm
     import matplotlib.pyplot as plt
     monkeypatch.setattr(IPython.display,'display',lambda *a,**k:None)
     snap=snapshot('coherent')
+    form._set_request_controls(snap.request)
     monkeypatch.setattr(ui,'execute',lambda *a,**k:snap)
     form.run_button.click()
     summary=form.completed_summary.value
@@ -166,6 +167,7 @@ def test_html_summary_escapes_saved_names(form,monkeypatch):
     request=replace(request,beams=replace(request.beams,channels=tuple(
         replace(b,coherence_group='<laser>') for b in request.beams.channels)))
     snap=replace(snap,request_json=json.dumps(ui.encode_lc_static_request(request)))
+    form._set_request_controls(snap.request)
     monkeypatch.setattr(ui,'execute',lambda *a,**k:snap)
     monkeypatch.setattr(ui,'display_figure',lambda *a,**k:None)
     form.run_button.click()

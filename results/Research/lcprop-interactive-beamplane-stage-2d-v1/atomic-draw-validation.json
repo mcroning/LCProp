@@ -1,0 +1,9 @@
+{
+  "src/lcprop/notebook/interactive_lc.py": "b0a69e527276404cab53471eac97864f4fb40186ba4837ce0dc3d5bdf55d030e",
+  "src/lcprop/notebook/_beam_position_editor.py": "58c8e4127ae86804b47503b9e8788f03cec72d38534ee7577c51ec479e81b1ab",
+  "tests/test_interactive_lc_atomic_draw.py": "8fae914762a3345e0bae63134cd52aa5afa625f077ab2f747a99908544f58c7b",
+  "tests/test_interactive_lc_redraw.py": "69d5ad55ceddae8a66621ac870b8cac90bf8919c6c3adb6f04056166dfcdf8fa",
+  ".codex-work/beam-atomic-draw/before.txt": "f711ec5bf1cb114adb25775caf5203165a3862e97cc93e8ed2eff681ee1bbcfc",
+  ".codex-work/beam-atomic-draw/after.txt": "650ee153d740324fd099a34a5a02fa67f187045aa21efe221f7f1a42051f80be",
+  ".codex-work/beam-atomic-draw/frames.txt": "70b2325c1f255181aed856a150bb2e7175d8edba2c7879775f9ce54a3cb66ebe"
+}

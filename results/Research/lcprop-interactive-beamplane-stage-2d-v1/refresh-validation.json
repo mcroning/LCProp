@@ -1,0 +1,6 @@
+{
+  "src/lcprop/notebook/_beam_position_editor.py": "0c1a37f9b922a9264571631e437214b1fc9c04e338b8bf767a0230e2edcd60f9",
+  "tests/test_interactive_lc_full_refresh.py": "805511cab5ac81b2511e0359bf64f247e5c9d5cbfcf49f3980633433aff9900c",
+  ".codex-work/beam-stage2d-refresh/frames.txt": "4dfbb45df98b17ff406ee6d62139fae93ab0f042cc9ed119fe53d0d51019de03",
+  ".codex-work/beam-stage2d-refresh/regressions.txt": "967f9ffc6a96f1b9fc935f20732672272ec2d1e164bd3ca132c75ddb066e398b"
+}
