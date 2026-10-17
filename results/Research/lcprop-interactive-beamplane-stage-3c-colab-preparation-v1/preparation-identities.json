@@ -1,0 +1,10 @@
+{
+  "release_commit": "2e195579dc3d76f6477bf6c885fd537043acdf9d",
+  "testpypi_observation": "HTTP 404; exact version unavailable at preparation",
+  "sha256": {
+    "notebooks/lc_static_pypi_rc1_colab_qualification.ipynb": "d68c9044bb6da450bd35d97c1d416204254f89bfd1798c7999c5eca8fdfc0e4f",
+    "notebooks/lc_static_pypi_cpu.ipynb": "dc2860509f5f5caba8780dbba0f5e8fa04961cf777d62b2ffe6f21c6dab66151",
+    ".codex-work/beam-stage3c/check_notebook.py": "b8b48d4b173844d3de5f2727e3fd7c4459e80c5d2e4754a81a692fc8c7316d56",
+    ".codex-work/beam-stage3c/checks.txt": "3889bef13047e659f59c7088535ff00e14625472ead416c28232696262c31e76"
+  }
+}
