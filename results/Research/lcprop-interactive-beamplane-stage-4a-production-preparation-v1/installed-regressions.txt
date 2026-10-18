@@ -1,0 +1,15 @@
+................s...................................................     [100%]
+=============================== warnings summary ===============================
+.codex-work/beam-040/harness/tests/test_interactive_lc_full_refresh.py: 1 warning
+.codex-work/beam-040/harness/tests/test_interactive_lc_move_tilt.py: 1 warning
+.codex-work/beam-040/harness/tests/test_interactive_lc_multibeam_presentation.py: 12 warnings
+.codex-work/beam-040/harness/tests/test_interactive_lc_preview_lifecycle.py: 2 warnings
+.codex-work/beam-040/harness/tests/test_interactive_lc_run_isolation.py: 6 warnings
+.codex-work/beam-040/harness/tests/test_interactive_lc_unified_preview.py: 6 warnings
+  /Users/mcroning/LCProp/.codex-work/beam-040/colab-env/lib/python3.12/site-packages/traitlets/traitlets.py:1396: DeprecationWarning: Passing unrecognized arguments to super(Toolbar).__init__().
+  NavigationToolbar2WebAgg.__init__() missing 1 required positional argument: 'canvas'
+  This is deprecated in traitlets 4.2.This error will be raised in a future release of traitlets.
+    warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+67 passed, 1 skipped, 28 warnings in 50.19s

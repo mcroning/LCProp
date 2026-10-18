@@ -1,0 +1,11 @@
+{
+  "base_commit": "2e195579dc3d76f6477bf6c885fd537043acdf9d",
+  "qualification_closure": "d2f7f38b2f3e40cbe05fc6f7e8a3d519362d659b",
+  "overlays": [
+    "README.md",
+    "docs/notebook_package.md",
+    "pyproject.toml"
+  ],
+  "source_files": 282,
+  "source_tar_sha256": "57bc92690363e83ff7d24c72cccbd7db4c72f088941769051b24350c861de70e"
+}

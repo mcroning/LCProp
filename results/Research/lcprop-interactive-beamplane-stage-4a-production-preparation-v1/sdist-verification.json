@@ -1,0 +1,14 @@
+{
+  "mode": "sdist",
+  "python": "3.12.15 | packaged by Anaconda, Inc. | (main, Oct  1 2026, 20:11:32) [Clang 20.1.8 ]",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "module": "/Users/mcroning/LCProp/.codex-work/beam-040/sdist-env/lib/python3.12/site-packages/lcprop/__init__.py",
+  "runtime_files": 269,
+  "deployment": "PASS",
+  "versions": {
+    "lcprop": "0.4.0",
+    "numpy": "2.5.4",
+    "pip": "25.0.1",
+    "scipy": "1.18.1"
+  }
+}

@@ -20,43 +20,48 @@ of the packaged release and does **not** install or qualify the latest package v
 repository checkout are required. Colab runtime compatibility and resource availability
 can change; retain exported results and provenance before the session expires.
 
-## Interactive BeamPlane candidate (0.4.0rc1)
+## Interactive BeamPlane in 0.4.0
 
-The 0.4.0rc1 candidate adds one/two-beam numeric controls and optional graphical
-**Move/Tilt** editing through the packaged `InteractiveLC` controller. Both static
-and interactive launch previews use canonical combined intensity, beam centers,
-internal-ray tilt arrows and active-beam highlighting. Coherence groups and phase
-retain the scientific engine's conventions. Mouse editing never starts propagation.
+LCProp 0.4.0 preserves the qualified 0.4.0rc1 runtime: one/two-beam numeric
+controls and optional graphical **Move/Tilt** editing through `InteractiveLC`.
+Static and interactive previews share canonical combined intensity, beam centers,
+internal-ray tilt arrows and active-beam highlighting. Coherence and relative
+phase retain the engine's conventions. Editing never starts propagation.
 
-For this candidate, `colab` includes optional ipympl; core and desktop GUI extras
-remain independent of it. In a local Jupyter kernel, select `%matplotlib widget`
-**before** creating the controller for mouse editing, or `%matplotlib inline` for
-the complete static preview with numeric editing. In hosted Colab, the standard
-custom widget manager must also be enabled before selecting the widget backend:
+Both `from lcprop.notebook import InteractiveLC` and
+`from lcprop.notebook.interactive_lc import InteractiveLC` are supported.
+The optional `colab` extra includes `ipympl>=0.10.0,<0.11`; core and GUI extras
+remain independent of it. Local Jupyter users select `%matplotlib widget` before
+creating the controller, or `%matplotlib inline` for the static preview.
 
-```python
-from google.colab import output  # hosted Colab only
-output.enable_custom_widget_manager()
-```
+**Hosted Colab requires installation → manual session restart → verification →
+initialization.** Restart using Runtime → Restart session, then verify the installed
+version before enabling Colab's custom widget manager and selecting the widget
+backend. Do not delete the runtime or reload live numerical modules. Export needed
+results before restarting. Restart-free installation is not qualified.
 
-The candidate supports `from lcprop.notebook import InteractiveLC` and preserves
-`from lcprop.notebook.interactive_lc import InteractiveLC`. Reuse an existing
-compatible controller to retain results; backend changes require a fresh controller
-or kernel after exporting needed records. Completed results and exports belong to
-the frozen executed request, not subsequent draft edits.
+Reuse an existing compatible controller to preserve completed results. Run captures
+the validated kernel-accepted request; completed plots, metadata and exports remain
+attached to that frozen request after draft edits. Unsynchronized browser edits are
+outside the capture guarantee. Only the explicit Run button executes science.
 
-This release candidate is not yet production-published or hosted-Colab qualified.
-Use its verified artifacts and qualification instructions until separately approved
-publication. The existing published Colab demonstration and 0.3.0 notebook pin are
-unchanged. Local graphical acceptance is not a new numerical physics qualification;
-multibeam/exploratory settings do not establish soliton formation or stability.
+The RC1 implementation passed hosted graphical checks and the bounded single-beam
+scientific/snapshot qualification. The existing production 0.3.0 notebook and
+historical demonstration remain unchanged; a 0.4.0 ordinary-user notebook replacement
+requires separate review. Qualification notebooks and evidence bundles are for
+release validation, not required ordinary-user setup. See the
+[0.4.0 notebook guide](https://github.com/mcroning/LCProp/blob/publication/colab-lc-0.4.0rc1/docs/notebook_package.md)
+for setup and fallback details. That branch guide may lag the prepared release until
+publication; the source distribution includes the guide matching its version.
 
 ## Scientific qualification scope
 
 Retained hosted CPU qualification covers bounded presets for reduced PR time evolution,
 LC fixed-director propagation and LC self-consistent nonlinear static propagation.
 The 0.3.0 release family's packaged nonlinear LC preset passed nine scientific-array comparisons and all
-100 slice-convergence checks. Qualification applies to the recorded scientific preset,
+100 slice-convergence checks. The 0.4.0rc1 runtime likewise passed all nine retained
+array comparisons and 100/100 slices in 35.38 seconds, with unchanged exports after
+draft edits. This covers the tested preset, not arbitrary multibeam settings. Qualification applies to the recorded scientific preset,
 package identity and numerical environment; each release has its own validation scope.
 
 These results do not establish stationary soliton formation, arbitrary beam/voltage
@@ -152,12 +157,15 @@ For Jupyter/Colab widgets and plotting:
 python -m pip install "lcprop[colab]"
 ```
 
-After installation, initialize the packaged interface in a notebook:
+For local Jupyter, select the desired backend before initialization. Hosted Colab
+users must complete the restart/verification sequence above and enable its custom
+widget manager first. In a compatible session, reuse the packaged interface:
 
 ```python
 from IPython.display import display
 from lcprop.notebook.interactive_lc import InteractiveLC
-app = InteractiveLC()
+if "app" not in globals():
+    app = InteractiveLC()
 display(app.widget)
 ```
 
