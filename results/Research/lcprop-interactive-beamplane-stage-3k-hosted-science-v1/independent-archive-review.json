@@ -1,0 +1,137 @@
+{
+  "archive_sha256": "65aa3736fd8e08783ce70f76396c7761f30197d76b4f81ef5665ce642b547199",
+  "member_sha256": {
+    "snapshot-checks.json": "7690371ef4071f3e3545871225a99d871b6fe7a3ee32493c5d1d1eaae0d0ff6e",
+    "preflight.json": "6bfb0cb99f7238f63c850fa968b64c8effd71ebfd93eb0f7953ffdf3d307a9dd",
+    "comparison.json": "8de65e9fd6438afe718a023843b932646fa442c4307140c7225fe3e6ce2ff67e",
+    "after/summary.json": "483f31f992f0c5e0e9e22a881fd59f9c0175365d68df369b1a40e7cb169c1477",
+    "after/arrays.npz": "1750b35f217f1d17612f552154f11c7d18995e1a0ef42be64090a5e5516a0697",
+    "after/visualization.json": "0f66675d7a13a23ee76eca10de353e1278fcc325aba0a30adea4cbe3bf6239fc",
+    "after/fields.png": "8a1312c20593ef50fec046e31fbf6f12c98b93ba74c360b04a9d6a75af348fe3",
+    "after/sha256.json": "b81fdf73202466a2bee88038a3d2a612d105c44d9f10f2b457f4f7929ba34fc9",
+    "after/experiment.lcprop.json": "b620ee2ebd878b89993dbe9ee66645da3aaabe6f793ff94089542ef19ebbbaa2",
+    "before/summary.json": "483f31f992f0c5e0e9e22a881fd59f9c0175365d68df369b1a40e7cb169c1477",
+    "before/arrays.npz": "1750b35f217f1d17612f552154f11c7d18995e1a0ef42be64090a5e5516a0697",
+    "before/visualization.json": "0f66675d7a13a23ee76eca10de353e1278fcc325aba0a30adea4cbe3bf6239fc",
+    "before/fields.png": "8a1312c20593ef50fec046e31fbf6f12c98b93ba74c360b04a9d6a75af348fe3",
+    "before/sha256.json": "b81fdf73202466a2bee88038a3d2a612d105c44d9f10f2b457f4f7929ba34fc9",
+    "before/experiment.lcprop.json": "b620ee2ebd878b89993dbe9ee66645da3aaabe6f793ff94089542ef19ebbbaa2"
+  },
+  "request_sha256": "46448f7f3dec0af49faf053c8b94426c2ff8c4c6e772e66aba54a71440298ffc",
+  "arrays": {
+    "A_initial": {
+      "pass_": true,
+      "bitwise": false,
+      "max_abs": 1.3877787807814457e-17,
+      "relative_l2": 1.3306586175454916e-17,
+      "shape": [
+        1,
+        128,
+        128
+      ],
+      "dtype": "complex128"
+    },
+    "A_final": {
+      "pass_": true,
+      "bitwise": false,
+      "max_abs": 1.1937414660825033e-13,
+      "relative_l2": 5.495412631679459e-13,
+      "shape": [
+        1,
+        128,
+        128
+      ],
+      "dtype": "complex128"
+    },
+    "theta": {
+      "pass_": true,
+      "bitwise": false,
+      "max_abs": 3.3306690738754696e-15,
+      "relative_l2": 7.863672718296887e-16,
+      "shape": [
+        100,
+        128,
+        128
+      ],
+      "dtype": "float64"
+    },
+    "theta_bias": {
+      "pass_": true,
+      "bitwise": false,
+      "max_abs": 1.1102230246251565e-16,
+      "relative_l2": 4.396257291798443e-17,
+      "shape": [
+        128,
+        128
+      ],
+      "dtype": "float64"
+    },
+    "intensity_stack": {
+      "pass_": true,
+      "bitwise": false,
+      "max_abs": 4.395789288125229e-15,
+      "relative_l2": 3.5587250535556507e-14,
+      "shape": [
+        100,
+        128,
+        128
+      ],
+      "dtype": "float64"
+    },
+    "widths_um": {
+      "pass_": true,
+      "bitwise": false,
+      "max_abs": 6.394884621840902e-14,
+      "relative_l2": 4.275995867492485e-15,
+      "shape": [
+        100,
+        2
+      ],
+      "dtype": "float64"
+    },
+    "x_um": {
+      "pass_": true,
+      "bitwise": true,
+      "max_abs": 0.0,
+      "relative_l2": 0.0,
+      "shape": [
+        128
+      ],
+      "dtype": "float64"
+    },
+    "y_um": {
+      "pass_": true,
+      "bitwise": true,
+      "max_abs": 0.0,
+      "relative_l2": 0.0,
+      "shape": [
+        128
+      ],
+      "dtype": "float64"
+    },
+    "z_um": {
+      "pass_": true,
+      "bitwise": true,
+      "max_abs": 0.0,
+      "relative_l2": 0.0,
+      "shape": [
+        100
+      ],
+      "dtype": "float64"
+    }
+  },
+  "export_byte_identity": true,
+  "manifest_checks": true,
+  "convergence": true,
+  "elapsed_seconds": 35.377490939999916,
+  "residual_rms_max": 0.004935085357116411,
+  "residual_max": 0.019985181428802123,
+  "iteration_records": 6275,
+  "discrete_history_matches_reference": true,
+  "visualization_matches_frozen_request": true,
+  "artifact_and_controller_identity": true,
+  "limitations": [
+    "Hosted 269-file verification and in-memory object identity are recorded assertions, not independently re-executed in the remote kernel.",
+    "Browser behavior is supported by user observation; archive cannot independently prove callback history."
+  ]
+}

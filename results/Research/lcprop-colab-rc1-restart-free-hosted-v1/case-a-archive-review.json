@@ -1,0 +1,35 @@
+{
+  "archive_sha256": "f8a4b23cdc0e053876fb087ca5087a9a3a72a440e2750aed31cd67d5aa325c54",
+  "members": {
+    "evidence.json": "99b035415416ba57d52211bd57c7930b9df8acab59380437cb91802e940a6f8d",
+    "pip-stdout.txt": "b4c4e464823c08f9176a6c02cbd4c16bfe1c05f55265cb2399e862490296c3fc",
+    "pip-stderr.txt": "d0ffea8e396e7d0fab7585526840a8fdbc45d584c188c3637be233564865726f",
+    "pip-report.json": "9c9f4ff136d1b49ada9902069ec9dbab116f9af9f5723230fb4cc24f88f0cb68"
+  },
+  "recomputed_changes": {
+    "ipympl": {
+      "before": null,
+      "after": "0.10.0"
+    },
+    "jedi": {
+      "before": null,
+      "after": "0.20.1"
+    },
+    "lcprop": {
+      "before": null,
+      "after": "0.4.0rc1"
+    }
+  },
+  "pip_only_additions": true,
+  "pids": {
+    "initial": 1036,
+    "pre_install": 1036,
+    "post_install": 1036,
+    "post_initialization": 1036
+  },
+  "numpy_preinstall": {
+    "loaded": "2.1.3",
+    "metadata": "1.26.4"
+  },
+  "decision": "NO-GO restart-free; baseline NumPy inconsistency unresolved"
+}

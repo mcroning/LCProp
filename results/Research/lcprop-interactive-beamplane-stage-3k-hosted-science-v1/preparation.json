@@ -1,0 +1,11 @@
+{
+  "request_sha256": "46448f7f3dec0af49faf053c8b94426c2ff8c4c6e772e66aba54a71440298ffc",
+  "reference_files": {
+    "arrays.npz": "8cfddcfc2c870fbfa5f3c4ffb020f2756e220f2638e22a3b7cc173971fd857e3",
+    "experiment.lcprop.json": "b620ee2ebd878b89993dbe9ee66645da3aaabe6f793ff94089542ef19ebbbaa2",
+    "summary.json": "797bb1f283153c8a12e54eff5978503fc5f153bfe81b2e376dceffdb8bc54c10"
+  },
+  "runtime_files": 269,
+  "wall_time_budget_seconds": 120,
+  "execution": "NOT AUTHORIZED / NOT EXECUTED"
+}
