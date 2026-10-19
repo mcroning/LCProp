@@ -1,0 +1,57 @@
+{
+  "javascript": {
+    "pass": true,
+    "tests": [
+      "touch sequence/coordinates/dedup",
+      "pen sequence/coordinates/dedup",
+      "pointercancel cancellation",
+      "lostpointercapture cancellation",
+      "pointerleave cancellation",
+      "outside cancellation",
+      "blur cancellation",
+      "hidden cancellation",
+      "second cancellation",
+      "remove cancellation",
+      "native mouse",
+      "double-install refusal",
+      "style restore",
+      "framing stop"
+    ],
+    "limitations": "Mock DOM event ordering only; not a real browser or Colab test"
+  },
+  "python": {
+    "pass": true,
+    "results": [
+      {
+        "beam": 1,
+        "action": "Move",
+        "cancel_no_commit": true,
+        "release_updates_controls": true
+      },
+      {
+        "beam": 1,
+        "action": "Tilt",
+        "cancel_no_commit": true,
+        "release_updates_controls": true
+      },
+      {
+        "beam": 2,
+        "action": "Move",
+        "cancel_no_commit": true,
+        "release_updates_controls": true
+      },
+      {
+        "beam": 2,
+        "action": "Tilt",
+        "cancel_no_commit": true,
+        "release_updates_controls": true
+      }
+    ],
+    "busy_guard": true,
+    "completed_remains_none": true,
+    "scientific_execution": false,
+    "limitations": "Synthetic Python mouse events only; no browser adapter integration or real completed snapshot tested"
+  },
+  "date": "2026-10-19",
+  "note": "Mock harness capture sorting was corrected before PASS; no adapter behavior was changed for that harness error."
+}

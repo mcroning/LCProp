@@ -1,0 +1,12 @@
+{
+  "notebook_sha256": "9f08871fbf1244fe28fe254d528df8be8bdc752b7fe53bb872a55e8d3e4d4c25",
+  "checks": {
+    "fresh_beamplane_rejected": true,
+    "acceptance_without_events_rejected": true,
+    "accepted_synthetic_sequence_allows_disposable_beamplane": true,
+    "run_disabled_completed_absent": true,
+    "framing_failure_stops": true,
+    "embedded_adapter_unchanged": true
+  },
+  "limitations": "Colab eval_js mocked; no hosted finger/Pencil qualification; no scientific execution"
+}
