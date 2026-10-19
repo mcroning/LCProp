@@ -1,0 +1,37 @@
+{
+  "checked_utc": "2026-10-19T16:04:52.907049+00:00",
+  "notebook_sha256": "08dfb1e30e870fb18bd736695a9ea1409f5ef2528cd26e540bcb283f7a8a6452",
+  "code_cell_sha256": [
+    "c8ba6bef8d65a8b3386b5957e69f6b0356d341e90daf5e0c1bcd18343066ff04",
+    "5bb8a1d0b541519492df2f565f063ebcb2a31fa6944a4a973dd93ee6097548d3",
+    "143732f61b229734eb52ec8e1437ae5319b26fb87a3aff05e58da6e557b71aa0",
+    "e49cec7f0b81a99484466665368d6208f099b83a3f9092852f631382b5786dcf"
+  ],
+  "checks": {
+    "compile": true,
+    "no_saved_outputs": true,
+    "synthetic_press_motion_release_order": true,
+    "coordinates_valid": true,
+    "scoped_css_assignment": true,
+    "baseline_css_removed": true,
+    "cleanup": true
+  },
+  "versions": {
+    "matplotlib": "3.11.2",
+    "ipympl": "0.10.0",
+    "ipywidgets": "8.1.9",
+    "IPython": "9.17.1"
+  },
+  "python": "3.12.15",
+  "limitations": [
+    "Colab widget manager mocked",
+    "No actual browser CSS or touch events tested",
+    "No scientific execution or installation"
+  ],
+  "synthetic_summary": {
+    "presses": 1,
+    "motions": 1,
+    "releases": 1,
+    "leaves": 0
+  }
+}
