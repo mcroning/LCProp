@@ -1,0 +1,16 @@
+{
+  "wheel_commit": "9aee474c300e3900ebca3e908965a026b929450b",
+  "notebook_sha256": "fe9db2918837f148706f1e9f5bef5e17768001dfdbfc3ad7053c7e14cb163d76",
+  "runtime_manifest_entries": 269,
+  "checks": [
+    "code compiles",
+    "no saved outputs",
+    "exact wheel hash and immutable commit",
+    "embedded runtime manifest matches wheel",
+    "adapter matches accepted 25 Hz revision",
+    "synthetic-first gate retained",
+    "Run disabled and disconnected",
+    "no upload or diagnostic transfer required"
+  ],
+  "hosted_status": "Pending one bounded iPad attempt; local Colab framing tests mocked"
+}
