@@ -1,0 +1,11 @@
+{
+  "filename": "lcprop-0.4.1.dev0+stage5c-py3-none-any.whl",
+  "sha256": "51520c31974ecfd6c0a911a4000ba4c2c6786456e14cd4168a737afac81e66a1",
+  "bytes": 761039,
+  "runtime_files": 269,
+  "unchanged_from_production": 267,
+  "changed_runtime": [
+    "lcprop/notebook/_beam_position_editor.py",
+    "lcprop/notebook/interactive_lc.py"
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "pass": true,
+  "version": "0.4.1.dev0+stage5c",
+  "runtime_files_verified": 269,
+  "installed_origin": "[local disposable target; absolute path redacted for publication]",
+  "checks": [
+    "runtime identity",
+    "headless core imports",
+    "setup verification",
+    "synthetic-first gate",
+    "public tolerance 30",
+    "Run callback removed/disabled",
+    "repeat BeamPlane attempt rejected"
+  ],
+  "limits": [
+    "Colab eval_js and shell magic mocked",
+    "no hosted browser or scientific execution"
+  ],
+  "dependency_versions": {
+    "numpy": "2.5.4",
+    "scipy": "1.18.1",
+    "matplotlib": "3.11.2",
+    "ipympl": "0.10.0",
+    "ipywidgets": "8.1.9",
+    "IPython": "9.17.1"
+  },
+  "publication_review": {
+    "runtime_files": 269,
+    "production_identical": 267,
+    "only_runtime_changes": [
+      "lcprop/notebook/_beam_position_editor.py",
+      "lcprop/notebook/interactive_lc.py"
+    ],
+    "retained_tests": "63 passed in 34.11s",
+    "original_evidence_preserved": true
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "base_commit": "dfc426a26d288a540228d3ab24c990cf33105b0e",
+  "version": "0.4.1.dev0+stage5c",
+  "source_files": 282,
+  "overlays": [
+    "src/lcprop/notebook/interactive_lc.py",
+    "src/lcprop/notebook/_beam_position_editor.py",
+    "pyproject.toml"
+  ],
+  "snapshot_sha256": "12a61b07ec5bd4bc12978cba99314e8cc9024678ac588b600aa941c3bc237ae1"
+}
