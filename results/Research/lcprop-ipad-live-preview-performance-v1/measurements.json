@@ -1,0 +1,421 @@
+{
+  "version": "0.4.1.dev0+stage5c",
+  "runtime_files_verified": 269,
+  "results": [
+    {
+      "beams": 1,
+      "action": "Move",
+      "preview_hz": 0,
+      "motion_handler": {
+        "n": 75,
+        "median_ms": 0.10258308611810207,
+        "p95_ms": 0.12545888312160966,
+        "max_ms": 0.1479999627918005
+      },
+      "canonical_launch": {
+        "n": 0,
+        "median_ms": 0,
+        "p95_ms": 0,
+        "max_ms": 0
+      },
+      "raster": {
+        "n": 75,
+        "median_ms": 18.20141705684364,
+        "p95_ms": 22.152841207571328,
+        "max_ms": 25.88733285665512
+      },
+      "full_png_encoding": {
+        "n": 75,
+        "median_ms": 2.716209040954709,
+        "p95_ms": 2.856596000492573,
+        "max_ms": 3.3424999564886093
+      },
+      "live_updates": 0,
+      "draw_requests": 80,
+      "release_ms": 23.622084176167846,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    },
+    {
+      "beams": 1,
+      "action": "Move",
+      "preview_hz": 4,
+      "motion_handler": {
+        "n": 75,
+        "median_ms": 0.0963748898357153,
+        "p95_ms": 3.400391968898475,
+        "max_ms": 3.4861660096794367
+      },
+      "canonical_launch": {
+        "n": 10,
+        "median_ms": 1.9550209399312735,
+        "p95_ms": 2.039309055544436,
+        "max_ms": 2.055959077551961
+      },
+      "raster": {
+        "n": 75,
+        "median_ms": 17.884959001094103,
+        "p95_ms": 19.434862514026463,
+        "max_ms": 23.145999992266297
+      },
+      "full_png_encoding": {
+        "n": 75,
+        "median_ms": 2.6891669258475304,
+        "p95_ms": 2.823387598618865,
+        "max_ms": 2.9172080103307962
+      },
+      "live_updates": 10,
+      "draw_requests": 80,
+      "release_ms": 26.24616608954966,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    },
+    {
+      "beams": 1,
+      "action": "Move",
+      "preview_hz": 5,
+      "motion_handler": {
+        "n": 75,
+        "median_ms": 0.10704109445214272,
+        "p95_ms": 3.5868500825017686,
+        "max_ms": 5.065749865025282
+      },
+      "canonical_launch": {
+        "n": 14,
+        "median_ms": 1.9489586120471358,
+        "p95_ms": 2.5206311838701363,
+        "max_ms": 3.2261249143630266
+      },
+      "raster": {
+        "n": 75,
+        "median_ms": 18.596250098198652,
+        "p95_ms": 23.730191309005022,
+        "max_ms": 47.59329208172858
+      },
+      "full_png_encoding": {
+        "n": 75,
+        "median_ms": 2.712792018428445,
+        "p95_ms": 2.8765955939888954,
+        "max_ms": 3.3566660713404417
+      },
+      "live_updates": 14,
+      "draw_requests": 80,
+      "release_ms": 24.805207969620824,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    },
+    {
+      "beams": 1,
+      "action": "Tilt",
+      "preview_hz": 0,
+      "motion_handler": {
+        "n": 75,
+        "median_ms": 0.023082830011844635,
+        "p95_ms": 0.029529538005590432,
+        "max_ms": 0.11237501166760921
+      },
+      "canonical_launch": {
+        "n": 0,
+        "median_ms": 0,
+        "p95_ms": 0,
+        "max_ms": 0
+      },
+      "raster": {
+        "n": 75,
+        "median_ms": 19.098541932180524,
+        "p95_ms": 21.484712488017973,
+        "max_ms": 40.947083150967956
+      },
+      "full_png_encoding": {
+        "n": 75,
+        "median_ms": 2.746458863839507,
+        "p95_ms": 2.9147497611120343,
+        "max_ms": 10.33545914106071
+      },
+      "live_updates": 0,
+      "draw_requests": 80,
+      "release_ms": 28.620708966627717,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    },
+    {
+      "beams": 1,
+      "action": "Tilt",
+      "preview_hz": 4,
+      "motion_handler": {
+        "n": 75,
+        "median_ms": 0.020290957763791084,
+        "p95_ms": 3.787616081535816,
+        "max_ms": 4.301500041037798
+      },
+      "canonical_launch": {
+        "n": 10,
+        "median_ms": 2.2501455387100577,
+        "p95_ms": 2.4495725869201124,
+        "max_ms": 2.4579160381108522
+      },
+      "raster": {
+        "n": 75,
+        "median_ms": 19.32904194109142,
+        "p95_ms": 23.190004192292687,
+        "max_ms": 30.311291106045246
+      },
+      "full_png_encoding": {
+        "n": 75,
+        "median_ms": 2.730750013142824,
+        "p95_ms": 2.885437780059874,
+        "max_ms": 2.9124580323696136
+      },
+      "live_updates": 10,
+      "draw_requests": 80,
+      "release_ms": 26.009541004896164,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    },
+    {
+      "beams": 1,
+      "action": "Tilt",
+      "preview_hz": 5,
+      "motion_handler": {
+        "n": 75,
+        "median_ms": 0.02033403143286705,
+        "p95_ms": 3.852595412172376,
+        "max_ms": 28.035332914441824
+      },
+      "canonical_launch": {
+        "n": 14,
+        "median_ms": 2.109499997459352,
+        "p95_ms": 2.3879503831267352,
+        "max_ms": 2.630834002047777
+      },
+      "raster": {
+        "n": 75,
+        "median_ms": 19.364667125046253,
+        "p95_ms": 20.708887558430433,
+        "max_ms": 21.04441705159843
+      },
+      "full_png_encoding": {
+        "n": 75,
+        "median_ms": 2.758709015324712,
+        "p95_ms": 2.9513292713090777,
+        "max_ms": 3.0884998850524426
+      },
+      "live_updates": 14,
+      "draw_requests": 80,
+      "release_ms": 25.748584186658263,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    },
+    {
+      "beams": 2,
+      "action": "Move",
+      "preview_hz": 0,
+      "motion_handler": {
+        "n": 75,
+        "median_ms": 0.11583417654037476,
+        "p95_ms": 0.15030824579298493,
+        "max_ms": 0.5661670584231615
+      },
+      "canonical_launch": {
+        "n": 0,
+        "median_ms": 0,
+        "p95_ms": 0,
+        "max_ms": 0
+      },
+      "raster": {
+        "n": 75,
+        "median_ms": 20.480083068832755,
+        "p95_ms": 25.269375042989846,
+        "max_ms": 48.43574995175004
+      },
+      "full_png_encoding": {
+        "n": 75,
+        "median_ms": 2.9771660920232534,
+        "p95_ms": 3.2360748853534456,
+        "max_ms": 6.140667013823986
+      },
+      "live_updates": 0,
+      "draw_requests": 80,
+      "release_ms": 30.035708099603653,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    },
+    {
+      "beams": 2,
+      "action": "Move",
+      "preview_hz": 4,
+      "motion_handler": {
+        "n": 75,
+        "median_ms": 0.1027500256896019,
+        "p95_ms": 4.9208373529836535,
+        "max_ms": 5.347083089873195
+      },
+      "canonical_launch": {
+        "n": 10,
+        "median_ms": 3.41339607257396,
+        "p95_ms": 3.7783464300446212,
+        "max_ms": 3.838083939626813
+      },
+      "raster": {
+        "n": 75,
+        "median_ms": 19.19695921242237,
+        "p95_ms": 21.346912649460133,
+        "max_ms": 33.77258311957121
+      },
+      "full_png_encoding": {
+        "n": 75,
+        "median_ms": 2.8900830075144768,
+        "p95_ms": 3.1009337631985545,
+        "max_ms": 3.204124979674816
+      },
+      "live_updates": 10,
+      "draw_requests": 80,
+      "release_ms": 29.060791013762355,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    },
+    {
+      "beams": 2,
+      "action": "Move",
+      "preview_hz": 5,
+      "motion_handler": {
+        "n": 75,
+        "median_ms": 0.10558310896158218,
+        "p95_ms": 4.98633321840316,
+        "max_ms": 5.242959130555391
+      },
+      "canonical_launch": {
+        "n": 14,
+        "median_ms": 3.4518339671194553,
+        "p95_ms": 3.618964843917638,
+        "max_ms": 3.7010000087320805
+      },
+      "raster": {
+        "n": 75,
+        "median_ms": 19.421417033299804,
+        "p95_ms": 21.480357996188104,
+        "max_ms": 23.899625055491924
+      },
+      "full_png_encoding": {
+        "n": 75,
+        "median_ms": 2.9215409886091948,
+        "p95_ms": 3.053362458012998,
+        "max_ms": 3.0789170414209366
+      },
+      "live_updates": 14,
+      "draw_requests": 80,
+      "release_ms": 28.202249901369214,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    },
+    {
+      "beams": 2,
+      "action": "Tilt",
+      "preview_hz": 0,
+      "motion_handler": {
+        "n": 75,
+        "median_ms": 0.02070819027721882,
+        "p95_ms": 0.02680022735148668,
+        "max_ms": 0.030833063647150993
+      },
+      "canonical_launch": {
+        "n": 0,
+        "median_ms": 0,
+        "p95_ms": 0,
+        "max_ms": 0
+      },
+      "raster": {
+        "n": 75,
+        "median_ms": 18.98008305579424,
+        "p95_ms": 20.202333061024547,
+        "max_ms": 21.46458299830556
+      },
+      "full_png_encoding": {
+        "n": 75,
+        "median_ms": 2.893208060413599,
+        "p95_ms": 3.028012369759381,
+        "max_ms": 3.123583970591426
+      },
+      "live_updates": 0,
+      "draw_requests": 80,
+      "release_ms": 27.05625002272427,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    },
+    {
+      "beams": 2,
+      "action": "Tilt",
+      "preview_hz": 4,
+      "motion_handler": {
+        "n": 75,
+        "median_ms": 0.01895800232887268,
+        "p95_ms": 5.006300075910985,
+        "max_ms": 5.179625004529953
+      },
+      "canonical_launch": {
+        "n": 10,
+        "median_ms": 3.51545843295753,
+        "p95_ms": 3.7134955637156963,
+        "max_ms": 3.7577080074697733
+      },
+      "raster": {
+        "n": 75,
+        "median_ms": 19.24679195508361,
+        "p95_ms": 21.24534985050559,
+        "max_ms": 22.232791874557734
+      },
+      "full_png_encoding": {
+        "n": 75,
+        "median_ms": 2.897749887779355,
+        "p95_ms": 3.0250623589381576,
+        "max_ms": 3.199625061824918
+      },
+      "live_updates": 10,
+      "draw_requests": 80,
+      "release_ms": 28.623458929359913,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    },
+    {
+      "beams": 2,
+      "action": "Tilt",
+      "preview_hz": 5,
+      "motion_handler": {
+        "n": 75,
+        "median_ms": 0.017124926671385765,
+        "p95_ms": 5.014170706272125,
+        "max_ms": 5.161416949704289
+      },
+      "canonical_launch": {
+        "n": 14,
+        "median_ms": 3.5501039819791913,
+        "p95_ms": 3.7778436322696507,
+        "max_ms": 3.84974991902709
+      },
+      "raster": {
+        "n": 75,
+        "median_ms": 19.058832898736,
+        "p95_ms": 19.621112593449652,
+        "max_ms": 20.617499947547913
+      },
+      "full_png_encoding": {
+        "n": 75,
+        "median_ms": 2.891582902520895,
+        "p95_ms": 2.9677124926820397,
+        "max_ms": 2.988334046676755
+      },
+      "live_updates": 14,
+      "draw_requests": 80,
+      "release_ms": 28.078334173187613,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    }
+  ],
+  "scientific_execution": false,
+  "limitations": [
+    "Synthetic schedule at 25 Hz; not real-time browser delivery",
+    "Raster and full-frame PNG encoding measured separately; not ipympl differential encoding, network or browser paint",
+    "No frontend acknowledgement/backlog or browser corruption measurement",
+    "Diagnostic-only per-instance LIVE_INTERVAL override; desktop defaults and adapter unchanged"
+  ]
+}

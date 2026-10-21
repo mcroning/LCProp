@@ -1,0 +1,14 @@
+{
+  "python": "3.12.15",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "versions": {
+    "lcprop": "0.4.1.dev0+stage5c",
+    "numpy": "2.5.4",
+    "scipy": "1.18.1",
+    "matplotlib": "3.11.2",
+    "ipympl": "0.10.0",
+    "ipywidgets": "8.1.9",
+    "Pillow": "13.0.0"
+  },
+  "hosted": false
+}

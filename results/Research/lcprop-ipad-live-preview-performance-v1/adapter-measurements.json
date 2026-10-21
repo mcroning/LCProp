@@ -1,0 +1,35 @@
+{
+  "pass": true,
+  "tests": [
+    "touch sequence/coordinates/dedup",
+    "pen sequence/coordinates/dedup",
+    "pointercancel cancellation",
+    "lostpointercapture cancellation",
+    "pointerleave cancellation",
+    "outside cancellation",
+    "blur cancellation",
+    "hidden cancellation",
+    "second cancellation",
+    "remove cancellation",
+    "240Hz input bounded to 25Hz",
+    "exact final release coordinates",
+    "immediate cancel after skipped motion",
+    "no deferred timers",
+    "native mouse",
+    "double-install refusal",
+    "style restore",
+    "framing stop"
+  ],
+  "throughput": {
+    "inputMoves": 240,
+    "deliveredMoves": 24,
+    "skippedMoves": 216
+  },
+  "limitations": "Mock DOM event ordering only; not a real browser or Colab test",
+  "benchmark": {
+    "suites": 100,
+    "total_ms": 71,
+    "mean_suite_ms": 0.71,
+    "scope": "Mock DOM processing only; no rendering/comm"
+  }
+}
