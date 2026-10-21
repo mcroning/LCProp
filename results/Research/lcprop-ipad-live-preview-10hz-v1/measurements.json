@@ -1,0 +1,149 @@
+{
+  "version": "0.4.1.dev0+stage5c",
+  "runtime_files_verified": 269,
+  "results": [
+    {
+      "beams": 1,
+      "action": "Move",
+      "preview_hz": 10,
+      "motion_handler": {
+        "n": 150,
+        "median_ms": 0.15722948592156172,
+        "p95_ms": 5.731837532948702,
+        "max_ms": 11.891833040863276
+      },
+      "canonical_launch": {
+        "n": 50,
+        "median_ms": 2.3571874480694532,
+        "p95_ms": 4.1581391473300755,
+        "max_ms": 8.7849588599056
+      },
+      "raster": {
+        "n": 150,
+        "median_ms": 23.51591654587537,
+        "p95_ms": 40.24100598180662,
+        "max_ms": 98.35758409462869
+      },
+      "full_png_encoding": {
+        "n": 150,
+        "median_ms": 2.9571460327133536,
+        "p95_ms": 4.421295702923089,
+        "max_ms": 11.742624919861555
+      },
+      "live_updates": 50,
+      "draw_requests": 155,
+      "release_ms": 31.492667039856315,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    },
+    {
+      "beams": 1,
+      "action": "Tilt",
+      "preview_hz": 10,
+      "motion_handler": {
+        "n": 150,
+        "median_ms": 0.023895991034805775,
+        "p95_ms": 4.280256247147917,
+        "max_ms": 4.7751248348504305
+      },
+      "canonical_launch": {
+        "n": 50,
+        "median_ms": 2.337062614969909,
+        "p95_ms": 3.0970708001404996,
+        "max_ms": 3.21508408524096
+      },
+      "raster": {
+        "n": 150,
+        "median_ms": 20.929250516928732,
+        "p95_ms": 24.234356184024364,
+        "max_ms": 26.631625136360526
+      },
+      "full_png_encoding": {
+        "n": 150,
+        "median_ms": 2.815458457916975,
+        "p95_ms": 2.984691259916872,
+        "max_ms": 3.3537501003593206
+      },
+      "live_updates": 50,
+      "draw_requests": 155,
+      "release_ms": 27.476083021610975,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    },
+    {
+      "beams": 2,
+      "action": "Move",
+      "preview_hz": 10,
+      "motion_handler": {
+        "n": 150,
+        "median_ms": 0.11958344839513302,
+        "p95_ms": 5.529948219191281,
+        "max_ms": 12.885041069239378
+      },
+      "canonical_launch": {
+        "n": 50,
+        "median_ms": 3.567646024748683,
+        "p95_ms": 5.021616793237626,
+        "max_ms": 8.936041966080666
+      },
+      "raster": {
+        "n": 150,
+        "median_ms": 20.246334024704993,
+        "p95_ms": 22.323291841894385,
+        "max_ms": 62.43487517349422
+      },
+      "full_png_encoding": {
+        "n": 150,
+        "median_ms": 2.945499843917787,
+        "p95_ms": 3.1159205362200737,
+        "max_ms": 5.5468331556767225
+      },
+      "live_updates": 50,
+      "draw_requests": 155,
+      "release_ms": 29.46329186670482,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    },
+    {
+      "beams": 2,
+      "action": "Tilt",
+      "preview_hz": 10,
+      "motion_handler": {
+        "n": 150,
+        "median_ms": 0.022458494640886784,
+        "p95_ms": 5.471731547731905,
+        "max_ms": 5.7482910342514515
+      },
+      "canonical_launch": {
+        "n": 50,
+        "median_ms": 3.698833519592881,
+        "p95_ms": 4.030287265777588,
+        "max_ms": 4.248959012329578
+      },
+      "raster": {
+        "n": 150,
+        "median_ms": 20.97345853690058,
+        "p95_ms": 23.27565175946802,
+        "max_ms": 73.6392920371145
+      },
+      "full_png_encoding": {
+        "n": 150,
+        "median_ms": 2.976750023663044,
+        "p95_ms": 3.1377660343423486,
+        "max_ms": 6.99204090051353
+      },
+      "live_updates": 50,
+      "draw_requests": 155,
+      "release_ms": 30.640208162367344,
+      "exact_release_request_and_intensity": true,
+      "cancel_restores_committed": true
+    }
+  ],
+  "scientific_execution": false,
+  "limitations": [
+    "Synthetic schedule at 25 Hz; not real-time browser delivery",
+    "Raster and full-frame PNG encoding measured separately; not ipympl differential encoding, network or browser paint",
+    "No frontend acknowledgement/backlog or browser corruption measurement",
+    "Diagnostic-only per-instance LIVE_INTERVAL override; desktop defaults and adapter unchanged"
+  ]
+}
