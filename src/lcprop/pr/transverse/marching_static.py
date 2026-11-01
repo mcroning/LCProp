@@ -557,6 +557,8 @@ def run_pr_transverse_static_marching(
                 or not math.isfinite(launch_peak_intensity_reference)
                 or launch_peak_intensity_reference <= 0):
             raise ValueError("external launch peak must be finite and positive")
+        # Bind the numerical value, not its Python/NumPy scalar representation.
+        launch_peak_intensity_reference = float(launch_peak_intensity_reference)
     if phase_binding is not None:
         from lcprop.pr.transverse.streaming import TransversePhaseBinding
         if not isinstance(phase_binding, TransversePhaseBinding):

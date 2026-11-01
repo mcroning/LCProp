@@ -62,7 +62,8 @@
   "integration_edits": {
     "docs/pr_transverse_constant_gauge.md": "Update retained synthetic H200 scope; original derivation unchanged.",
     "tests/test_engine_frontend_independence.py": "Exercise corrected two-cell/replay engine with optional adapters blocked.",
-    "tests/test_pr_transverse_constant_gauge.py": "Add retained Wolfram reference and independent analytic differentiation-matrix comparison."
+    "tests/test_pr_transverse_constant_gauge.py": "Add retained Wolfram reference and independent analytic differentiation-matrix comparison.",
+    "src/lcprop/pr/transverse/marching_static.py": "PR review: canonicalize validated external launch peak scalars to Python float before restart-identity serialization. Numerical equations, historical defaults and tolerances unchanged."
   },
   "reference_fixture": {
     "path": "tests/data/pr_constant_gauge_wolfram.json",

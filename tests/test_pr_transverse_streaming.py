@@ -66,6 +66,19 @@ def test_explicit_normalization_scale_invariance():
     assert np.array_equal(a.first_pass.restart_state.previous_psi,b.first_pass.restart_state.previous_psi)
 
 
+@pytest.mark.parametrize('peak', [np.float32(4), np.float64(4), np.int64(4), 4])
+def test_external_peak_scalar_types_preserve_field_and_restart_identity(peak):
+    r = request(modulation=.001)
+    reference = s.run_pr_transverse_streaming(
+        r, launch_peak_intensity_reference=4., stop_after_accepted_cells=1)
+    actual = s.run_pr_transverse_streaming(
+        r, launch_peak_intensity_reference=peak, stop_after_accepted_cells=1)
+    assert reference.converged and actual.converged
+    assert np.array_equal(reference.first_pass.A_final, actual.first_pass.A_final)
+    assert (reference.first_pass.restart_state.request_fingerprint
+            == actual.first_pass.restart_state.request_fingerprint)
+
+
 @pytest.mark.parametrize('count',[0,-1,4,True,1.5])
 def test_invalid_prefix(count):
     with pytest.raises(ValueError):s.run_pr_transverse_streaming(request(),stop_after_accepted_cells=count)
