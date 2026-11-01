@@ -120,6 +120,25 @@ Fast and Full sizes are derived from retained-array shapes and precision:
   five for full-transverse static;
 - bounded metadata/package allowance and a broad compression/container range.
 
+TD accepted-time movies add an upper storage scenario for both Fast and Full:
+up to 36 float32 frames for optical, material and far-field transverse samples
+and two longitudinal cuts, with each dimension capped at 128. The existing
+`2 * raw_movie_bytes + 65536` allowance covers compression/container overhead
+for planning; it is not a measured minimum. Zlib/base64 payload sizes depend
+on frame content, MP4 encoding can be unavailable, and the September 2026
+commissioning packages predate movie retention. Lower estimates therefore use
+the baseline array inventory; upper estimates add the movie allowance before
+applying the unchanged policy factors. These ranges are planning estimates,
+not guaranteed archive bounds. This corrects the November 1 review holdout
+failure (4,207,592 measured bytes versus the former 4,744,806.4-byte lower
+estimate) without changing evidence, calibration factors or retained products.
+
+Regression checks cover both historical package measurements, float32/float64,
+reduced/full TD, history saturation at 36 frames, and actual trajectory-codec
+payloads for constant and random samples. Static size estimates and all TD
+upper estimates remain unchanged. This is a result-size planning correction;
+it does not recalibrate timing or memory measurements.
+
 Full-transverse nonlinear static GPU memory follows the plane-local
 bounded-memory architecture and therefore has no `Nz` multiplier in its GPU
 workspace. Host working memory does retain the full-volume factor. At the
