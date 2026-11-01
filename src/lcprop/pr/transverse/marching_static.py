@@ -9,6 +9,7 @@ import hashlib
 import json
 import math
 from time import perf_counter
+from numbers import Integral, Real
 from typing import Any
 
 import numpy as np
@@ -449,6 +450,7 @@ def _evaluate_local_state(
     material_real_dtype,
     optical_complex_dtype,
     xp,
+    require_full_residual=False,
 ) -> _LocalEvaluation:
     resolved = project_production_resolved_modes(
         psi,
@@ -496,7 +498,9 @@ def _evaluate_local_state(
         h_y=request.dielectric.h_y,
         xp=xp,
     )
-    residual_rms, residual_max = _metrics(resolved_residual, xp=xp)
+    residual_rms, residual_max = _metrics(
+        residual if require_full_residual else resolved_residual, xp=xp
+    )
     valid, carrier_mean, carrier_minimum, potential_mean = (
         _physical_state_validity(state, xp=xp)
     )
@@ -520,11 +524,39 @@ def run_pr_transverse_static_marching(
     *,
     restart_state: PRTransverseMarchingRestartState | None = None,
     stop_after_accepted_intervals: int | None = None,
+    launch_peak_intensity_reference: float | None = None,
+    phase_binding=None,
+    record_streaming_diagnostics: bool = False,
+    require_full_residual: bool = False,
 ) -> PRTransverseMarchingStaticRunResult:
     """March through locally implicit intervals and return host NumPy arrays."""
 
     started = perf_counter()
     _validate_request(request)
+    # Optional Figure 11 contracts are validated before backend/grid allocation.
+    from lcprop.core.grid import round_nz
+    nz = round_nz(request.grid.z_length_um, request.grid.dz_um)
+    if stop_after_accepted_intervals is not None and (
+        isinstance(stop_after_accepted_intervals, (bool, np.bool_))
+        or not isinstance(stop_after_accepted_intervals, Integral)
+        or not 1 <= stop_after_accepted_intervals <= nz
+    ):
+        raise ValueError("accepted interval prefix must be an integer in [1, Nz]")
+    if launch_peak_intensity_reference is not None:
+        if request.initial_A is None:
+            raise ValueError("external launch peak requires explicit initial_A")
+        if (isinstance(launch_peak_intensity_reference, (bool, np.bool_))
+                or not isinstance(launch_peak_intensity_reference, Real)
+                or not math.isfinite(launch_peak_intensity_reference)
+                or launch_peak_intensity_reference <= 0):
+            raise ValueError("external launch peak must be finite and positive")
+    if phase_binding is not None:
+        from lcprop.pr.transverse.streaming import TransversePhaseBinding
+        if not isinstance(phase_binding, TransversePhaseBinding):
+            raise TypeError("phase_binding must be TransversePhaseBinding")
+        phase_binding.validate_for(
+            request, required_cells=stop_after_accepted_intervals or nz
+        )
     backend = get_backend(request.backend)
     xp = backend.xp
     precision = _resolve_precision_policy(backend)
@@ -582,7 +614,11 @@ def run_pr_transverse_static_marching(
         xp=xp,
         complex_dtype=precision.optical_complex_dtype,
     ).astype(precision.optical_complex_dtype, copy=False)
-    peak_reference = channel_peak_intensity_reference(A0, xp=xp)
+    peak_reference = (
+        channel_peak_intensity_reference(A0, xp=xp)
+        if launch_peak_intensity_reference is None
+        else float(launch_peak_intensity_reference)
+    )
     request_fingerprint = _request_fingerprint(
         request, precision_policy_id=precision.policy_id
     )
@@ -598,6 +634,18 @@ def run_pr_transverse_static_marching(
             real_dtype=grid.real_dtype,
             xp=xp,
         )
+    if phase_binding is not None:
+        scattering_provenance = phase_binding.provenance()
+    if launch_peak_intensity_reference is not None or phase_binding is not None:
+        request_fingerprint = hashlib.sha256(json.dumps({
+            "base_request": request_fingerprint,
+            "external_launch_peak": launch_peak_intensity_reference,
+            "phase_source": scattering_provenance,
+        }, sort_keys=True, allow_nan=False).encode()).hexdigest()
+    if require_full_residual:
+        request_fingerprint = hashlib.sha256(
+            (request_fingerprint + ":full_equilibrium_residual_v1").encode()
+        ).hexdigest()
 
     if restart_state is None:
         start_interval = 0
@@ -678,7 +726,7 @@ def run_pr_transverse_static_marching(
     k0 = request.material.characteristic_wavenumber_per_um
     dx_normalized = k0 * grid.dx_um
     dy_normalized = k0 * grid.dy_um
-    capacity = grid.Nz - start_interval
+    capacity = (grid.Nz if stop_index is None else stop_index) - start_interval
     material_shape = (capacity, grid.Nx, grid.Ny)
     field_shape = (
         capacity,
@@ -718,6 +766,7 @@ def run_pr_transverse_static_marching(
         incoming_buffer[0] = A_in
 
     summaries: list[PRTransverseMarchingIntervalSummary] = []
+    plane_diagnostics: list[dict[str, Any]] = []
     records: list[PRTransverseMarchingPicardRecord] = []
     failed_interval: int | None = None
     failure_evaluation: _LocalEvaluation | None = None
@@ -747,6 +796,7 @@ def run_pr_transverse_static_marching(
             material_real_dtype=precision.material_real_dtype,
             optical_complex_dtype=precision.optical_complex_dtype,
             xp=xp,
+            require_full_residual=require_full_residual,
         )
         synchronize(xp)
         optical_seconds += perf_counter() - evaluation_started
@@ -905,6 +955,14 @@ def run_pr_transverse_static_marching(
             failure_material_records = tuple(interval_material_records)
             break
 
+        if record_streaming_diagnostics:
+            from lcprop.pr.transverse.streaming import _plane_diagnostics
+            plane_diagnostics.append(_plane_diagnostics(
+                evaluation, interval_index=interval_index,
+                material_records=interval_material_records,
+                dx_normalized=dx_normalized, dy_normalized=dy_normalized,
+                request=request, xp=xp,
+            ))
         if psi_buffer is not None:
             psi_buffer[accepted_count] = evaluation.psi
             source_buffer[accepted_count] = evaluation.source
@@ -915,14 +973,18 @@ def run_pr_transverse_static_marching(
         previous_psi = evaluation.psi.copy()
         previous_material_source = evaluation.source.copy()
         A_in = evaluation.A_pre_scattering.copy()
-        _apply_canonical_scattering_after_slice(
-            A_in,
-            scattering=request.scattering,
-            z_index=interval_index,
-            grid=grid,
-            z_length_um=request.grid.z_length_um,
-            xp=xp,
-        )
+        if phase_binding is None:
+            _apply_canonical_scattering_after_slice(
+                A_in,
+                scattering=request.scattering,
+                z_index=interval_index,
+                grid=grid,
+                z_length_um=request.grid.z_length_um,
+                xp=xp,
+            )
+        else:
+            # Same post-acceptance cell boundary as the Figure 11 runner.
+            phase_binding.apply_to(A_in, interval_index, xp=xp)
         accepted_count += 1
         if incoming_buffer is not None:
             incoming_buffer[accepted_count] = A_in
@@ -1064,7 +1126,7 @@ def run_pr_transverse_static_marching(
         "dy_normalized": dy_normalized,
     }
     if scattering_provenance is not None:
-        resolved_profile["canonical_scattering"] = scattering_provenance
+        resolved_profile["indexed_scattering" if phase_binding is not None else "canonical_scattering"] = scattering_provenance
     diagnostics = {
         "termination_reason": (
             "all_intervals_converged"
@@ -1086,7 +1148,21 @@ def run_pr_transverse_static_marching(
         ),
     }
     if scattering_provenance is not None:
-        diagnostics["canonical_scattering"] = scattering_provenance
+        diagnostics["indexed_scattering" if phase_binding is not None else "canonical_scattering"] = scattering_provenance
+    if record_streaming_diagnostics:
+        diagnostics["planes"] = plane_diagnostics
+    if record_streaming_diagnostics or launch_peak_intensity_reference is not None or phase_binding is not None:
+        diagnostics["streaming_extent"] = {
+            "physical_length_um": request.grid.z_length_um,
+            "physical_Nz": grid.Nz,
+            "propagated_distance_um": completed * grid.dz_um,
+            "partial_domain_prefix": completed < grid.Nz,
+            "launch_peak_intensity_reference": float(peak_reference),
+            "launch_peak_source": (
+                "explicit_full_domain" if launch_peak_intensity_reference is not None
+                else "local_launch"
+            ),
+        }
     synchronize(xp)
     elapsed = perf_counter() - started
     return PRTransverseMarchingStaticRunResult(
