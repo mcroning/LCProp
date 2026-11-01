@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 
+from .discretization import DERIVATIVE_RESOLVED_V1, potential_null_mask
+
 
 @dataclass(frozen=True)
 class PRTransverseState:
@@ -73,6 +75,7 @@ def state_from_potential(
     dy_normalized: float,
     h_y: float = 1.0,
     applied_field_x: float = 0.0,
+    potential_space: str = DERIVATIVE_RESOLVED_V1,
     xp=np,
 ) -> PRTransverseState:
     """Reconstruct ``P``, ``E_x`` and ``E_y`` from zero-mean periodic ψ."""
@@ -86,7 +89,7 @@ def state_from_potential(
     )
     denominator = kx * kx + float(h_y) * ky * ky
     potential_hat = xp.fft.fft2(potential, axes=(-2, -1))
-    potential_hat = xp.where(denominator == 0.0, 0.0, potential_hat)
+    potential_hat = xp.where(potential_null_mask(denominator, potential_space, xp=xp), 0.0, potential_hat)
     resolved = xp.fft.ifft2(potential_hat, axes=(-2, -1)).real.astype(
         potential.dtype, copy=False
     )

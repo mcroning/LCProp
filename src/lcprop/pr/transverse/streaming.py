@@ -102,7 +102,8 @@ def _plane_diagnostics(evaluation, *, interval_index, material_records,
     """Scalar observations only. Temporary arrays never escape this function."""
     kw = dict(dx_normalized=dx_normalized, dy_normalized=dy_normalized,
               h_y=request.dielectric.h_y, xp=xp)
-    state = state_from_potential(evaluation.psi, **kw)
+    state = state_from_potential(
+        evaluation.psi, potential_space=request.solver.material_solver.potential_space, **kw)
     out = state_diagnostics(state, **kw)
     out["carrier_integral"] = float(out.pop("carrier_integrals_per_z"))
     out.update(interval_index=int(interval_index),

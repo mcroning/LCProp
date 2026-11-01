@@ -47,10 +47,12 @@ from lcprop.pr.transverse.static import (
     PRTransverseStaticNewtonRecord,
     _physical_state_validity,
     project_production_resolved_modes,
+    project_static_potential,
     solve_pr_transverse_static_intensity,
     static_equilibrium_residual,
 )
 from lcprop.pr.transverse.transport import state_from_potential
+from .discretization import DERIVATIVE_RESOLVED_V1, CONSTANT_GAUGE_V1
 from lcprop.pr.workflow import (
     _apply_canonical_scattering_after_slice,
     _validate_canonical_scattering_for_grid,
@@ -345,6 +347,8 @@ def _request_fingerprint(
         "initial_A": array_identity(request.initial_A),
         "initial_psi": array_identity(request.initial_psi),
     }
+    if request.solver.material_solver.potential_space == DERIVATIVE_RESOLVED_V1:
+        payload["solver"]["material_solver"].pop("potential_space")
     encoded = json.dumps(
         payload, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode("utf-8")
@@ -452,12 +456,13 @@ def _evaluate_local_state(
     xp,
     require_full_residual=False,
 ) -> _LocalEvaluation:
-    resolved = project_production_resolved_modes(
+    resolved = project_static_potential(
         psi,
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
         xp=xp,
+        potential_space=request.solver.material_solver.potential_space,
     )
     state = state_from_potential(
         resolved,
@@ -466,6 +471,7 @@ def _evaluate_local_state(
         h_y=request.dielectric.h_y,
         applied_field_x=request.boundary.applied_field_x,
         xp=xp,
+        potential_space=request.solver.material_solver.potential_space,
     )
     active = project_active_field(
         state.E_x, state.E_y, profile=request.projection, xp=xp
@@ -490,6 +496,7 @@ def _evaluate_local_state(
         dy_normalized=dy_normalized,
         h_y=request.dielectric.h_y,
         xp=xp,
+        potential_space=request.solver.material_solver.potential_space,
     )
     resolved_residual = project_production_resolved_modes(
         residual,
@@ -499,7 +506,7 @@ def _evaluate_local_state(
         xp=xp,
     )
     residual_rms, residual_max = _metrics(
-        residual if require_full_residual else resolved_residual, xp=xp
+        residual if (require_full_residual or request.solver.material_solver.potential_space == CONSTANT_GAUGE_V1) else resolved_residual, xp=xp
     )
     valid, carrier_mean, carrier_minimum, potential_mean = (
         _physical_state_validity(state, xp=xp)

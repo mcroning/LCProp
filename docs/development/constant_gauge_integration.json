@@ -1,0 +1,72 @@
+{
+  "base": "105a03492039f29ab18b9b97a81252b91c994344",
+  "prerequisite_commit": "b5d1fe2cd5eeaa3e24e00b8da05fb87e3ad23b30",
+  "correction": "constant_gauge_v1",
+  "default": "derivative_resolved_v1",
+  "verified_correction_files": [
+    {
+      "path": "src/lcprop/pr/transverse/static.py",
+      "sha256": "4a7cf14f75045a73e29236a118d74a63b8325017079c27064da1a0419d78d8a9",
+      "bytes": 63481
+    },
+    {
+      "path": "src/lcprop/pr/transverse/transport.py",
+      "sha256": "7f2bfa30a5ffb4df46c47697b5cc9334648b61df07c8c3435a3ba6d1154c3f96",
+      "bytes": 9467
+    },
+    {
+      "path": "src/lcprop/pr/transverse/marching_static.py",
+      "sha256": "a228324195c854aa387630068d2107e40ff0876cc39758f1508bd7d1c8c1e345",
+      "bytes": 47023
+    },
+    {
+      "path": "src/lcprop/pr/transverse/streaming.py",
+      "sha256": "965c7a5e70e00ca5529b8fe1c96ce8f4409a9a5c86c867268da2c7504785f9cb",
+      "bytes": 12351
+    },
+    {
+      "path": "src/lcprop/pr/transverse/static_workflow.py",
+      "sha256": "c247595001ec637cc92505a5f9b1dc08d85a15a680e7aeba44c40840bb19208c",
+      "bytes": 68956
+    },
+    {
+      "path": "src/lcprop/pr/transverse/discretization.py",
+      "sha256": "e55f4486ac2356c66067422cef4ea73fdb8ba92da4e2c87c22b4c52ccd3b3c14",
+      "bytes": 740
+    },
+    {
+      "path": "tests/test_pr_transverse_constant_gauge.py",
+      "sha256": "5f851bd27ac9a6f84233ebf216b434eb38551626f43e9b819b217f91d99c75ac",
+      "bytes": 8099
+    },
+    {
+      "path": "tests/data/pr_constant_gauge_cell1.json",
+      "sha256": "bef8860d34090c629be693dbc3e91592b1cde36413d817be3d9421665faad126",
+      "bytes": 392
+    },
+    {
+      "path": "tests/data/pr_constant_gauge_cell1.npz",
+      "sha256": "74f809e6eafded8325ed680ae6bda2d20e7bd09daec5c3143cd02a472e02d4b5",
+      "bytes": 5854
+    },
+    {
+      "path": "docs/pr_transverse_constant_gauge.md",
+      "sha256": "0d2267469e83ee657ad633a80a1ec9be57a4bdf67564138ed15d4608e1d2af3b",
+      "bytes": 3483
+    }
+  ],
+  "wolfram_reference_sha256": "a69cdbc93683534912ab6113a1a6accdbe4cc98f3a277066169533e972f57cca",
+  "retained_h200_job": "6585850",
+  "retained_h200_scope": "Synthetic parity/replay/rollback and bounded resource checks only; no physical Figure 11 or large-domain qualification.",
+  "fresh_integration_scope": "CPU and installed-package validation only; no GPU or cluster computation.",
+  "integration_edits": {
+    "docs/pr_transverse_constant_gauge.md": "Update retained synthetic H200 scope; original derivation unchanged.",
+    "tests/test_engine_frontend_independence.py": "Exercise corrected two-cell/replay engine with optional adapters blocked.",
+    "tests/test_pr_transverse_constant_gauge.py": "Add retained Wolfram reference and independent analytic differentiation-matrix comparison."
+  },
+  "reference_fixture": {
+    "path": "tests/data/pr_constant_gauge_wolfram.json",
+    "sha256": "a69cdbc93683534912ab6113a1a6accdbe4cc98f3a277066169533e972f57cca",
+    "script": "tests/data/pr_constant_gauge_reference.wls"
+  }
+}

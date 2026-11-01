@@ -58,6 +58,27 @@ def test_headless_calculation_and_persistence_without_frontends(tmp_path):
         loaded = load_experiment(path, expected_material_id='pr')
         assert loaded.workflow_id == PR_STATIC_WORKFLOW
         assert loaded.request == legacy
+
+        from lcprop.pr.transverse.static import PRTransverseStaticMaterialSolverOptions
+        from lcprop.pr.transverse.marching_static import (
+            PRTransverseMarchingStaticOptions, PRTransverseMarchingStaticRunRequest)
+        from lcprop.pr.transverse.streaming import run_pr_transverse_streaming
+        assert PRTransverseStaticMaterialSolverOptions().potential_space == 'derivative_resolved_v1'
+        corrected = PRTransverseMarchingStaticRunRequest(
+            grid=GridSpec(Nx=8, Ny=8, x_aperture_um=40., y_aperture_um=40.,
+                          dz_um=5., z_length_um=15.),
+            beams=BeamStack(channels=(BeamChannel(coherence_group='engine'),)),
+            material=PRMaterialSpec(dark_intensity=.4, uniform_background_intensity=.1,
+                                   gain_length_product=1e-3,
+                                   characteristic_wavenumber_per_um_override=.1),
+            solver=PRTransverseMarchingStaticOptions(material_solver=
+                PRTransverseStaticMaterialSolverOptions(potential_space='constant_gauge_v1')),
+            initial_A=(np.exp(.01 * (-1.) ** np.arange(8)[:, None])
+                       * np.ones((1, 8)))[None].astype(complex))
+        replay = run_pr_transverse_streaming(corrected, stop_after_accepted_cells=2)
+        assert replay.converged
+        assert all(replay.diagnostics['replay_checks'].values())
+        assert replay.first_pass.resolved_profile['solver']['material_solver']['potential_space'] == 'constant_gauge_v1'
         print('Headless calculation, codec and legacy persistence passed')
     ''')
     result = subprocess.run(
