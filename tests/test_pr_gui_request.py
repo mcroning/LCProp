@@ -145,19 +145,38 @@ def test_static_selection_builds_only_static_semantics_and_auto_tolerances(app):
     evolution_panel.precision.setCurrentText("float32")
 
     request = _build(controls)
-    from lcprop.pr.published_static import PublishedStaticRequest
+    from lcprop.pr.unified.integration import UnifiedFreshRequest
+    from lcprop.pr.unified.solver_specs import REDUCED
     from lcprop.pr.gui.request_adapter import validate_pr_gui_workflow_request
     preflight = validate_pr_gui_workflow_request(request)
-    assert isinstance(request, PublishedStaticRequest)
+    assert isinstance(request, UnifiedFreshRequest)
     assert request.backend.precision == "float32"
-    assert not hasattr(request, "solver")
-    assert not hasattr(request.material_solver, "optical_substeps")
+    assert request.solver.identity == REDUCED
+    assert request.closure.dimension == 1
+    assert not hasattr(request, "initial_E")
+    assert not hasattr(request.solver, "optical_substeps")
     assert preflight.warnings == ()
     assert evolution_panel.Nt.isHidden()
     assert evolution_panel.dt_normalized.isHidden()
     assert evolution_panel.integrator.isHidden()
     assert evolution_panel.max_coupled_passes.isHidden()
-    assert not evolution_panel.material_iterations.isHidden()
+    assert evolution_panel.material_iterations.isHidden()
+    assert not evolution_panel.unified_closure.isHidden()
+
+
+def test_explicit_published_request_keeps_its_engine_identity(app):
+    from lcprop.pr.published_static import PublishedStaticRequest, PR_PUBLISHED_STATIC_WORKFLOW
+    from lcprop.pr.unified.integration import UnifiedFreshRequest, WORKFLOW_ID
+
+    controls = _controls(app)
+    controls[0].set_material(PRMaterialSpec())
+    controls[-1].set_workflow_id(PR_PUBLISHED_STATIC_WORKFLOW)
+    assert isinstance(_build(controls), PublishedStaticRequest)
+    assert controls[-1].workflow_id() == PR_PUBLISHED_STATIC_WORKFLOW
+
+    controls[-1].set_workflow_id(WORKFLOW_ID)
+    assert isinstance(_build(controls), UnifiedFreshRequest)
+    assert controls[-1].workflow_id() == WORKFLOW_ID
 
 
 def test_beam_stack_inverse_mapping_preserves_optical_fields_and_signs(app):

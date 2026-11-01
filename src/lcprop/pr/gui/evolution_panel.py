@@ -337,6 +337,7 @@ class PREvolutionPanel(QWidget):
             self._refresh_workflow_controls()
             return
         if workflow_id == PR_PUBLISHED_STATIC_WORKFLOW:
+            self.legacy_static = True
             self.set_workflow_id(PR_STATIC_WORKFLOW)
             return
         index = self.workflow.findData(workflow_id)
@@ -353,7 +354,8 @@ class PREvolutionPanel(QWidget):
         self._refresh_workflow_controls()
 
     def _image_amplification_status_for_workflow(self, workflow_id: str) -> str:
-        if workflow_id == PR_PUBLISHED_STATIC_WORKFLOW:
+        if workflow_id in (PR_STATIC_WORKFLOW, PR_PUBLISHED_STATIC_WORKFLOW):
+            # Legacy midpoint Static remains an engine API, not a GUI workflow.
             return "unavailable"
         status = next(
             capability.validation_status

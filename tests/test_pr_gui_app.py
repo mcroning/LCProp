@@ -55,12 +55,15 @@ def test_pr_application_main_constructs_shows_and_connects_shutdown(
     _Application.instances.clear()
     _Window.instances.clear()
     monkeypatch.setattr(pr_app, "QApplication", _Application)
+    configured = []
+    monkeypatch.setattr(pr_app, "configure_application_font", configured.append)
     monkeypatch.setattr(pr_app, "PRMainWindow", _Window)
     monkeypatch.setattr(pr_app.sys, "argv", ["lcprop-pr", "--example"])
 
     exit_code = pr_app.main()
 
     application = _Application.instances[0]
+    assert configured == [application]
     window = _Window.instances[0]
     assert exit_code == 23
     assert application.argv == ["lcprop-pr", "--example"]

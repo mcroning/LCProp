@@ -96,7 +96,10 @@ def test_rejected_request_retains_previous_result_and_request(app, monkeypatch, 
     assert "Previous result" in workspace.result_ownership.text()
     assert "successful request" in workspace.request_summary.toPlainText()
     assert "correct the beam configuration" in workspace.operation_status.text()
-    assert "Traceback" in workspace.console.toPlainText()
+    if window_type is PRMainWindow:
+        assert "Invalid request: correct the beam configuration" in workspace.console.toPlainText()
+    else:
+        assert "Traceback" in workspace.console.toPlainText()
     assert not window._background_running
     assert workspace.image_pane._run_data.fields['intensity'].data is data.fields['intensity'].data
     window.close()
@@ -368,7 +371,12 @@ def test_pr_continuation_dispatch_is_local_with_slurm_and_noncheckout_source(app
     monkeypatch.setattr(runner, "preflight_source", forbidden)
     monkeypatch.setattr(runner, "run_registered", forbidden)
     monkeypatch.setattr(window.remote_execution_controls, "validate_backend", forbidden)
-    checkpoint = SimpleNamespace(completed_steps=3, time_normalized=0.003)
+    from lcprop.pr.specs import PRMaterialSpec
+    # Exercise the legacy local-continuation route explicitly. Physical
+    # normalization uses a separate continuation dialog/request contract.
+    window.material_panel.set_material(PRMaterialSpec())
+    checkpoint = SimpleNamespace(completed_steps=3, time_normalized=0.003,
+                                 request=window.build_request())
     window.last_checkpoint = checkpoint
     monkeypatch.setattr(module, "validate_pr_continuation", lambda request, supplied: None)
     dispatched = []
