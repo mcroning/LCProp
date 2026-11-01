@@ -35,16 +35,43 @@ from lcprop.persistence import (
 from lcprop.pr.gui.image_input_panel import PR_IMAGE_AMPLIFICATION_INPUT_MODE
 from lcprop.pr.gui.main_window import PRMainWindow
 from lcprop.pr.image_amplification import PR_IMAGE_AMPLIFICATION_WORKFLOW
-from lcprop.pr.specs import PR_MATERIAL_ID
+from lcprop.pr.specs import PR_MATERIAL_ID, PRMaterialSpec
+from lcprop.pr.illumination import LEGACY_NORMALIZATION
+from lcprop.pr.unified.integration import UnifiedFreshRequest, WORKFLOW_ID as UNIFIED_WORKFLOW
+from lcprop.pr.gui.request_adapter import apply_pr_request
 from lcprop.pr.static import PRStaticSolverOptions
-from lcprop.pr.static_workflow import PR_STATIC_WORKFLOW
-from lcprop.pr.transverse.static_workflow import PR_TRANSVERSE_STATIC_WORKFLOW
+from lcprop.pr.static_workflow import PR_STATIC_WORKFLOW, PRStaticRunRequest
+from lcprop.pr.transverse.static_workflow import PR_TRANSVERSE_STATIC_WORKFLOW, PRTransverseStaticRunRequest
 from lcprop.pr.transverse.specs import PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
 
 
 @pytest.fixture(scope="module")
 def app():
     return QApplication.instance() or QApplication([])
+
+
+def _apply_legacy_static(window, workflow_id):
+    """Exercise explicit engine requests, independently of fresh GUI defaults."""
+    assert workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW
+    request = PRTransverseStaticRunRequest(grid=window.grid_panel.grid(),
+                           beams=window.beam_panel.beams(), material=PRMaterialSpec())
+    apply_pr_request(request, material_panel=window.material_panel,
+                     beam_panel=window.beam_panel, grid_panel=window.grid_panel,
+                     evolution_panel=window.evolution_panel)
+    assert window.build_request() == request
+
+
+def test_reduced_static_image_mode_reports_gui_limit_without_changing_engine(app, tmp_path):
+    image_path = tmp_path / 'reduced-static.png'
+    image = QImage(8, 6, QImage.Format.Format_RGBA8888)
+    image.fill(0x6080A0FF)
+    assert image.save(str(image_path), 'PNG')
+    window = PRMainWindow()
+    _configure_image_amplification_window(window, image_path, PR_STATIC_WORKFLOW)
+    assert window.evolution_panel._image_amplification_status_for_workflow(PR_STATIC_WORKFLOW) == 'unavailable'
+    with pytest.raises(ValueError, match='not Image Amplification'):
+        window.build_request()
+    window.close()
 
 
 def _make_angle_stack():
@@ -120,6 +147,10 @@ def _configure_image_amplification_window(window, image_path, workflow_id):
     )
     window.input_panel.input_mode.setCurrentIndex(mode_index)
     window.evolution_panel.set_workflow_id(workflow_id)
+    if workflow_id in (PR_STATIC_WORKFLOW, PR_TRANSVERSE_STATIC_WORKFLOW):
+        # These explicit legacy engine algorithms use channel-peak normalization.
+        normalization = window.material_panel.normalization_mode
+        normalization.setCurrentIndex(normalization.findData(LEGACY_NORMALIZATION))
     window.grid_panel.Nx.setValue(32)
     window.grid_panel.Ny.setValue(16)
     window.grid_panel.x_aperture_um.setValue(80.0)
@@ -173,7 +204,6 @@ def _configure_image_amplification_window(window, image_path, workflow_id):
     "workflow_id",
     (
         "pr_timedependent",
-        PR_STATIC_WORKFLOW,
         PR_TRANSVERSE_STATIC_WORKFLOW,
         PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
     ),
@@ -470,7 +500,11 @@ def test_pr_experiment_cross_session_round_trip(app, tmp_path, workflow_id):
     loaded = target.load_experiment_from(path)
 
     assert loaded.request == expected == target.build_request()
-    assert target.evolution_panel.workflow_id() == workflow_id
+    expected_workflow = UNIFIED_WORKFLOW if workflow_id == PR_STATIC_WORKFLOW else workflow_id
+    assert loaded.workflow_id == expected_workflow
+    assert target.evolution_panel.workflow_id() == expected_workflow
+    if workflow_id == PR_STATIC_WORKFLOW:
+        assert isinstance(expected, UnifiedFreshRequest)
     beams = target.beam_panel.beam_stack_definition.beams
     assert beams[0].n_ext == 1.6
     assert beams[1].enabled is False
@@ -481,7 +515,7 @@ def test_pr_transverse_static_save_open_buttons_round_trip_exactly(
     app, tmp_path, monkeypatch
 ):
     source = PRMainWindow()
-    source.evolution_panel.set_workflow_id(PR_TRANSVERSE_STATIC_WORKFLOW)
+    _apply_legacy_static(source, PR_TRANSVERSE_STATIC_WORKFLOW)
     source.evolution_panel.backend.setCurrentText("cupy")
     source.evolution_panel.precision.setCurrentText("float32")
     source.evolution_panel.max_coupled_passes.setValue(37)
@@ -680,12 +714,12 @@ def test_pr_open_button_warns_that_lc_file_requires_lc_application(
     assert target.last_checkpoint is checkpoint
 
 
-def test_pr_unrepresentable_static_policy_is_rejected_before_changes(
+def test_legacy_midpoint_static_is_preserved_headlessly_and_rejected_before_gui_changes(
     app, tmp_path
 ):
     source = PRMainWindow()
-    source.evolution_panel.set_workflow_id(PR_STATIC_WORKFLOW)
-    request = source.build_request()
+    request = PRStaticRunRequest(grid=source.grid_panel.grid(),
+                                 beams=source.beam_panel.beams(), material=PRMaterialSpec())
     request = replace(
         request,
         solver=replace(
@@ -700,11 +734,12 @@ def test_pr_unrepresentable_static_policy_is_rejected_before_changes(
         material_id=PR_MATERIAL_ID,
         workflow_id=PR_STATIC_WORKFLOW,
     )
+    assert load_experiment(path, expected_material_id=PR_MATERIAL_ID).request == request
     target = PRMainWindow()
     target.grid_panel.Nx.setValue(96)
     before = target._capture_experiment_gui_state()
 
-    with pytest.raises(ValueError, match="cannot represent"):
+    with pytest.raises(ValueError, match="preserved headlessly"):
         target.load_experiment_from(path)
 
     assert target._capture_experiment_gui_state() == before

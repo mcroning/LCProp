@@ -158,6 +158,7 @@ def displayed_policy(result):
     """Result-owned provenance; never read the next-request selector."""
     policy=getattr(result,'result_policy',None) or getattr(result,'retention_summary',{}).get('policy','full')
     label={'minimal':'Minimal','fast':'Fast / Exploratory','interactive':'Interactive','full':'Full'}.get(policy,policy)
-    if policy=='fast' and hasattr(result,'run') and not result.run.viewer_previews:
+    if (policy == 'fast' and hasattr(result, 'run')
+            and hasattr(result.run, 'viewer_previews') and not result.run.viewer_previews):
         label+=' (historical fixed-cut products)'
     return label

@@ -250,6 +250,8 @@ class PRTransverseStaticRunResult:
 
 
 def _validate_request(request: PRTransverseStaticRunRequest) -> None:
+    if request.solver.material_solver.potential_space != "derivative_resolved_v1":
+        raise ValueError("constant-gauge potential space requires the causal marching/streaming workflow")
     request.grid.validate()
     request.beams.validate()
     request.material.validate()

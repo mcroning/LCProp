@@ -17,8 +17,13 @@ solver.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from lcprop.pr.disk_scattering import DiskScatteringPhases
+from lcprop.pr.indexed_scattering import IndexedScatteringPhases
+from lcprop.pr.gpu_indexed_scattering import GPUIndexedScatteringPhases
+from lcprop.pr.frozen_scattering import FrozenScatteringPhases
 import hashlib
 import math
+from numbers import Integral, Real
 from typing import Any
 
 import numpy as np
@@ -42,7 +47,11 @@ from lcprop.pr.source import (
     pr_driving_intensity,
 )
 from lcprop.pr.specs import PRMaterialSpec
-from lcprop.pr.static import solve_pr_static_intensity_batched
+from lcprop.pr.static import (
+    PR_STATIC_LINEAR_PYTHON,
+    _validate_linear_solver_backend,
+    solve_pr_static_intensity_batched,
+)
 from lcprop.pr.static_workflow import (
     PRCoupledStaticIterationRecord,
     PRCoupledStaticSliceSummary,
@@ -168,6 +177,7 @@ class PRStreamingPassResult:
     source_xz_at_y: dict[int, np.ndarray]
     source_yz_at_x: dict[int, np.ndarray]
     converged: bool
+    failure: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -186,6 +196,7 @@ class PRStreamingStaticResult:
     memory_policy: dict[str, Any]
     replay_diagnostics: dict[str, Any]
     status: str
+    execution_extent: dict[str, Any] | None = None
 
 
 def _backend_scalar(value) -> float:
@@ -497,8 +508,15 @@ def _run_streaming_pass(
     tolerances,
     window,
     xp: Any,
+    stop_after_accepted_cells: int | None = None,
+    frozen_scattering: FrozenScatteringPhases | DiskScatteringPhases | IndexedScatteringPhases | GPUIndexedScatteringPhases | None = None,
+    linear_solver_backend: str = PR_STATIC_LINEAR_PYTHON,
 ) -> tuple[PRStreamingPassResult, Any]:
     mode = request.solver.mode
+    material_backend = (
+        {} if linear_solver_backend == PR_STATIC_LINEAR_PYTHON
+        else {"linear_solver_backend": linear_solver_backend}
+    )
     coupled = request.solver.coupled
     groups = request.beams.coherence_groups
     dx_normalized = request.material.characteristic_wavenumber_per_um * grid.dx_um
@@ -562,7 +580,10 @@ def _run_streaming_pass(
             source = 0.5 * (source_before + source_after)
         return A_out, source
 
-    for z_index in range(grid.Nz):
+    failure = None
+    cell_limit = grid.Nz if stop_after_accepted_cells is None else stop_after_accepted_cells
+    for z_index in range(cell_limit):
+        material_accepted = True
         A_slice_in = A.copy()
         state = previous_state.copy()
 
@@ -587,6 +608,7 @@ def _run_streaming_pass(
                     dx_normalized=dx_normalized,
                     initial_E=state,
                     options=tolerances.material_solver,
+                    **material_backend,
                     xp=xp,
                 )
                 if not material_result.converged:
@@ -712,10 +734,12 @@ def _run_streaming_pass(
                     dx_normalized=dx_normalized,
                     initial_E=state,
                     options=tolerances.material_solver,
+                    **material_backend,
                     xp=xp,
                 )
                 state = material_result.E
                 material_status = material_result.status
+                material_accepted = material_result.converged
             full_residual = residual_at(state, intensity)
             if mode == PR_STREAMING_LEGACY_LINEARIZED_REFERENCE:
                 residual = legacy_linearized_static_residual_spectral(
@@ -743,15 +767,31 @@ def _run_streaming_pass(
             )
             A *= full_response[None, :, :] * window[None, :, :]
 
+        # Opt-in prefixes retain only accepted cells, never skip a failed cell.
+        # The default march deliberately keeps its historical behavior.
+        if stop_after_accepted_cells is not None:
+            finite = bool(xp.all(xp.isfinite(A))) and bool(xp.all(xp.isfinite(state)))
+            if not (converged and material_accepted and finite):
+                failure = {
+                    "z_index": z_index,
+                    "termination_reason": termination if finite else "nonfinite_candidate",
+                    "material_accepted": bool(material_accepted),
+                    "residual_accepted": bool(converged),
+                    "residual_rms": residual_rms,
+                    "residual_max": residual_max,
+                }
+                A = A_slice_in
+                break
         previous_state = state.copy()
-        noise_phase = _volume_noise_phase(
-            z_index,
-            request=request,
-            grid=grid,
-            xp=xp,
-        )
-        if noise_phase is not None:
-            A *= xp.exp(1j * noise_phase)[None, :, :]
+        if isinstance(frozen_scattering, (DiskScatteringPhases, IndexedScatteringPhases, GPUIndexedScatteringPhases)):
+            frozen_scattering.apply_to(A, z_index, xp=xp)
+        else:
+            noise_phase = (
+                _volume_noise_phase(z_index, request=request, grid=grid, xp=xp)
+                if frozen_scattering is None else frozen_scattering.phase(z_index)
+            )
+            if noise_phase is not None:
+                A *= xp.exp(1j * noise_phase)[None, :, :]
         state_moments.append(_moments(state, xp=xp))
         source_moments.append(_moments(intensity, xp=xp))
         residual_moments.append(_moments(residual, xp=xp))
@@ -787,7 +827,8 @@ def _run_streaming_pass(
             E_yz_at_x=_finalize_captures(E_yz),
             source_xz_at_y=_finalize_captures(source_xz),
             source_yz_at_x=_finalize_captures(source_yz),
-            converged=all(summary.converged for summary in summaries),
+            converged=failure is None and all(summary.converged for summary in summaries),
+            failure=failure,
         ),
         A,
     )
@@ -795,12 +836,69 @@ def _run_streaming_pass(
 
 def run_pr_static_streaming(
     request: PRStreamingStaticRequest,
+    *,
+    stop_after_accepted_cells: int | None = None,
+    launch_peak_intensity_reference: float | None = None,
+    frozen_scattering: FrozenScatteringPhases | DiskScatteringPhases | IndexedScatteringPhases | GPUIndexedScatteringPhases | None = None,
+    linear_solver_backend: str = PR_STATIC_LINEAR_PYTHON,
 ) -> PRStreamingStaticResult:
-    """Run a bounded-memory production or explicitly named reference march."""
+    """Run a bounded-memory production or explicitly named reference march.
+
+    ``linear_solver_backend`` selects only the nonlinear material linear solve.
+    The default is unchanged; ``cupy_rawkernel_cyclic_v1`` requires CuPy and a
+    nonlinear mode. It is reused during replay and recorded in backend_summary.
+    It does not modify the physical request, launch or scattering inputs.
+
+    ``frozen_scattering`` optionally supplies hash-verified phase inputs or an
+    explicitly selected deterministic indexed recipe.
+    It is validated before launch and reused by indexed access during replay;
+    frozen inputs are not regenerated; an indexed recipe regenerates only the
+    selected physical event using its bound historical prescription.
+
+    ``stop_after_accepted_cells`` limits execution, not the physical grid or
+    gain/noise normalization. A failed cell terminates an opt-in prefix without
+    committing that cell. Prefix convergence is never full-domain convergence.
+
+    For a transverse crop, supply ``initial_A`` and an explicit positive finite
+    ``launch_peak_intensity_reference``: the sum of per-channel maxima of
+    abs(A)**2 on the ORIGINAL full launch grid (not the coherent total peak).
+    Use the same amplitude units for the crop and reference. This scalar is
+    fixed across cells and replay. The caller must retain its full-grid origin;
+    the runner cannot infer an omitted Gaussian peak from a crop. Omitting it
+    preserves the historical local-launch normalization exactly.
+    """
 
     wavelength_um = _validate_request(request)
+    if (
+        linear_solver_backend != PR_STATIC_LINEAR_PYTHON
+        and request.solver.mode == PR_STREAMING_LEGACY_LINEARIZED_REFERENCE
+    ):
+        raise ValueError("linear solver backend selection applies only to nonlinear streaming modes")
+    nz = round_nz(request.grid.z_length_um, request.grid.dz_um)
+    if stop_after_accepted_cells is not None and (
+        isinstance(stop_after_accepted_cells, (bool, np.bool_))
+        or not isinstance(stop_after_accepted_cells, Integral)
+        or not 1 <= stop_after_accepted_cells <= nz
+    ):
+        raise ValueError("stop_after_accepted_cells must be an integer in [1, Nz]")
+    if launch_peak_intensity_reference is not None:
+        if request.initial_A is None:
+            raise ValueError("external launch peak requires explicit initial_A")
+        if (
+            isinstance(launch_peak_intensity_reference, (bool, np.bool_))
+            or not isinstance(launch_peak_intensity_reference, Real)
+            or not math.isfinite(launch_peak_intensity_reference)
+            or launch_peak_intensity_reference <= 0
+        ):
+            raise ValueError("launch_peak_intensity_reference must be finite and positive")
+    if frozen_scattering is not None:
+        if not isinstance(frozen_scattering, (FrozenScatteringPhases, DiskScatteringPhases, IndexedScatteringPhases, GPUIndexedScatteringPhases)):
+            raise TypeError("frozen_scattering must be FrozenScatteringPhases, DiskScatteringPhases, IndexedScatteringPhases or GPUIndexedScatteringPhases")
+        frozen_scattering.validate_for(request, required_cells=(
+            nz if stop_after_accepted_cells is None else stop_after_accepted_cells))
     backend = get_backend(request.backend)
     xp = backend.xp
+    _validate_linear_solver_backend(linear_solver_backend, xp=xp)
     grid = make_grid(request.grid, xp=xp, real_dtype=backend.real_dtype)
     launch = build_launch(
         request.beams,
@@ -844,8 +942,19 @@ def run_pr_static_streaming(
         xp=xp,
         real_dtype=backend.real_dtype,
     )
-    peak_reference = channel_peak_intensity_reference(A0, xp=xp)
+    if launch_peak_intensity_reference is None:
+        peak_reference = channel_peak_intensity_reference(A0, xp=xp)
+    else:
+        if not bool(xp.all(xp.isfinite(A0))):
+            raise ValueError("initial_A must be finite with an external launch peak")
+        crop_peak = _backend_scalar(
+            xp.sum(xp.max(xp.abs(A0) ** 2, axis=(-2, -1)))
+        )
+        if not math.isfinite(crop_peak) or launch_peak_intensity_reference < crop_peak:
+            raise ValueError("full-domain launch peak cannot be smaller than crop peak")
+        peak_reference = float(launch_peak_intensity_reference)
     arguments = dict(
+        stop_after_accepted_cells=stop_after_accepted_cells,
         request=request,
         A0=A0,
         grid=grid,
@@ -857,10 +966,15 @@ def run_pr_static_streaming(
         window=window,
         xp=xp,
     )
+    if frozen_scattering is not None:
+        arguments["frozen_scattering"] = frozen_scattering
+    if linear_solver_backend != PR_STATIC_LINEAR_PYTHON:
+        arguments["linear_solver_backend"] = linear_solver_backend
     first, first_A = _run_streaming_pass(**arguments)
     replay_execution = (
         _run_streaming_pass(**arguments)
         if request.solver.deterministic_replay
+        and (stop_after_accepted_cells is None or first.converged)
         else None
     )
     replay, replay_A = (None, None) if replay_execution is None else replay_execution
@@ -871,6 +985,13 @@ def run_pr_static_streaming(
             "performed": False,
             "specification": "disabled explicitly",
             "consistent": False,
+        }
+        final_A = first_A
+    elif stop_after_accepted_cells is not None and not replay.converged:
+        replay_diagnostics = {
+            "performed": True,
+            "consistent": False,
+            "specification": "prefix replay failed; first-pass field retained",
         }
         final_A = first_A
     else:
@@ -910,11 +1031,42 @@ def run_pr_static_streaming(
             "consistent": field_consistent and moments_consistent,
         }
         final_A = replay_A
-    completed = grid.Nz
+    if stop_after_accepted_cells is not None:
+        replay_diagnostics["requested_cells"] = int(stop_after_accepted_cells)
+        replay_diagnostics["first_accepted_cells"] = len(first.slice_summaries)
+        replay_diagnostics["replay_accepted_cells"] = (
+            None if replay is None else len(replay.slice_summaries)
+        )
+        if replay is not None and not replay_diagnostics["consistent"]:
+            final_A = first_A
+        if not first.converged and request.solver.deterministic_replay:
+            replay_diagnostics["specification"] = "skipped: first prefix failed"
+    completed = (
+        grid.Nz if stop_after_accepted_cells is None else len(first.slice_summaries)
+    )
     converged = first.converged and (replay is None or replay.converged)
     replay_ok = replay is None or replay_diagnostics["consistent"]
     status = "converged" if converged and replay_ok else "not_converged"
+    extent = None
+    if stop_after_accepted_cells is not None or launch_peak_intensity_reference is not None:
+        extent = {
+            "requested_accepted_cells": (
+                None if stop_after_accepted_cells is None else int(stop_after_accepted_cells)
+            ),
+            "physical_length_um": float(request.grid.z_length_um),
+            "physical_Nz": grid.Nz,
+            "propagated_distance_um": float(completed * grid.dz_um),
+            "partial_domain_prefix": completed < grid.Nz,
+            "launch_peak_intensity_reference": float(peak_reference),
+            "launch_peak_source": (
+                "explicit_full_domain"
+                if launch_peak_intensity_reference is not None else "local_launch"
+            ),
+        }
+    if stop_after_accepted_cells is not None and completed < grid.Nz:
+        status = "prefix_converged" if status == "converged" else "prefix_failed"
     return PRStreamingStaticResult(
+        execution_extent=extent,
         A_initial=np.asarray(asnumpy(A0)).copy(),
         A_final=np.asarray(asnumpy(final_A)).copy(),
         first_pass=first,
@@ -922,7 +1074,11 @@ def run_pr_static_streaming(
         power_initial=normalized_power(A0, grid),
         power_final=normalized_power(final_A, grid),
         completed_slices=completed,
-        backend_summary=backend.summary(),
+        backend_summary={
+            **backend.summary(),
+            **({"pr_static_linear_solver_backend": linear_solver_backend}
+               if linear_solver_backend != PR_STATIC_LINEAR_PYTHON else {}),
+        },
         tolerance_provenance=tolerances.provenance(),
         memory_policy={
             "retained_material_volume": False,
@@ -939,6 +1095,8 @@ def run_pr_static_streaming(
                     xp=xp,
                 ),
             },
+            **({"frozen_scattering": frozen_scattering.provenance()}
+               if frozen_scattering is not None else {}),
             "captured_y_indices": tuple(request.solver.capture_y_indices),
             "captured_x_indices": tuple(request.solver.capture_x_indices),
             "host_boundary": "final fields, summaries, moments, and requested cross-sections only",

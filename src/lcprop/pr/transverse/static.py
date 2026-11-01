@@ -9,6 +9,9 @@ from typing import Any, Callable
 
 import numpy as np
 
+from .discretization import (DERIVATIVE_RESOLVED_V1, CONSTANT_GAUGE_V1,
+                             potential_null_mask, validate_potential_space)
+
 from lcprop.core.backend import asnumpy, scalar_float
 from lcprop.pr.transverse.transport import (
     potential_rhs,
@@ -61,7 +64,10 @@ class PRTransverseStaticMaterialSolverOptions:
     minimum_step_scale: float = 2.0**-16
     armijo_fraction: float = 1.0e-4
 
+    potential_space: str = DERIVATIVE_RESOLVED_V1
+
     def validate(self) -> None:
+        validate_potential_space(self.potential_space)
         if int(self.max_newton_iterations) < 1:
             raise ValueError("max_newton_iterations must be at least one")
         if int(self.max_pcg_iterations) < 1:
@@ -252,6 +258,7 @@ def _symbols(
     dx_normalized: float,
     dy_normalized: float,
     h_y: float,
+    potential_space: str = DERIVATIVE_RESOLVED_V1,
     xp: Any = np,
 ):
     kx, ky = spectral_wavevectors(
@@ -261,7 +268,7 @@ def _symbols(
         xp=xp,
     )
     denominator = kx * kx + float(h_y) * ky * ky
-    return denominator, denominator == 0.0
+    return denominator, potential_null_mask(denominator, potential_space, xp=xp)
 
 
 def project_production_resolved_modes(
@@ -283,6 +290,16 @@ def project_production_resolved_modes(
         xp=xp,
     )
     return _project_resolved_modes(array, null_mask=null_mask, xp=xp)
+
+
+def project_static_potential(value, *, dx_normalized, dy_normalized, h_y=1.0,
+                             potential_space=DERIVATIVE_RESOLVED_V1, xp=np):
+    """Project the selected potential space, retaining checkerboards when opted in."""
+    array = _validate_real_array(value, name="value", xp=xp)
+    _, mask = _symbols(array.shape[-2:], dx_normalized=dx_normalized,
+                       dy_normalized=dy_normalized, h_y=h_y,
+                       potential_space=potential_space, xp=xp)
+    return _project_resolved_modes(array, null_mask=mask, xp=xp)
 
 
 def _project_resolved_modes(array, *, null_mask, xp: Any):
@@ -310,6 +327,7 @@ def static_equilibrium_residual(
     dx_normalized: float,
     dy_normalized: float,
     h_y: float = 1.0,
+    potential_space: str = DERIVATIVE_RESOLVED_V1,
     xp: Any = np,
 ) -> Any:
     """Return ``P - (exp(-psi)/I)/mean(exp(-psi)/I)``.
@@ -331,6 +349,7 @@ def static_equilibrium_residual(
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=h_y,
+        potential_space=potential_space,
         xp=xp,
     )
     return _static_equilibrium_residual_arrays(
@@ -340,6 +359,7 @@ def static_equilibrium_residual(
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=h_y,
+        potential_space=potential_space,
         xp=xp,
     )
 
@@ -353,6 +373,7 @@ def _static_equilibrium_residual_arrays(
     dy_normalized: float,
     h_y: float,
     xp: Any,
+    potential_space: str = DERIVATIVE_RESOLVED_V1,
 ):
     """Evaluate validated backend arrays without repeating host-side checks."""
 
@@ -362,6 +383,7 @@ def _static_equilibrium_residual_arrays(
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=h_y,
+        potential_space=potential_space,
         xp=xp,
     )
     equilibrium_carrier = _normalized_equilibrium_carrier(resolved, driving, xp=xp)
@@ -935,6 +957,7 @@ def _solve_plane(
             dy_normalized=dy_normalized,
             h_y=h_y,
             xp=xp,
+            potential_space=options.potential_space,
         )
     denominator, null_mask = spectral_operators
     psi = _project_resolved_modes(
@@ -946,6 +969,7 @@ def _solve_plane(
         dy_normalized=dy_normalized,
         h_y=h_y,
         xp=xp,
+        potential_space=options.potential_space,
     )
     if bool(asnumpy(xp.any(initial_state.carrier_density <= 0.0))):
         raise ValueError("initial_psi reconstructs nonpositive carrier density")
@@ -966,6 +990,7 @@ def _solve_plane(
             dy_normalized=dy_normalized,
             h_y=h_y,
             xp=xp,
+            potential_space=options.potential_space,
         )
         _raise_if_cancelled(
             cancellation_check, stage="material_residual_construction"
@@ -982,7 +1007,8 @@ def _solve_plane(
         resolved_residual = _project_resolved_modes(
             residual, null_mask=null_mask, xp=xp
         )
-        equilibrium_rms, equilibrium_max = _metrics(resolved_residual, xp=xp)
+        equilibrium_rms, equilibrium_max = _metrics(
+            residual if options.potential_space == CONSTANT_GAUGE_V1 else resolved_residual, xp=xp)
         td_rhs_rms, td_rhs_max = _metrics(td_residual, xp=xp)
         if _criteria_met(
             equilibrium_rms,
@@ -1058,6 +1084,7 @@ def _solve_plane(
                 dy_normalized=dy_normalized,
                 h_y=h_y,
                 xp=xp,
+                potential_space=options.potential_space,
             )
             valid_trial = xp.all(
                 xp.isfinite(trial) & (trial_state.carrier_density > 0.0)
@@ -1071,6 +1098,7 @@ def _solve_plane(
                     dy_normalized=dy_normalized,
                     h_y=h_y,
                     xp=xp,
+                    potential_space=options.potential_space,
                 )
                 _raise_if_cancelled(
                     cancellation_check, stage="material_line_search"
@@ -1080,7 +1108,8 @@ def _solve_plane(
                     null_mask=null_mask,
                     xp=xp,
                 )
-                after_rms, after_max = _metrics(trial_resolved_residual, xp=xp)
+                after_rms, after_max = _metrics(
+                    trial_residual if options.potential_space == CONSTANT_GAUGE_V1 else trial_resolved_residual, xp=xp)
                 if (
                     math.isfinite(after_rms)
                     and after_rms
@@ -1124,6 +1153,7 @@ def _solve_plane(
         dy_normalized=dy_normalized,
         h_y=h_y,
         xp=xp,
+        potential_space=options.potential_space,
     )
     td_residual = potential_rhs(
         psi,
@@ -1137,11 +1167,12 @@ def _solve_plane(
     resolved_residual = _project_resolved_modes(
         residual, null_mask=null_mask, xp=xp
     )
-    equilibrium_rms, equilibrium_max = _metrics(resolved_residual, xp=xp)
+    equilibrium_rms, equilibrium_max = _metrics(
+            residual if options.potential_space == CONSTANT_GAUGE_V1 else resolved_residual, xp=xp)
     td_rhs_rms, td_rhs_max = _metrics(td_residual, xp=xp)
     null_rms, null_max = _metrics(
         _derivative_null_residual_array(
-            residual, null_mask=null_mask, xp=xp
+            residual, null_mask=denominator == 0.0, xp=xp
         ),
         xp=xp,
     )
@@ -1151,6 +1182,7 @@ def _solve_plane(
         dy_normalized=dy_normalized,
         h_y=h_y,
         xp=xp,
+        potential_space=options.potential_space,
     )
     (
         physical_state_valid,
@@ -1235,6 +1267,7 @@ def _solve_continuum_static_intensity(
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=h_y,
+        potential_space=resolved_options.potential_space,
         xp=xp,
     )
     for plane_index in range(driving_volume.shape[0]):
@@ -1359,6 +1392,7 @@ def _solve_pr_transverse_static_intensity_host_volume(
         dx_normalized=dx_normalized,
         dy_normalized=dy_normalized,
         h_y=h_y,
+        potential_space=resolved_options.potential_space,
         xp=xp,
     )
     for plane_index in range(driving_volume.shape[0]):
@@ -1669,6 +1703,8 @@ def solve_pr_transverse_discrete_static_intensity(
     started = perf_counter()
     material_options = options or PRTransverseStaticMaterialSolverOptions()
     material_options.validate()
+    if material_options.potential_space != DERIVATIVE_RESOLVED_V1:
+        raise ValueError("constant-gauge potential space is not a TD-discrete corrector option")
     resolved_corrector = (
         corrector_options or PRTransverseDiscreteStaticCorrectorOptions()
     )

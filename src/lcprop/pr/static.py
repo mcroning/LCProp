@@ -12,6 +12,20 @@ from lcprop.pr.cyclic import solve_cyclic_tridiagonal_rows
 from lcprop.pr.evolution import hopping_rhs, periodic_derivatives_x
 
 
+PR_STATIC_LINEAR_PYTHON = "python_cyclic_v1"
+PR_STATIC_LINEAR_COMPILED = "cupy_rawkernel_cyclic_v1"
+
+
+def _validate_linear_solver_backend(linear_solver_backend: str, *, xp: Any) -> None:
+    if linear_solver_backend not in (PR_STATIC_LINEAR_PYTHON, PR_STATIC_LINEAR_COMPILED):
+        raise ValueError("unknown PR static linear solver backend")
+    if (
+        linear_solver_backend == PR_STATIC_LINEAR_COMPILED
+        and getattr(xp, "__name__", "") != "cupy"
+    ):
+        raise ValueError("cupy_rawkernel_cyclic_v1 requires the CuPy backend")
+
+
 @dataclass(frozen=True)
 class PRStaticSolverOptions:
     """Controls for the CPU reference damped-Newton solve."""
@@ -508,15 +522,25 @@ def solve_pr_static_intensity_batched(
     initial_E: Any | None = None,
     options: PRStaticSolverOptions = PRStaticSolverOptions(),
     xp: Any = np,
+    linear_solver_backend: str = PR_STATIC_LINEAR_PYTHON,
 ) -> PRStaticResult:
     """Solve ``R(E; I)=0`` with the O(Nx) batched cyclic direction.
 
     Arrays and nonlinear iteration remain on the explicitly supplied NumPy- or
     CuPy-like backend. The dense oracle uses the same residual, damping, and
     acceptance contract; only the linear-system implementation differs.
+    ``linear_solver_backend="cupy_rawkernel_cyclic_v1"`` explicitly opts into
+    the qualified compiled CuPy cyclic solver. The default remains the Python
+    cyclic implementation. Selection is execution-only, not a material option.
     """
 
+    _validate_linear_solver_backend(linear_solver_backend, xp=xp)
+
     def structured_direction(residual, lower, diagonal, upper):
+        if linear_solver_backend == PR_STATIC_LINEAR_COMPILED:
+            from lcprop.pr.cyclic_gpu import solve_cyclic_tridiagonal_rows_gpu
+
+            return solve_cyclic_tridiagonal_rows_gpu(lower, diagonal, upper, -residual)
         return batched_newton_direction(
             residual,
             lower,
@@ -551,6 +575,8 @@ def solve_pr_static_intensity_batched(
 
 
 __all__ = [
+    "PR_STATIC_LINEAR_PYTHON",
+    "PR_STATIC_LINEAR_COMPILED",
     "PRStaticIterationRecord",
     "PRStaticResult",
     "PRStaticSolverOptions",

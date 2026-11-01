@@ -1,0 +1,8 @@
+{
+  "source_job": "6583849",
+  "source_record": "results/Research/fig11-transverse-xorwow-failure-review-v1/retrieved/evidence/trial-capture/0043-evaluation.json",
+  "source_arrays_sha256": "28a8179f9ba1c7dfc2bf29a02b83256f4c9280ece16689ef6099e62635790f04",
+  "fixture_sha256": "74f809e6eafded8325ed680ae6bda2d20e7bd09daec5c3143cd02a472e02d4b5",
+  "synthetic": true,
+  "not_Figure11": true
+}

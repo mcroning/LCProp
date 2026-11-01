@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import traceback
+import re
 
 
 def begin_request(window, operation: str) -> None:
@@ -39,7 +40,10 @@ def report_failure(window, formatted_traceback: str) -> None:
     lines = formatted_traceback.strip().splitlines()
     cause = lines[-1] if lines else "Unknown failure"
     if 'nyquist' in formatted_traceback.lower():
-        cause = 'Optical launch exceeds grid sampling (Nyquist); adjust beam angles or grid/aperture'
+        minimums = tuple(dict.fromkeys(re.findall(r'minimum N[xy]=\d+', formatted_traceback)))
+        cause = 'Optical launch exceeds Grid sampling (Nyquist); adjust beam angles or grid/aperture'
+        if minimums:
+            cause += '; ' + '; '.join(minimums)
     elif len(cause) > 180:
         cause = cause[:177] + '…'
     workspace = window.results_panel.workspace

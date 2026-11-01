@@ -802,6 +802,7 @@ def format_pr_resource_estimate(estimate: PRResourceEstimate) -> str:
 
     nx, ny, nz = estimate.grid_shape
     model_labels = {
+        "unified_nonlinear": "Unified nonlinear Static",
         "published_static_field_linear_local_intensity": "Published optical-first Static — Local-I",
         "published_static_nonlinear": "Published optical-first Static — nonlinear hopping",
         "local_plane_field_linear": "Local-intensity field-linear Static — streaming local planes",
