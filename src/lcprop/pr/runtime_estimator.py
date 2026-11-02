@@ -559,26 +559,33 @@ def _result_sizes(
     # Accepted-time presentation history is bounded and retained by Fast too.
     # Three transverse movies (optical/material/far field) and two z cuts;
     # include conservative base64/zlib overhead, independent of full volumes.
+    # This is an upper allowance, not a minimum: legacy packages have no
+    # history, and repeated/smooth current frames can compress to very little.
     movie_allowance = 0
     if not static:
         frames = min(int(request.solver.Nt) + 1, 36)
         px, py, pz = min(nx, 128), min(ny, 128), min(nz, 128)
         movie_raw = frames * 4 * (3*px*py + px*pz + py*pz)
         movie_allowance = 2*movie_raw + 65536
-        fast_raw += movie_allowance
     retained_volumes = 5 if (static and full_transverse) else 4 if static else 3
     full_raw = max(
         fast_raw - preview,
         endpoints
         + optical_products
         + retained_volumes * volume * real_bytes
-        + metadata_allowance + movie_allowance,
+        + metadata_allowance,
     )
     fast_factors = tuple(float(value) for value in size_policy["fast_range_factors"])
     full_factors = tuple(float(value) for value in size_policy["full_range_factors"])
     return (
-        EstimateRange(fast_factors[0] * fast_raw, fast_factors[1] * fast_raw, "bytes"),
-        EstimateRange(full_factors[0] * full_raw, full_factors[1] * full_raw, "bytes"),
+        EstimateRange(
+            fast_factors[0] * fast_raw,
+            fast_factors[1] * (fast_raw + movie_allowance), "bytes",
+        ),
+        EstimateRange(
+            full_factors[0] * full_raw,
+            full_factors[1] * (full_raw + movie_allowance), "bytes",
+        ),
     )
 
 
@@ -694,6 +701,12 @@ def estimate_pr_resources(request) -> PRResourceEstimate:
         static=static,
         full_transverse=full_transverse,
     )
+    if not static:
+        notes = (*notes,
+            "Result-size lower estimates use the baseline retained arrays; "
+            "upper estimates include bounded accepted-time movies. Compressed "
+            "movie size depends on frame content; legacy packages omit movies. "
+            "These are planning ranges, not guaranteed archive bounds.")
     gpu_memory, host_memory = _memory_ranges(
         request,
         cell=cell,

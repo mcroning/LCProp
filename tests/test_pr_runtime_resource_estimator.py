@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import numpy as np
 
 from lcprop.core.backend import BackendSpec
 from lcprop.core.beams import BeamChannel, BeamStack
@@ -229,6 +230,46 @@ def test_nonlinear_static_holdout_memory_projection_and_low_confidence():
     assert estimate.peak_host_memory.low == pytest.approx(25.0 * GIB)
     assert estimate.peak_host_memory.high == pytest.approx(45.0 * GIB)
     assert "Newton/PCG" in " ".join(estimate.qualifications)
+
+
+@pytest.mark.parametrize("transport", ("reduced", "full"))
+@pytest.mark.parametrize("precision", ("float32", "float64"))
+def test_td_movie_planning_allows_compression_and_caps_retained_history(transport, precision):
+    request = _request(transport, "td", PR_MATERIAL_RESPONSE_NONLINEAR)
+    request = replace(request, backend=replace(request.backend, precision=precision))
+    short = estimate_pr_resources(request)
+    capped = estimate_pr_resources(replace(request, solver=replace(request.solver, Nt=35)))
+    longer = estimate_pr_resources(replace(request, solver=replace(request.solver, Nt=100)))
+    # Content-dependent compressed history is an upper scenario. More accepted
+    # times cannot force an uncompressed minimum or exceed the 36-frame cap.
+    for name in ("fast_result_size", "full_result_size"):
+        a, b, c = (getattr(e, name) for e in (short, capped, longer))
+        assert a.low == b.low == c.low
+        assert a.high < b.high == c.high
+    assert "legacy packages omit movies" in " ".join(short.qualifications)
+
+
+@pytest.mark.parametrize("pattern", ("constant", "random"))
+@pytest.mark.parametrize("nt", (3, 35))
+def test_td_size_range_covers_historical_package_plus_actual_packed_movies(pattern, nt):
+    from lcprop.pr.trajectory import pack_frames
+
+    request = _request("full", "td", PR_MATERIAL_RESPONSE_LINEARIZED)
+    request = replace(request, solver=replace(request.solver, Nt=nt))
+    estimate = estimate_pr_resources(request)
+    rng = np.random.default_rng(143)
+    movies = []
+    for x, y in ((128, 128),) * 3 + ((128, 2), (128, 2)):
+        shape = (nt + 1, x, y)
+        frames = (np.ones(shape, dtype=np.float32) if pattern == "constant"
+                  else rng.random(shape, dtype=np.float32))
+        movies.append(pack_frames(frames))
+    # Use the real compression/base64 codec, with both highly compressible
+    # and noisy payloads, without running a scientific calculation or encoder.
+    packed_bytes = len(json.dumps(movies).encode("utf-8"))
+    baseline = calibration_data()["cases"]["full_transverse_linearized_td_h200"][
+        "measurements"]["fast_package_bytes"]["value"]
+    assert estimate.fast_result_size.low <= baseline + packed_bytes <= estimate.fast_result_size.high
 
 
 @pytest.mark.parametrize(
