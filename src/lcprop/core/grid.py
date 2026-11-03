@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import import_module
 from typing import Any
 
 import numpy as np
@@ -28,9 +29,6 @@ class RuntimeGrid:
     dy_um: float
     dz_um: float
 
-    du: float
-    dv: float
-
     x_um: Array
     y_um: Array
     fx_um: Array
@@ -45,8 +43,6 @@ class RuntimeGrid:
             "dx_um": float(self.dx_um),
             "dy_um": float(self.dy_um),
             "dz_um": float(self.dz_um),
-            "du": float(self.du),
-            "dv": float(self.dv),
             "x_aperture_um": float(self.spec.x_aperture_um),
             "y_aperture_um": float(self.spec.y_aperture_um),
             "z_length_um": float(self.spec.z_length_um),
@@ -59,6 +55,33 @@ def round_nz(z_length_um: float, dz_um: float) -> int:
     return max(1, int(round(float(z_length_um) / float(dz_um))))
 
 
+@dataclass(frozen=True)
+class GridMetadata:
+    """Scalar geometry only; no coordinate, frequency, or scientific arrays."""
+
+    spec: GridSpec
+    Nx: int
+    Ny: int
+    Nz: int
+    dx_um: float
+    dy_um: float
+    dz_um: float
+
+
+def grid_metadata(spec: GridSpec) -> GridMetadata:
+    """Derive presentation/runtime geometry using the existing z convention."""
+
+    spec.validate()
+    nx, ny = int(spec.Nx), int(spec.Ny)
+    return GridMetadata(
+        spec=spec, Nx=nx, Ny=ny,
+        Nz=round_nz(spec.z_length_um, spec.dz_um),
+        dx_um=float(spec.x_aperture_um) / nx,
+        dy_um=float(spec.y_aperture_um) / ny,
+        dz_um=float(spec.dz_um),
+    )
+
+
 def make_grid(
     spec: GridSpec,
     *,
@@ -67,15 +90,9 @@ def make_grid(
 ) -> RuntimeGrid:
     """Build a runtime grid from GridSpec."""
 
-    spec.validate()
-
-    Nx = int(spec.Nx)
-    Ny = int(spec.Ny)
-    Nz = round_nz(spec.z_length_um, spec.dz_um)
-
-    dx_um = float(spec.x_aperture_um) / Nx
-    dy_um = float(spec.y_aperture_um) / Ny
-    dz_um = float(spec.dz_um)
+    metadata = grid_metadata(spec)
+    Nx, Ny, Nz = metadata.Nx, metadata.Ny, metadata.Nz
+    dx_um, dy_um, dz_um = metadata.dx_um, metadata.dy_um, metadata.dz_um
 
     x_um = (
         (xp.arange(Nx, dtype=real_dtype) - Nx / 2) * dx_um + 0.5 * dx_um
@@ -92,10 +109,6 @@ def make_grid(
         copy=False,
     )
 
-    # Trusted LC theta coordinates: u = 2x/d, with d = x aperture.
-    du = 2.0 / (Nx - 1)
-    dv = du * (dy_um / dx_um)
-
     return RuntimeGrid(
         spec=spec,
         xp=xp,
@@ -106,8 +119,6 @@ def make_grid(
         dx_um=dx_um,
         dy_um=dy_um,
         dz_um=dz_um,
-        du=du,
-        dv=dv,
         x_um=x_um,
         y_um=y_um,
         fx_um=fx_um,
@@ -116,21 +127,21 @@ def make_grid(
     )
 
 
-def from_cell(
-    *,
-    Nx: int,
-    Ny: int,
-    dz_um: float,
-    thickness_um: float,
-    y_aperture_um: float,
-    interaction_length_um: float,
-) -> GridSpec:
-    """Convenience constructor from LC-cell geometry."""
-    return GridSpec(
-        Nx=Nx,
-        Ny=Ny,
-        dz_um=dz_um,
-        x_aperture_um=thickness_um,
-        y_aperture_um=y_aperture_um,
-        z_length_um=interaction_length_um,
-    )
+_LC_COMPATIBILITY_EXPORTS = {"from_cell"}
+
+
+def __getattr__(name: str):
+    """Resolve historical LC conveniences from their canonical owner."""
+
+    if name not in _LC_COMPATIBILITY_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module("lcprop.lc.normalization"), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | _LC_COMPATIBILITY_EXPORTS)
+
+
+__all__ = ["GridMetadata", "grid_metadata", "RuntimeGrid", "from_cell", "make_grid", "round_nz"]

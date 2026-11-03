@@ -1,0 +1,84 @@
+{
+  "schema": "lcprop.pr_figure6_panel_comparison.v1",
+  "comparison_kind": "publication-raster-to-normalized-LCProp-product",
+  "published_panel_extraction": {
+    "input_crop_pixels_yx": [
+      [
+        95,
+        734
+      ],
+      [
+        282,
+        921
+      ]
+    ],
+    "output_crop_pixels_yx": [
+      [
+        89,
+        728
+      ],
+      [
+        282,
+        921
+      ]
+    ],
+    "colormap": "viridis",
+    "scale": "linear",
+    "input_limits_normalized_intensity": [
+      0.0,
+      0.5
+    ],
+    "output_limits_normalized_intensity": [
+      0.0,
+      1.5
+    ],
+    "field_of_view_um": [
+      -2000.0,
+      2000.0,
+      -2000.0,
+      2000.0
+    ]
+  },
+  "registration": {
+    "orientation": "horizontal reflection from persisted LCProp raster to published panel convention",
+    "input_shift_publication_pixels_yx": [
+      0,
+      6
+    ],
+    "output_shift_publication_pixels_yx": [
+      -12,
+      -12
+    ],
+    "note": "output optimum reached the bounded search edge and is not a stable physical registration"
+  },
+  "metrics": {
+    "input_direct": {
+      "pearson_correlation": -0.6019068281052565,
+      "normalized_rmse": 0.5699197959528921,
+      "edge_correlation": 0.4648561171345549
+    },
+    "input_polarity_corrected_display_hypothesis": {
+      "pearson_correlation": 0.6019068281052565,
+      "normalized_rmse": 0.2947042662886372,
+      "edge_correlation": 0.4648561171345549
+    },
+    "output_direct": {
+      "pearson_correlation": 0.06728367252329759,
+      "normalized_rmse": 0.36506680136915565,
+      "edge_correlation": 0.12419282899694563
+    }
+  },
+  "sources": {
+    "reference/prprop/photonics-12-00113-v3/Fig 6-a.png": "14a36afa232a06cdeab16b7b009ab4c7c2ac83848af83e09979b9a9f945fb5dc",
+    "reference/prprop/photonics-12-00113-v3/Fig 6-b.png": "55f192f5a043082467d4c11ae38b31ee8dbf6b1aa67148d55da9705ef15bfbca",
+    "job_2227722_input_signal.png": "319a604f95ff05aea3cecdf7403fb4f701a09f4640a8133d9abbc7cb945f3b85",
+    "job_2227722_output_signal.png": "7d779a5649dd3298aaa741c50ce10fbb0cc26649a6cb078b1fec51dc8412a817",
+    "PRProp3D_AF_Res_Chart.png": "e424f1070587d79d2a91f4a3bd14e7c11e80adfe7c723e45432d9d4fc5bb85b7"
+  },
+  "limitations": [
+    "Published values were recovered from 8-bit rendered panels by inverse-colormap lookup.",
+    "LCProp compact raw arrays were not locally available; its preserved 8-bit normalized products were used.",
+    "The LCProp output PNG does not preserve its absolute maximum, so absolute output-scale agreement is not evaluated.",
+    "The input transparency polarity differs; output residual metrics do not compare identical physical requests."
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "V_bias": 0.9144,
+  "requested_x_um": -20.0,
+  "requested_y_um": 0.0,
+  "x_index": 29,
+  "y_index": 63,
+  "sampled_x_um": -20.21484375,
+  "sampled_y_um": -0.390625,
+  "volume_axes": [
+    "z",
+    "x",
+    "y"
+  ],
+  "z_location": "retained slice midpoints",
+  "optical_quantity": "retained slice-average optical intensity",
+  "director_quantity": "theta minus corresponding retained theta_bias",
+  "director_baseline": "completed run theta_bias; no recomputation"
+}

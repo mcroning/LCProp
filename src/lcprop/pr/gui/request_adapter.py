@@ -1,0 +1,549 @@
+"""Mapping and preflight for standalone PR GUI controls."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+from lcprop.pr.unified.integration import UnifiedFreshRequest, WORKFLOW_ID as UNIFIED_WORKFLOW, validate_fresh
+from lcprop.pr.published_static import PublishedStaticRequest, PR_PUBLISHED_STATIC_WORKFLOW
+from lcprop.pr.published_static_integration import validate_published_static_request
+from typing import Literal
+
+from lcprop.adapters.launchplane import beam_stack_to_launchplane
+from lcprop.core.grid import grid_metadata
+from lcprop.pr.evolution import validate_timestep
+from lcprop.optics.sampling import qualify_launch_sampling
+from lcprop.pr.geometry import (
+    PRBeamStackApertureReport,
+    analyze_beam_stack_aperture,
+)
+from lcprop.pr.specs import (
+    PRRunRequest,
+    PR_TIMEDEPENDENT_WORKFLOW,
+    PR_TD_PUBLISHED_COUPLING,
+    PR_TD_LEGACY_COUPLING,
+    validate_pr_timedependent_configuration,
+)
+from lcprop.pr.workflow import _validate_canonical_scattering_for_grid
+from lcprop.pr.static_workflow import (
+    PRStaticRunRequest,
+    PR_STATIC_WORKFLOW,
+)
+from lcprop.pr.transverse.specs import (
+    PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1,
+    PR_FULL_TRANSVERSE_PROFILE_V1,
+    PR_MATERIAL_RESPONSE_LINEARIZED,
+    PR_MATERIAL_RESPONSE_NONLINEAR,
+    PRTransverseBoundaryProfile,
+    PRTransverseDielectricProfile,
+    PRTransverseProjectionProfile,
+    PRTransverseRunRequest,
+    PRTransverseSolverOptions,
+    PRTransverseTransportProfile,
+    PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+)
+from lcprop.pr.transverse.static_workflow import (
+    PRTransverseStaticRunRequest,
+    PRTransverseStaticWorkflowOptions,
+    PR_TRANSVERSE_STATIC_WORKFLOW,
+)
+
+
+# Presentation work budget, not a grid-validity or execution-resource limit.
+PR_GUI_TIMESTEP_SCAN_MAX_MODES = 4096
+TIMESTEP_ASSESSMENT_PENDING = (
+    "Execution timestep assessment pending: the exact nonlinear TD mode scan "
+    "is deferred to execution; timestep acceptance has not been established."
+)
+
+
+@dataclass(frozen=True)
+class PRRequestPreflight:
+    conservative_dt_limit: float | None
+    aperture: PRBeamStackApertureReport
+    timestep_assessment: Literal["passed", "pending", "not_applicable"] = "not_applicable"
+
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        if self.timestep_assessment == "pending":
+            return (*self.aperture.warnings, TIMESTEP_ASSESSMENT_PENDING)
+        return self.aperture.warnings
+
+
+@dataclass(frozen=True)
+class PRStaticRequestPreflight:
+    aperture: PRBeamStackApertureReport
+
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        return self.aperture.warnings
+
+
+def _validate_pr_gui_common(request) -> PRBeamStackApertureReport:
+    request.grid.validate()
+    request.beams.validate()
+    request.material.validate()
+    if not isinstance(request, (PublishedStaticRequest, UnifiedFreshRequest)):
+        request.solver.validate()
+    request.backend.validate()
+    request.optical_boundary.validate()
+    if isinstance(request, PRRunRequest):
+        validate_pr_timedependent_configuration(request)
+    wavelengths = tuple(
+        float(channel.wavelength_um) for channel in request.beams.channels
+    )
+    if any(wavelength != wavelengths[0] for wavelength in wavelengths[1:]):
+        raise ValueError("minimal PR workflow requires one shared wavelength")
+
+    sampling = qualify_launch_sampling(
+        request.beams, request.grid, request.material.refractive_index,
+        boundary=request.optical_boundary, launch_elements=request.launch_elements)
+    sampling.require_valid()
+    grid = grid_metadata(request.grid)
+    aperture = analyze_beam_stack_aperture(
+        grid,
+        request.beams,
+        refractive_index=request.material.refractive_index,
+        boundary_mode=request.optical_boundary.mode,
+        strict=False,
+    )
+
+    return replace(
+        aperture, warnings=tuple(dict.fromkeys((*aperture.warnings, *sampling.warnings))))
+
+
+def validate_pr_gui_request(request: PRRunRequest) -> PRRequestPreflight:
+    """Validate one GUI request using PR-owned numerical rules."""
+
+    if not isinstance(request, PRRunRequest):
+        raise TypeError("request must be a PRRunRequest")
+    aperture = _validate_pr_gui_common(request)
+    grid = grid_metadata(request.grid)
+    if grid.Nx > PR_GUI_TIMESTEP_SCAN_MAX_MODES or request.material.normalization_identity != "pr_channel_peak_reference_v1":
+        dt_limit = None
+        assessment = "pending"
+    else:
+        dt_limit = validate_timestep(
+            request.solver.dt_normalized, grid, request.material,
+            integrator=request.solver.integrator,
+        )
+        assessment = "passed"
+    return PRRequestPreflight(
+        conservative_dt_limit=dt_limit, aperture=aperture,
+        timestep_assessment=assessment,
+    )
+
+
+def validate_pr_static_gui_request(
+    request: PRStaticRunRequest,
+) -> PRStaticRequestPreflight:
+    """Validate one static GUI request without transient-time rules."""
+
+    if not isinstance(request, PRStaticRunRequest):
+        raise TypeError("request must be a PRStaticRunRequest")
+    request.material_response.validate_reduced_static()
+    _validate_canonical_scattering_for_grid(
+        request.scattering, grid=request.grid, z_length_um=request.grid.z_length_um
+    )
+    return PRStaticRequestPreflight(
+        aperture=_validate_pr_gui_common(request),
+    )
+
+
+def validate_pr_transverse_static_gui_request(
+    request: PRTransverseStaticRunRequest,
+) -> PRStaticRequestPreflight:
+    """Validate the GUI's canonical nonlinear 2D zero-flux request."""
+
+    if not isinstance(request, PRTransverseStaticRunRequest):
+        raise TypeError("request must be a PRTransverseStaticRunRequest")
+    aperture = _validate_pr_gui_common(request)
+    request.transport.validate()
+    request.dielectric.validate()
+    request.boundary.validate()
+    request.projection.validate()
+    request.material_response.validate_configuration(
+        material_applied_field=request.material.applied_field,
+        transport=request.transport,
+        dielectric=request.dielectric,
+        boundary=request.boundary,
+        projection=request.projection,
+    )
+    if request.backend.backend not in ("numpy", "cupy"):
+        raise ValueError(
+            "2D zero-flux static workflow requires an explicit NumPy or "
+            "CuPy backend"
+        )
+    if (
+        request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR
+        and
+        request.backend.backend == "numpy"
+        and request.backend.precision != "float64"
+    ):
+        raise ValueError(
+            "2D zero-flux static NumPy execution requires float64 precision"
+        )
+    return PRStaticRequestPreflight(aperture=aperture)
+
+
+def validate_pr_transverse_gui_request(
+    request: PRTransverseRunRequest,
+) -> PRRequestPreflight:
+    """Validate one canonical full-transverse material-time GUI request."""
+
+    if not isinstance(request, PRTransverseRunRequest):
+        raise TypeError("request must be a PRTransverseRunRequest")
+    aperture = _validate_pr_gui_common(request)
+    request.transport.validate()
+    request.dielectric.validate()
+    request.boundary.validate()
+    request.projection.validate()
+    request.material_response.validate_configuration(
+        material_applied_field=request.material.applied_field,
+        transport=request.transport,
+        dielectric=request.dielectric,
+        boundary=request.boundary,
+        projection=request.projection,
+    )
+    if request.backend.backend not in ("numpy", "cupy"):
+        raise ValueError(
+            "2D zero-flux time-dependent workflow requires an explicit "
+            "NumPy or CuPy backend"
+        )
+    return PRRequestPreflight(
+        conservative_dt_limit=float("nan"),
+        aperture=aperture,
+    )
+
+
+def validate_pr_gui_workflow_request(request):
+    """Dispatch GUI preflight by the request's exact PR workflow type."""
+
+    if isinstance(request, UnifiedFreshRequest):
+        validate_fresh(request)
+        return PRStaticRequestPreflight(aperture=_validate_pr_gui_common(request))
+    if isinstance(request, PublishedStaticRequest):
+        validate_published_static_request(request)
+        return PRStaticRequestPreflight(aperture=_validate_pr_gui_common(request))
+    if isinstance(request, PRTransverseRunRequest):
+        return validate_pr_transverse_gui_request(request)
+    if isinstance(request, PRRunRequest):
+        return validate_pr_gui_request(request)
+    if isinstance(request, PRTransverseStaticRunRequest):
+        return validate_pr_transverse_static_gui_request(request)
+    if isinstance(request, PRStaticRunRequest):
+        return validate_pr_static_gui_request(request)
+    raise TypeError("unsupported PR GUI request type")
+
+
+def build_pr_request(
+    *,
+    material_panel,
+    beam_panel,
+    grid_panel,
+    evolution_panel,
+) -> (
+    PRRunRequest
+    | PRStaticRunRequest
+    | PRTransverseRunRequest
+    | PRTransverseStaticRunRequest
+):
+    """Take one immutable, validated request snapshot from PR controls."""
+
+    workflow_id = evolution_panel.workflow_id()
+    grid = grid_panel.grid()
+    material = material_panel.material()
+    if material.normalization_identity != "pr_channel_peak_reference_v1" and workflow_id not in (
+            UNIFIED_WORKFLOW, PR_TIMEDEPENDENT_WORKFLOW, PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW):
+        raise ValueError("physical normalization supports unified Static and TD; choose explicit legacy mode for this workflow")
+    launch = beam_panel.launch_configuration()
+    beam_panel.set_optical_context(
+        n_ref=float(material.refractive_index),
+        interaction_length_um=float(grid.z_length_um),
+    )
+    common = {
+        "grid": grid,
+        "beams": launch.beams,
+        "launch_elements": launch.channel_elements,
+        "material": material,
+        "backend": evolution_panel.backend_spec(),
+        "initial_A": None,
+        "initial_E": None,
+        "optical_boundary": beam_panel.optical_boundary(),
+    }
+    scattering = evolution_panel.scattering_spec()
+    if workflow_id == UNIFIED_WORKFLOW:
+        common.pop('initial_A');common.pop('initial_E')
+        closure=evolution_panel.unified_closure.closure(material.background_intensity
+            if material.normalization_identity=="pr_channel_peak_reference_v1" else 0.)
+        common['material']=replace(material,applied_field=closure.reservoir_field or 0.)
+        from lcprop.pr.unified.solver_specs import PRUnifiedSolverSpec, REDUCED, SCALABLE, DIRECT_POLICY, ITERATIVE_POLICY
+        identity=evolution_panel.unified_solver.currentData() if closure.dimension==2 else REDUCED
+        solver=PRUnifiedSolverSpec(identity,ITERATIVE_POLICY if identity==SCALABLE else DIRECT_POLICY)
+        request=UnifiedFreshRequest(**common,closure=closure,scattering=scattering,solver=solver)
+        loaded=getattr(evolution_panel,'_loaded_unified_request',None)
+        if loaded is not None and replace(request,schema=loaded.schema)==loaded:
+            request=loaded  # Unmodified legacy re-save retains its origin.
+    elif workflow_id == PR_PUBLISHED_STATIC_WORKFLOW:
+        common.pop("initial_E")
+        request = PublishedStaticRequest(**common, scattering=scattering,
+            material_solver=evolution_panel.published_material_solver(),
+            material_response=evolution_panel.transverse_material_response())
+    elif workflow_id == PR_TIMEDEPENDENT_WORKFLOW:
+        request = PRRunRequest(
+            **common,
+            solver=evolution_panel.solver(),
+            scattering=scattering,
+            material_response=evolution_panel.transverse_material_response(),
+        )
+    elif workflow_id == PR_STATIC_WORKFLOW:
+        request = PRStaticRunRequest(
+            **common,
+            solver=evolution_panel.static_solver(),
+            scattering=scattering,
+            material_response=evolution_panel.transverse_material_response(),
+        )
+    elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
+        transverse_common = dict(common)
+        transverse_common.pop("initial_E")
+        material_response = evolution_panel.transverse_material_response()
+        boundary_profile_id = (
+            PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1
+            if material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+            else PR_FULL_TRANSVERSE_PROFILE_V1
+        )
+        request = PRTransverseStaticRunRequest(
+            **transverse_common,
+            transport=PRTransverseTransportProfile(),
+            dielectric=PRTransverseDielectricProfile(),
+            boundary=PRTransverseBoundaryProfile(
+                profile_id=boundary_profile_id,
+                applied_field_x=(
+                    evolution_panel.transverse_applied_field.value()
+                    if material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+                    else 0.0
+                ),
+            ),
+            projection=PRTransverseProjectionProfile(),
+            material_response=material_response,
+            scattering=scattering,
+            initial_psi=None,
+            solver=evolution_panel.transverse_static_solver(),
+        )
+    elif workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
+        transverse_common = dict(common)
+        transverse_common.pop("initial_E")
+        material_response = evolution_panel.transverse_material_response()
+        boundary_profile_id = (
+            PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1
+            if material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+            else PR_FULL_TRANSVERSE_PROFILE_V1
+        )
+        request = PRTransverseRunRequest(
+            optical_coupling=(PR_TD_PUBLISHED_COUPLING if material_response.model == "nonlinear" else PR_TD_LEGACY_COUPLING),
+            **transverse_common,
+            transport=PRTransverseTransportProfile(),
+            dielectric=PRTransverseDielectricProfile(),
+            boundary=PRTransverseBoundaryProfile(
+                profile_id=boundary_profile_id,
+                applied_field_x=(
+                    evolution_panel.transverse_applied_field.value()
+                    if material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+                    else 0.0
+                ),
+            ),
+            projection=PRTransverseProjectionProfile(),
+            material_response=material_response,
+            scattering=scattering,
+            initial_psi=None,
+            solver=evolution_panel.transverse_solver(),
+        )
+    else:
+        raise ValueError(f"unsupported PR GUI workflow: {workflow_id!r}")
+    validate_pr_gui_workflow_request(request)
+    return request
+
+
+def validate_pr_gui_request_representable(request) -> None:
+    """Reject headless PR settings that have no exact GUI representation."""
+
+    if isinstance(request, UnifiedFreshRequest):
+        validate_pr_gui_workflow_request(request)
+        # Do not silently round newly introduced electrical targets on load.
+        c=request.closure
+        values=(c.reservoir_field,) if c.reservoir_field is not None else c.target
+        if any(abs(v)>1e9 or round(v,12)!=v for v in values):
+            raise ValueError('GUI cannot represent this electrical target exactly; use the headless request')
+        if request.backend.verbose:
+            raise ValueError('PR GUI cannot represent backend verbose=True')
+        return
+    from lcprop.pr.local_plane_workflow import LocalPlaneRunRequest
+    if isinstance(request, PRRunRequest) and request.optical_coupling != PR_TD_PUBLISHED_COUPLING:
+        raise ValueError("Saved midpoint TD coupling is preserved headlessly; GUI cannot silently migrate it to published optical-first. Create a fresh request.")
+    if (isinstance(request, PRTransverseRunRequest)
+            and request.material_response.model == "nonlinear"
+            and request.resolved_optical_coupling != PR_TD_PUBLISHED_COUPLING):
+        raise ValueError("Saved transverse midpoint TD coupling cannot silently migrate in the GUI; create a fresh request.")
+    if isinstance(request, (LocalPlaneRunRequest, PRStaticRunRequest)):
+        raise ValueError("Saved midpoint/symmetric Static arithmetic is preserved headlessly; GUI cannot migrate it to published optical-first. Create a fresh request.")
+    validate_pr_gui_workflow_request(request)
+    if isinstance(request, PRStaticRunRequest) and request.material_response.model == "field_linear_local_intensity":
+        raise ValueError("Saved pr_static Local-I requests use historical midpoint arithmetic; GUI loading cannot migrate them. Create a fresh local-plane request.")
+    if isinstance(request, PublishedStaticRequest) and (request.residual_rms_tolerance != 1e-5 or request.residual_max_tolerance != 1e-4):
+        raise ValueError("GUI cannot represent nondefault local-plane residual validity gates")
+    if isinstance(request, PublishedStaticRequest):
+        from lcprop.pr.static import PRStaticSolverOptions
+        defaults = PRStaticSolverOptions()
+        if (request.material_solver.minimum_step_scale != defaults.minimum_step_scale
+                or request.material_solver.armijo_fraction != defaults.armijo_fraction):
+            raise ValueError("GUI cannot represent custom material line-search constants")
+    initial_material = (
+        request.initial_psi
+        if isinstance(
+            request,
+            (PRTransverseRunRequest, PRTransverseStaticRunRequest),
+        )
+        else getattr(request, "initial_E", None)
+    )
+    if request.initial_A is not None or initial_material is not None:
+        raise ValueError(
+            "PR GUI controls cannot represent request-owned initial arrays; "
+            "load a PR checkpoint for continuation"
+        )
+    if request.backend.verbose:
+        raise ValueError("PR GUI cannot represent backend verbose=True")
+    if isinstance(request, PRTransverseRunRequest):
+        represented = PRTransverseSolverOptions(
+            Nt=request.solver.Nt,
+            dt_normalized=request.solver.dt_normalized,
+            optical_substeps=request.solver.optical_substeps,
+            integrator=request.solver.integrator,
+        )
+        if request.solver != represented:
+            raise ValueError(
+                "PR GUI cannot represent these transverse TD solver options"
+            )
+    elif isinstance(request, PRTransverseStaticRunRequest):
+        represented = PRTransverseStaticWorkflowOptions(
+            max_coupled_iterations=request.solver.max_coupled_iterations,
+            optical_substeps=request.solver.optical_substeps,
+        )
+        if request.solver != represented:
+            raise ValueError(
+                "PR GUI cannot represent these transverse static solver options"
+            )
+    elif isinstance(request, PRStaticRunRequest):
+        represented = type(request.solver)(
+            material_solver=None,
+            max_coupled_passes=request.solver.max_coupled_passes,
+            optical_substeps=request.solver.optical_substeps,
+        )
+        if request.solver != represented:
+            raise ValueError(
+                "PR GUI cannot represent these static solver options"
+            )
+
+
+def apply_pr_request(
+    request: (
+        PRRunRequest
+        | PRStaticRunRequest
+        | PRTransverseRunRequest
+        | PRTransverseStaticRunRequest
+    ),
+    *,
+    material_panel,
+    beam_panel,
+    grid_panel,
+    evolution_panel,
+    beam_stack_definition=None,
+) -> None:
+    """Populate every representable PR control from a saved request."""
+
+    validate_pr_gui_request_representable(request)
+    if isinstance(request, UnifiedFreshRequest):
+        grid_panel.set_grid(request.grid);material_panel.set_material(request.material)
+        evolution_panel.legacy_static=False
+        evolution_panel.set_workflow_id(PR_STATIC_WORKFLOW if request.closure.dimension==1 else PR_TRANSVERSE_STATIC_WORKFLOW)
+        evolution_panel.material_response.setCurrentIndex(evolution_panel.material_response.findData('nonlinear'))
+        evolution_panel.unified_closure.set_closure(request.closure)
+        index=evolution_panel.unified_solver.findData(request.solver.identity)
+        if index>=0:evolution_panel.unified_solver.setCurrentIndex(index)
+        evolution_panel.set_backend_spec(request.backend);evolution_panel.set_scattering_spec(request.scattering)
+        beam_panel.set_aperture(request.grid.x_aperture_um,request.grid.y_aperture_um)
+        beam_panel.set_beam_stack_definition(beam_stack_to_launchplane(request.beams) if beam_stack_definition is None else beam_stack_definition)
+        beam_panel.set_optical_boundary(request.optical_boundary)
+        beam_panel.set_optical_context(n_ref=request.material.refractive_index,interaction_length_um=request.grid.z_length_um)
+        beam_panel.input_screen_editor.set_launch_elements(request.launch_elements)
+        evolution_panel._refresh_workflow_controls()
+        evolution_panel._loaded_unified_request=request
+        return
+    # Explicit legacy identity remains selected when loading; never reinterpret it.
+    evolution_panel.legacy_static=isinstance(request,(PublishedStaticRequest,PRTransverseStaticRunRequest,PRStaticRunRequest))
+    grid_panel.set_grid(request.grid)
+    material_panel.set_material(request.material)
+    if isinstance(request, PublishedStaticRequest):
+        evolution_panel.set_workflow_id(PR_PUBLISHED_STATIC_WORKFLOW)
+        evolution_panel.set_published_material_solver(request.material_solver)
+        evolution_panel.set_transverse_material_response(request.material_response,
+            applied_field_x=request.material.applied_field)
+    elif isinstance(request, PRTransverseRunRequest):
+        evolution_panel.set_workflow_id(PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW)
+        evolution_panel.set_transverse_material_response(
+            request.material_response,
+            applied_field_x=request.boundary.applied_field_x,
+        )
+        evolution_panel.set_transverse_solver(request.solver)
+    elif isinstance(request, PRTransverseStaticRunRequest):
+        evolution_panel.set_workflow_id(PR_TRANSVERSE_STATIC_WORKFLOW)
+        evolution_panel.set_transverse_material_response(
+            request.material_response,
+            applied_field_x=request.boundary.applied_field_x,
+        )
+        evolution_panel.set_transverse_static_solver(request.solver)
+    elif isinstance(request, PRStaticRunRequest):
+        evolution_panel.set_workflow_id(PR_STATIC_WORKFLOW)
+        evolution_panel.set_transverse_material_response(
+            request.material_response,
+            applied_field_x=request.material.applied_field,
+        )
+        evolution_panel.set_static_solver(request.solver)
+    else:
+        evolution_panel.set_workflow_id(PR_TIMEDEPENDENT_WORKFLOW)
+        evolution_panel.set_transverse_material_response(
+            request.material_response,
+            applied_field_x=request.material.applied_field,
+        )
+        evolution_panel.set_solver(request.solver)
+    evolution_panel.set_scattering_spec(getattr(request, "scattering", None))
+    evolution_panel.set_backend_spec(request.backend)
+    if isinstance(request, PublishedStaticRequest):
+        evolution_panel.set_published_material_solver(request.material_solver)
+    beam_panel.set_aperture(
+        request.grid.x_aperture_um,
+        request.grid.y_aperture_um,
+    )
+    beam_panel.set_beam_stack_definition(
+        beam_stack_to_launchplane(request.beams)
+        if beam_stack_definition is None
+        else beam_stack_definition
+    )
+    beam_panel.set_optical_boundary(request.optical_boundary)
+    beam_panel.set_optical_context(
+        n_ref=float(request.material.refractive_index),
+        interaction_length_um=float(request.grid.z_length_um),
+    )
+    beam_panel.clear_launch_elements()
+
+
+__all__ = [
+    "PRRequestPreflight",
+    "PRStaticRequestPreflight",
+    "apply_pr_request",
+    "build_pr_request",
+    "validate_pr_gui_request",
+    "validate_pr_gui_request_representable",
+    "validate_pr_gui_workflow_request",
+    "validate_pr_static_gui_request",
+    "validate_pr_transverse_gui_request",
+    "validate_pr_transverse_static_gui_request",
+]

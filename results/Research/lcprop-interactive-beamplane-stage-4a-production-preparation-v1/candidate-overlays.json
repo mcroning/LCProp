@@ -1,0 +1,14 @@
+{
+  "README.md": {
+    "sha256": "4b79ab6173485724af7c5621cc8abc983de569a6a8a4a5e0c04d28901909d145",
+    "bytes": 17244
+  },
+  "docs/notebook_package.md": {
+    "sha256": "89b8be4c25e21cc11b227733934f0ae33607b53115080029e246e12c666fa4fb",
+    "bytes": 7451
+  },
+  "pyproject.toml": {
+    "sha256": "f60076c14d05d32f7fbea753941b934a0cb8993ad26625f36dc68fab1ea51b86",
+    "bytes": 1027
+  }
+}

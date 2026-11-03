@@ -1,0 +1,55 @@
+{
+  "backend_summary": {
+    "backend": "cupy",
+    "complex_dtype": "complex128",
+    "is_gpu": true,
+    "real_dtype": "float64"
+  },
+  "completed_steps": 3,
+  "diagnostics": {
+    "accepted_material_steps": 3,
+    "carrier_density_minimum": 0.5760850973270508,
+    "material_response_calls": 3,
+    "material_response_validation": "validated",
+    "nonlinear_td_rhs_max": 0.6710893841846177,
+    "nonlinear_td_rhs_rms": 0.17935435855301135,
+    "optical_passes_completed": 4,
+    "physical_state_valid": true,
+    "potential_mean_max_abs": 3.3881317890172014e-20,
+    "source_cadence": "one_complete_optical_pass_per_material_interval_with_source_frozen_during_each_material_update"
+  },
+  "internal_request_checksums_passed": true,
+  "internal_result_checksums_passed": true,
+  "job_id": "3672475",
+  "products": {
+    "fields": [
+      "far_field_intensity",
+      "input_intensity",
+      "output_intensity"
+    ],
+    "geometry": {
+      "x": 256,
+      "y": 256,
+      "z": 2
+    }
+  },
+  "production_git_sha": "1a129dc3cb93f6c8a005a198f40d86a31792f223",
+  "reconstruction_source": "retrieved Fast request/result package",
+  "request_applied_field": 0.0,
+  "request_backend": "cupy",
+  "request_material_response": "nonlinear",
+  "request_precision": "float64",
+  "requested_steps": 3,
+  "result": "passed",
+  "retention": {
+    "omitted_fields": [
+      "psi_initial",
+      "psi_final"
+    ],
+    "package_bytes": 4207630,
+    "policy": "fast",
+    "psi_final_available": false,
+    "psi_initial_available": false
+  },
+  "status": "completed"
+}

@@ -1,0 +1,14 @@
+{
+  "bundle_sha256": "86be5478f788b68405684e63ab1c953d1f53bc66bfdf428fd4fea2cf66bcb23a",
+  "bundle_bytes": 31111686,
+  "engine_revision": "52b00928978a9ec7862a357d38327fd0b9ae857c",
+  "wheel_sha256": "1322400b31fac3a28d439f281cc189fb790f1526940dc36af9bf50971fdc5c20",
+  "example_sha256": "2ffed40dfc82d47b73bd1f9770c2ef4a12a2918e32bd2c137f6a252ed07f90a3",
+  "input_manifest_sha256": "9be0fdb38372a9112aa9b91a10374df5dee3065fdab4fefa4d2f5b1c4a938a15",
+  "expected_array_count": 18,
+  "wheel_package_files_verified": 264,
+  "tracked_files_preserved": 815,
+  "python310_grammar": "pass",
+  "archive_membership_and_bytes": "pass",
+  "preparation": "no scientific execution; saved-array comparison only"
+}

@@ -1,3 +1,4 @@
+import math
 from lcprop.core.context import GridSpec, LCMaterial, BiasSpec
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.requests import StaticRunRequest, StaticSolverOptions, OutputOptions
@@ -28,13 +29,13 @@ def test_static_request_construction():
     beam = BeamChannel(
         wavelength_um=0.633,
         power_mW=1.0,
-        waist_x_um=3.0,
-        waist_y_um=3.0,
         x0_um=0.0,
         y0_um=0.0,
-        tilt_x_rad_per_um=0.0,
-        tilt_y_rad_per_um=0.0,
         phase_rad=0.0,
+        w1_um=3.0,
+        w2_um=3.0,
+        theta_ext_rad=math.asin(math.hypot(0.0, 0.0) * 0.633 / (2 * math.pi)),
+        phi_rad=math.atan2(0.0, 0.0) % (2 * math.pi),
     )
 
     request = StaticRunRequest(

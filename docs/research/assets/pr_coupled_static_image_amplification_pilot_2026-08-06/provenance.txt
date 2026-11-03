@@ -1,0 +1,43 @@
+job_id=2222684
+start_utc=2026-08-06T16:41:24Z
+hostname=pax009
+repository=/cluster/tufts/cglab/mcroning/LCProp
+expected_git_sha=a51d48b5c9a80b64516735f1e9445001703ce72e
+actual_git_sha=a51d48b5c9a80b64516735f1e9445001703ce72e
+expected_driver_sha256=40b3029cdaa660d193f2de828924ff963f0b6da0e8417a9ab56ffbcaa02477b6
+actual_driver_sha256=40b3029cdaa660d193f2de828924ff963f0b6da0e8417a9ab56ffbcaa02477b6
+expected_image_sha256=e424f1070587d79d2a91f4a3bd14e7c11e80adfe7c723e45432d9d4fc5bb85b7
+actual_image_sha256=e424f1070587d79d2a91f4a3bd14e7c11e80adfe7c723e45432d9d4fc5bb85b7
+expected_td_reference_sha256=1f686ec06875b66d19b20c87b8108684b971ef9afbd35dde963c91979e3eb9b9
+actual_td_reference_sha256=1f686ec06875b66d19b20c87b8108684b971ef9afbd35dde963c91979e3eb9b9
+run_dir=/cluster/tufts/cglab/mcroning/lcprop_runs/static-image-pilot-2222684
+scratch_root=/tmp/lcprop-pr-static-image-2222684
+stdout=/cluster/tufts/cglab/mcroning/lcprop_runs/lcprop-pr-static-image-2222684.stdout
+stderr=/cluster/tufts/cglab/mcroning/lcprop_runs/lcprop-pr-static-image-2222684.stderr
+slurm_job_gpus=3
+slurm_gpus_on_node=1
+cuda_visible_devices=0
+pythonpath=/cluster/tufts/cglab/mcroning/LCProp/src
+ld_library_path=/cluster/tufts/apps/spack/9/x86_64/apps/linux-broadwell/cuda-12.9.0-rawz6ldivpmqfoshs6r7xn3bledbwgjg/lib64
+loaded_modules:
+
+Currently Loaded Modules:
+  1) cuda/12.9.0
+
+
+
+nvcc_version:
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2025 NVIDIA Corporation
+Built on Wed_Apr__9_19:24:57_PDT_2025
+Cuda compilation tools, release 12.9, V12.9.41
+Build cuda_12.9.r12.9/compiler.35813241_0
+python=Python 3.10.4
+lcprop=/cluster/tufts/cglab/mcroning/LCProp/src/lcprop/__init__.py
+numpy=2.1.0
+scipy=1.15.2
+pillow=11.1.0
+cupy=13.6.0
+0, NVIDIA H200, 575.57.08, 143771 MiB
+end_utc=2026-08-06T16:41:44Z
+exit_code=0

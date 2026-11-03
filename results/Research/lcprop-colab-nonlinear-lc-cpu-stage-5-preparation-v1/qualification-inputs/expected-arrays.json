@@ -1,0 +1,147 @@
+{
+  "nonlinear/A_initial": {
+    "shape": [
+      1,
+      128,
+      128
+    ],
+    "dtype": "complex128",
+    "sha256": "d0512443687a3d556ce18790f8dbb669c57a41b8980d0c6595c7fec951b3fba3"
+  },
+  "nonlinear/A_final": {
+    "shape": [
+      1,
+      128,
+      128
+    ],
+    "dtype": "complex128",
+    "sha256": "599b279c096952da2650041d428791c4748810134c0e8e6ae126a8d4cd9fbbaa"
+  },
+  "nonlinear/theta": {
+    "shape": [
+      100,
+      128,
+      128
+    ],
+    "dtype": "float64",
+    "sha256": "b7cf30880d188fcba003c479ea290463080fbd0e854a285660a2c374ce232fb9"
+  },
+  "nonlinear/theta_bias": {
+    "shape": [
+      128,
+      128
+    ],
+    "dtype": "float64",
+    "sha256": "fd4005b4df100022e08758acdbdda85ff7e0a2bb576034b06a1ef6453bdab446"
+  },
+  "nonlinear/intensity_stack": {
+    "shape": [
+      100,
+      128,
+      128
+    ],
+    "dtype": "float64",
+    "sha256": "75547c769c6e275845776a9ebc49effbb7b7c85b2f5f7056c28640d9fe559690"
+  },
+  "nonlinear/widths_um": {
+    "shape": [
+      100,
+      2
+    ],
+    "dtype": "float64",
+    "sha256": "4072720ade767552d46b0698f5de6149e34c0e576df08fa2e0ee5433909a15f5"
+  },
+  "nonlinear/x_um": {
+    "shape": [
+      128
+    ],
+    "dtype": "float64",
+    "sha256": "61fd04d91f7ed8fa5bcb1b047c3748a5edf957eb61bee7d1e9199d1adfc5e064"
+  },
+  "nonlinear/y_um": {
+    "shape": [
+      128
+    ],
+    "dtype": "float64",
+    "sha256": "b460fd98873c22484e76cf22dc5bb35d6faf80ea86bed899c9c9bc4383856780"
+  },
+  "nonlinear/z_um": {
+    "shape": [
+      100
+    ],
+    "dtype": "float64",
+    "sha256": "7d3fd1ec319efad4fa839adeaea318e9853b12a37a979199e067a7d8ac8552f4"
+  },
+  "fixed/A_initial": {
+    "shape": [
+      1,
+      128,
+      128
+    ],
+    "dtype": "complex128",
+    "sha256": "d0512443687a3d556ce18790f8dbb669c57a41b8980d0c6595c7fec951b3fba3"
+  },
+  "fixed/A_final": {
+    "shape": [
+      1,
+      128,
+      128
+    ],
+    "dtype": "complex128",
+    "sha256": "8dbce0a85426739c9a9a913384e16a7dbe394c1e71f202a8e210fa2e7c03f67c"
+  },
+  "fixed/theta": {
+    "shape": [
+      128,
+      128
+    ],
+    "dtype": "float64",
+    "sha256": "fd4005b4df100022e08758acdbdda85ff7e0a2bb576034b06a1ef6453bdab446"
+  },
+  "fixed/theta_bias": {
+    "shape": [
+      128,
+      128
+    ],
+    "dtype": "float64",
+    "sha256": "fd4005b4df100022e08758acdbdda85ff7e0a2bb576034b06a1ef6453bdab446"
+  },
+  "fixed/intensity_stack": {
+    "shape": [
+      100,
+      128,
+      128
+    ],
+    "dtype": "float64",
+    "sha256": "ff3f278e884b46e1dab3c6cd59af484de50cf50b2221b4b88e823eda9ef98110"
+  },
+  "fixed/widths_um": {
+    "shape": [
+      100,
+      2
+    ],
+    "dtype": "float64",
+    "sha256": "70a07f401e27320aa1d6fe748f6bd806a34210d1b99acb42a5c7373913e6e91b"
+  },
+  "fixed/x_um": {
+    "shape": [
+      128
+    ],
+    "dtype": "float64",
+    "sha256": "61fd04d91f7ed8fa5bcb1b047c3748a5edf957eb61bee7d1e9199d1adfc5e064"
+  },
+  "fixed/y_um": {
+    "shape": [
+      128
+    ],
+    "dtype": "float64",
+    "sha256": "b460fd98873c22484e76cf22dc5bb35d6faf80ea86bed899c9c9bc4383856780"
+  },
+  "fixed/z_um": {
+    "shape": [
+      100
+    ],
+    "dtype": "float64",
+    "sha256": "7d3fd1ec319efad4fa839adeaea318e9853b12a37a979199e067a7d8ac8552f4"
+  }
+}

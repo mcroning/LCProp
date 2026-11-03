@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "calibration_id": "pr-runtime-resource-v1",
+  "timing_scope": "scientific computation only; excludes scheduler queue and transport",
+  "measurement_policy": "Every measured value carries its exact committed source and deterministic extraction rule. Derived projections and planning heuristics are separate sections.",
+  "evidence_sources": {
+    "results/pr_linearization_resolution_sweep_2026-09-10/production_gaussian_x_n256/summary.json": "f6590ccfe8a59a533c7eb6d81b4a5feb3e8c5cd77a5a5489e6fbd0ee0bc4adfa",
+    "results/pr_linearization_resolution_sweep_2026-09-10/production_gaussian_45deg_n256/summary.json": "35aaf021378ab124dca6892fb87e4952b746b83c53a6053bf16b2c3d83498002",
+    "results/pr_linearization_resolution_sweep_2026-09-10/production_broad_n256/summary.json": "7bfec9d649606fb5c4ae1e381b1afd24ff05b3dfb37a7fa4cb135af1ff54dbfd",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/commissioning_metrics.json": "6541a6258e293843f9c4373d0adb2e5b78948e07d93ab47b26b90ca2c1f42ec3",
+    "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/gpu_process_memory_samples.csv": "60cf139766b9a04741198547dc0507a8a85a1159092ebd4b53ce62fc707f8e4f",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/commissioning_metrics.json": "b6a9a297b77784858ede580cb893f012f2f2e8bd9500d15876257f0194d6984c",
+    "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/gpu_process_memory_samples.csv": "654319545c69fea9fc5df2c749e1193143b483f2cfea5d75fa94e1baa71789b1",
+    "docs/development/pr_transverse_static_memory_bounded_marching.md": "a899a412e94e705ef2f9e93e595a1049116352a9ef73fdf97d8c158939e8c5ac"
+  },
+  "cases": {
+    "reduced_static_numpy_nonlinear": {
+      "grid": [256, 256, 100],
+      "coupled_passes": 20,
+      "measurements": {
+        "runtime_seconds": [
+          {
+            "value": 5.0429912919935305,
+            "source": "results/pr_linearization_resolution_sweep_2026-09-10/production_gaussian_x_n256/summary.json",
+            "extract": {"kind": "json_pointer", "pointer": "/rows/0/runtime_s"}
+          },
+          {
+            "value": 5.529829749983037,
+            "source": "results/pr_linearization_resolution_sweep_2026-09-10/production_gaussian_45deg_n256/summary.json",
+            "extract": {"kind": "json_pointer", "pointer": "/rows/0/runtime_s"}
+          }
+        ]
+      }
+    },
+    "reduced_static_numpy_linearized": {
+      "grid": [256, 256, 100],
+      "coupled_passes": 20,
+      "measurements": {
+        "runtime_seconds": [
+          {
+            "value": 2.852051334019052,
+            "source": "results/pr_linearization_resolution_sweep_2026-09-10/production_gaussian_x_n256/summary.json",
+            "extract": {"kind": "json_pointer", "pointer": "/rows/1/runtime_s"}
+          },
+          {
+            "value": 3.4450362919887993,
+            "source": "results/pr_linearization_resolution_sweep_2026-09-10/production_broad_n256/summary.json",
+            "extract": {"kind": "json_pointer", "pointer": "/rows/1/runtime_s"}
+          }
+        ]
+      }
+    },
+    "full_transverse_linearized_td_numpy": {
+      "grid": [256, 256, 2],
+      "material_intervals": 3,
+      "optical_passes": 4,
+      "measurements": {
+        "material_seconds": {"value": 0.08200642501469702, "source": "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/commissioning_metrics.json", "extract": {"kind": "json_pointer", "pointer": "/cases/biased/numpy_timing/linearized_material_seconds"}},
+        "optical_seconds": {"value": 0.11718057317193598, "source": "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/commissioning_metrics.json", "extract": {"kind": "json_pointer", "pointer": "/cases/biased/numpy_timing/optical_pass_seconds"}},
+        "scientific_total_seconds": {"value": 0.3038907089503482, "source": "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/commissioning_metrics.json", "extract": {"kind": "json_pointer", "pointer": "/cases/biased/numpy_timing/scientific_total_seconds"}}
+      }
+    },
+    "full_transverse_linearized_td_h200": {
+      "grid": [256, 256, 2],
+      "material_intervals": 3,
+      "optical_passes": 4,
+      "measurements": {
+        "material_seconds": {"value": 0.010497980169020593, "source": "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/commissioning_metrics.json", "extract": {"kind": "json_pointer", "pointer": "/cases/biased/cupy_timing/linearized_material_seconds"}},
+        "optical_seconds": {"value": 0.008834655047394335, "source": "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/commissioning_metrics.json", "extract": {"kind": "json_pointer", "pointer": "/cases/biased/cupy_timing/optical_pass_seconds"}},
+        "scientific_total_seconds": {"value": 0.03357275703456253, "source": "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/commissioning_metrics.json", "extract": {"kind": "json_pointer", "pointer": "/cases/biased/cupy_timing/scientific_total_seconds"}},
+        "observed_peak_mib": {"value": 576.0, "source": "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/gpu_process_memory_samples.csv", "extract": {"kind": "csv_column_max", "column_index": 4}},
+        "fast_package_bytes": {"value": 4207592, "source": "results/pr_full_transverse_linearized_td_h200_commissioning_2026-09-11/job_3593204/evidence/commissioning_metrics.json", "extract": {"kind": "json_pointer", "pointer": "/fast_package/package_bytes"}}
+      }
+    },
+    "full_transverse_nonlinear_td_numpy": {
+      "grid": [256, 256, 2],
+      "material_intervals": 3,
+      "optical_passes": 4,
+      "measurements": {
+        "material_seconds": {"value": 0.09641207288950682, "source": "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/commissioning_metrics.json", "extract": {"kind": "json_pointer", "pointer": "/primary/numpy_timing/nonlinear_material_seconds"}},
+        "optical_seconds": {"value": 0.10742174414917827, "source": "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/commissioning_metrics.json", "extract": {"kind": "json_pointer", "pointer": "/primary/numpy_timing/optical_pass_seconds"}},
+        "scientific_total_seconds": {"value": 0.34523770003579557, "source": "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/commissioning_metrics.json", "extract": {"kind": "json_pointer", "pointer": "/primary/numpy_timing/scientific_total_seconds"}}
+      }
+    },
+    "full_transverse_nonlinear_td_h200": {
+      "grid": [256, 256, 2],
+      "material_intervals": 3,
+      "optical_passes": 4,
+      "measurements": {
+        "material_seconds": {"value": 0.02014520694501698, "source": "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/commissioning_metrics.json", "extract": {"kind": "json_pointer", "pointer": "/primary/cupy_timing/nonlinear_material_seconds"}},
+        "optical_seconds": {"value": 0.01533179497346282, "source": "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/commissioning_metrics.json", "extract": {"kind": "json_pointer", "pointer": "/primary/cupy_timing/optical_pass_seconds"}},
+        "scientific_total_seconds": {"value": 0.42976761795580387, "source": "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/commissioning_metrics.json", "extract": {"kind": "json_pointer", "pointer": "/primary/cupy_timing/scientific_total_seconds"}},
+        "observed_peak_mib": {"value": 572.0, "source": "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/gpu_process_memory_samples.csv", "extract": {"kind": "csv_column_max", "column_index": 4}},
+        "fast_package_bytes": {"value": 4207630, "source": "results/pr_full_transverse_nonlinear_td_h200_commissioning_2026-09-13/retry_job_3672475/commissioning_metrics.json", "extract": {"kind": "json_pointer", "pointer": "/fast_package/package_bytes"}}
+      }
+    },
+    "full_transverse_nonlinear_static_memory": {
+      "grid": [1024, 1024, 400],
+      "precision": "float64",
+      "derived_projections": {
+        "gpu_peak_gib": [1.5, 4.0],
+        "host_direct_gib": [25.0, 45.0],
+        "host_continuation_overlap_gib": [50.0, 61.0]
+      },
+      "source": "docs/development/pr_transverse_static_memory_bounded_marching.md",
+      "source_excerpt": "approximately 25-45 GiB direct; roughly 50-61 GiB with direct-fallback/continuation overlap"
+    }
+  },
+  "derived_scaling": {
+    "fft_work": "Nx * Ny * log2(Nx * Ny) * Nz",
+    "float32_timing_factor": 0.65,
+    "reduced_td_material_fraction_of_full": 0.25,
+    "static_continuation_visibility_factors": [1, 2, 2, 2, 1],
+    "static_continuation_stage_count": 5
+  },
+  "planning_policy": {
+    "runtime_range_factors": {
+      "reduced_static": [0.75, 1.6],
+      "reduced_td_local": [0.5, 2.5, 0.1],
+      "reduced_td_h200": [0.5, 3.0, 0.6],
+      "full_td_local": [0.65, 2.0, 0.1],
+      "full_td_h200": [0.65, 2.5, 0.6],
+      "full_static_linearized_local": [0.65, 2.0, 0.1],
+      "full_static_linearized_h200": [0.65, 2.5, 0.6],
+      "full_static_nonlinear_local": [0.7, 1.5, 1.0],
+      "full_static_nonlinear_h200": [0.7, 1.8, 1.0]
+    },
+    "result_size": {"metadata_allowance_bytes": 524288, "fast_range_factors": [0.8, 1.35], "full_range_factors": [0.85, 1.3]},
+    "memory": {"full_gpu_floor_mib": [512, 640], "reduced_gpu_floor_mib": [384, 576], "full_plane_multipliers": [12, 40], "full_volume_multipliers": [2, 4], "reduced_plane_multipliers": [6, 18], "host_high_result_factor": 1.5, "host_working_volume_multipliers": [1, 3]},
+    "recommendation_threshold_seconds": {"consider_h200": 120, "recommend_h200": 900},
+    "confidence": {"direct_measured_workflow": "Medium", "derived_workflow": "Low", "nonlinear_static": "Low"}
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "version": "0.4.0rc1",
+  "requires_python": ">=3.10",
+  "dependencies": [
+    "numpy",
+    "scipy",
+    "tomli; python_version < \"3.11\"",
+    "matplotlib; extra == \"colab\"",
+    "ipywidgets; extra == \"colab\"",
+    "IPython; extra == \"colab\"",
+    "ipympl<0.11,>=0.10.0; extra == \"colab\"",
+    "cupy-cuda12x; extra == \"gpu\"",
+    "PySide6; extra == \"gui\"",
+    "pyqtgraph; extra == \"gui\"",
+    "matplotlib; extra == \"gui\"",
+    "pytest>=8; extra == \"test\"",
+    "Pillow; extra == \"test\""
+  ],
+  "extras": [
+    "colab",
+    "gpu",
+    "gui",
+    "test"
+  ],
+  "license": "BSD-3-Clause"
+}

@@ -1,0 +1,2897 @@
+"""Standalone Qt window for the photorefractive workflow."""
+
+from __future__ import annotations
+
+from lcprop.pr.unified.integration import UnifiedFreshRequest, UNIFIED_OPERATION, WORKFLOW_ID as UNIFIED_WORKFLOW, core_request, ANALYSIS_PRODUCTS as UNIFIED_ANALYSIS_PRODUCTS
+from lcprop.pr.published_static import PublishedStaticRequest, PR_PUBLISHED_STATIC_WORKFLOW, PR_PUBLISHED_STATIC_ARITHMETIC
+from lcprop.pr.published_static_integration import PUBLISHED_STATIC_OPERATION, PUBLISHED_STATIC_ANALYSIS_PRODUCTS
+
+from lcprop.pr.live_results import (PRLivePreviewPolicy, PRLiveSnapshot,
+                                    reduced_pr_live_to_run_data)
+
+from lcprop.gui.runtime_status import RuntimeStatusLabel, reserve_button_text
+
+from lcprop.gui.layout import FlowLayout, application_layout
+
+from dataclasses import replace
+from functools import partial
+from time import monotonic
+import traceback
+
+from PySide6.QtCore import QCoreApplication, QThread, QTimer, QSignalBlocker, Qt, Slot
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QFileDialog,
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QMenu,
+    QPushButton,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from lcprop.core.execution import CancellationToken, RunProgress
+from lcprop.gui.panels.results_panel import ResultsPanel
+from lcprop.gui.experiment_files import (
+    ExperimentFileButtons,
+    choose_experiment_open_path,
+    choose_experiment_save_path,
+    launchplane_presentation_payload,
+    launchplane_stack_from_presentation,
+    show_experiment_open_warning,
+)
+from lcprop.gui.workers import WorkflowWorker
+from lcprop.gui.request_transparency import (
+    begin_request, execution_summary, inspect_request, report_failure, source_preflight,
+)
+from lcprop.gui.help import ProductHelpButton
+from lcprop.gui.remote_execution import (
+    RemoteExecutionControls,
+    execution_target_selector,
+    remote_status_text,
+)
+from lcprop.transport.status import RemoteRunState, RemoteRunStatus
+from lcprop.transport.result_policy import FAST_RESULT_POLICY, FULL_RESULT_POLICY
+from lcprop.persistence import (
+    load_experiment,
+    load_run_checkpoint,
+    save_experiment,
+    save_run_checkpoint,
+)
+from lcprop.persistence.execution_intent import ExecutionIntent
+from lcprop.pr.checkpoint import (
+    PRTimeDependentCheckpoint,
+    validate_pr_continuation,
+)
+from lcprop.pr.gui.beam_panel import make_pr_beam_panel
+from lcprop.pr.gui.evolution_panel import PREvolutionPanel
+from lcprop.pr.gui.grid_panel import PRGridPanel
+from lcprop.pr.gui.image_input_panel import (
+    PR_GAUSSIAN_INPUT_MODE,
+    PR_IMAGE_AMPLIFICATION_INPUT_MODE,
+    PRImageInputPanel,
+)
+from lcprop.pr.gui.material_panel import PRMaterialPanel
+from lcprop.pr.gui.run_cost import (
+    LocalRunCostAssessment,
+    LocalRunCostClass,
+    classify_pr_run_cost,
+)
+from lcprop.pr.gui.request_adapter import (
+    apply_pr_request,
+    build_pr_request,
+    validate_pr_gui_workflow_request,
+    validate_pr_gui_request_representable,
+)
+from lcprop.pr.gui.resource_estimator_panel import PRResourceEstimatorPanel
+from lcprop.pr.optional_image_analysis import (
+    PRImageAnalysisSelection, add_optional_image_analysis,
+)
+from lcprop.pr.operations import (
+    PR_IMAGE_AMPLIFICATION_OPERATION,
+    PR_STATIC_OPERATION,
+    PR_TIMEDEPENDENT_OPERATION,
+)
+from lcprop.pr.specs import (
+    PRRunRequest,
+    PRRunResult,
+    PR_MATERIAL_ID,
+    PR_TIMEDEPENDENT_WORKFLOW,
+)
+from lcprop.pr.image_amplification import (
+    PR_IMAGE_AMPLIFICATION_WORKFLOW,
+    PRBeamPanelImageAmplificationRunRequest,
+    PRImageAmplificationCompositeResult,
+    PRImageAmplificationExperimentRequest,
+    PRImageAmplificationRunRequest,
+    image_amplification_base_capabilities,
+    image_amplification_experiment_request,
+    prepare_image_amplification_base_request,
+    prepare_image_amplification_workflow_request,
+    run_image_amplification_experiment,
+)
+from lcprop.pr.static_workflow import (
+    PRStaticRunRequest,
+    PRStaticRunResult,
+    PR_STATIC_WORKFLOW,
+)
+from lcprop.pr.transverse.operations import (
+    PR_TRANSVERSE_STATIC_OPERATION,
+    PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
+)
+from lcprop.pr.transverse.specs import (
+    PR_MATERIAL_RESPONSE_LINEARIZED,
+    PRTransverseRunRequest,
+    PRTransverseRunResult,
+    PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+)
+from lcprop.pr.transverse.static_workflow import (
+    PRTransverseStaticRunRequest,
+    PRTransverseStaticRunResult,
+    PR_TRANSVERSE_STATIC_WORKFLOW,
+)
+from lcprop.pr.workflow import continue_pr_timedependent
+from lcprop.pr.runtime_estimator import (
+    estimate_pr_resources,
+    format_pr_resource_estimate,
+)
+from lcprop.runners.base import RunnerResult
+from lcprop.runners.local import LocalRunner
+
+
+def _image_amplification_validation_status(capability, base_request) -> str:
+    """Resolve IA validation without changing workflow-level capability data."""
+
+    if base_request.material_response.model in (
+        PR_MATERIAL_RESPONSE_LINEARIZED, "field_linear_local_intensity"
+    ):
+        return "compatible_validation_pending"
+    return capability.validation_status
+
+
+def _continue_transverse_operation(request, *, checkpoint, cancellation_token=None, progress_callback=None, optical_preview=None):
+    from lcprop.pr.transverse.continuation import continue_transverse_td, ContinuationFailure, notify_failure_checkpoint
+    try:
+        result = continue_transverse_td(request, checkpoint, cancellation_token=cancellation_token,
+                                       progress_callback=progress_callback, optical_preview=optical_preview)
+    except ContinuationFailure as exc:
+        notify_failure_checkpoint(exc, progress_callback)
+        raise
+    return RunnerResult(kind=PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW, result=result,
+        message="Cancelled locally" if result.status == "cancelled" else "Completed locally",
+        run_data=PR_TRANSVERSE_TIMEDEPENDENT_OPERATION.to_run_data(result), material_id=PR_MATERIAL_ID)
+
+
+def _continue_pr_operation(
+    request,
+    *,
+    checkpoint,
+    additional_steps,
+    cancellation_token=None,
+    progress_callback=None,
+) -> RunnerResult:
+    """Adapt PR continuation to the workflow-neutral worker result."""
+
+    from lcprop.pr.reduced_continuation import continue_physical_pr
+    continuation = (continue_physical_pr
+                    if request.material.normalization_identity != "pr_channel_peak_reference_v1"
+                    else continue_pr_timedependent)
+    result = continuation(
+        request,
+        checkpoint,
+        additional_steps,
+        cancellation_token=cancellation_token,
+        progress_callback=progress_callback,
+        live_preview_policy=PRLivePreviewPolicy(),
+    )
+    return RunnerResult(
+        kind=PR_TIMEDEPENDENT_WORKFLOW,
+        result=result,
+        message=(
+            "Cancelled locally"
+            if result.status == "cancelled"
+            else "Completed locally"
+        ),
+        run_data=PR_TIMEDEPENDENT_OPERATION.to_run_data(result),
+        material_id=PR_MATERIAL_ID,
+    )
+
+
+class _UnresolvedExecutionRunner:
+    name = "Slurm (saved target unavailable/unresolved)"
+
+
+def illumination_summary(material):
+    from lcprop.pr.illumination import INTEGRAL_NORMALIZATION
+    if material.normalization_identity == INTEGRAL_NORMALIZATION:
+        return (f'Normalization: {material.normalization_identity}; physical irradiance authority\n'
+                f'Dark-equivalent irradiance: {material.dark_irradiance_W_cm2} W/cm²; '
+                f'uniform background: {material.uniform_irradiance_W_cm2} W/cm²\n'
+                'Transport = (optical + dark + uniform)/aperture-mean total illumination; '
+                'background fractions derived at launch; characteristic time only')
+    return (f'Normalization: {material.normalization_identity} (legacy)\n'
+            f'Normalized intensities: dark={material.dark_intensity:g}, '
+            f'uniform background={material.uniform_background_intensity:g}')
+
+
+def electrical_closure_summary(closure):
+    """Describe validated electrical metadata without changing the request."""
+    from lcprop.pr.unified.specs import (
+        UNBIASED, FIXED_FIELD, PRESCRIBED_CURRENT, A7_CURRENT, OPEN_TRANSVERSE,
+    )
+
+    closure.validate()
+    if closure.identity == UNBIASED:
+        meaning = 'Unbiased / zero-flux electrical condition'
+    elif closure.identity == FIXED_FIELD:
+        meaning = f'Prescribed mean-field target b = {closure.target}'
+    elif closure.identity == PRESCRIBED_CURRENT:
+        meaning = f'Prescribed mean-current target <J> = {closure.target}; mean internal field b adjusts to carry this current'
+    elif closure.identity == A7_CURRENT:
+        meaning = (
+            f'A7 reservoir/applied parameter E_app = {closure.reservoir_field}; '
+            f'background intensity I_b = {closure.background_intensity}; '
+            f'derived prescribed normalized current J_ext = E_app * I_b = {closure.target[0]}; '
+            'mean internal field b adjusts to carry the current; it need not equal E_app'
+        )
+    elif closure.identity == OPEN_TRANSVERSE:
+        meaning = (
+            f'Prescribed x mean-field target b_x = {closure.target[0]}; '
+            'open-circuit y condition: transverse mean current <J_y> = 0; the mean y field b_y adjusts to enforce zero net y current'
+        )
+    else:
+        raise ValueError(f'Unsupported electrical closure summary: {closure.identity}')
+    return f'Electrical closure: {closure.identity}\n{meaning}'
+
+
+class PRMainWindow(QWidget):
+    """Focused GUI for the registered PR workflow operations."""
+
+    def __init__(self, *, slurm_runner=None) -> None:
+        super().__init__()
+        self.local_runner = LocalRunner(
+            operations=(
+                PR_TIMEDEPENDENT_OPERATION,
+                PR_IMAGE_AMPLIFICATION_OPERATION,
+                PR_TRANSVERSE_TIMEDEPENDENT_OPERATION,
+                PR_TRANSVERSE_STATIC_OPERATION,
+                PR_STATIC_OPERATION,
+                PUBLISHED_STATIC_OPERATION,
+                UNIFIED_OPERATION,
+            )
+        )
+        self._saved_unresolved_intent = None
+        self.execution_intent_was_saved = False
+        self._explicit_slurm_runner = slurm_runner
+        self.remote_execution_controls = RemoteExecutionControls(preserve_selection_on_refresh=True)
+        self.slurm_runner = (
+            slurm_runner
+            if slurm_runner is not None
+            else self.remote_execution_controls.create_runner()
+        )
+        self.runner = self.local_runner
+        self.last_result = None
+        self.last_runner_result = None
+        self.last_progress: RunProgress | None = None
+        self.last_remote_status = None
+        self.remote_status_history = []
+        self.last_progress_thread = None
+        self.last_checkpoint = None
+        self.run_status = "idle"
+        self._background_running = False
+        self._active_request = None
+        self._thread: QThread | None = None
+        self._worker: WorkflowWorker | None = None
+        self._cancellation_token: CancellationToken | None = None
+        self._outcome_received = False
+        self._thread_done = False
+        self._close_requested = False
+        self._hydrating_checkpoint = False
+        self._hydrating_experiment = False
+        self.checkpoint_compatibility_reason: str | None = None
+        self._progress_console_state: dict[str, tuple[str, int]] = {}
+
+        self.setWindowTitle("LCProp PR")
+        self.setMinimumSize(1200, 760)
+        self.resize(1450, 900)
+
+        root = application_layout(self)
+        header = FlowLayout()
+        header.addWidget(QLabel("LCProp PR"))
+        header.addStretch(1)
+        header.addWidget(QLabel("Execution:"))
+        self.execution_target_selector = execution_target_selector(
+            slurm_available=self.slurm_runner is not None
+        )
+        self.execution_target_selector.currentIndexChanged.connect(
+            self._execution_target_changed
+        )
+        header.addWidget(self.execution_target_selector)
+        header.addWidget(QLabel("Result retrieval:"))
+        self.result_policy_selector = QComboBox()
+        self.result_policy_selector.addItem("Interactive", FAST_RESULT_POLICY)
+        self.result_policy_selector.addItem("Analysis", "analysis")
+        self.result_policy_selector.addItem("Full", FULL_RESULT_POLICY)
+        self.result_policy_selector.setEnabled(False)
+        self.result_policy_selector.setToolTip(
+            "Reduced Static: Interactive returns bounded display products; Analysis "
+            "returns explicitly selected exact products; Full retains complete state. "
+            "Other workflows retain their existing Fast/Full behavior."
+        )
+        header.addWidget(self.result_policy_selector)
+        from lcprop.transport.result_policy import ANALYSIS_PRODUCTS
+        self.analysis_products_button = QPushButton("Analysis products…")
+        menu = QMenu(self.analysis_products_button)
+        self._analysis_actions = {}
+        for name in ANALYSIS_PRODUCTS:
+            from lcprop.pr.material_previews import ANALYSIS_LABELS
+            action = menu.addAction(ANALYSIS_LABELS.get(name,name.replace("_", " ").title()))
+            action.setCheckable(True)
+            action.toggled.connect(self._analysis_selection_changed)
+            self._analysis_actions[name] = action
+        self.analysis_products_button.setMenu(menu)
+        self.analysis_products_button.setToolTip("Reduced x-only Static only; select before execution. Unselected exact products will not be retrievable later.")
+        header.addWidget(self.analysis_products_button)
+        self.runner_label = RuntimeStatusLabel(f"Runner: {self.runner.name}", preferred_width=160)
+        header.addWidget(self.runner_label)
+        self.status_label = RuntimeStatusLabel("Idle", preferred_width=280)
+        header.addWidget(self.status_label)
+        self.preview_button = QPushButton("Inspect Request")
+        self.preview_button.setToolTip(
+            "Commit pending editor values and validate/inspect without running"
+        )
+        self.preview_button.clicked.connect(self.preview_request_clicked)
+        header.addWidget(self.preview_button)
+
+        self.run_button = QPushButton("Run PR")
+        self.run_button.clicked.connect(self.run_clicked)
+        header.addWidget(self.run_button)
+        self.continue_button = QPushButton("Continue")
+        self.continue_button.setEnabled(False)
+        self.continue_button.clicked.connect(self.continue_clicked)
+        header.addWidget(self.continue_button)
+        self.save_checkpoint_button = QPushButton("Save Checkpoint Folder…")
+        self.save_checkpoint_button.setEnabled(False)
+        self.save_checkpoint_button.clicked.connect(
+            self.save_checkpoint_clicked
+        )
+        header.addWidget(self.save_checkpoint_button)
+        self.load_checkpoint_button = QPushButton("Load Checkpoint")
+        self.load_checkpoint_button.clicked.connect(
+            self.load_checkpoint_clicked
+        )
+        header.addWidget(self.load_checkpoint_button)
+        self.stop_button = QPushButton("Stop")
+        self.stop_button.setVisible(False)
+        self.stop_button.clicked.connect(self.stop_clicked)
+        header.addWidget(self.stop_button)
+        self.help_button = ProductHelpButton(application="pr", parent=self)
+        header.addWidget(self.help_button)
+        self.experiment_file_buttons = ExperimentFileButtons(self)
+        self.experiment_file_buttons.saveRequested.connect(
+            self.save_experiment_clicked
+        )
+        self.experiment_file_buttons.openRequested.connect(
+            self.open_experiment_clicked
+        )
+        header.addWidget(self.experiment_file_buttons)
+        reserve_button_text(self.run_button, ["Run PR", "Running…"])
+        reserve_button_text(self.stop_button, ["Stop", "Stopping…"], retain_hidden=True)
+        root.addLayout(header)
+        self.checkpoint_owner_label = QLabel()
+        self.checkpoint_owner_label.setToolTip('Continue uses the retained TD checkpoint, not the current Run PR configuration. Static has no commissioned Continue operation. Fast previews alone are insufficient.')
+        self.checkpoint_owner_label.setWordWrap(True)
+        root.addWidget(self.checkpoint_owner_label)
+        self.checkpoint_source_label = QLabel()
+        self.checkpoint_source_label.setWordWrap(True)
+        self.checkpoint_source_label.hide()
+        root.addWidget(self.checkpoint_source_label)
+        self._loaded_checkpoint_source = None
+        root.addWidget(self.remote_execution_controls)
+        self.execution_intent_label = QLabel("Execution intent: current selection (not loaded from file)")
+        self.execution_intent_label.setWordWrap(True)
+        root.addWidget(self.execution_intent_label)
+        for selector in (
+            self.execution_target_selector,
+            self.remote_execution_controls.cluster_selector,
+            self.remote_execution_controls.resource_selector,
+        ):
+            selector.activated.connect(self._accept_execution_selection)
+        self.remote_execution_controls.selectionChanged.connect(
+            self._remote_profile_changed
+        )
+
+        self.tabs = QTabWidget()
+        root.addWidget(self.tabs)
+        self.material_panel = PRMaterialPanel()
+        self.grid_panel = PRGridPanel()
+        self.input_panel = PRImageInputPanel()
+        self.beam_panel = make_pr_beam_panel(
+            x_aperture_um=self.grid_panel.x_aperture_um.value(),
+            y_aperture_um=self.grid_panel.y_aperture_um.value(),
+        )
+        self.input_panel.set_beam_panel(self.beam_panel)
+        self.evolution_panel = PREvolutionPanel()
+        self.evolution_panel.fresh_unified_button.clicked.connect(self._configuration_changed)
+        self.evolution_panel.unified_solver.currentIndexChanged.connect(self._configuration_changed)
+        self.resource_estimator_panel = PRResourceEstimatorPanel()
+        self.results_panel = ResultsPanel()
+        self.tabs.addTab(self.material_panel, "PR Material")
+        self.tabs.addTab(self.input_panel, "Input")
+        self.tabs.addTab(self.beam_panel, "Beam")
+        self.tabs.addTab(self.grid_panel, "Grid")
+        self.tabs.addTab(self.evolution_panel, "Evolution")
+        self.tabs.addTab(self.resource_estimator_panel, "Run Planning")
+        self.tabs.addTab(self.results_panel, "Results")
+        self.result_policy_selector.currentIndexChanged.connect(
+            self.resource_estimator_panel.mark_stale
+        )
+        for selector in (self.execution_target_selector, self.result_policy_selector,
+                         self.remote_execution_controls.cluster_selector,
+                         self.remote_execution_controls.resource_selector,
+                         self.evolution_panel.backend, self.evolution_panel.precision):
+            selector.currentIndexChanged.connect(self._mark_request_inspection_stale)
+        self.resource_estimator_panel.estimateRequested.connect(
+            self._estimate_current_resources
+        )
+
+        self.beam_panel.bind_aperture_controls(self.grid_panel)
+        self.grid_panel.z_length_um.valueChanged.connect(self._sync_beam_optical_context)
+        self.material_panel.refractive_index.valueChanged.connect(self._sync_beam_optical_context)
+        self._sync_beam_optical_context()
+        self.grid_panel.x_aperture_um.valueChanged.connect(
+            self._sync_beam_aperture
+        )
+        self.grid_panel.y_aperture_um.valueChanged.connect(
+            self._sync_beam_aperture
+        )
+        self.input_panel.modeChanged.connect(self._input_mode_changed)
+        self.input_panel.configurationChanged.connect(
+            self._configuration_changed
+        )
+        self._input_mode_changed(self.input_panel.mode_id())
+        self._connect_checkpoint_compatibility_signals()
+        self._update_product_controls()
+
+    @Slot(str)
+    def _input_mode_changed(self, mode_id: str) -> None:
+        image_mode = mode_id == PR_IMAGE_AMPLIFICATION_INPUT_MODE
+        beam_index = self.tabs.indexOf(self.beam_panel)
+        self.tabs.setTabEnabled(beam_index, True)
+        self.evolution_panel.set_image_amplification_mode(image_mode)
+        if hasattr(self, "checkpoint_compatibility_reason"):
+            self._refresh_checkpoint_controls()
+
+    def _sync_beam_optical_context(self) -> None:
+        self.beam_panel.set_optical_context(
+            n_ref=self.material_panel.refractive_index.value(),
+            interaction_length_um=self.grid_panel.z_length_um.value(),
+        )
+
+    def _sync_beam_aperture(self) -> None:
+        self.beam_panel.set_aperture(
+            self.grid_panel.x_aperture_um.value(),
+            self.grid_panel.y_aperture_um.value(),
+        )
+
+    def _connect_checkpoint_compatibility_signals(self) -> None:
+        for panel in (
+            self.material_panel,
+            self.input_panel,
+            self.beam_panel,
+            self.grid_panel,
+            self.evolution_panel,
+        ):
+            for widget_type in (QSpinBox, QDoubleSpinBox):
+                for widget in panel.findChildren(widget_type):
+                    widget.valueChanged.connect(self._configuration_changed)
+            for widget in panel.findChildren(QComboBox):
+                widget.currentIndexChanged.connect(
+                    self._configuration_changed
+                )
+            for widget in panel.findChildren(QCheckBox):
+                widget.toggled.connect(self._configuration_changed)
+            for widget in panel.findChildren(QLineEdit):
+                widget.editingFinished.connect(self._configuration_changed)
+        self.beam_panel.launch_plane_widget.beamStackChanged.connect(
+            self._configuration_changed
+        )
+        self._refresh_checkpoint_controls()
+
+    @Slot()
+    def _configuration_changed(self, *_args) -> None:
+        if hasattr(self, "analysis_products_button"):
+            self._update_product_controls()
+        if (
+            self._hydrating_checkpoint
+            or self._hydrating_experiment
+            or self._background_running
+        ):
+            return
+        self.resource_estimator_panel.mark_stale()
+        self._refresh_checkpoint_controls()
+
+    @Slot()
+    def _estimate_current_resources(self) -> None:
+        """Estimate the current immutable request without running it."""
+
+        try:
+            configured_request = self.build_request()
+            request = self._request_for_local_cost(configured_request)
+            estimate = estimate_pr_resources(request)
+        except Exception as exc:
+            self.resource_estimator_panel.set_error(str(exc))
+            return
+        text = (
+            "Configured execution:\n" + self._execution_summary(configured_request)
+            + "\n\nComparison estimates (not the selected execution plan):\n"
+            + format_pr_resource_estimate(estimate)
+        )
+        if isinstance(configured_request, PRRunRequest):
+            preflight = validate_pr_gui_workflow_request(configured_request)
+            if preflight.timestep_assessment == "pending":
+                text += "\n" + "\n".join(preflight.warnings)
+        self.resource_estimator_panel.set_estimate(text)
+
+    def _refresh_checkpoint_controls(self) -> None:
+        checkpoint = self.last_checkpoint
+        from lcprop.pr.transverse.continuation import TransverseTDCheckpoint
+        from .presentation_guidance import checkpoint_ownership
+        transverse = isinstance(checkpoint, TransverseTDCheckpoint)
+        self.checkpoint_owner_label.setText(checkpoint_ownership(checkpoint, transverse=transverse))
+        owner = 'Full-transverse TD' if transverse else 'Reduced TD'
+        self.continue_button.setText(f'Continue {owner}' if checkpoint is not None else 'Continue TD')
+        from .presentation_guidance import checkpoint_folder_hint
+        source = self._loaded_checkpoint_source
+        if source is not None and source[0] is not checkpoint:
+            self._loaded_checkpoint_source = source = None
+        self.checkpoint_source_label.setText(
+            'Loaded checkpoint source: ' + source[1] if source is not None else '')
+        self.checkpoint_source_label.setVisible(source is not None)
+        self.checkpoint_source_label.setToolTip(
+            'Continue uses this retained checkpoint. Run PR uses the current controls.')
+        self.save_checkpoint_button.setToolTip(checkpoint_folder_hint(transverse=transverse))
+        if isinstance(checkpoint, TransverseTDCheckpoint):
+            ready = not self._background_running
+            self.continue_button.setEnabled(ready)
+            self.save_checkpoint_button.setEnabled(ready)
+            self.continue_button.setToolTip("Edit physical illumination for a new local segment; inherited state parameters are locked.")
+            self.checkpoint_compatibility_reason = None
+            return
+        if (isinstance(checkpoint, PRTimeDependentCheckpoint)
+                and checkpoint.request.material.normalization_identity != "pr_channel_peak_reference_v1"):
+            ready = (not self._background_running and not self.input_panel.is_image_amplification()
+                     and self.evolution_panel.workflow_id() == PR_TIMEDEPENDENT_WORKFLOW)
+            self.continue_button.setEnabled(ready)
+            self.save_checkpoint_button.setEnabled(not self._background_running)
+            self.continue_button.setToolTip("Edit physical illumination; reduced state, closure and cadence stay locked.")
+            self.checkpoint_compatibility_reason = None
+            return
+        workflow_id = self.evolution_panel.workflow_id()
+        reason = None
+        if self.input_panel.is_image_amplification():
+            reason = "Continuation is not available for image amplification."
+        elif workflow_id != PR_TIMEDEPENDENT_WORKFLOW:
+            reason = "Continuation is available only for time-dependent runs."
+        elif checkpoint is None:
+            reason = "No PR checkpoint is loaded or retained."
+        else:
+            try:
+                validate_pr_continuation(self.build_request(), checkpoint)
+            except Exception as exc:
+                reason = str(exc)
+        self.checkpoint_compatibility_reason = reason
+        compatible = checkpoint is not None and reason is None
+        actions_enabled = not self._background_running
+        self.continue_button.setEnabled(actions_enabled and compatible)
+        self.continue_button.setToolTip(
+            "Continue locally; the Run target selection is not used."
+            if compatible else reason or ""
+        )
+        self.save_checkpoint_button.setEnabled(
+            actions_enabled
+            and workflow_id == PR_TIMEDEPENDENT_WORKFLOW
+            and checkpoint is not None
+        )
+        if checkpoint is None or workflow_id != PR_TIMEDEPENDENT_WORKFLOW:
+            return
+        if compatible:
+            self.status_label.setText(
+                "Checkpoint ready: "
+                f"step {checkpoint.completed_steps}, "
+                f"t={checkpoint.time_normalized:.6g}"
+            )
+        else:
+            self.status_label.setText(f"Checkpoint incompatible: {reason}")
+
+    def build_request(self):
+        """Construct the immutable request represented by the controls."""
+
+        if self.input_panel.is_image_amplification():
+            if self.evolution_panel.workflow_id() in (PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW):
+                raise ValueError("Published optical-first Static currently supports fresh ordinary calculations, not Image Amplification experiments")
+            base_request = build_pr_request(
+                material_panel=self.material_panel,
+                beam_panel=self.beam_panel,
+                grid_panel=self.grid_panel,
+                evolution_panel=self.evolution_panel,
+            )
+            return self.input_panel.build_experiment_request(
+                base_workflow_id=self.evolution_panel.workflow_id(),
+                base_request=base_request,
+                launch_configuration=self.beam_panel.launch_configuration(),
+            )
+        return build_pr_request(
+            material_panel=self.material_panel,
+            beam_panel=self.beam_panel,
+            grid_panel=self.grid_panel,
+            evolution_panel=self.evolution_panel,
+        )
+
+    def _capture_experiment_gui_state(self):
+        workflow_id = self.evolution_panel.workflow_id()
+        if workflow_id == PR_PUBLISHED_STATIC_WORKFLOW:
+            solver = self.evolution_panel.published_material_solver()
+        elif workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
+            solver = self.evolution_panel.transverse_solver()
+        elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
+            solver = self.evolution_panel.transverse_static_solver()
+        elif workflow_id == PR_STATIC_WORKFLOW:
+            solver = self.evolution_panel.static_solver()
+        else:
+            solver = self.evolution_panel.solver()
+        return {
+            "loaded_unified_request": getattr(self.evolution_panel, "_loaded_unified_request", None),
+            "unified_solver": self.evolution_panel.unified_solver.currentData(),
+            "unified_closure": self.evolution_panel.unified_closure.closure(self.material_panel.closure_background()),
+            "legacy_static": self.evolution_panel.legacy_static,
+            "transport": self.evolution_panel.transport_model.currentData(),
+            "execution_controls": self._capture_execution_controls(),
+            "input_mode": self.input_panel.mode_id(),
+            "workflow_id": workflow_id,
+            "grid": self.grid_panel.grid(),
+            "material": self.material_panel.material(allow_incomplete=True),
+            "physical_input_texts": (self.material_panel.dark_irradiance.text(),self.material_panel.uniform_irradiance.text()),
+            "solver": solver,
+            "material_response": (
+                self.evolution_panel.transverse_material_response()
+            ),
+            "scattering": self.evolution_panel.scattering_spec(),
+            "transverse_applied_field": (
+                self.evolution_panel.transverse_applied_field.value()
+                if workflow_id in (
+                    PR_TRANSVERSE_STATIC_WORKFLOW,
+                    PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+                )
+                else 0.0
+            ),
+            "backend": self.evolution_panel.backend_spec(),
+            "beam_stack": self.beam_panel.beam_stack_definition,
+            "launch_elements": self.beam_panel.launch_elements(),
+            "pump_channel_index": self.input_panel.pump_channel.currentData(),
+            "signal_channel_index": self.input_panel.signal_channel.currentData(),
+        }
+
+    def _restore_experiment_gui_state(self, state) -> None:
+        self.evolution_panel._loaded_unified_request = state["loaded_unified_request"]
+        mode_index = self.input_panel.input_mode.findData(state["input_mode"])
+        self.input_panel.input_mode.setCurrentIndex(mode_index)
+        self.grid_panel.set_grid(state["grid"])
+        self.material_panel.set_material(state["material"],validate=False)
+        self.material_panel.dark_irradiance.setText(state["physical_input_texts"][0])
+        self.material_panel.uniform_irradiance.setText(state["physical_input_texts"][1])
+        workflow_id = state["workflow_id"]
+        self.evolution_panel.set_workflow_id(workflow_id)
+        self.evolution_panel.transport_model.setCurrentIndex(self.evolution_panel.transport_model.findData(state['transport']))
+        self.evolution_panel.legacy_static=state['legacy_static']
+        self.evolution_panel.unified_closure.set_closure(state['unified_closure'])
+        self.evolution_panel.unified_solver.setCurrentIndex(self.evolution_panel.unified_solver.findData(state['unified_solver']))
+        self.evolution_panel.set_transverse_material_response(
+            state["material_response"],
+            applied_field_x=state["transverse_applied_field"],
+        )
+        if workflow_id == PR_PUBLISHED_STATIC_WORKFLOW:
+            self.evolution_panel.set_published_material_solver(state["solver"])
+        elif workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
+            self.evolution_panel.set_transverse_solver(state["solver"])
+        elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
+            self.evolution_panel.set_transverse_static_solver(state["solver"])
+        elif workflow_id == PR_STATIC_WORKFLOW:
+            self.evolution_panel.set_static_solver(state["solver"])
+        else:
+            self.evolution_panel.set_solver(state["solver"])
+        self.evolution_panel.set_scattering_spec(state["scattering"])
+        self.evolution_panel.set_backend_spec(state["backend"])
+        self.beam_panel.set_aperture(
+            state["grid"].x_aperture_um,
+            state["grid"].y_aperture_um,
+        )
+        self.beam_panel.set_beam_stack_definition(state["beam_stack"])
+        self.beam_panel.input_screen_editor.set_launch_elements(
+            state["launch_elements"]
+        )
+        if (
+            state["pump_channel_index"] is not None
+            and state["signal_channel_index"] is not None
+        ):
+            self.input_panel.set_role_indices(
+                state["pump_channel_index"],
+                state["signal_channel_index"],
+            )
+
+    def _execution_summary(self, request, *, runner=None):
+        text = execution_summary(self, request, runner=runner)
+        intent = self._saved_unresolved_intent
+        if intent is not None and runner in (None, self.runner):
+            text = text.replace("Execution target: Local", "Execution target: Slurm (unavailable/unresolved)")
+            text += (f"\nSaved cluster: {intent.cluster_profile}"
+                     f"\nSaved resource: {intent.resource_profile}"
+                     "\nExplicit execution target selection required before running.")
+        return text
+
+    def _remote_identity_available(self):
+        controls = self.remote_execution_controls
+        cluster = controls.selected_cluster()
+        if not controls.slurm_available or cluster is None:
+            return False
+        try:
+            cluster.profile(controls.selected_resource_name())
+        except KeyError:
+            return False
+        return True
+
+    def _display_current_execution_intent(self, prefix="Current execution intent"):
+        intent = self._current_execution_intent()
+        text = (f"{prefix}: {intent.target}; cluster={intent.cluster_profile}; "
+                f"resource={intent.resource_profile}; retrieval={intent.retrieval_policy}")
+        if self._saved_unresolved_intent is not None:
+            text += " — UNAVAILABLE/UNRESOLVED: explicitly select an execution target before running"
+        self.execution_intent_label.setText(text)
+
+    def _update_product_controls(self, *, policy=None):
+        from lcprop.transport.result_policy import static_product_selection
+        unified=self.evolution_panel.workflow_id()==UNIFIED_WORKFLOW
+        self.material_panel.applied_field.setEnabled(not unified)
+        self.material_panel.applied_field.setToolTip('Unified Static uses the explicit electrical-condition controls; this legacy value is not used.' if unified else '')
+        local_plane = self.evolution_panel.workflow_id() in (PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW)
+        supported = self.evolution_panel.workflow_id() in (PR_STATIC_WORKFLOW, PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW)
+        for name, action in self._analysis_actions.items():
+            allowed = (name in UNIFIED_ANALYSIS_PRODUCTS) if unified else (name in PUBLISHED_STATIC_ANALYSIS_PRODUCTS if local_plane else not name.startswith('unified_'))
+            if unified and name=="unified_face_y_volume":
+                allowed = self.evolution_panel.unified_closure.dimension==2
+            action.setEnabled(allowed)
+            if not allowed:
+                with QSignalBlocker(action):
+                    action.setChecked(False)
+        current = policy or self.result_policy_selector.currentData() or "fast"
+        if unified and policy is None and not getattr(self,'_unified_products_active',False) and self.execution_target_selector.currentData()=='local':
+            current='interactive'
+        self._unified_products_active=unified
+        kind, _ = static_product_selection(current)
+        names = sorted(name for name, action in self._analysis_actions.items() if action.isChecked())
+        analysis = "analysis:" + ",".join(names) if names else "analysis"
+        if supported:
+            interactive = current if kind == "interactive" else "fast"
+            items = ([("Minimal", "minimal"),("Fast / Exploratory", "fast"),("Interactive", "interactive"),("Analysis",analysis),("Full","full")] if unified else [("Interactive", interactive), ("Analysis", analysis), ("Full", "full")])
+            selected = analysis if kind == "analysis" else ("full" if kind == "full" else (current if unified else interactive))
+        else:
+            items = [("Fast / Exploratory", "fast"), ("Full", "full")]
+            selected = "full" if kind == "full" else "fast"
+        # One path for construction, loading, and workflow switches. Unsupported
+        # policies are absent, not merely disabled entries with stale payloads.
+        with QSignalBlocker(self.result_policy_selector):
+            previous = [(self.result_policy_selector.itemText(i), self.result_policy_selector.itemData(i))
+                        for i in range(self.result_policy_selector.count())]
+            if previous != items:
+                self.result_policy_selector.clear()
+                for label, value in items:
+                    self.result_policy_selector.addItem(label, value)
+            self.result_policy_selector.setCurrentIndex(self.result_policy_selector.findData(selected))
+        self.analysis_products_button.setEnabled(supported)
+        self.analysis_products_button.setToolTip(
+            'Unified Static: selecting far-field requests the exact M5 accepted-boundary spectrum and Product axes.'
+            if unified else 'Reduced x-only Static only; select before execution. Unselected exact products will not be retrievable later.')
+        self.result_policy_selector.setEnabled(supported or self.execution_target_selector.currentData() == "slurm")
+
+    def _analysis_selection_changed(self, *event):
+        if (event and event[0] is True and hasattr(self,'evolution_panel')
+                and self.evolution_panel.workflow_id()==UNIFIED_WORKFLOW):
+            names=sorted(name for name,action in self._analysis_actions.items() if action.isChecked())
+            self._update_product_controls(policy='analysis:'+','.join(names))
+        else:
+            self._update_product_controls()
+        if hasattr(self, "resource_estimator_panel"):
+            self.resource_estimator_panel.mark_stale()
+
+    def _set_product_policy(self, policy):
+        from lcprop.transport.result_policy import normalize_result_policy, static_product_selection
+        normalized = normalize_result_policy(policy)
+        _, selection = static_product_selection(normalized)
+        for name, action in self._analysis_actions.items():
+            with QSignalBlocker(action):
+                action.setChecked(name in selection)
+        self._update_product_controls(policy=normalized)
+
+    def _capture_execution_controls(self):
+        controls = self.remote_execution_controls
+        item = self.execution_target_selector.model().item(1)
+        return dict(
+            target=self.execution_target_selector.currentData(),
+            cluster=controls.cluster_selector.currentData(),
+            resource=controls.resource_selector.currentData(),
+            backend=self.evolution_panel.backend_spec(),
+            backend_origin=self.evolution_panel.backend_origin,
+            retrieval=self.result_policy_selector.currentData(),
+            analysis_selection=tuple(name for name, action in self._analysis_actions.items() if action.isChecked()),
+            retrieval_enabled=self.result_policy_selector.isEnabled(),
+            unresolved=self._saved_unresolved_intent,
+            was_saved=self.execution_intent_was_saved,
+            label=self.execution_intent_label.text(),
+            runner_label=self.runner_label.text(),
+            runner=self.runner, slurm_runner=self.slurm_runner,
+            slurm_enabled=item.isEnabled(), slurm_tooltip=item.toolTip(),
+        )
+
+    def _restore_execution_controls(self, state):
+        controls = self.remote_execution_controls
+        with QSignalBlocker(controls), QSignalBlocker(self.execution_target_selector), QSignalBlocker(self.result_policy_selector):
+            controls.select_profile_identity(state["cluster"], state["resource"])
+            self.execution_target_selector.setCurrentIndex(self.execution_target_selector.findData(state["target"]))
+            self._set_product_policy(state["retrieval"])
+            for name, action in self._analysis_actions.items():
+                with QSignalBlocker(action):
+                    action.setChecked(name in state["analysis_selection"])
+            self._analysis_selection_changed()
+            self.result_policy_selector.setEnabled(state["retrieval_enabled"])
+            self.evolution_panel.set_backend_spec(state["backend"])
+            self.evolution_panel._backend_origin = state["backend_origin"]
+            self._saved_unresolved_intent = state["unresolved"]
+            self.execution_intent_was_saved = state["was_saved"]
+            self.runner, self.slurm_runner = state["runner"], state["slurm_runner"]
+            self.execution_intent_label.setText(state["label"])
+            self.runner_label.setText(state["runner_label"])
+            item = self.execution_target_selector.model().item(1)
+            item.setEnabled(state["slurm_enabled"])
+            item.setToolTip(state["slurm_tooltip"])
+
+    def _current_execution_intent(self):
+        backend = self.evolution_panel.backend_spec()
+        if self._saved_unresolved_intent is not None:
+            return replace(self._saved_unresolved_intent,
+                           requested_backend=backend.backend, precision=backend.precision,
+                           retrieval_policy=str(self.result_policy_selector.currentData()))
+        target = str(self.execution_target_selector.currentData())
+        controls = self.remote_execution_controls
+        return ExecutionIntent(
+            target, controls.cluster_selector.currentData() if target == "slurm" else None,
+            controls.selected_resource_name() if target == "slurm" else None,
+            backend.backend, backend.precision,
+            str(self.result_policy_selector.currentData()),
+        )
+
+    def _restore_execution_intent(self, intent):
+        self.execution_intent_was_saved = intent is not None
+        self._saved_unresolved_intent = None
+        if intent is None:
+            self._execution_target_changed()
+            self.execution_intent_label.setText(
+                "Execution intent: absent in this file; current/default selection retained"
+            )
+            return
+        controls = self.remote_execution_controls
+        backend = self.evolution_panel.backend_spec()
+        # Keep the saved selection pinned while profile signals rebuild controls.
+        self._saved_unresolved_intent = intent
+        self.execution_target_selector.setCurrentIndex(
+            self.execution_target_selector.findData(intent.target)
+        )
+        available = intent.target == "local"
+        if intent.target == "slurm":
+            controls.select_profile_identity(intent.cluster_profile, intent.resource_profile)
+            available = self._remote_identity_available()
+        self._set_product_policy(intent.retrieval_policy)
+        if available:
+            self._saved_unresolved_intent = None
+        self._execution_target_changed()
+        # Execution context suggestions must never rewrite saved science.
+        self.evolution_panel.set_backend_spec(backend)
+        self.execution_intent_label.setText(
+            f"Saved execution intent: {intent.target}; cluster={intent.cluster_profile}; "
+            f"resource={intent.resource_profile}; retrieval={intent.retrieval_policy}"
+            + ("" if available else " — UNAVAILABLE/UNRESOLVED: explicitly select an execution target before running")
+        )
+
+    @Slot()
+    def _accept_execution_selection(self):
+        self._saved_unresolved_intent = None
+        self._execution_target_changed()
+        self._display_current_execution_intent("Explicit execution intent")
+
+    @staticmethod
+    def _validate_experiment_request_representable(request) -> None:
+        if isinstance(request, PRImageAmplificationExperimentRequest):
+            request.validate()
+            validate_pr_gui_request_representable(request.base_request)
+            if request.base_request.beams != request.launch_configuration.beams:
+                raise ValueError(
+                    "Image Amplification base and launch beams must agree"
+                )
+            if (
+                request.base_request.launch_elements
+                != request.launch_configuration.channel_elements
+            ):
+                raise ValueError(
+                    "Image Amplification base and launch screen plans must agree"
+                )
+            return
+        validate_pr_gui_request_representable(request)
+
+    def save_experiment_to(self, path):
+        """Save the active PR experiment without running it."""
+        self.results_panel.workspace.operation_boundary("Save Experiment")
+
+        if self._background_running:
+            raise RuntimeError("cannot save an experiment while a run is active")
+        request = self.build_request()
+        self._validate_experiment_request_representable(request)
+        return save_experiment(
+            request,
+            path,
+            material_id=PR_MATERIAL_ID,
+            workflow_id=self._workflow_id_for_request(request),
+            execution_intent=self._current_execution_intent(),
+            presentation_payload=launchplane_presentation_payload(
+                self.beam_panel
+            ),
+        )
+
+    def load_experiment_from(self, path):
+        """Validate and transactionally restore one PR experiment file."""
+        self.results_panel.workspace.operation_boundary("Open Experiment")
+
+        if self._background_running:
+            raise RuntimeError("cannot open an experiment while a run is active")
+        loaded = load_experiment(path, expected_material_id=PR_MATERIAL_ID)
+        self._validate_experiment_request_representable(loaded.request)
+        prior = self._capture_experiment_gui_state()
+        stack = launchplane_stack_from_presentation(loaded)
+        self._hydrating_experiment = True
+        try:
+            image_experiment = isinstance(
+                loaded.request,
+                PRImageAmplificationExperimentRequest,
+            )
+            mode = (
+                PR_IMAGE_AMPLIFICATION_INPUT_MODE
+                if image_experiment
+                else PR_GAUSSIAN_INPUT_MODE
+            )
+            mode_index = self.input_panel.input_mode.findData(mode)
+            self.input_panel.input_mode.setCurrentIndex(mode_index)
+            ordinary_request = (
+                loaded.request.base_request
+                if image_experiment
+                else loaded.request
+            )
+            apply_pr_request(
+                ordinary_request,
+                material_panel=self.material_panel,
+                beam_panel=self.beam_panel,
+                grid_panel=self.grid_panel,
+                evolution_panel=self.evolution_panel,
+                beam_stack_definition=stack,
+            )
+            self.beam_panel.input_screen_editor.set_launch_elements(
+                ordinary_request.launch_elements
+            )
+            if image_experiment:
+                self.input_panel.set_role_indices(
+                    loaded.request.pump_channel_index,
+                    loaded.request.signal_channel_index,
+                )
+            self._restore_execution_intent(loaded.execution_intent)
+            rebuilt = self.build_request()
+            if rebuilt != loaded.request:
+                raise ValueError(
+                    "loaded PR request is not exactly representable by the GUI"
+                )
+        except Exception:
+            self._restore_experiment_gui_state(prior)
+            self._restore_execution_controls(prior["execution_controls"])
+            raise
+        finally:
+            self._hydrating_experiment = False
+        self.resource_estimator_panel.mark_stale()
+        self._refresh_checkpoint_controls()
+        return loaded
+
+    @Slot()
+    def save_experiment_clicked(self) -> None:
+        path = choose_experiment_save_path(self)
+        if path is None:
+            return
+        try:
+            saved = self.save_experiment_to(path)
+        except Exception:
+            self.status_label.setText("Experiment save failed")
+            self.results_panel.append_console("ERROR")
+            report_failure(self, traceback.format_exc())
+            self.tabs.setCurrentWidget(self.results_panel)
+            return
+        self.status_label.setText("Experiment saved")
+        self.results_panel.append_console(f"Saved PR experiment: {saved}")
+
+    @Slot()
+    def open_experiment_clicked(self) -> None:
+        path = choose_experiment_open_path(self)
+        if path is None:
+            return
+        try:
+            loaded = self.load_experiment_from(path)
+        except Exception as exc:
+            show_experiment_open_warning(self, exc)
+            self.status_label.setText("Experiment open failed")
+            self.results_panel.append_console("ERROR")
+            report_failure(self, traceback.format_exc())
+            self.tabs.setCurrentWidget(self.results_panel)
+            return
+        self.status_label.setText("Experiment opened")
+        self.results_panel.append_console(
+            f"Opened PR experiment: {loaded.workflow_id}"
+        )
+
+    def preview_request_clicked(self) -> None:
+        workspace = self.results_panel.workspace
+        workspace.begin_request('Inspect current Run PR configuration')
+        workspace.set_request_summary('Current Run PR configuration: inspection pending; not executed.')
+        inspect_request(self, self.build_request)
+        if workspace.operation_status.text().startswith('Execution status: Failed'):
+            workspace.set_request_summary(
+                'Current Run PR request rejected; no new result was produced.\n'
+                + workspace.operation_status.text())
+
+    def describe_request(self, request, *, runner=None) -> str:
+        summary = (
+            self._describe_scientific_request(request, runner=runner)
+            + "\n" + self._execution_summary(request, runner=runner)
+        )
+        if self.input_panel.requests_optional_image_analysis():
+            from lcprop.transport.result_policy import static_product_selection
+            kind, products = static_product_selection(self.result_policy_selector.currentData())
+            if isinstance(request, PRStaticRunRequest) and kind != "full" and not {
+                "complex_input", "complex_output"
+            }.issubset(products):
+                summary += ("\nOptional image analysis: NOT SELECTED — requires complex_input "
+                            "and complex_output. Select both Analysis products or Full before Run; "
+                            "propagation will still complete without this analysis.")
+            summary += (
+                "\nOn Run: optional specialized image analysis; ordinary PR "
+                "propagation remains authoritative. Analysis may be unavailable."
+                "\nAnalysis roles are session-only; Save Experiment stores "
+                "the ordinary propagation request."
+            )
+        return summary
+
+    def _describe_scientific_request(self, request, *, runner=None) -> str:
+        """Return a durable, unit-explicit summary of one PR request."""
+        runner = self.runner if runner is None else runner
+
+        if isinstance(request, PRImageAmplificationExperimentRequest):
+            prepared, _transmission, _grating = (
+                prepare_image_amplification_base_request(request)
+            )
+            capability = next(
+                capability
+                for capability in image_amplification_base_capabilities()
+                if capability.workflow_id == request.base_workflow_id
+            )
+            assignments = {
+                assignment.channel_index: assignment.elements
+                for assignment in request.launch_configuration.channel_elements
+            }
+            screen = assignments[request.signal_channel_index][0]
+            channels = request.launch_configuration.beams.channels
+            pump = channels[request.pump_channel_index]
+            signal = channels[request.signal_channel_index]
+            validation_status = _image_amplification_validation_status(
+                capability, prepared
+            )
+            status = (
+                "Validated"
+                if validation_status == "compatible_and_validated"
+                else "Experimental — validation pending"
+            )
+            lines = [
+                "Material: photorefractive",
+                f"Workflow: {PR_IMAGE_AMPLIFICATION_WORKFLOW}",
+                "Input mode: Image Amplification",
+                f"Base PR algorithm: {request.base_workflow_id}",
+                f"Algorithm validation: {status}",
+                f"Source: {request.source.display_name}",
+                (
+                    "Image footprint: "
+                    f"{screen.placement.width_um:g} × "
+                    f"{screen.placement.height_um:g} µm"
+                ),
+                f"Invert image: {screen.invert}",
+                (
+                    "Incident channel powers: "
+                    f"pump={pump.power_mW:g} mW; "
+                    f"signal={signal.power_mW:g} mW"
+                ),
+                (
+                    "Derived incident signal/pump power ratio: "
+                    f"{request.incident_signal_to_pump_power_ratio:g}"
+                ),
+                "Base request:",
+            ]
+            lines.extend(
+                f"  {line}" for line in self.describe_request(prepared).splitlines()
+            )
+            return "\n".join(lines)
+
+        if isinstance(
+            request,
+            (
+                PRImageAmplificationRunRequest,
+                PRBeamPanelImageAmplificationRunRequest,
+            ),
+        ):
+            prepared, _transmission, _grating = (
+                prepare_image_amplification_workflow_request(request)
+            )
+            preflight = validate_pr_gui_workflow_request(prepared)
+            source = request.source
+            if isinstance(request, PRBeamPanelImageAmplificationRunRequest):
+                launch_configuration = request.launch_configuration
+                pump = launch_configuration.beams.channels[
+                    request.pump_channel_index
+                ]
+                signal = launch_configuration.beams.channels[
+                    request.signal_channel_index
+                ]
+                signal_elements = next(
+                    assignment.elements
+                    for assignment in launch_configuration.channel_elements
+                    if assignment.channel_index == request.signal_channel_index
+                )
+                screen = signal_elements[0]
+                image_size = (
+                    screen.placement.width_um,
+                    screen.placement.height_um,
+                )
+                invert_image = screen.invert
+                preprocessing_policy = screen.preprocessing_policy
+                incident_powers = (pump.power_mW, signal.power_mW)
+                incident_ratio = request.incident_signal_to_pump_power_ratio
+            else:
+                launch = request.launch
+                image_size = (
+                    launch.image_physical_size_um,
+                    launch.image_physical_size_um,
+                )
+                invert_image = launch.invert_image
+                preprocessing_policy = source.preprocessing_policy
+                incident_powers = (
+                    launch.pump_incident_power_mW,
+                    launch.signal_incident_power_mW,
+                )
+                incident_ratio = launch.incident_signal_to_pump_power_ratio
+            lines = [
+                "Material: photorefractive",
+                f"Workflow: {PR_IMAGE_AMPLIFICATION_WORKFLOW}",
+                "Input mode: Image Amplification",
+                f"Runner: {runner.name}",
+                (
+                    f"Grid: {request.grid.Nx} × {request.grid.Ny}, "
+                    f"Nz={round(request.grid.z_length_um / request.grid.dz_um)}"
+                ),
+                (
+                    "Periodic aperture: "
+                    f"x={request.grid.x_aperture_um:g} µm, "
+                    f"y={request.grid.y_aperture_um:g} µm"
+                ),
+                (
+                    f"Source: {source.display_name}; "
+                    f"pixels={source.width} × {source.height}; "
+                    f"format={source.encoded_format}; SHA-256={source.sha256}"
+                ),
+                f"Preprocessing: {preprocessing_policy}",
+                "Alpha policy: discarded; alpha is not an optical mask",
+                (
+                    f"Image footprint: {image_size[0]:g} × {image_size[1]:g} µm; "
+                    "nearest-neighbor resampling"
+                ),
+                f"Invert image: {invert_image}",
+                (
+                    "Incident channel powers: "
+                    f"pump={incident_powers[0]:g} mW; "
+                    f"signal={incident_powers[1]:g} mW"
+                ),
+                (
+                    "Derived incident signal/pump power ratio: "
+                    f"{incident_ratio:g}"
+                ),
+                (
+                    "Prepared incident channel powers: "
+                    + ", ".join(
+                        f"{channel.power_mW:.8g} mW"
+                        for channel in prepared.beams.channels
+                    )
+                ),
+                f"Material steps: {request.solver.Nt}",
+                f"Material integrator: {request.solver.integrator}",
+                f"Normalized timestep: {request.solver.dt_normalized:g}",
+                (
+                    "Conservative normalized timestep limit: "
+                    + ("execution timestep assessment pending"
+                       if preflight.conservative_dt_limit is None
+                       else f"{preflight.conservative_dt_limit:.8g}")
+                ),
+                f"Optical substeps per z slice: {request.solver.optical_substeps}",
+                (
+                    f"Backend: {request.backend.backend}; "
+                    f"precision={request.backend.precision}"
+                ),
+            ]
+            if preflight.warnings:
+                lines.append("Preflight warnings:")
+                lines.extend(f"- {warning}" for warning in preflight.warnings)
+            else:
+                lines.append("Preflight warnings: none")
+            return "\n".join(lines)
+        preflight = validate_pr_gui_workflow_request(request)
+        if isinstance(request, UnifiedFreshRequest):
+            r=core_request(request);c=request.closure
+            from lcprop.pr.unified.integration import resource_plan
+            plan=resource_plan(request)
+            return '\n'.join([
+                f'Workflow: {UNIFIED_WORKFLOW}',f'Arithmetic: {r.arithmetic_identity}',
+                f'Transport: {r.spatial.dimension}D active; batch axes {r.spatial.batch_axes}',
+                'Material response: fully nonlinear unified transport',
+                (f'A7 E_app={c.reservoir_field}; normalized current is derived at launch from physical background/reference irradiance; b is solved independently'
+                 if request.material.normalization_identity != "pr_channel_peak_reference_v1" and c.reservoir_field is not None
+                 else electrical_closure_summary(c)),
+                illumination_summary(request.material),
+                f'Precision: {r.precision.identity}',f'Projection: {r.projection_identity}',
+                'Published optical-first: P → I → material → projection → M → S; no replay',
+                f'Scattering: {request.scattering}',
+                f'Grid: {request.grid}; wavelength={r.wavelength_um}; gain-length={request.material.gain_length_product}',
+                f'Material solver: {r.solver.identity}; backend: {request.backend.backend}; execution target: {self.execution_target_selector.currentData()}',
+                f'Support envelope: {plan["support_envelope"]}',
+                f'Resource formula: {plan["schema"]}; working bytes: {plan["bytes"]}',
+                *([f'Local resource assessment: {plan["local_assessment"]}'] if 'local_assessment' in plan else []),
+                *preflight.warnings])
+        workflow_id = self._workflow_id_for_request(request)
+        lines = [
+            "Material: photorefractive",
+            "Launch sampling: central carriers representable; Gaussian margins and boundary risks qualified below.",
+            f"Workflow: {workflow_id}",
+            f"Runner: {runner.name}",
+            (
+                f"Grid: {request.grid.Nx} × {request.grid.Ny}, "
+                f"Nz={round(request.grid.z_length_um / request.grid.dz_um)}"
+            ),
+            (
+                "Periodic aperture: "
+                f"x={request.grid.x_aperture_um:g} µm, "
+                f"y={request.grid.y_aperture_um:g} µm"
+            ),
+            (
+                f"Interaction length: {request.grid.z_length_um:g} µm; "
+                f"optical dz={request.grid.dz_um:g} µm"
+            ),
+            illumination_summary(request.material),
+            f"Normalized applied field: {request.material.applied_field:g}",
+            f"Gain-length product: {request.material.gain_length_product:g}",
+            f"Refractive index: {request.material.refractive_index:g}",
+            f"Enabled beams: {len(request.beams.channels)}",
+        ]
+        for index, (channel, group) in enumerate(
+            zip(request.beams.channels, request.beams.coherence_groups),
+            start=1,
+        ):
+            lines.append(
+                f"Beam {index}: {channel.name}; P={channel.power_mW:g} mW; "
+                f"λ={channel.wavelength_um:g} µm; "
+                f"external beam-normal radii=({channel.w1_um:g}, "
+                f"{channel.w2_um:g}) µm; "
+                f"center=({channel.x0_um:g}, {channel.y0_um:g}) µm; "
+                "phase gradients="
+                f"({channel.tilt_x_rad_per_um:g}, "
+                f"{channel.tilt_y_rad_per_um:g}) rad/µm; "
+                f"phase={channel.phase_rad:g} rad; group={group}"
+            )
+        transverse = isinstance(
+            request,
+            (PRTransverseRunRequest, PRTransverseStaticRunRequest),
+        )
+        timedependent = isinstance(
+            request,
+            (PRRunRequest, PRTransverseRunRequest),
+        )
+        linearized = (
+            request.material_response.model != "nonlinear"
+        )
+        lines.extend([
+            f"Evolution: {'Time dependent' if timedependent else 'Static'}",
+            (
+                "Transport model: Full transverse (x-y drift/diffusion)"
+                if transverse
+                else "Transport model: Reduced x-only (x drift/diffusion)"
+            ),
+            (
+                ("Material response: Uniform-reference tangent" if transverse
+                 else "Material response: Field-linear (local intensity), paper Eq. (5)")
+                if linearized
+                else "Material response: Fully nonlinear"
+            ),
+            "Software status: Production model selection",
+        ])
+        scattering = getattr(request, "scattering", None)
+        if scattering is None:
+            lines.append("Canonical volume scattering: disabled")
+        else:
+            lines.extend([
+                "Canonical volume scattering: enabled",
+                f"Scattering strength ε: {scattering.epsilon:g}",
+                (
+                    "Scattering correlation length: "
+                    f"{scattering.transverse_correlation_um:g} µm"
+                ),
+                f"Scattering seed: {scattering.realization_seed}",
+                f"Scattering canonical slab Δz: {scattering.canonical_dz_um:g} µm",
+                f"Scattering model: {scattering.algorithm_version}",
+            ])
+        if workflow_id == PR_TIMEDEPENDENT_WORKFLOW:
+            lines.extend([
+                f"Material steps: {request.solver.Nt}",
+                f"Material integrator: {request.solver.integrator}",
+                f"Longitudinal optical coupling: {request.optical_coupling}",
+                f"Normalized timestep: {request.solver.dt_normalized:g}",
+                (
+                    "Conservative normalized timestep limit: "
+                    + ("execution timestep assessment pending"
+                       if preflight.conservative_dt_limit is None
+                       else f"{preflight.conservative_dt_limit:.8g}")
+                ),
+            ])
+        elif workflow_id == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
+            lines.extend([
+                f"Longitudinal optical coupling: {request.resolved_optical_coupling}",
+                (
+                    "Time-dependent material model: Linearized full transverse"
+                    if linearized
+                    else "Time-dependent material model: full 2D transverse zero-flux"
+                ),
+                "Authoritative material state: periodic zero-mean psi",
+                "Solved material fields: E_x and E_y",
+                "Scalar optical projection: E_active = E_x",
+                f"Material steps: {request.solver.Nt}",
+                (
+                    "Material integrator: exact frozen-source modal update"
+                    if linearized
+                    else f"Material integrator: {request.solver.integrator}"
+                ),
+                f"Normalized timestep: {request.solver.dt_normalized:g}",
+            ])
+            if linearized:
+                lines.extend([
+                    (
+                        "Linearization intensity I₀: "
+                        f"{request.material_response.reference_intensity:g} "
+                        "normalized total transport intensity"
+                    ),
+                    (
+                        "Transverse applied mean field: "
+                        f"{request.boundary.applied_field_x:g} normalized"
+                    ),
+                    "Electrical ensemble: fixed mean internal field",
+                ])
+        elif workflow_id == PR_PUBLISHED_STATIC_WORKFLOW:
+            lines.extend([
+                f"Static material model: {request.material_response.model}",
+                f"Arithmetic: {PR_PUBLISHED_STATIC_ARITHMETIC}",
+                "Full optical hop → arriving intensity → material solve → full material phase → scattering.",
+                "Status: accepted cells, reached z and material residual; no coupled iteration or replay.",
+                "Explicit optical boundary and material right-endpoint coordinates; no continuation.",
+            ])
+        elif workflow_id == PR_TRANSVERSE_STATIC_WORKFLOW:
+            lines.extend([
+                (
+                    "Static material model: Linearized material response"
+                    if linearized
+                    else "Static material model: Fully nonlinear"
+                ),
+                "Transport: Full transverse PR transport",
+                "Authoritative material state: periodic zero-mean psi",
+                "Solved material fields: E_x and E_y",
+                "Scalar optical projection: E_active = E_x",
+                (
+                    "Maximum coupled material/optical iterations: "
+                    f"{request.solver.max_coupled_iterations}"
+                ),
+            ])
+            if linearized:
+                lines.extend([
+                    (
+                        "Linearization intensity I₀: "
+                        f"{request.material_response.reference_intensity:g} "
+                        "normalized total transport intensity"
+                    ),
+                    (
+                        "Transverse applied mean field: "
+                        f"{request.boundary.applied_field_x:g} normalized"
+                    ),
+                    "Electrical ensemble: fixed mean internal field",
+                ])
+        else:
+            lines.extend([
+                (
+                    "Static material model: Field-linear (local intensity)"
+                    if linearized
+                    else "Static material model: Nonlinear reduced hopping"
+                ),
+                "Transport: Reduced x-only PR transport",
+                (
+                    "Maximum coupled passes per z slice: "
+                    f"{request.solver.max_coupled_passes}"
+                ),
+                (
+                    "Static material solver: direct centered-difference "
+                    "Fourier response"
+                    if linearized
+                    else (
+                        "Static material solver: precision-aware automatic "
+                        "defaults"
+                    )
+                ),
+            ])
+            if linearized:
+                lines.extend([
+                    "Intensity denominator: local optical / launch peak reference + dark + uniform background",
+                    (
+                        "Reduced applied field: "
+                        f"{request.material.applied_field:g} normalized"
+                    ),
+                    "Paper Eq. (5): E + E_app D_x E - D_xx E = (E_app I_b + D_x I) / I",
+                ])
+        lines.extend([
+            ("Optical propagation: one full-cell hop" if isinstance(request, PublishedStaticRequest) else f"Optical substeps per z slice: {request.solver.optical_substeps}"),
+            (
+                f"Backend: {request.backend.backend}; "
+                f"precision={request.backend.precision}"
+            ),
+        ])
+        if preflight.warnings:
+            lines.append("Preflight warnings:")
+            lines.extend(f"- {warning}" for warning in preflight.warnings)
+        else:
+            lines.append("Preflight warnings: none")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _workflow_id_for_request(request) -> str:
+        if isinstance(request, UnifiedFreshRequest):
+            return UNIFIED_WORKFLOW
+        if isinstance(
+            request,
+            (
+                PRImageAmplificationRunRequest,
+                PRBeamPanelImageAmplificationRunRequest,
+                PRImageAmplificationExperimentRequest,
+            ),
+        ):
+            return PR_IMAGE_AMPLIFICATION_WORKFLOW
+        if isinstance(request, PRTransverseStaticRunRequest):
+            return PR_TRANSVERSE_STATIC_WORKFLOW
+        if isinstance(request, PRTransverseRunRequest):
+            return PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
+        if isinstance(request, PublishedStaticRequest):
+            return PR_PUBLISHED_STATIC_WORKFLOW
+        if isinstance(request, PRStaticRunRequest):
+            return PR_STATIC_WORKFLOW
+        if isinstance(request, PRRunRequest):
+            return PR_TIMEDEPENDENT_WORKFLOW
+        raise TypeError("unsupported PR GUI request type")
+
+    @Slot()
+    def _remote_profile_changed(self) -> None:
+        if self.remote_execution_controls.slurm_available:
+            self.slurm_runner = self.remote_execution_controls.create_runner()
+        else:
+            self.slurm_runner = self._explicit_slurm_runner
+        item = self.execution_target_selector.model().item(1)
+        if item is not None:
+            item.setEnabled(self.slurm_runner is not None)
+            item.setToolTip(
+                "" if self.slurm_runner is not None
+                else self.remote_execution_controls.unavailable_reason
+            )
+        if self.execution_target_selector.currentData() == "slurm":
+            self._execution_target_changed()
+            self._display_current_execution_intent()
+
+    @Slot()
+    def _execution_target_changed(self) -> None:
+        if hasattr(self, "resource_estimator_panel"):
+            self.resource_estimator_panel.mark_stale()
+        target = self.execution_target_selector.currentData()
+        if (target == "slurm" and self._saved_unresolved_intent is None
+                and self.remote_execution_controls.cluster_selector.currentData() is not None
+                and not self._remote_identity_available()):
+            self._saved_unresolved_intent = self._current_execution_intent()
+        if self._saved_unresolved_intent is not None:
+            self.runner = _UnresolvedExecutionRunner()
+            self.runner_label.setText(f"Runner: {self.runner.name}")
+            self.result_policy_selector.setEnabled(True)
+            self._display_current_execution_intent()
+            return
+        self.runner = self.slurm_runner if target == "slurm" else self.local_runner
+        if self.runner is None:
+            self.runner = self.local_runner
+            self.execution_target_selector.setCurrentIndex(0)
+        self.runner_label.setText(f"Runner: {self.runner.name}")
+        self.result_policy_selector.setEnabled(target == "slurm" or self.evolution_panel.workflow_id() in (PR_STATIC_WORKFLOW, PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW))
+        if target != "slurm":
+            self.evolution_panel.apply_execution_backend_context(target="local")
+            return
+        cluster = self.remote_execution_controls.selected_cluster()
+        resource = self.remote_execution_controls.selected_resource_name()
+        if cluster is None or resource is None:
+            return
+        profile = cluster.profile(resource)
+        self.evolution_panel.apply_execution_backend_context(
+            target="slurm",
+            gpu_capable=profile.gpus > 0 or profile.require_cupy,
+        )
+
+    def _mark_request_inspection_stale(self, *_):
+        if not hasattr(self, 'results_panel'):
+            return
+        self._display_current_execution_intent()
+        workspace = self.results_panel.workspace
+        # Historical displayed-result request remains owned by the workspace.
+        workspace.set_request_summary(
+            'Current Run PR configuration changed; use Inspect Request to validate.\n'
+            + self.execution_intent_label.text())
+
+    def _remote_runner_kwargs(self) -> dict[str, str]:
+        values = self.remote_execution_controls.runner_kwargs()
+        values["result_policy"] = str(self.result_policy_selector.currentData())
+        return values
+
+    def _run_registered(self, request, **kwargs):
+        self._require_execution_intent_resolved()
+        policy = str(self.result_policy_selector.currentData())
+        if policy.startswith("analysis") and not isinstance(request, (PRStaticRunRequest, PublishedStaticRequest, UnifiedFreshRequest)):
+            raise ValueError("Analysis product selection is supported only by reduced Static")
+        if isinstance(
+            request,
+            (
+                PRBeamPanelImageAmplificationRunRequest,
+                PRImageAmplificationExperimentRequest,
+            ),
+        ):
+            composite = (
+                request
+                if isinstance(request, PRImageAmplificationExperimentRequest)
+                else image_amplification_experiment_request(request)
+            )
+            runner_kwargs = (
+                self._remote_runner_kwargs()
+                if self.runner is self.slurm_runner
+                else None
+            )
+            return run_image_amplification_experiment(
+                self.runner,
+                composite,
+                cancellation_token=kwargs.get("cancellation_token"),
+                progress_callback=kwargs.get("progress_callback"),
+                runner_kwargs=runner_kwargs,
+            )
+        if isinstance(
+            request,
+            (PRStaticRunRequest, PRTransverseStaticRunRequest),
+        ):
+            progress_callback = kwargs.get("progress_callback")
+            phase_started_at = monotonic()
+
+            def before_product_conversion(_operation, result) -> None:
+                if progress_callback is None:
+                    return
+                transverse = isinstance(result, PRTransverseStaticRunResult)
+                completed = int(
+                    result.completed_coupled_iterations
+                    if transverse
+                    else result.completed_slices
+                )
+                total = int(
+                    request.solver.max_coupled_iterations
+                    if transverse
+                    else result.grid_summary["Nz"]
+                )
+                progress_callback(
+                    RunProgress(
+                        workflow=(
+                            PR_TRANSVERSE_STATIC_WORKFLOW
+                            if transverse
+                            else PR_STATIC_WORKFLOW
+                        ),
+                        status="running",
+                        completed_units=completed,
+                        total_units=total,
+                        current_coordinate=(
+                            float(completed)
+                            if transverse
+                            else float(
+                                completed * result.grid_summary["dz_um"]
+                            )
+                        ),
+                        coordinate_name=(
+                            "coupled_iteration" if transverse else "z"
+                        ),
+                        coordinate_unit=("1" if transverse else "um"),
+                        elapsed_wall_time=monotonic() - phase_started_at,
+                        message="Preparing GUI results...",
+                        diagnostics={"phase": "gui_products"},
+                    )
+                )
+
+            kwargs["_before_product_conversion"] = before_product_conversion
+        if self.runner is self.slurm_runner:
+            kwargs.update(self._remote_runner_kwargs())
+        elif isinstance(request, (PRStaticRunRequest, PublishedStaticRequest, UnifiedFreshRequest)):
+            kwargs["_result_policy"] = policy
+        elif isinstance(request, PRRunRequest):
+            kwargs["live_preview_policy"] = PRLivePreviewPolicy()
+        return self.runner.run_registered(
+            PR_MATERIAL_ID,
+            self._workflow_id_for_request(request),
+            request,
+            **kwargs,
+        )
+
+    def _run_with_optional_image_analysis(self, request, *, selection, **kwargs):
+        started = monotonic()
+        base = self._run_registered(request, **kwargs)
+        return add_optional_image_analysis(
+            base, request, selection, base_runtime=monotonic() - started,
+            cancellation_token=kwargs.get("cancellation_token"),
+            progress_callback=kwargs.get("progress_callback"),
+        )
+
+    def _slurm_supports_workflow(self, workflow_id: str) -> bool:
+        """Return whether the active Slurm composition registers one PR operation."""
+
+        if self.slurm_runner is None:
+            return False
+        return any(
+            operation.key == (PR_MATERIAL_ID, workflow_id)
+            for operation in self.slurm_runner.registered_operations
+        )
+
+    def save_checkpoint_to(self, run_dir):
+        """Save the retained PR checkpoint through the shared dispatcher."""
+        self.results_panel.workspace.operation_boundary("Save Checkpoint")
+
+        if self.last_checkpoint is None:
+            raise ValueError("no PR checkpoint is available to save")
+        from lcprop.pr.transverse.continuation import TransverseTDCheckpoint, save_checkpoint
+        if isinstance(self.last_checkpoint, TransverseTDCheckpoint):
+            return save_checkpoint(self.last_checkpoint, run_dir)
+        return save_run_checkpoint(self.last_checkpoint, run_dir)
+
+    def load_checkpoint_from(self, run_dir) -> PRTimeDependentCheckpoint:
+        """Load, validate, and hydrate one PR checkpoint directory."""
+        self.results_panel.workspace.operation_boundary("Load Checkpoint")
+
+        from pathlib import Path
+        if (Path(run_dir) / 'transverse-continuation.json').is_file():
+            from lcprop.pr.transverse.continuation import load_checkpoint
+            checkpoint = load_checkpoint(run_dir)
+            self.last_checkpoint = checkpoint
+            self._loaded_checkpoint_source = (checkpoint, str(Path(run_dir).resolve()))
+            self.results_panel.set_request_summary(
+                f"Loaded checkpoint source directory: {Path(run_dir).resolve()}\n"
+                "Continue uses this checkpoint; Run PR uses the current controls.\n"
+                + f"Transverse continuation checkpoint {checkpoint.identity}\nCumulative τ={checkpoint.time_normalized:.12g}; "
+                "Continue opens the inherited, locked-state segment editor.")
+            self._refresh_checkpoint_controls()
+            return checkpoint
+        checkpoint = load_run_checkpoint(run_dir)
+        if not isinstance(checkpoint, PRTimeDependentCheckpoint):
+            raise TypeError(
+                "LCProp PR can load only a pr/pr_timedependent checkpoint"
+            )
+        self._hydrating_checkpoint = True
+        try:
+            apply_pr_request(
+                checkpoint.request,
+                material_panel=self.material_panel,
+                beam_panel=self.beam_panel,
+                grid_panel=self.grid_panel,
+                evolution_panel=self.evolution_panel,
+            )
+        finally:
+            self._hydrating_checkpoint = False
+        self.resource_estimator_panel.mark_stale()
+        self.last_checkpoint = checkpoint
+        self._loaded_checkpoint_source = (checkpoint, str(Path(run_dir).resolve()))
+        self.results_panel.set_request_summary(
+            f"Loaded checkpoint source directory: {Path(run_dir).resolve()}\n"
+            "Continue uses this checkpoint; Run PR uses the current controls.\n"
+            + self.describe_request(checkpoint.request)
+        )
+        self.results_panel.set_td_time_indicator(
+            "Loaded PR checkpoint: "
+            f"{checkpoint.time_normalized:.6g} normalized; "
+            f"step {checkpoint.completed_steps}/{checkpoint.requested_steps}"
+        )
+        self._refresh_checkpoint_controls()
+        return checkpoint
+
+    @Slot()
+    def save_checkpoint_clicked(self) -> None:
+        from lcprop.pr.transverse.continuation import TransverseTDCheckpoint
+        from lcprop.pr.gui.presentation_guidance import checkpoint_folder_hint
+        hint = checkpoint_folder_hint(transverse=isinstance(self.last_checkpoint, TransverseTDCheckpoint))
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Save Checkpoint Folder — " + hint,
+        )
+        if not directory:
+            return
+        try:
+            saved = self.save_checkpoint_to(directory)
+        except Exception:
+            self.results_panel.append_console("ERROR")
+            report_failure(self, traceback.format_exc())
+            return
+        self.results_panel.append_console(f"Saved PR checkpoint: {saved}")
+
+    @Slot()
+    def load_checkpoint_clicked(self) -> None:
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Open PR checkpoint directory",
+        )
+        if not directory:
+            return
+        try:
+            checkpoint = self.load_checkpoint_from(directory)
+        except Exception:
+            self.status_label.setText("Checkpoint load failed")
+            self.results_panel.append_console("ERROR")
+            report_failure(self, traceback.format_exc())
+            self.tabs.setCurrentWidget(self.results_panel)
+            return
+        self.results_panel.append_console(
+            "Loaded PR checkpoint: "
+            f"step {checkpoint.completed_steps}, "
+            f"t={checkpoint.time_normalized:.6g} normalized"
+        )
+
+    @Slot()
+    def continue_clicked(self) -> None:
+        from lcprop.pr.transverse.continuation import TransverseTDCheckpoint, describe_continuation
+        if isinstance(self.last_checkpoint, TransverseTDCheckpoint):
+            if self._background_running or self._close_requested:
+                return
+            from .transverse_continuation import TransverseContinuationDialog
+            import json
+            dialog = TransverseContinuationDialog(self.last_checkpoint, self)
+            if not dialog.exec():
+                return
+            request = dialog.request
+            self._scientific_preflight(request)
+            summary = json.dumps(describe_continuation(request, self.last_checkpoint), indent=2)
+            self._start_background(request, summary=summary,
+                runner_callable=partial(_continue_transverse_operation, checkpoint=self.last_checkpoint),
+                run_label="Continuing transverse TD locally", execution_runner=self.local_runner,
+                preview_checkpoint=self.last_checkpoint)
+            return
+        if (
+            self._background_running
+            or self._close_requested
+            or self.last_checkpoint is None
+            or self.input_panel.is_image_amplification()
+            or self.evolution_panel.workflow_id()
+            != PR_TIMEDEPENDENT_WORKFLOW
+        ):
+            return
+        if self.last_checkpoint.request.material.normalization_identity != "pr_channel_peak_reference_v1":
+            from lcprop.pr.reduced_continuation import describe_continuation as describe_reduced
+            from .transverse_continuation import TransverseContinuationDialog
+            import json
+            dialog = TransverseContinuationDialog(self.last_checkpoint, self,
+                describe=describe_reduced, reduced=True)
+            if not dialog.exec():
+                return
+            request = dialog.request
+            try:
+                self._scientific_preflight(request)
+                summary = json.dumps(describe_reduced(request, self.last_checkpoint), indent=2)
+            except ValueError as exc:
+                self.status_label.setText("Invalid continuation")
+                report_failure(self, str(exc))
+                return
+            self._start_background(request, summary=summary,
+                runner_callable=partial(_continue_pr_operation, checkpoint=self.last_checkpoint,
+                    additional_steps=request.solver.Nt), run_label="Continuing reduced TD locally",
+                execution_runner=self.local_runner)
+            return
+        begin_request(self, "Continue")
+        checkpoint = self.last_checkpoint
+        try:
+            self._require_execution_intent_resolved()
+            request = self.build_request()
+            validate_pr_continuation(request, checkpoint)
+            # Continuation is Local-only; selected Slurm settings apply to Run.
+            self._scientific_preflight(request)
+            summary = self.describe_request(request, runner=self.local_runner)
+            summary += "\nContinuation is Local-only; the Run target selection is not used."
+        except Exception:
+            self.status_label.setText("Checkpoint incompatible")
+            self.results_panel.append_console("ERROR")
+            report_failure(self, traceback.format_exc())
+            self._refresh_checkpoint_controls()
+            return
+        additional_steps = int(request.solver.Nt)
+        summary += (
+            "\nContinuation checkpoint step: "
+            f"{checkpoint.completed_steps}"
+            "\nContinuation start time (normalized): "
+            f"{checkpoint.time_normalized:.8g}"
+            f"\nAdditional material steps: {additional_steps}"
+        )
+        runner_callable = partial(
+            _continue_pr_operation,
+            checkpoint=checkpoint,
+            additional_steps=additional_steps,
+        )
+        self._start_background(
+            request,
+            summary=summary,
+            runner_callable=runner_callable,
+            run_label="Continuing locally",
+            execution_runner=self.local_runner,
+        )
+
+    def _scientific_preflight(self, request) -> None:
+        preflight_request = request
+        if isinstance(
+            request,
+            (
+                PRBeamPanelImageAmplificationRunRequest,
+                PRImageAmplificationExperimentRequest,
+            ),
+        ):
+            composite = (
+                request
+                if isinstance(request, PRImageAmplificationExperimentRequest)
+                else image_amplification_experiment_request(request)
+            )
+            preflight_request, _transmission, _grating = (
+                prepare_image_amplification_base_request(
+                    composite
+                )
+            )
+            capability = next(
+                capability
+                for capability in image_amplification_base_capabilities()
+                if capability.workflow_id == composite.base_workflow_id
+            )
+            self._append_image_amplification_validation_warning(
+                capability, preflight_request
+            )
+        elif isinstance(request, PRImageAmplificationRunRequest):
+            preflight_request, _transmission, _grating = (
+                prepare_image_amplification_workflow_request(request)
+            )
+        preflight = validate_pr_gui_workflow_request(preflight_request)
+        for warning in preflight.warnings:
+            self.results_panel.append_console(f"WARNING: {warning}")
+
+    def _require_execution_intent_resolved(self):
+        if self._saved_unresolved_intent is not None:
+            raise ValueError("Saved execution target is unavailable/unresolved; explicitly select a target before execution")
+
+    def _validate_execution_request(self, request) -> None:
+        self._require_execution_intent_resolved()
+        self._scientific_preflight(request)
+        if self.runner is self.slurm_runner:
+            self.remote_execution_controls.validate_backend(
+                request.backend.backend
+            )
+            workflow_id = self._workflow_id_for_request(request)
+            if isinstance(request, PRImageAmplificationExperimentRequest):
+                workflow_id = request.base_workflow_id
+            if not self._slurm_supports_workflow(workflow_id):
+                kind = (
+                    "base operation"
+                    if isinstance(
+                        request, PRImageAmplificationExperimentRequest
+                    )
+                    else "operation"
+                )
+                raise ValueError(
+                    "Slurm execution does not support the selected PR "
+                    f"{kind} {workflow_id!r}"
+                )
+        source_preflight(self)
+
+    @Slot()
+    def run_clicked(self) -> None:
+        if self._background_running or self._close_requested:
+            return
+        begin_request(self, "Run")
+        try:
+            request = self.build_request()
+            summary = self.describe_request(request)
+            self._validate_execution_request(request)
+        except ValueError as exc:
+            self.status_label.setText("Invalid request")
+            self.results_panel.append_console("Invalid request: " + str(exc))
+            report_failure(self, "Invalid request: " + str(exc))
+            self.tabs.setCurrentWidget(self.results_panel)
+            return
+        except Exception:
+            self.status_label.setText("Invalid request")
+            self.results_panel.append_console("ERROR")
+            report_failure(self, traceback.format_exc())
+            self.tabs.setCurrentWidget(self.results_panel)
+            return
+
+        if not self._local_run_cost_guard(request):
+            self.results_panel.workspace.set_operation_status("Run not started")
+            return
+
+        if (
+            self.last_checkpoint is not None
+            and self._workflow_id_for_request(request)
+            in (PR_TIMEDEPENDENT_WORKFLOW, PR_IMAGE_AMPLIFICATION_WORKFLOW)
+        ):
+            self.results_panel.append_console(
+                "Starting a fresh PR run; previous checkpoint cleared."
+            )
+            self.last_checkpoint = None
+        runner_callable = self._run_registered
+        if self.input_panel.requests_optional_image_analysis():
+            # Snapshot roles on the GUI thread. The worker never reads widgets
+            # or lets subsequent editing change this run's analysis ownership.
+            selection = PRImageAnalysisSelection(
+                self.input_panel.pump_channel.currentData(),
+                self.input_panel.signal_channel.currentData(),
+            )
+            runner_callable = partial(
+                self._run_with_optional_image_analysis, selection=selection,
+            )
+        self._start_background(
+            request,
+            summary=summary,
+            runner_callable=runner_callable,
+            run_label="Running",
+        )
+
+    def _request_for_local_cost(self, request):
+        if isinstance(
+            request,
+            (
+                PRBeamPanelImageAmplificationRunRequest,
+                PRImageAmplificationExperimentRequest,
+            ),
+        ):
+            composite = (
+                request
+                if isinstance(request, PRImageAmplificationExperimentRequest)
+                else image_amplification_experiment_request(request)
+            )
+            base_request, _transmission, _grating = (
+                prepare_image_amplification_base_request(composite)
+            )
+            return base_request
+        if isinstance(request, PRImageAmplificationRunRequest):
+            base_request, _transmission, _grating = (
+                prepare_image_amplification_workflow_request(request)
+            )
+            return base_request
+        return request
+
+    @staticmethod
+    def _local_cost_warning_text(assessment: LocalRunCostAssessment) -> str:
+        nx, ny, nz = assessment.grid_shape
+        return (
+            f"Selected model: {assessment.model_label}\n"
+            f"Grid: {nx} x {ny} x {nz}\n"
+            "Execution: Local\n\n"
+            + ("Large streaming calculations can still be costly locally; bounded certification is not a runtime estimate.\n\n"
+             if "streaming" in assessment.model_label else
+             "Full-transverse nonlinear PR can be very slow locally. Use Slurm/H200 for large full-transverse nonlinear PR runs.\n\n")
+            + "Stop is observed at the next safe solver cancellation checkpoint; "
+            "an in-progress trial is discarded and the last accepted state is "
+            "preserved."
+        )
+
+    def _show_potentially_expensive_local_warning(
+        self, assessment: LocalRunCostAssessment
+    ) -> None:
+        QMessageBox.warning(
+            self,
+            "Potentially expensive local calculation",
+            self._local_cost_warning_text(assessment),
+        )
+
+    def _confirm_very_expensive_local_run(
+        self, assessment: LocalRunCostAssessment
+    ) -> str:
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle("Very expensive local calculation")
+        dialog.setText(self._local_cost_warning_text(assessment))
+        cancel_button = dialog.addButton(
+            "Cancel", QMessageBox.ButtonRole.RejectRole
+        )
+        slurm_button = dialog.addButton(
+            "Use Slurm/H200", QMessageBox.ButtonRole.ActionRole
+        )
+        run_button = dialog.addButton(
+            "Run locally anyway", QMessageBox.ButtonRole.DestructiveRole
+        )
+        slurm_button.setEnabled(self.slurm_runner is not None)
+        dialog.setDefaultButton(cancel_button)
+        dialog.exec()
+        clicked = dialog.clickedButton()
+        if clicked is run_button:
+            return "run_local"
+        if clicked is slurm_button:
+            return "use_slurm"
+        return "cancel"
+
+    def _unified_volume_guard(self, request) -> bool:
+        """Presentation budget warning, not a measured RAM or solver capacity bound."""
+        if not isinstance(request, UnifiedFreshRequest):
+            return True
+        from lcprop.pr.unified.integration import resource_plan
+        plan = resource_plan(request, str(self.result_policy_selector.currentData()))
+        local = plan.get('local_assessment')
+        if local and local['warnings']:
+            message = '\n'.join(local['warnings'])
+            self.results_panel.append_console('Local planning: ' + message)
+            if local['classification']=='memory-risk':
+                if QMessageBox.question(self, 'Local memory risk', message,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+                    return False
+        size = plan['longitudinal_full_volume_bytes']
+        # Default interactive retention must remain a conscious choice for large runs.
+        if size <= 512 * 1024**2:
+            return True
+        message = (
+            f"Selected longitudinal result volumes require {size / 1024**3:.2f} GiB "
+            "of retained array storage, exceeding the 512 MiB interactive warning budget. "
+            "Assembly can temporarily hold a second copy; scientific working memory, "
+            "viewer/export copies and archive overhead are additional.\n\n"
+            f"Volume bytes: {plan['longitudinal_product_bytes']}\n"
+            "Choose Minimal or fewer Analysis products to reduce storage, or explicitly "
+            "continue with this selection. No grid or scientific settings will be changed."
+        )
+        return QMessageBox.question(self, "Large selected result volumes", message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
+
+    def _local_run_cost_guard(self, request) -> bool:
+        target = str(self.execution_target_selector.currentData())
+        if target == "local" and not self._unified_volume_guard(request):
+            return False
+        assessment = classify_pr_run_cost(
+            self._request_for_local_cost(request), execution_target=target
+        )
+        if assessment.classification is LocalRunCostClass.NORMAL:
+            return True
+        if assessment.classification is LocalRunCostClass.POTENTIALLY_EXPENSIVE:
+            self._show_potentially_expensive_local_warning(assessment)
+            return True
+
+        action = self._confirm_very_expensive_local_run(assessment)
+        if action == "run_local":
+            return True
+        if action == "use_slurm":
+            index = self.execution_target_selector.findData("slurm")
+            if index >= 0 and self.slurm_runner is not None:
+                self.execution_target_selector.setCurrentIndex(index)
+                self.results_panel.append_console(
+                    "Very expensive local calculation not started; Slurm/H200 "
+                    "selected. Press Run to submit explicitly."
+                )
+        return False
+
+    def _start_background(
+        self,
+        request,
+        *,
+        summary: str,
+        runner_callable,
+        run_label: str,
+        execution_runner=None,
+        preview_checkpoint=None,
+    ) -> None:
+        execution_runner = self.runner if execution_runner is None else execution_runner
+        from lcprop.pr.transverse.live_preview import supported, LatestPreview, AcceptedPassObserver
+        from lcprop.gui.live_optical_preview import LiveOpticalPreview
+        from uuid import uuid4
+        previous_mailbox = getattr(self, '_live_mailbox', None)
+        if previous_mailbox is not None:
+            previous_mailbox.close()
+        if hasattr(self, '_live_timer'):
+            self._live_timer.stop()
+        self._live_mailbox = None
+        live = (execution_runner is not self.slurm_runner
+                and isinstance(request, PRTransverseRunRequest) and supported(request))
+        if live:
+            workspace = self.results_panel.workspace
+            if not hasattr(self, '_live_view'):
+                self._live_view = LiveOpticalPreview()
+                workspace.tabs.addTab(self._live_view, 'Live accepted optical pass')
+                self._live_timer = QTimer(self)
+                self._live_timer.setInterval(100)
+                self._live_timer.timeout.connect(self._poll_live_preview)
+            run_id = uuid4().hex
+            self._live_mailbox = LatestPreview(run_id)
+            from lcprop.pr.transverse.live_preview import next_segment_number, can_preserve_preview
+            number = 1 if preview_checkpoint is None else next_segment_number(preview_checkpoint)
+            preserve = can_preserve_preview(request, preview_checkpoint,
+                getattr(self._live_view, 'checkpoint_identity', None))
+            self._live_view.begin(run_id, segment_number=number, preserve=preserve)
+            observer = AcceptedPassObserver(self._live_mailbox, segment_id=run_id,
+                segment_number=number, total_steps=request.solver.Nt)
+            runner_callable = partial(runner_callable, optical_preview=observer)
+            workspace.tabs.setCurrentWidget(self._live_view)
+            self._live_timer.start()
+        else:
+            self.results_panel.workspace.invalidate_products()
+            self.results_panel.reset_field_color_scales()
+        self.results_panel.set_request_summary(summary)
+        workflow_id = self._workflow_id_for_request(request)
+        self.results_panel.append_console(
+            f"{'Validating/Preparing' if execution_runner is self.slurm_runner else run_label} {workflow_id} "
+            f"with {execution_runner.name}..."
+        )
+        self._active_request = request
+        self._background_running = True
+        self._outcome_received = False
+        self._thread_done = False
+        remote = execution_runner is self.slurm_runner
+        self.run_status = "preparing" if remote else "running"
+        self.last_progress = None
+        self.last_remote_status = None
+        self._progress_console_state.clear()
+        self.status_label.setText("Validating/Preparing…" if remote else "Running…")
+        self.tabs.setCurrentWidget(self.results_panel)
+        self._set_configuration_enabled(False)
+
+        token = CancellationToken()
+        thread = QThread(self)
+        worker = WorkflowWorker(runner_callable, request, token)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(
+            self._on_progress,
+            Qt.ConnectionType.BlockingQueuedConnection,
+        )
+        worker.finished.connect(self._on_finished)
+        worker.failed.connect(self._on_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        thread.finished.connect(self._on_thread_finished)
+        thread.finished.connect(thread.deleteLater)
+
+        self._cancellation_token = token
+        self._thread = thread
+        self._worker = worker
+        self.results_panel.workspace.set_operation_status("Starting")
+        if execution_runner is self.slurm_runner:
+            self.results_panel.workspace.operation_boundary("Slurm submission / remote execution")
+        thread.start()
+        self.results_panel.workspace.set_operation_status("Validating/Preparing" if remote else "Running")
+
+    def _append_image_amplification_validation_warning(
+        self,
+        capability,
+        base_request,
+    ) -> None:
+        if (
+            _image_amplification_validation_status(capability, base_request)
+            != "compatible_and_validated"
+        ):
+            self.results_panel.append_console(
+                "WARNING: selected Image Amplification base algorithm is "
+                "experimental; specialized validation is pending."
+            )
+
+    def _set_configuration_enabled(self, enabled: bool) -> None:
+        for panel in (
+            self.material_panel,
+            self.beam_panel,
+            self.grid_panel,
+            self.evolution_panel,
+            self.input_panel,
+        ):
+            panel.setEnabled(enabled)
+        self.execution_target_selector.setEnabled(enabled)
+        self.remote_execution_controls.setEnabled(enabled)
+        self.run_button.setEnabled(enabled)
+        self.experiment_file_buttons.setEnabled(enabled)
+        self.load_checkpoint_button.setEnabled(enabled)
+        self.stop_button.setVisible(not enabled)
+        self.stop_button.setEnabled(not enabled)
+        if enabled:
+            self._refresh_checkpoint_controls()
+        else:
+            self.continue_button.setEnabled(False)
+            self.save_checkpoint_button.setEnabled(False)
+
+    @Slot()
+    def stop_clicked(self) -> None:
+        token = self._cancellation_token
+        if not self._background_running or token is None:
+            return
+        token.cancel()
+        self.results_panel.workspace.set_operation_status("Stopping — awaiting safe boundary")
+        self.run_status = "stopping"
+        is_transverse_static = isinstance(
+            self._active_request,
+            PRTransverseStaticRunRequest,
+        )
+        is_static = is_transverse_static or isinstance(
+            self._active_request,
+            PRStaticRunRequest,
+        )
+        self.status_label.setText(
+            "Stopping at next safe solver checkpoint…"
+            if is_static
+            else "Stopping at next safe internal boundary…"
+        )
+        self.stop_button.setEnabled(False)
+        self.stop_button.setText("Stopping…")
+        self.results_panel.append_console(
+            "Stop requested; discarding the in-progress trial at the next safe "
+            "solver checkpoint; the last accepted state will be preserved."
+            if is_transverse_static
+            else "Stop requested; finishing the current accepted z slice."
+            if is_static
+            else "Stop requested; stopping at next safe internal boundary."
+        )
+
+    @Slot(object)
+    def _on_progress(self, progress: RunProgress) -> None:
+        if (isinstance(progress, RunProgress) and isinstance(progress.latest_field_state, dict)
+                and 'accepted_continuation_checkpoint' in progress.latest_field_state):
+            from lcprop.pr.transverse.continuation import TransverseTDCheckpoint
+            checkpoint=progress.latest_field_state['accepted_continuation_checkpoint']
+            if not isinstance(checkpoint, TransverseTDCheckpoint):
+                raise TypeError('invalid accepted failure checkpoint')
+            checkpoint.validate()
+            self.last_checkpoint=checkpoint
+            if getattr(self, "_live_mailbox", None) is not None:
+                self._live_view.bind_checkpoint(checkpoint.identity)
+            self.results_panel.set_td_time_indicator(
+                f"Last accepted cumulative τ={checkpoint.time_normalized:.12g}; steps={checkpoint.completed_steps}")
+            return
+        self.last_progress = progress
+        self.last_progress_thread = QThread.currentThread()
+        if isinstance(progress, RemoteRunStatus):
+            self.results_panel.workspace.set_operation_status(progress.state.value.replace("_", " ").title())
+            self.last_remote_status = progress
+            self.remote_status_history.append(progress)
+            message = remote_status_text(progress)
+            self.status_label.setText(
+                progress.state.value.replace("_", " ").title()
+            )
+            self.results_panel.set_td_time_indicator(message)
+            structured = (progress.progress_metadata or {}).get(
+                "structured_progress", {}
+            )
+            phase = str(structured.get("phase", progress.state.value))
+            if self._progress_console_due(
+                "remote",
+                int(structured.get("completed_units", 0)),
+                int(structured.get("total_units", 0)),
+                phase,
+            ):
+                self.results_panel.append_console(message)
+            return
+        if progress.workflow == UNIFIED_WORKFLOW:
+            from lcprop.pr.unified.integration import progress_to_run_data
+            event = progress.latest_field_state
+            maximum = max((abs(v) for k,v in event.diagnostics.items() if k.endswith('_rms')), default=0.)
+            text = f'Accepted cells {event.completed_cells}/{event.total_cells}; z={event.z_um:g} µm; material residual RMS max={maximum:g}'
+            self.results_panel.set_run_data(progress_to_run_data(event), state="Current accepted state")
+            self.status_label.setText(text)
+            self.results_panel.set_td_time_indicator(text)
+            return
+        if progress.workflow == PR_PUBLISHED_STATIC_WORKFLOW:
+            residual = (progress.diagnostics or {}).get("material_residual_rms")
+            text = f"Cells {progress.completed_units}/{progress.total_units}; z={progress.current_coordinate:g} µm; material residual RMS={residual}"
+            self.status_label.setText(text)
+            self.results_panel.set_td_time_indicator(text)
+            return
+        if progress.workflow == PR_TRANSVERSE_STATIC_WORKFLOW:
+            diagnostics = progress.diagnostics or {}
+            if diagnostics.get("phase") == "gui_products":
+                self.status_label.setText(progress.message)
+                self.results_panel.set_td_time_indicator(progress.message)
+                if self._progress_console_due(
+                    progress.workflow,
+                    progress.completed_units,
+                    progress.total_units,
+                    str(diagnostics.get("phase", "products")),
+                ):
+                    self.results_panel.append_console(
+                        f"{progress.message}; "
+                        f"elapsed={progress.elapsed_wall_time:.3f} s"
+                    )
+                return
+            linearized = diagnostics.get("material_response") == "linearized"
+            self.status_label.setText(
+                ("Linearized outer iteration " if linearized else "2D zero-flux iteration ")
+                +
+                f"{progress.completed_units}/{progress.total_units}"
+            )
+            self.results_panel.set_td_time_indicator(
+                "PR transverse static coupled iteration: "
+                f"{progress.completed_units}/{progress.total_units}"
+            )
+            if self._progress_console_due(
+                progress.workflow,
+                progress.completed_units,
+                progress.total_units,
+                "solve",
+            ):
+                self.results_panel.append_console(
+                "PR transverse static progress: "
+                f"iteration {progress.completed_units}/"
+                f"{progress.total_units}; "
+                +
+                ("material consistency RMS=" if linearized else "equilibrium RMS=")
+                +
+                f"{diagnostics.get('material_response_rms', float('nan')):.6g}; "
+                f"max={diagnostics.get('material_response_max', float('nan')):.6g}; "
+                f"elapsed={progress.elapsed_wall_time:.3f} s"
+                )
+            return
+        if progress.workflow == PR_IMAGE_AMPLIFICATION_WORKFLOW:
+            self.status_label.setText(progress.message)
+            self.results_panel.set_td_time_indicator(progress.message)
+            if self._progress_console_due(
+                progress.workflow,
+                progress.completed_units,
+                progress.total_units,
+                "image_amplification",
+            ):
+                self.results_panel.append_console(progress.message)
+            return
+        if progress.workflow == PR_STATIC_WORKFLOW:
+            diagnostics = progress.diagnostics or {}
+            phase = diagnostics.get("phase", "solve")
+            if phase != "solve":
+                self.status_label.setText(progress.message)
+                if phase == "replay":
+                    self.results_panel.set_td_time_indicator(
+                        "Independent replay: "
+                        f"{progress.completed_units}/{progress.total_units}"
+                    )
+                else:
+                    self.results_panel.set_td_time_indicator(progress.message)
+                if self._progress_console_due(
+                    progress.workflow,
+                    progress.completed_units,
+                    progress.total_units,
+                    str(phase),
+                ):
+                    self.results_panel.append_console(
+                        f"{progress.message}; "
+                        f"elapsed={progress.elapsed_wall_time:.3f} s"
+                    )
+                return
+            self.status_label.setText(
+                f"Slice {progress.completed_units}/{progress.total_units}"
+            )
+            self.results_panel.set_td_time_indicator(
+                "PR static z: "
+                f"{float(progress.current_coordinate):.6g} µm; "
+                f"slices: {progress.completed_units}/{progress.total_units}"
+            )
+            if self._progress_console_due(
+                progress.workflow,
+                progress.completed_units,
+                progress.total_units,
+                "solve",
+            ):
+                self.results_panel.append_console(
+                "PR static progress: "
+                f"slice {progress.completed_units}/{progress.total_units}; "
+                f"z={float(progress.current_coordinate):.6g} µm; "
+                f"elapsed={progress.elapsed_wall_time:.3f} s"
+                )
+            return
+        if (progress.workflow == PR_TIMEDEPENDENT_WORKFLOW
+                and isinstance(progress.latest_field_state, PRLiveSnapshot)):
+            self.results_panel.set_run_data(
+                reduced_pr_live_to_run_data(progress.latest_field_state),
+                state="Current accepted state",
+            )
+        from .presentation_guidance import accepted_td_time_text
+        time_text = accepted_td_time_text(progress)
+        self.status_label.setText(time_text)
+        # Scalar status can advance while a throttled scientific frame remains
+        # at its own accepted step. Never relabel that frame with a later time.
+        if (progress.workflow == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW
+                and getattr(self, '_live_mailbox', None) is not None
+                and not self._live_mailbox.closed):
+            self._live_view.set_latest_progress(time_text)
+        elif (progress.workflow != PR_TIMEDEPENDENT_WORKFLOW
+                or progress.latest_field_state is not None):
+            self.results_panel.set_td_time_indicator(
+                time_text
+            )
+        if self._progress_console_due(
+            progress.workflow,
+            progress.completed_units,
+            progress.total_units,
+            "material_time",
+        ):
+            self.results_panel.append_console(
+                "PR progress: "
+                f"step {progress.completed_units}/{progress.total_units}; "
+                f"normalized time={float(progress.current_coordinate):.6g}; "
+                f"elapsed={progress.elapsed_wall_time:.3f} s"
+            )
+
+    def _progress_console_due(
+        self,
+        key: str,
+        completed: int,
+        total: int,
+        phase: str,
+    ) -> bool:
+        """Keep normal progress bounded while status widgets remain live."""
+
+        bucket = (
+            min(10, int(10 * max(completed, 0) / total))
+            if total > 0 else 0
+        )
+        state = (str(phase), bucket)
+        if self._progress_console_state.get(key) == state:
+            return False
+        self._progress_console_state[key] = state
+        return True
+
+    def _poll_live_preview(self):
+        mailbox = getattr(self, '_live_mailbox', None)
+        if mailbox is None:
+            return
+        frame = mailbox.take()
+        if frame is not None:
+            try:
+                self._live_view.show_frame(frame)
+            except Exception as exc:
+                mailbox.error = f"Live preview display unavailable: {type(exc).__name__}: {exc}"
+        if mailbox.error:
+            self._live_view.label.setText(mailbox.error)
+
+    def _finish_live_preview(self, status):
+        mailbox = getattr(self, '_live_mailbox', None)
+        if mailbox is not None:
+            self._poll_live_preview()
+            self._live_timer.stop()
+            self._live_view.finish(status)
+            if mailbox.error:
+                self._live_view.label.setText(self._live_view.label.text() + " " + mailbox.error)
+            mailbox.close()
+
+    @Slot(object)
+    def _on_finished(self, runner_result) -> None:
+        self._finish_live_preview(getattr(runner_result.result, 'status', 'completed'))
+        try:
+            if runner_result.material_id != PR_MATERIAL_ID:
+                raise ValueError("PR window received a non-PR runner result")
+            if runner_result.kind not in (
+                PR_TIMEDEPENDENT_WORKFLOW,
+                PR_IMAGE_AMPLIFICATION_WORKFLOW,
+                PR_STATIC_WORKFLOW,
+                PR_PUBLISHED_STATIC_WORKFLOW,
+                UNIFIED_WORKFLOW,
+                PR_TRANSVERSE_STATIC_WORKFLOW,
+                PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+            ):
+                raise ValueError("PR window received an unexpected workflow")
+            if runner_result.run_data is None:
+                raise ValueError("PR runner result has no prepared RunData")
+            result = runner_result.result
+            ordinary_result = (
+                result.run_result
+                if runner_result.kind == PR_IMAGE_AMPLIFICATION_WORKFLOW
+                else result
+            )
+            self.last_runner_result = runner_result
+            self.last_result = result
+            if runner_result.kind in (
+                PR_STATIC_WORKFLOW,
+                PR_PUBLISHED_STATIC_WORKFLOW,
+                UNIFIED_WORKFLOW,
+                PR_TRANSVERSE_STATIC_WORKFLOW,
+            ):
+                self.status_label.setText("Rendering results...")
+                self.status_label.repaint()
+                self.results_panel.set_td_time_indicator("Rendering results...")
+                self.results_panel.append_console("Rendering results...")
+            state = (
+                "State at failure" if runner_result.kind in (PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW) and result.status == "failed" else
+                "State at stop/cancellation"
+                if getattr(result, "status", None) in {"stopped", "cancelled"}
+                else "Completed result"
+            )
+            self.results_panel.set_run_data(runner_result.run_data)
+            from lcprop.pr.material_previews import displayed_policy
+            policy_label = displayed_policy(ordinary_result)
+            self.results_panel.workspace.finish_attempt(state+" — retrieval: "+policy_label)
+            self.results_panel.append_console("Displayed result retrieval: "+policy_label)
+            if runner_result.kind == UNIFIED_WORKFLOW:
+                scientific=result.run.scientific
+                self.last_checkpoint=None
+                self.run_status='stopped' if scientific.status=='cancelled' else scientific.status
+                self.status_label.setText(self.run_status.title());message=scientific.reason
+                residuals=scientific.ledger[-1]['observations'] if scientific.ledger else {}
+                maximum=max((abs(v) for k,v in residuals.items() if k.endswith('_rms') and 'iteration_' not in k),default=0.)
+                self.results_panel.set_td_time_indicator(f'{scientific.status}: cells {scientific.completed_cells}; accepted z={scientific.reached_z_um:g} µm; material residual RMS max={maximum:g}')
+                if scientific.failure:self.results_panel.append_console(str(scientific.failure))
+            elif runner_result.kind == PR_PUBLISHED_STATIC_WORKFLOW:
+                scientific = result.run.scientific
+                self.last_checkpoint = None
+                self.run_status = "stopped" if scientific.status == "cancelled" else scientific.status
+                self.status_label.setText(self.run_status.title())
+                message = scientific.reason
+                self.results_panel.set_td_time_indicator(
+                    f"Cells {scientific.completed_cells}/{scientific.requested_cells}; "
+                    f"z={scientific.reached_z_um:g} µm; material residual RMS={scientific.last_residual_rms}")
+            elif runner_result.kind == PR_IMAGE_AMPLIFICATION_WORKFLOW:
+                td_result = ordinary_result
+                analysis = (
+                    result.analysis_result
+                    if isinstance(result, PRImageAmplificationCompositeResult)
+                    else result
+                )
+                self.last_checkpoint = None
+                if result.status == "cancelled":
+                    self.run_status = "stopped"
+                    self.status_label.setText("Stopped")
+                    prefix = "PR image time at stop"
+                    message = "Image-amplification run cancelled"
+                elif result.status == "not_converged":
+                    self.run_status = "not_converged"
+                    self.status_label.setText("Not converged")
+                    prefix = "Final PR image time"
+                    message = "Base PR solve did not converge"
+                elif result.status not in ("completed", "converged"):
+                    self.run_status = "failed"
+                    self.status_label.setText("Analysis failed")
+                    prefix = "Final PR image time"
+                    message = getattr(
+                        result,
+                        "analysis_message",
+                        "Image-amplification analysis failed",
+                    )
+                else:
+                    self.run_status = "completed"
+                    self.status_label.setText(
+                        "Converged" if result.status == "converged" else "Completed"
+                    )
+                    prefix = "Final PR image time"
+                    message = "Image-amplification run complete"
+                if isinstance(td_result, (PRRunResult, PRTransverseRunResult)):
+                    self.results_panel.set_td_time_indicator(
+                        f"{prefix}: {float(td_result.time_normalized):.6g} "
+                        f"normalized; steps: {td_result.completed_steps}/"
+                        f"{td_result.requested_steps}"
+                    )
+                elif isinstance(td_result, PRTransverseStaticRunResult):
+                    requested = int(
+                        td_result.resolved_profile["solver"][
+                            "max_coupled_iterations"
+                        ]
+                    )
+                    self.results_panel.set_td_time_indicator(
+                        "PR image transverse static: "
+                        f"{td_result.completed_coupled_iterations}/"
+                        f"{requested} coupled iterations"
+                    )
+                    diagnostics = td_result.diagnostics
+                    self.results_panel.append_console(
+                        "Authoritative zero-flux residual: "
+                        f"RMS={diagnostics['equilibrium_residual_rms']:.8g}; "
+                        f"max={diagnostics['equilibrium_residual_max']:.8g}"
+                    )
+                elif isinstance(td_result, PRStaticRunResult):
+                    total_slices = int(td_result.grid_summary["Nz"])
+                    self.results_panel.set_td_time_indicator(
+                        "PR image static: "
+                        f"{td_result.completed_slices}/{total_slices} slices"
+                    )
+                else:
+                    raise TypeError(
+                        "unsupported Image Amplification base result type: "
+                        f"{type(td_result).__name__}"
+                    )
+                if analysis is not None:
+                    self.results_panel.append_console(
+                        "Image amplification: "
+                        f"measured gain={analysis.measured_absolute_signal_gain:.8g}; "
+                        f"analytic gain={analysis.analytic_absolute_signal_gain:.8g}; "
+                        f"correlation={analysis.image_intensity_correlation:.8g}; "
+                        f"NRMSE={analysis.normalized_image_rmse:.8g}"
+                    )
+            elif runner_result.kind == PR_TIMEDEPENDENT_WORKFLOW:
+                self.last_checkpoint = result.checkpoint
+                if result.status == "cancelled":
+                    self.run_status = "stopped"
+                    self.status_label.setText("Stopped")
+                    prefix = "PR time at stop"
+                    message = "Run cancelled"
+                else:
+                    self.run_status = "completed"
+                    self.status_label.setText("Completed")
+                    prefix = "Final PR time"
+                    message = "Run complete"
+                self.results_panel.set_td_time_indicator(
+                    f"{prefix}: {float(result.time_normalized):.6g} normalized; "
+                    f"steps: {result.completed_steps}/{result.requested_steps}"
+                )
+            elif runner_result.kind == PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW:
+                self.last_checkpoint = None
+                from lcprop.pr.transverse.continuation import checkpoint_from_result
+                if isinstance(self._active_request, PRTransverseRunRequest):
+                    try:
+                        self.last_checkpoint = checkpoint_from_result(self._active_request, result)
+                        if getattr(self, '_live_mailbox', None) is not None:
+                            self._live_view.bind_checkpoint(self.last_checkpoint.identity)
+                    except (ValueError, TypeError) as exc:
+                        self.results_panel.append_console("Continuation unavailable: " + str(exc))
+                if result.status == "cancelled":
+                    self.run_status = "stopped"
+                    self.status_label.setText("Stopped")
+                    prefix = "PR transverse time at stop"
+                    message = "2D zero-flux time-dependent run cancelled"
+                else:
+                    self.run_status = "completed"
+                    self.status_label.setText("Completed")
+                    prefix = "Final PR transverse time"
+                    message = "2D zero-flux time-dependent run complete"
+                self.results_panel.set_td_time_indicator(
+                    f"{prefix}: {float(result.time_normalized):.6g} segment τ; "
+                    f"steps: {result.completed_steps}/{result.requested_steps}; "
+                    f"cumulative τ={result.resolved_profile.get('continuation_segment', {}).get('cumulative_time', result.time_normalized):.6g}"
+                )
+            elif runner_result.kind == PR_TRANSVERSE_STATIC_WORKFLOW:
+                diagnostics = result.diagnostics
+                linearized = diagnostics.get("material_response") == "linearized"
+                model_name = (
+                    "linearized material-response"
+                    if linearized
+                    else "2D zero-flux"
+                )
+                if result.status == "cancelled":
+                    self.run_status = "stopped"
+                    self.status_label.setText("Stopped")
+                    message = f"{model_name} static run cancelled"
+                elif result.status == "converged":
+                    self.run_status = "completed"
+                    self.status_label.setText("Converged")
+                    message = f"{model_name} static solve converged"
+                else:
+                    self.run_status = "not_converged"
+                    self.status_label.setText("Not converged")
+                    message = f"{model_name} static solve did not converge"
+                requested = int(
+                    result.resolved_profile["solver"][
+                        "max_coupled_iterations"
+                    ]
+                )
+                self.results_panel.set_td_time_indicator(
+                    "PR transverse static: "
+                    f"{result.completed_coupled_iterations}/{requested} "
+                    "coupled iterations"
+                )
+                self.results_panel.append_console(
+                    (
+                        "Material-response consistency residual: "
+                        if linearized
+                        else "Authoritative zero-flux residual: "
+                    )
+                    +
+                    f"RMS={diagnostics['equilibrium_residual_rms']:.8g}; "
+                    f"max={diagnostics['equilibrium_residual_max']:.8g}"
+                )
+                self.results_panel.append_console(
+                    "Material state diagnostics: "
+                    f"max|E_x|={diagnostics['E_x_max_abs']:.8g}; "
+                    f"max|E_y|={diagnostics['E_y_max_abs']:.8g}; "
+                    f"carrier minimum={diagnostics['carrier_minimum']:.8g}"
+                )
+                if linearized:
+                    self.results_panel.append_console(
+                        "Material solve work: analytic Fourier response; "
+                        f"calls={diagnostics['material_response_calls']}; "
+                        f"termination={diagnostics['termination_reason']}"
+                    )
+                else:
+                    solver_summary = diagnostics["discrete_corrector"]
+                    self.results_panel.append_console(
+                        "Material solve work: "
+                        "Newton="
+                        f"{solver_summary['continuum_newton_iterations_attempted']}; "
+                        f"PCG={solver_summary['continuum_pcg_iterations']}; "
+                        f"termination={diagnostics['termination_reason']}"
+                    )
+            else:
+                total_slices = int(result.grid_summary["Nz"])
+                z_reached_um = float(
+                    result.completed_slices * result.grid_summary["dz_um"]
+                )
+                if result.status == "cancelled":
+                    self.run_status = "stopped"
+                    self.status_label.setText("Stopped")
+                    prefix = "PR static z at stop"
+                    message = "Static run cancelled"
+                elif result.status == "converged":
+                    self.run_status = "completed"
+                    self.status_label.setText("Converged")
+                    prefix = "Final PR static z"
+                    message = "Static solve converged"
+                else:
+                    self.run_status = "not_converged"
+                    self.status_label.setText("Not converged")
+                    prefix = "Final PR static z"
+                    message = "Static solve did not converge"
+                self.results_panel.set_td_time_indicator(
+                    f"{prefix}: {z_reached_um:.6g} µm; "
+                    f"slices: {result.completed_slices}/{total_slices}"
+                )
+            self.results_panel.append_console(
+                f"Local-plane execution: {result.status}"
+                if runner_result.kind in (PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW) else runner_result.message)
+            self.results_panel.append_console(message)
+            if runner_result.kind not in (PR_PUBLISHED_STATIC_WORKFLOW, UNIFIED_WORKFLOW):
+                self.results_panel.append_console(
+                    "Normalized optical power: "
+                    f"{ordinary_result.power_initial:.8g} -> "
+                    f"{ordinary_result.power_final:.8g}"
+                )
+        except Exception:
+            self.run_status = "failed"
+            self.status_label.setText("Failed")
+            self.results_panel.append_console("ERROR")
+            report_failure(self, traceback.format_exc())
+        self._outcome_received = True
+        self._maybe_finish_background()
+
+    @Slot(str)
+    def _on_failed(self, formatted_traceback: str) -> None:
+        self._finish_live_preview("failed")
+        if (
+            self.last_remote_status is not None
+            and self.last_remote_status.state == RemoteRunState.CANCELLED
+        ):
+            self.run_status = "stopped"
+            self.status_label.setText("Stopped")
+            self.results_panel.workspace.finish_attempt("State at stop/cancellation")
+            self.results_panel.append_console("Remote job cancelled")
+            self._outcome_received = True
+            self._maybe_finish_background()
+            return
+        self.run_status = "failed"
+        self.status_label.setText("Failed")
+        self.results_panel.append_console("ERROR")
+        report_failure(self, formatted_traceback)
+        self._outcome_received = True
+        self._maybe_finish_background()
+
+    @Slot()
+    def _on_thread_finished(self) -> None:
+        thread = self._thread
+        if thread is not None:
+            # ``finished`` precedes completion of all native-thread cleanup.
+            # Join before dropping the last explicit reference or allowing
+            # the parent window to be destroyed.
+            thread.wait()
+        self._thread = None
+        self._worker = None
+        self._thread_done = True
+        self._maybe_finish_background()
+        if self._close_requested:
+            QTimer.singleShot(0, self.close)
+
+    def _maybe_finish_background(self) -> None:
+        if self._outcome_received and self._thread_done:
+            self._finish_background()
+
+    def _finish_background(self) -> None:
+        self._background_running = False
+        self._active_request = None
+        self._cancellation_token = None
+        self.stop_button.setText("Stop")
+        if not self._close_requested:
+            self._set_configuration_enabled(True)
+
+    def shutdown_background_run(self, timeout_ms: int = 30000) -> bool:
+        """Cooperatively cancel and join the PR worker without GUI deadlock."""
+
+        if not self.remote_execution_controls.shutdown_connection_test(
+            min(timeout_ms, 16000)
+        ):
+            return False
+
+        if self._thread is None:
+            return True
+        if self._cancellation_token is not None:
+            self._cancellation_token.cancel()
+        self.results_panel.workspace.set_operation_status("Stopping — awaiting safe boundary")
+        self.run_status = "stopping"
+        self.status_label.setText("Stopping…")
+        deadline = monotonic() + max(0, timeout_ms) / 1000.0
+        while self._thread is not None:
+            thread = self._thread
+            if not thread.isRunning():
+                thread.wait()
+                QCoreApplication.processEvents()
+                if self._thread is thread:
+                    self._thread = None
+                    self._worker = None
+                    self._background_running = False
+                return True
+            remaining_ms = int(max(0.0, deadline - monotonic()) * 1000)
+            if remaining_ms <= 0:
+                return False
+            thread.wait(min(10, remaining_ms))
+            # Blocking progress delivery requires the GUI thread to service
+            # queued signals. Do not retain/use ``thread`` after this call:
+            # the finished/deleteLater path may have run.
+            QCoreApplication.processEvents()
+        return True
+
+    def closeEvent(self, event) -> None:
+        thread = self._thread
+        if self._background_running or (
+            thread is not None and thread.isRunning()
+        ):
+            first_request = not self._close_requested
+            self._close_requested = True
+            if self._cancellation_token is not None:
+                self._cancellation_token.cancel()
+            self.results_panel.workspace.set_operation_status("Stopping — awaiting safe boundary")
+            self.run_status = "stopping"
+            self.status_label.setText("Stopping…")
+            self.stop_button.setEnabled(False)
+            self.stop_button.setText("Stopping…")
+            if first_request:
+                self.results_panel.append_console(
+                    "Close requested; waiting for the active PR workflow to "
+                    "finish at a safe boundary."
+                )
+            event.ignore()
+            return
+        if thread is not None:
+            thread.wait()
+        self._close_requested = False
+        event.accept()
+
+
+__all__ = ["PRMainWindow"]

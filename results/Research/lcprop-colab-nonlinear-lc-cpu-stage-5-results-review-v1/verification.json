@@ -1,0 +1,24 @@
+{
+  "archive_sha256": "a04fde6758533c0d428e5fe5767beb512d34166c5bcd6d91b25e675f5951be3f",
+  "manifest_sha256": "874e64f47beb73c56d3952d5de655ff064ab921d82f34bba265dd48691f1dc02",
+  "all_manifest_files_verified": 16,
+  "installed_files_attested_match": 264,
+  "script_request_wheel_identity": "exact",
+  "environment": {
+    "python": "3.13.16 (main, Oct  1 2026, 15:40:24) [GCC 13.3.0]",
+    "executable": "/usr/bin/python3",
+    "platform": "Linux-6.6.122+-x86_64-with-glibc2.39",
+    "numpy": "2.1.3",
+    "scipy": "1.16.3",
+    "matplotlib": "3.10.0",
+    "lcprop": "0.1.0",
+    "module": "/usr/local/lib/python3.13/dist-packages/lcprop/__init__.py",
+    "engine_source": "52b00928978a9ec7862a357d38327fd0b9ae857c",
+    "direct_url": "{\"archive_info\": {\"hash\": \"sha256=1322400b31fac3a28d439f281cc189fb790f1526940dc36af9bf50971fdc5c20\", \"hashes\": {\"sha256\": \"1322400b31fac3a28d439f281cc189fb790f1526940dc36af9bf50971fdc5c20\"}}, \"url\": \"file:///content/qualification-inputs/lcprop-0.1.0-py3-none-any.whl\"}",
+    "thread_environment": {
+      "OMP_NUM_THREADS": null,
+      "OPENBLAS_NUM_THREADS": null,
+      "MKL_NUM_THREADS": null
+    }
+  }
+}

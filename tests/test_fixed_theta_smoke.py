@@ -1,3 +1,4 @@
+from lcprop.optics.launch import OpticalLaunchContext
 import numpy as np
 
 from lcprop.core.context import GridSpec, LCMaterial, BiasSpec
@@ -6,8 +7,9 @@ from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.requests import StaticRunRequest, StaticSolverOptions, OutputOptions
 
 from lcprop.lc.bias import build_bias
+from lcprop.lc.propagation import advance_slice
 from lcprop.optics.launch import build_launch, total_power
-from lcprop.optics.splitstep import linear_kernel, advance_slice
+from lcprop.optics.splitstep import linear_kernel
 
 
 def test_one_slice_fixed_theta_smoke():
@@ -29,12 +31,7 @@ def test_one_slice_fixed_theta_smoke():
         bias=BiasSpec(theta_bc=0.0),
         beams=BeamStack(
             channels=(
-                BeamChannel(
-                    wavelength_um=0.633,
-                    power_mW=1.0,
-                    waist_x_um=3.0,
-                    waist_y_um=3.0,
-                ),
+                BeamChannel(wavelength_um=0.633, power_mW=1.0, w1_um=3.0, w2_um=3.0),
             ),
         ),
         solver=StaticSolverOptions(),
@@ -42,8 +39,9 @@ def test_one_slice_fixed_theta_smoke():
     )
 
     grid = make_grid(request.grid)
-    bias = build_bias(request.bias, grid)
-    launch = build_launch(request.beams, grid)
+    material = LCMaterial()
+    bias = build_bias(request.bias, grid, material)
+    launch = build_launch(request.beams, grid, context=OpticalLaunchContext(grid, 1.0, grid.spec.z_length_um))
 
     A = launch.A0.copy()
     p0 = total_power(A, grid)

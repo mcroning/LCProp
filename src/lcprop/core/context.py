@@ -1,6 +1,14 @@
+"""Shared grid specification with historical LC compatibility exports.
+
+``GridSpec`` is the canonical material-neutral API in this module. The LC
+names exposed through ``__getattr__`` and ``__all__`` are retained for import
+compatibility; new LC code should import them from :mod:`lcprop.lc`.
+"""
+
 from dataclasses import dataclass
-from typing import Optional
 import math
+from numbers import Integral, Real
+from importlib import import_module
 
 
 @dataclass(frozen=True)
@@ -15,79 +23,44 @@ class GridSpec:
     z_length_um: float = 3000.0
 
     def validate(self) -> None:
-        if self.Nx <= 1 or self.Ny <= 1:
-            raise ValueError("Nx and Ny must be > 1")
-        if self.dz_um <= 0.0:
-            raise ValueError("dz_um must be positive")
-        if self.x_aperture_um <= 0.0:
-            raise ValueError("x_aperture_um must be positive")
-        if self.y_aperture_um <= 0.0:
-            raise ValueError("y_aperture_um must be positive")
-        if self.z_length_um <= 0.0:
-            raise ValueError("z_length_um must be positive")
+        for name in ("Nx", "Ny"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, Integral) or value <= 1:
+                raise ValueError("Nx and Ny must be integers > 1")
+        for name in ("dz_um", "x_aperture_um", "y_aperture_um", "z_length_um"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Real)
+                or not math.isfinite(value)
+                or value <= 0.0
+            ):
+                raise ValueError(f"{name} must be finite and positive")
 
 
-@dataclass(frozen=True)
-class TimeSpec:
-    """Physical/pseudo-time discretization choices."""
-
-    dt: float = 7.5e-4
-    Nt: int = 20
-
-    def validate(self) -> None:
-        if self.dt <= 0.0:
-            raise ValueError("dt must be positive")
-        if self.Nt < 0:
-            raise ValueError("Nt must be nonnegative")
+_LC_COMPATIBILITY_EXPORTS = {"BiasSpec", "LCContext", "LCMaterial"}
+_LC_COMPATIBILITY_EXPORTS.add("TimeSpec")
 
 
-@dataclass(frozen=True)
-class LCMaterial:
-    name: str = "generic"
-    ne: float = 1.70
-    no: float = 1.50
-    K: float = 7.0e-12
-    delta_epsilon: float = 13.0
-
-    def validate(self) -> None:
-        if self.ne <= 0.0 or self.no <= 0.0:
-            raise ValueError("ne and no must be positive")
-        if self.K <= 0.0:
-            raise ValueError("K must be positive")
-        if self.delta_epsilon <= 0.0:
-            raise ValueError("delta_epsilon must be positive")
+def __getattr__(name: str):
+    if name not in _LC_COMPATIBILITY_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name = (
+        "lcprop.lc.normalization" if name == "TimeSpec" else "lcprop.lc.specs"
+    )
+    value = getattr(import_module(module_name), name)
+    globals()[name] = value
+    return value
 
 
-@dataclass(frozen=True)
-class BiasSpec:
-    V_bias: float = 0.9144
-    theta_bc: float = 0.0
-    theta_min: float = 0.0
-    theta_max: float = math.pi / 2
-    theta_center: Optional[float] = None
-    b_override: Optional[float] = None
-
-    def validate(self) -> None:
-        if self.V_bias < 0.0:
-            raise ValueError("V_bias must be nonnegative")
-        if self.b_override is not None and self.b_override < 0.0:
-            raise ValueError("b_override must be nonnegative")
-        if self.theta_min > self.theta_max:
-            raise ValueError("theta_min must be <= theta_max")
-        if not (self.theta_min <= self.theta_bc <= self.theta_max):
-            raise ValueError("theta_bc must lie within [theta_min, theta_max]")
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | _LC_COMPATIBILITY_EXPORTS)
 
 
-@dataclass
-class LCContext:
-    """
-    Runtime numerical context built from a RunRequest.
-
-    LCContext should contain derived grid arrays, backend arrays,
-    propagation plans, and derived physical parameters. It is not part
-    of the immutable experiment request.
-    """
-
-    grid: GridSpec
-    material: LCMaterial
-    bias: BiasSpec
+__all__ = [
+    "BiasSpec",
+    "GridSpec",
+    "LCContext",
+    "LCMaterial",
+    "TimeSpec",
+]

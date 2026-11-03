@@ -1,0 +1,62 @@
+{
+  "base": "9151e6bc7db8adb1a6788942e7be5bf315063fa2",
+  "candidate_sha256": {
+    "src/lcprop/notebook/interactive_lc.py": "1f11e77eccdfdc14d1e4dd7115d70f71cebabbe76dce96e7adb55f0a2c219388",
+    "src/lcprop/notebook/_beam_position_editor.py": "b380ff4e2c474e238584a9e10f4c8f93d1d7336c6ffa6b8a9ef201d99c547af6",
+    "tests/test_interactive_lc_dragging.py": "df634317cb249906bdfb93bdbb892daefd80ddaa0a6cb97600b823dcdb7c63ce",
+    "tests/test_interactive_lc_move_tilt.py": "a91024be7b5ccb6c3552c1a7cb1aaf595a195ec71dd6e1b79bdae0e8ab774bc2",
+    "docs/notebook_package.md": "6a9999061754545538f649886cbf2886c58326ee1ff0c753ce6d38e20cf2b2b8",
+    "tests/test_lc_static_interactive_presentation.py": "ff9fc8be15a66f8475f33b1185fc91a9d0242afb62fe7217b069c5fa8c172755",
+    "tests/test_interactive_lc_preview_lifecycle.py": "5c28d464de9715bbd5d36f750c0491b3c5f2d8083e10a8a1ca131e92025123d1"
+  },
+  "tests": {
+    "passed": 77,
+    "propagation_deselected": 2
+  },
+  "logs": {
+    "validated.txt": "dcf2d0bcca3d3fb3f313e003407e0b49cff4f38afdb3b6ddf4d5b528c2465aa8",
+    "canvas-smoke.txt": "168745b99dfdde28c5f1abcee04c795990d385b35da951e68fc43f006a7f194c",
+    "canvas_smoke.py": "0d233c080aa7e0211dcc712e79cd774ab34ec3c7f5a4c0cc3f779710f1a68b26"
+  },
+  "preserved_recorded_files": 902,
+  "browser_qualified": false,
+  "propagation_run": false,
+  "pre_lifecycle_candidate_sha256": {
+    "src/lcprop/notebook/interactive_lc.py": "25676ccdc4e1908074599aac6ce57f02b3eb96b13d51f1fc68f95a15651623ad",
+    "src/lcprop/notebook/_beam_position_editor.py": "3cf700d9be99e83e4d2be6df484c942dc1e6d58888245a5f21b36acd95f533cb",
+    "tests/test_interactive_lc_dragging.py": "395e65bde594f54fe9744353fabec34650a68070ab266cc908ff3238869f87a0",
+    "tests/test_interactive_lc_move_tilt.py": "a91024be7b5ccb6c3552c1a7cb1aaf595a195ec71dd6e1b79bdae0e8ab774bc2",
+    "docs/notebook_package.md": "6a9999061754545538f649886cbf2886c58326ee1ff0c753ce6d38e20cf2b2b8"
+  },
+  "lifecycle_validation": {
+    "passed": 83,
+    "propagation_deselected": 2,
+    "browser_verified": false,
+    "logs": {
+      "accepted.txt": "1c63bf00d38f8c55e0e84b1585f21d1307357a1dccd09d0a661438d46c28b685",
+      "real-canvas.txt": "76dd66f5cabcedb4c98e78d79afc896ffdf34dbe83993e8c84aaf5a02cbaf1dc",
+      "interactive.png": "62be79f9a1e9e8d136af69ce013659800c2062ec2fbc96822f7c88eece2ed148",
+      "real_canvas.py": "921a72164959f3511b2bcd197b6cf0ba44bc877777f68083b66ba597e1350deb"
+    }
+  },
+  "publication_followup": {
+    "resolved": false,
+    "test_passed": 1,
+    "test_sha256": "b3e8def46e77607a7b290efcb3ec9df3d2c5ef0ea58504a74127eb909d37b49e",
+    "evidence": {
+      "iopub-test-final.txt": "b266695a4166406335fd347c87da01e9763961db9d094cbc68a3ca91b1c7c417",
+      "safari_preview_probe.ipynb": "65b982c59b822e4ddfa8914bb4fd3b84b13e0da93199d638fa27d34a03801156"
+    },
+    "product_source_unchanged": true
+  },
+  "persistent_canvas_safety_gate": {
+    "date": "2026-10-16",
+    "status": "blocked",
+    "product_source_changed": false,
+    "reason": "Same canvas/comm cannot distinguish pre-toggle pointer messages arriving after callback reattachment using callback epochs alone.",
+    "probe_sha256": {
+      "probe.py": "6aa4435f877836cf7c44d0439035e0ebe6d964d9ad1ab4abb4be7f34c5d7e7e0",
+      "probe.txt": "405e1ffb9ada494a31bd39ee50b43b3d4604a183015f92e8699aba33d6b7ca05"
+    }
+  }
+}

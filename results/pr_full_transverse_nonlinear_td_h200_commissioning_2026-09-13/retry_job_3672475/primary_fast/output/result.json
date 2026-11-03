@@ -1,0 +1,262 @@
+{
+  "array_manifest": {
+    "result__A_final": {
+      "dtype": "complex128",
+      "filename": "result_arrays.npz",
+      "member": "result__A_final",
+      "nbytes": 2097152,
+      "required": true,
+      "shape": [
+        2,
+        256,
+        256
+      ]
+    },
+    "result__A_initial": {
+      "dtype": "complex128",
+      "filename": "result_arrays.npz",
+      "member": "result__A_initial",
+      "nbytes": 2097152,
+      "required": true,
+      "shape": [
+        2,
+        256,
+        256
+      ]
+    },
+    "result__diagnostics__carrier_integrals_per_z": {
+      "dtype": "float64",
+      "filename": "result_arrays.npz",
+      "member": "result__diagnostics__carrier_integrals_per_z",
+      "nbytes": 16,
+      "required": true,
+      "shape": [
+        2
+      ]
+    }
+  },
+  "cancelled": false,
+  "codec_id": "pr.transverse_timedependent.result",
+  "codec_version": 1,
+  "converged": null,
+  "device_summary": {
+    "backend": "cupy",
+    "complex_dtype": "complex128",
+    "is_gpu": true,
+    "real_dtype": "float64"
+  },
+  "format": "lcprop-remote-result",
+  "material_id": "pr",
+  "provenance": {
+    "production_git_sha": "1a129dc3cb93f6c8a005a198f40d86a31792f223"
+  },
+  "result_payload": {
+    "A_final": {
+      "__lcprop_array__": "result__A_final"
+    },
+    "A_initial": {
+      "__lcprop_array__": "result__A_initial"
+    },
+    "backend_summary": {
+      "backend": "cupy",
+      "complex_dtype": "complex128",
+      "is_gpu": true,
+      "real_dtype": "float64"
+    },
+    "completed_steps": 3,
+    "diagnostics": {
+      "E_x_max_abs": 0.10383375965942124,
+      "E_x_rms": 0.02306476842240965,
+      "E_y_max_abs": 0.10536090842534912,
+      "E_y_rms": 0.023470266667950053,
+      "P_minus_one_max_abs": 0.4745830034645291,
+      "P_minus_one_rms": 0.10291744147931255,
+      "accepted_material_steps": 3,
+      "cancellation_observed_stage": null,
+      "carrier_density_minimum": 0.5760850973270508,
+      "carrier_integrals_per_z": {
+        "__lcprop_array__": "result__diagnostics__carrier_integrals_per_z"
+      },
+      "carrier_relative_drift_max": 2.220446049250313e-16,
+      "complete_final_optical_replay": true,
+      "curl_max": 2.3037127760972e-15,
+      "curl_rms": 3.1279677093711973e-16,
+      "finite_material_state": true,
+      "finite_optical_state": true,
+      "frozen_intensity_material_equation": "full_transverse_nonlinear_potential_rate",
+      "gauss_max": 1.546540673302843e-13,
+      "gauss_rms": 1.77237922125293e-14,
+      "integrator_policy": "production_first_order_spectral_imex",
+      "material_response": "nonlinear",
+      "material_response_calls": 3,
+      "material_response_validation": "validated",
+      "material_time_normalized": 0.15000000000000002,
+      "memory_policy": {
+        "backend_working_set": "accepted material and frozen source volumes with transverse FFT batches",
+        "retained_material_state": "initial_and_final_longitudinal_volumes",
+        "retained_material_time_history": false
+      },
+      "nonlinear_material_iterations": "not_applicable_fixed_step_time_integrator",
+      "nonlinear_td_rhs_max": 0.6710893841846177,
+      "nonlinear_td_rhs_rms": 0.17935435855301135,
+      "optical_passes_completed": 4,
+      "optical_power_relative_drift": 4.440892098500626e-16,
+      "physical_state_valid": true,
+      "potential_mean_max_abs": 3.3881317890172014e-20,
+      "source_cadence": "one_complete_optical_pass_per_material_interval_with_source_frozen_during_each_material_update"
+    },
+    "grid_summary": {
+      "Nx": 256,
+      "Ny": 256,
+      "Nz": 2,
+      "dx_um": 0.25,
+      "dy_um": 0.25,
+      "dz_um": 5.0,
+      "real_dtype": "float64",
+      "x_aperture_um": 64.0,
+      "y_aperture_um": 64.0,
+      "z_length_um": 10.0
+    },
+    "launch_summary": {
+      "Nch": 2,
+      "channel_throughput_fractions": [
+        1.0,
+        0.9999999999999998
+      ],
+      "coherence": "coherent",
+      "coherence_groups": [
+        "nonlinear-td-commissioning",
+        "nonlinear-td-commissioning"
+      ],
+      "field_normalization": "sum_channel_integrals_equals_one",
+      "physical_channel_powers_mW": [
+        1.0,
+        1.0
+      ],
+      "physical_total_power_mW": 2.0,
+      "post_element_channel_powers_mW": [
+        1.0,
+        0.9999999999999998
+      ],
+      "post_element_total_power_mW": 1.9999999999999998,
+      "power_fractions": [
+        0.5,
+        0.5
+      ],
+      "wavelengths_um": [
+        0.633,
+        0.633
+      ]
+    },
+    "power_final": 1.0000000000000004,
+    "power_initial": 1.0,
+    "psi_final": null,
+    "psi_initial": null,
+    "requested_steps": 3,
+    "resolved_profile": {
+      "beam_request": {
+        "channels": [
+          {
+            "coherence_group": "nonlinear-td-commissioning",
+            "name": "pump",
+            "phase_rad": 0.0,
+            "power_mW": 1.0,
+            "tilt_x_rad_per_um": 0.2945243112740431,
+            "tilt_y_rad_per_um": 0.19634954084936207,
+            "waist_x_um": 22.0,
+            "waist_y_um": 19.0,
+            "wavelength_um": 0.633,
+            "x0_um": 0.0,
+            "y0_um": 0.0
+          },
+          {
+            "coherence_group": "nonlinear-td-commissioning",
+            "name": "signal",
+            "phase_rad": 0.37,
+            "power_mW": 1.0,
+            "tilt_x_rad_per_um": -0.19634954084936207,
+            "tilt_y_rad_per_um": -0.2945243112740431,
+            "waist_x_um": 21.0,
+            "waist_y_um": 20.0,
+            "wavelength_um": 0.633,
+            "x0_um": 0.0,
+            "y0_um": 0.0
+          }
+        ],
+        "coherence": "coherent"
+      },
+      "boundary": {
+        "applied_field_x": 0.0,
+        "potential_gauge": "zero_mean_per_z_slice",
+        "profile_id": "pr_full_transverse_unbiased_reference_v1",
+        "x_boundary": "periodic",
+        "y_boundary": "periodic"
+      },
+      "characteristic_wavenumber_per_um": 0.2,
+      "dielectric": {
+        "h_y": 1.0,
+        "profile_id": "pr_full_transverse_unbiased_reference_v1"
+      },
+      "dx_normalized": 0.05,
+      "dy_normalized": 0.05,
+      "grid_request": {
+        "Nx": 256,
+        "Ny": 256,
+        "dz_um": 5.0,
+        "x_aperture_um": 64.0,
+        "y_aperture_um": 64.0,
+        "z_length_um": 10.0
+      },
+      "material": {
+        "applied_field": 0.0,
+        "characteristic_wavenumber_per_um_override": 0.2,
+        "dark_intensity": 0.4,
+        "gain_length_product": 0.025,
+        "mobile_charge_density_m3": 6.4e+22,
+        "refractive_index": 2.4,
+        "relative_permittivity": 2500.0,
+        "temperature_K": 293.0,
+        "uniform_background_intensity": 0.1
+      },
+      "material_response": {
+        "model": "nonlinear",
+        "reference_intensity": null
+      },
+      "physics_profile_id": "pr_full_transverse_unbiased_reference_v1",
+      "projection": {
+        "g_x": 1.0,
+        "g_y": 0.0,
+        "profile_id": "pr_full_transverse_unbiased_reference_v1"
+      },
+      "solver": {
+        "Nt": 3,
+        "dt_normalized": 0.05,
+        "integrator": "spectral_imex_euler",
+        "optical_substeps": 1
+      },
+      "transport": {
+        "m_y": 1.0,
+        "profile_id": "pr_full_transverse_unbiased_reference_v1"
+      },
+      "transport_model": "full_transverse",
+      "workflow": "pr_transverse_timedependent"
+    },
+    "retention_summary": {
+      "omitted_fields": [
+        "psi_initial",
+        "psi_final"
+      ],
+      "policy": "fast"
+    },
+    "status": "completed",
+    "time_normalized": 0.15000000000000002
+  },
+  "result_policy": "fast",
+  "run_id": "3672475",
+  "scientific_backend_requested": "cupy",
+  "scientific_backend_resolved": "cupy",
+  "scientific_status": "completed",
+  "termination_reason": "requested_material_steps_completed",
+  "transport_schema_version": 1,
+  "workflow_id": "pr_transverse_timedependent"
+}

@@ -34,12 +34,7 @@ def make_base_static_request(power_mW=0.05):
         bias=BiasSpec(theta_bc=0.0),
         beams=BeamStack(
             channels=(
-                BeamChannel(
-                    wavelength_um=0.633,
-                    power_mW=power_mW,
-                    waist_x_um=3.0,
-                    waist_y_um=3.0,
-                ),
+                BeamChannel(wavelength_um=0.633, power_mW=power_mW, w1_um=3.0, w2_um=3.0),
             )
         ),
         solver=StaticSolverOptions(),
@@ -84,7 +79,7 @@ def test_static_local_self_consistent_workflow_public_api():
     result = run_static(req)
 
     assert result.A_final.shape == (1, 24, 24)
-    assert result.theta_final.shape == (24, 24)
+    assert result.theta_final.shape == (2, 24, 24)
     assert result.method == "local_self_consistent"
     assert_finite_array(result.A_final)
     assert_finite_array(result.theta_final)
@@ -130,6 +125,8 @@ def test_soliton_workflow_public_api():
     assert result.theta.shape == (24, 24)
     assert "beta" in result.metrics
     assert "theta_max" in result.metrics
+    assert np.isclose(result.metrics["normalized_field_integral"], 1.0, rtol=1e-6)
+    assert result.metrics["physical_power_mW"] == 0.05
     assert_finite_array(result.A)
     assert_finite_array(result.theta)
 

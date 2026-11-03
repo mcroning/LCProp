@@ -1,0 +1,14 @@
+{
+  "files": [
+    {
+      "byte_size": 2919,
+      "filename": "request.json",
+      "required": true,
+      "role": "envelope",
+      "sha256": "878c835de848876179b29f24dee2950239e5655089ae0b4cda82819c201d6c6e"
+    }
+  ],
+  "format": "lcprop-artifact-manifest",
+  "manifest_schema_version": 1,
+  "run_id": "3593204"
+}

@@ -1,0 +1,19 @@
+{
+  "base": "9151e6bc7db8adb1a6788942e7be5bf315063fa2",
+  "files": {
+    "src/lcprop/notebook/interactive_lc.py": "dec18fd862926dc5b7f69f71ca0a913288ac78f4b65bd172043d599a2ed4b635",
+    "src/lcprop/notebook/_beam_position_editor.py": "642a706305200eff81dfc2ad31c472a162afd778ed91db94d039dcb0c956023f",
+    "tests/test_interactive_lc_dragging.py": "844e6e9923c5f8dfdfec62c5eb240d3092c6ef0312b128eb7958888d758b6203",
+    "docs/notebook_package.md": "de46dd7c3cb83fa7d740aaa50d347bbe2e53b321a514003a0f2f864cea7f8b92"
+  },
+  "tests": {
+    "passed": 61,
+    "deselected_propagation": 2
+  },
+  "logs": {
+    "validated.txt": "19835aa8a93310f4fc41152b64ba3057deb78e517d20224f9fe7734607d6cc69",
+    "real-canvas.txt": "116add905fd79e4dbdd313a478c61dba76fd9373a4a61f5b29c96af51f3e6f9e"
+  },
+  "browser_qualified": false,
+  "scientific_propagation_run": false
+}

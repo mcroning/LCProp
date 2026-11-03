@@ -1,20 +1,38 @@
 [project]
 name = "lcprop"
-version = "0.1.0"
-description = "Optical beam propagation in liquid crystal media"
+version = "0.4.0"
+description = "Optical beam propagation in liquid-crystal and photorefractive media"
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.10"
 dependencies = [
     "numpy",
     "scipy",
+    "tomli; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
+colab = ["matplotlib", "ipywidgets", "IPython", "ipympl>=0.10.0,<0.11"]
 gpu = ["cupy-cuda12x"]
-gui = ["PySide6", "pyqtgraph"]
+gui = ["PySide6", "pyqtgraph", "matplotlib"]
+test = ["pytest>=8", "Pillow"]
+
+[project.scripts]
+lcprop-pr = "lcprop.pr.gui.app:main"
 
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"lcprop.pr.assets" = ["runtime_estimator_calibration_v1.json"]
+"lcprop.pr.assets.images" = ["catalog.json", "*.png"]
+
+[tool.setuptools.exclude-package-data]
+"lcprop.pr" = ["README.md"]
+"lcprop.pr.gui" = ["README.md"]
+"lcprop.transport" = ["README.md"]

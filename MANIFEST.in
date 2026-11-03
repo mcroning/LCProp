@@ -1,0 +1,27 @@
+# Self-contained source distribution: runtime package, selected examples and tests.
+graft src/lcprop
+prune tests
+include tests/test_notebook_package.py
+include examples/lc_static_interactive.py
+include examples/lc_static_nonlinear_cpu.py
+include docs/notebook_package.md
+prune results
+prune reference
+prune .codex-work
+prune build
+prune notebooks
+global-exclude __pycache__ *.py[cod] *.npz *.npy *.code-workspace
+
+# Curated core regression set; the 5.7 KiB fixture is an explicit exception.
+include tests/__init__.py
+include tests/test_engine_frontend_independence.py
+include tests/test_pr_transverse_constant_gauge.py
+include tests/test_pr_transverse_marching_static.py
+include tests/test_pr_transverse_streaming.py
+include tests/data/pr_constant_gauge_cell1.json
+include tests/data/pr_constant_gauge_cell1.npz
+include tests/data/pr_constant_gauge_wolfram.json
+include tests/data/pr_constant_gauge_reference.wls
+include docs/pr_transverse_constant_gauge.md
+include docs/pr_transverse_streaming.md
+include docs/development/constant_gauge_integration.json

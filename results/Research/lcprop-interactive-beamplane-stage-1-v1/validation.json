@@ -1,0 +1,422 @@
+{
+  "head": "89152f65e8565208f44cd5ea9c703d191482e112",
+  "changed_tracked_since_start": [
+    "docs/notebook_package.md",
+    "src/lcprop/notebook/interactive_lc.py"
+  ],
+  "unchanged_tracked_files": 895,
+  "unchanged_src_files": 270,
+  "environment": {
+    "python": "3.12.13 | packaged by Anaconda, Inc. | (main, Mar 19 2026, 20:12:32) [Clang 20.1.8 ]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "numpy": "2.5.4",
+    "scipy": "1.18.1",
+    "matplotlib": "3.11.2",
+    "ipywidgets": "8.1.9"
+  },
+  "candidate_sha256": {
+    "docs/notebook_package.md": "30b72dca938653e3b685193164b48294c3e4321181cdcc6e05d57be4b68ed456",
+    "src/lcprop/notebook/interactive_lc.py": "2d467e928567bafbcdb236f1a961ea57b6256404f59d5d6d85d40a61886af5de",
+    "tests/test_interactive_lc_multibeam.py": "1ec204fcb8869a95d0167ae81d32950217dba03353a14970ec202e2d1aa3a40d"
+  },
+  "unrelated_sha256": {
+    "src/lcprop/pr/published_static.py": "6b63f6452edf6c7964e39663394adec7fe866e4de913e6814cd9e04f9fb39fca",
+    "tests/test_pr_published_static.py": "ec5d4bb54ad301a266be4eb49f7116ef1f6594d8bee593595c33b60f438e0e18"
+  },
+  "scientific_parity": [
+    {
+      "beams": 1,
+      "request": {
+        "schema_version": 3,
+        "grid": {
+          "Nx": 128,
+          "Ny": 128,
+          "dz_um": 5.0,
+          "x_aperture_um": 75.0,
+          "y_aperture_um": 100.0,
+          "z_length_um": 500.0
+        },
+        "material": {
+          "name": "generic",
+          "ne": 1.7,
+          "no": 1.5,
+          "K": 7e-12,
+          "delta_epsilon": 13.0
+        },
+        "bias": {
+          "V_bias": 0.9144,
+          "theta_bc": 0.0,
+          "theta_min": 0.0,
+          "theta_max": 1.5707963267948966,
+          "theta_center": null,
+          "b_override": null
+        },
+        "beams": {
+          "coherence": "incoherent",
+          "channels": [
+            {
+              "name": "off-axis",
+              "wavelength_um": 0.633,
+              "power_mW": 1.0,
+              "n_ext": 1.0,
+              "theta_ext_rad": 0.0,
+              "phi_rad": 0.0,
+              "w1_um": 10.0,
+              "w2_um": 10.0,
+              "psi_rad": 0.0,
+              "x0_um": -20.0,
+              "y0_um": 0.0,
+              "phase_rad": 0.0,
+              "coherence_group": "A",
+              "profile": "collimated_gaussian"
+            }
+          ]
+        },
+        "solver": {
+          "workflow": {
+            "strategy": "local_self_consistent",
+            "theta_solver": "picard_cn",
+            "optics_solver": "splitstep",
+            "coupling": "self_consistent"
+          },
+          "max_iterations": 3,
+          "tolerance_rms": null,
+          "tolerance_max": null,
+          "static_residual_rms_tol": 0.005,
+          "static_residual_max_tol": 0.02,
+          "static_delta_theta_rms_tol": null,
+          "static_delta_theta_max_tol": null,
+          "static_max_relax_iterations": 200,
+          "static_max_coupled_passes": 3,
+          "record_iteration_history": true
+        },
+        "output": {
+          "run_dir": null,
+          "save_slices": true,
+          "save_full": false
+        },
+        "runtime": {
+          "precision": "float64",
+          "optical_substeps_enabled": true,
+          "optical_dn_max_est": 0.02,
+          "optical_max_phase_per_substep_rad": 0.3,
+          "optical_max_substeps": 16
+        },
+        "optical_boundary": {
+          "mode": "periodic",
+          "width_fraction": 0.15,
+          "attenuation_per_um": 0.05,
+          "profile_order": 2,
+          "tukey_alpha": 0.1
+        }
+      },
+      "request_sha256": "46448f7f3dec0af49faf053c8b94426c2ff8c4c6e772e66aba54a71440298ffc",
+      "array_identity": "All nine arrays byte-identical to canonical workflow; shapes and dtypes identical",
+      "arrays": {
+        "A_initial": {
+          "shape": [
+            1,
+            128,
+            128
+          ],
+          "dtype": "complex128",
+          "sha256": "d0512443687a3d556ce18790f8dbb669c57a41b8980d0c6595c7fec951b3fba3"
+        },
+        "A_final": {
+          "shape": [
+            1,
+            128,
+            128
+          ],
+          "dtype": "complex128",
+          "sha256": "599b279c096952da2650041d428791c4748810134c0e8e6ae126a8d4cd9fbbaa"
+        },
+        "theta": {
+          "shape": [
+            100,
+            128,
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "b7cf30880d188fcba003c479ea290463080fbd0e854a285660a2c374ce232fb9"
+        },
+        "theta_bias": {
+          "shape": [
+            128,
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "fd4005b4df100022e08758acdbdda85ff7e0a2bb576034b06a1ef6453bdab446"
+        },
+        "intensity_stack": {
+          "shape": [
+            100,
+            128,
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "75547c769c6e275845776a9ebc49effbb7b7c85b2f5f7056c28640d9fe559690"
+        },
+        "widths_um": {
+          "shape": [
+            100,
+            2
+          ],
+          "dtype": "float64",
+          "sha256": "4072720ade767552d46b0698f5de6149e34c0e576df08fa2e0ee5433909a15f5"
+        },
+        "x_um": {
+          "shape": [
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "61fd04d91f7ed8fa5bcb1b047c3748a5edf957eb61bee7d1e9199d1adfc5e064"
+        },
+        "y_um": {
+          "shape": [
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "b460fd98873c22484e76cf22dc5bb35d6faf80ea86bed899c9c9bc4383856780"
+        },
+        "z_um": {
+          "shape": [
+            100
+          ],
+          "dtype": "float64",
+          "sha256": "7d3fd1ec319efad4fa839adeaea318e9853b12a37a979199e067a7d8ac8552f4"
+        }
+      },
+      "diagnostics": {
+        "completed_slices": 100,
+        "total_slices": 100,
+        "all_slices_converged": true,
+        "residual_rms_max": 0.0049350853571153985,
+        "residual_max": 0.019985181430640875,
+        "elapsed_seconds_including_products": 15.580764291109517,
+        "normalized_power_initial": 0.9997691121920113,
+        "normalized_power_final": 0.9997691121920986,
+        "physical_power_initial_mW": 0.9997230027106438,
+        "physical_power_final_mW": 0.9949732608568104
+      }
+    },
+    {
+      "beams": 2,
+      "request": {
+        "schema_version": 3,
+        "grid": {
+          "Nx": 128,
+          "Ny": 128,
+          "dz_um": 5.0,
+          "x_aperture_um": 75.0,
+          "y_aperture_um": 100.0,
+          "z_length_um": 500.0
+        },
+        "material": {
+          "name": "generic",
+          "ne": 1.7,
+          "no": 1.5,
+          "K": 7e-12,
+          "delta_epsilon": 13.0
+        },
+        "bias": {
+          "V_bias": 0.9144,
+          "theta_bc": 0.0,
+          "theta_min": 0.0,
+          "theta_max": 1.5707963267948966,
+          "theta_center": null,
+          "b_override": null
+        },
+        "beams": {
+          "coherence": "incoherent",
+          "channels": [
+            {
+              "name": "off-axis",
+              "wavelength_um": 0.633,
+              "power_mW": 0.5,
+              "n_ext": 1.0,
+              "theta_ext_rad": 0.0,
+              "phi_rad": 0.0,
+              "w1_um": 10.0,
+              "w2_um": 10.0,
+              "psi_rad": 0.0,
+              "x0_um": -20.0,
+              "y0_um": 0.0,
+              "phase_rad": 0.0,
+              "coherence_group": "A",
+              "profile": "collimated_gaussian"
+            },
+            {
+              "name": "second",
+              "wavelength_um": 0.633,
+              "power_mW": 0.5,
+              "n_ext": 1.0,
+              "theta_ext_rad": 0.0,
+              "phi_rad": 0.0,
+              "w1_um": 10.0,
+              "w2_um": 10.0,
+              "psi_rad": 0.0,
+              "x0_um": -20.0,
+              "y0_um": 0.0,
+              "phase_rad": 0.0,
+              "coherence_group": "B",
+              "profile": "collimated_gaussian"
+            }
+          ]
+        },
+        "solver": {
+          "workflow": {
+            "strategy": "local_self_consistent",
+            "theta_solver": "picard_cn",
+            "optics_solver": "splitstep",
+            "coupling": "self_consistent"
+          },
+          "max_iterations": 3,
+          "tolerance_rms": null,
+          "tolerance_max": null,
+          "static_residual_rms_tol": 0.005,
+          "static_residual_max_tol": 0.02,
+          "static_delta_theta_rms_tol": null,
+          "static_delta_theta_max_tol": null,
+          "static_max_relax_iterations": 200,
+          "static_max_coupled_passes": 3,
+          "record_iteration_history": true
+        },
+        "output": {
+          "run_dir": null,
+          "save_slices": true,
+          "save_full": false
+        },
+        "runtime": {
+          "precision": "float64",
+          "optical_substeps_enabled": true,
+          "optical_dn_max_est": 0.02,
+          "optical_max_phase_per_substep_rad": 0.3,
+          "optical_max_substeps": 16
+        },
+        "optical_boundary": {
+          "mode": "periodic",
+          "width_fraction": 0.15,
+          "attenuation_per_um": 0.05,
+          "profile_order": 2,
+          "tukey_alpha": 0.1
+        }
+      },
+      "request_sha256": "055da1bb1f810cbe5d1c1aa6044245cdff5d3e07333d454c4918003128377db8",
+      "array_identity": "All nine arrays byte-identical to canonical workflow; shapes and dtypes identical",
+      "arrays": {
+        "A_initial": {
+          "shape": [
+            2,
+            128,
+            128
+          ],
+          "dtype": "complex128",
+          "sha256": "4affe5d9ff68c436d885d17eb549d5445ae6a0a831b55c8098c2817c91f49bd6"
+        },
+        "A_final": {
+          "shape": [
+            2,
+            128,
+            128
+          ],
+          "dtype": "complex128",
+          "sha256": "a04f5bed62e1900ff568fe264f392020e1e144579bae244b0d6def15640d2ff2"
+        },
+        "theta": {
+          "shape": [
+            100,
+            128,
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "f97c2c9cdf6727b1332175666f9a9b19ed484fbb997fac31202ace69d98f289c"
+        },
+        "theta_bias": {
+          "shape": [
+            128,
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "fd4005b4df100022e08758acdbdda85ff7e0a2bb576034b06a1ef6453bdab446"
+        },
+        "intensity_stack": {
+          "shape": [
+            100,
+            128,
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "64cbac9ea0502f6e130eae272fb95b092248898c7f6da42c8d0e1b3a3039d13e"
+        },
+        "widths_um": {
+          "shape": [
+            100,
+            2
+          ],
+          "dtype": "float64",
+          "sha256": "21e071bea71aa668bf02c5219fabd2c71a5fda2b87464e6274d39d514ccca571"
+        },
+        "x_um": {
+          "shape": [
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "61fd04d91f7ed8fa5bcb1b047c3748a5edf957eb61bee7d1e9199d1adfc5e064"
+        },
+        "y_um": {
+          "shape": [
+            128
+          ],
+          "dtype": "float64",
+          "sha256": "b460fd98873c22484e76cf22dc5bb35d6faf80ea86bed899c9c9bc4383856780"
+        },
+        "z_um": {
+          "shape": [
+            100
+          ],
+          "dtype": "float64",
+          "sha256": "7d3fd1ec319efad4fa839adeaea318e9853b12a37a979199e067a7d8ac8552f4"
+        }
+      },
+      "diagnostics": {
+        "completed_slices": 100,
+        "total_slices": 100,
+        "all_slices_converged": true,
+        "residual_rms_max": 0.004935085357114844,
+        "residual_max": 0.019985181427375043,
+        "elapsed_seconds_including_products": 15.571596750058234,
+        "normalized_power_initial": 0.9997691121920113,
+        "normalized_power_final": 0.9997691121920979,
+        "physical_power_initial_mW": 0.9997230027106438,
+        "physical_power_final_mW": 0.9949732608568096
+      }
+    }
+  ],
+  "tests": {
+    "new": {
+      "passed": 22
+    },
+    "affected_candidate": {
+      "passed": 26,
+      "failed": 1,
+      "deselected": 5
+    },
+    "affected_committed_baseline": {
+      "passed": 26,
+      "failed": 1,
+      "deselected": 5
+    },
+    "canonical_regressions": {
+      "passed": 147
+    },
+    "unchanged_failure": "tests/test_lc_static_interactive.py::test_notebook_missing_dependency_is_clear",
+    "syntax_python310_grammar_whitespace": "PASS"
+  },
+  "log_sha256": {
+    "final-tests.txt": "2378489ea87b5963227fe27badb4c9561989e00f12ce364a90f6fb6a165f5ffb",
+    "baseline-tests.txt": "e6bbb7940d70e047e773ce13eec1ef442f9afbe42f161002df55561c8d6a5157",
+    "regression-tests.txt": "a947ed81102649064a7c2eee2e076f189fa3351cf8ce08525cee599ac552dd17",
+    "canonical-tests.txt": "8ed666d3390d5b98e30aa341b7a06aaa090d2ba69353e56f95feb46bb8d9e69a"
+  }
+}

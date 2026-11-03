@@ -1,0 +1,481 @@
+"""Photorefractive two-beam launch and sampling geometry."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import math
+
+from lcprop.optics.physical_launch import resolve_beam_geometry
+from lcprop.core.beams import BeamChannel, BeamStack
+
+
+def _pair(value, *, name: str) -> tuple[float, float]:
+    if isinstance(value, (int, float)):
+        pair = (float(value), float(value))
+    else:
+        pair = tuple(float(item) for item in value)
+        if len(pair) != 2:
+            raise ValueError(f"{name} must be a scalar or length-two sequence")
+    return pair
+
+
+def paraxial_kernel_slope(
+    *,
+    transverse_phase_gradient_rad_per_um: float,
+    wavelength_um: float,
+    refractive_index: float,
+) -> float:
+    """Return the historical paraxial slope (not canonical PR geometry).
+
+    The kernel phase is ``-pi*dz*wavelength*f_transverse**2/n``. Its group
+    delay moves an envelope at ``dx/dz = wavelength*f/n = kx/k_medium``.
+    """
+
+    wavelength = float(wavelength_um)
+    index = float(refractive_index)
+    if wavelength <= 0.0 or index <= 0.0:
+        raise ValueError("wavelength_um and refractive_index must be positive")
+    k_medium = 2.0 * math.pi * index / wavelength
+    return float(transverse_phase_gradient_rad_per_um) / k_medium
+
+
+def scalar_kernel_slopes(
+    *, kx_rad_per_um: float, ky_rad_per_um: float,
+    wavelength_um: float, refractive_index: float,
+) -> tuple[float, float]:
+    """Narrow-packet slopes Kx/Kz, Ky/Kz under scalar PR diffraction.
+
+    A grazing or evanescent carrier has no finite forward trajectory. This
+    geometry diagnostic rejects it; the diffraction kernel separately retains
+    grazing modes and suppresses evanescent modes.
+    """
+    values = tuple(map(float, (kx_rad_per_um, ky_rad_per_um, wavelength_um, refractive_index)))
+    kx, ky, wavelength, index = values
+    if not all(math.isfinite(v) for v in values) or wavelength <= 0 or index <= 0:
+        raise ValueError("finite phase gradients and positive wavelength/index required")
+    k = 2.0 * math.pi * index / wavelength
+    kz_squared = k * k - kx * kx - ky * ky
+    if kz_squared <= 0:
+        raise ValueError("grazing/nonpropagating carrier has no finite scalar trajectory")
+    kz = math.sqrt(kz_squared)
+    return kx / kz, ky / kz
+
+
+def crossing_beam_channels(
+    *,
+    wavelength_um: float,
+    refractive_index: float,
+    interaction_length_um: float,
+    polar_angles_rad: tuple[float, float],
+    azimuths_rad: tuple[float, float],
+    waist_x_um: float | tuple[float, float],
+    waist_y_um: float | tuple[float, float],
+    crossing_x_um: float = 0.0,
+    crossing_y_um: float = 0.0,
+    crossing_z_um: float | None = None,
+    powers_mW: tuple[float, float] | None = None,
+    beam_ratio: float | None = None,
+    total_power_mW: float = 1.0,
+    coherence_group: str = "pr-two-beam",
+    names: tuple[str, str] = ("pump", "signal"),
+) -> tuple[BeamChannel, BeamChannel]:
+    """Construct two channels whose kernel rays meet at a physical point.
+
+    External polar and azimuth angles (n_ext=1) define ``kx = k0*sin(theta)*cos(phi)`` and
+    ``ky = k0*sin(theta)*sin(phi)``. LCProp's scalar PR kernel moves
+    a narrow envelope with slopes ``kx/kz`` and ``ky/kz``. Launch centers
+    are back-projected with those slopes (tan(theta) in the tilt direction).
+    """
+
+    length = float(interaction_length_um)
+    if not math.isfinite(length) or length <= 0.0:
+        raise ValueError("interaction_length_um must be finite and positive")
+    z_cross = length / 2.0 if crossing_z_um is None else float(crossing_z_um)
+    if not math.isfinite(z_cross) or not 0.0 <= z_cross <= length:
+        raise ValueError("crossing_z_um must lie within the interaction region")
+    angles = _pair(polar_angles_rad, name="polar_angles_rad")
+    azimuths = _pair(azimuths_rad, name="azimuths_rad")
+    waists_x = _pair(waist_x_um, name="waist_x_um")
+    waists_y = _pair(waist_y_um, name="waist_y_um")
+    if any(value <= 0.0 for value in waists_x + waists_y):
+        raise ValueError("beam waists must be positive")
+    if not isinstance(coherence_group, str) or not coherence_group.strip():
+        raise ValueError("coherence_group must be non-empty")
+
+    if powers_mW is not None and beam_ratio is not None:
+        raise ValueError("specify either powers_mW or beam_ratio, not both")
+    if powers_mW is None:
+        ratio = 1.0 if beam_ratio is None else float(beam_ratio)
+        total = float(total_power_mW)
+        if not math.isfinite(ratio) or ratio <= 0.0:
+            raise ValueError("beam_ratio must be finite and positive")
+        if not math.isfinite(total) or total <= 0.0:
+            raise ValueError("total_power_mW must be finite and positive")
+        powers = (total / (1.0 + ratio), total * ratio / (1.0 + ratio))
+    else:
+        powers = _pair(powers_mW, name="powers_mW")
+        if any(not math.isfinite(value) or value < 0.0 for value in powers):
+            raise ValueError("powers_mW must be finite and nonnegative")
+        if sum(powers) <= 0.0:
+            raise ValueError("total beam power must be positive")
+
+    wavelength = float(wavelength_um)
+    index = float(refractive_index)
+    if wavelength <= 0.0 or index <= 0.0:
+        raise ValueError("wavelength_um and refractive_index must be positive")
+    k_external = 2.0 * math.pi / wavelength
+
+    channels = []
+    for beam in range(2):
+        theta = angles[beam]
+        phi = azimuths[beam]
+        k_transverse = k_external * math.sin(theta)
+        kx = k_transverse * math.cos(phi)
+        ky = k_transverse * math.sin(phi)
+        slope_x, slope_y = scalar_kernel_slopes(
+            kx_rad_per_um=kx, ky_rad_per_um=ky,
+            wavelength_um=wavelength, refractive_index=index,
+        )
+        channels.append(
+            BeamChannel(
+                name=names[beam],
+                wavelength_um=wavelength,
+                power_mW=powers[beam],
+                w1_um=waists_x[beam],
+                w2_um=waists_y[beam],
+                x0_um=float(crossing_x_um) - z_cross * slope_x,
+                y0_um=float(crossing_y_um) - z_cross * slope_y,
+                theta_ext_rad=abs(theta),
+                phi_rad=phi if theta >= 0 else phi + math.pi,
+                coherence_group=coherence_group,
+            )
+        )
+    return channels[0], channels[1]
+
+
+@dataclass(frozen=True)
+class PRApertureReport:
+    """Finite-beam aperture and resolution diagnostics."""
+
+    launch_offsets_um: tuple[tuple[float, float], tuple[float, float]]
+    radii_um: dict[str, tuple[tuple[float, float], tuple[float, float]]]
+    boundary_margins_um: dict[str, tuple[dict[str, float], dict[str, float]]]
+    samples_per_waist: tuple[tuple[float, float], tuple[float, float]]
+    grating_period_um: float
+    grating_samples_per_period: float
+    longitudinal_steps: int
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PRBeamStackApertureReport:
+    """Finite-beam sampling diagnostics for an arbitrary PR beam stack."""
+
+    radii_um: dict[str, tuple[tuple[float, float], ...]]
+    boundary_margins_um: dict[
+        str,
+        tuple[dict[str, float], ...],
+    ]
+    samples_per_waist: tuple[tuple[float, float], ...]
+    minimum_coherent_grating_samples: float
+    longitudinal_steps: int
+    warnings: tuple[str, ...]
+
+
+def _beam_radius_at_plane(
+    channel: BeamChannel,
+    *,
+    axis: str,
+    z_um: float,
+    interaction_length_um: float,
+    refractive_index: float,
+) -> float:
+    """Return the 1/e field radius implied by one launch profile."""
+
+    geometry = resolve_beam_geometry(channel, refractive_index)
+    # Conservative marginal face radius. Propagation broadening is a scalar
+    # paraxial envelope estimate used only for aperture guidance, not execution.
+    q = geometry.interface_quadratic
+    determinant = q[0, 0]*q[1, 1]-q[0, 1]*q[1, 0]
+    waist = math.sqrt(float(q[1, 1] if axis == "x" else q[0, 0])/determinant)
+    distance = float(z_um)
+    rayleigh = (
+        math.pi
+        * float(refractive_index)
+        * waist**2
+        / float(channel.wavelength_um)
+    )
+    return waist * math.sqrt(1.0 + (distance / rayleigh) ** 2)
+
+
+def analyze_beam_stack_aperture(
+    grid,
+    beams: BeamStack,
+    *,
+    refractive_index: float,
+    envelope_radii: float = 2.0,
+    minimum_samples_per_waist: float = 6.0,
+    minimum_grating_samples: float = 6.0,
+    minimum_longitudinal_steps: int = 10,
+    strict: bool = False,
+    boundary_mode: str = "periodic",
+) -> PRBeamStackApertureReport:
+    """Report periodic-aperture and resolution risks for PR propagation."""
+
+    beams.validate()
+    index = float(refractive_index)
+    if not math.isfinite(index) or index <= 0.0:
+        raise ValueError("refractive_index must be finite and positive")
+    if not math.isfinite(float(envelope_radii)) or envelope_radii <= 0.0:
+        raise ValueError("envelope_radii must be finite and positive")
+    if boundary_mode not in ("periodic", "sponge", "tukey"):
+        raise ValueError("boundary_mode must be periodic, sponge, or tukey")
+
+    warnings: list[str] = []
+    half_x = float(grid.spec.x_aperture_um) / 2.0
+    half_y = float(grid.spec.y_aperture_um) / 2.0
+    planes = {
+        "entrance": 0.0,
+        "output": float(grid.spec.z_length_um),
+    }
+    radii: dict[str, tuple[tuple[float, float], ...]] = {}
+    margins: dict[str, tuple[dict[str, float], ...]] = {}
+
+    for plane_name, z_um in planes.items():
+        plane_radii = []
+        plane_margins = []
+        for channel in beams.channels:
+            slope_x, slope_y = scalar_kernel_slopes(
+                kx_rad_per_um=channel.tilt_x_rad_per_um,
+                ky_rad_per_um=channel.tilt_y_rad_per_um,
+                wavelength_um=channel.wavelength_um, refractive_index=index,
+            )
+            center_x = float(channel.x0_um) + z_um * slope_x
+            center_y = float(channel.y0_um) + z_um * slope_y
+            radius_x = _beam_radius_at_plane(
+                channel,
+                axis="x",
+                z_um=z_um,
+                interaction_length_um=grid.spec.z_length_um,
+                refractive_index=index,
+            )
+            radius_y = _beam_radius_at_plane(
+                channel,
+                axis="y",
+                z_um=z_um,
+                interaction_length_um=grid.spec.z_length_um,
+                refractive_index=index,
+            )
+            plane_radii.append((radius_x, radius_y))
+            beam_margins = {
+                "x_min": center_x - envelope_radii * radius_x + half_x,
+                "x_max": half_x - center_x - envelope_radii * radius_x,
+                "y_min": center_y - envelope_radii * radius_y + half_y,
+                "y_max": half_y - center_y - envelope_radii * radius_y,
+            }
+            plane_margins.append(beam_margins)
+            if min(beam_margins.values()) <= 0.0:
+                warnings.append(
+                    f"{channel.name} {plane_name} envelope approaches a "
+                    + (
+                        "periodic boundary"
+                        if boundary_mode == "periodic"
+                        else f"{boundary_mode} boundary region"
+                    )
+                )
+        radii[plane_name] = tuple(plane_radii)
+        margins[plane_name] = tuple(plane_margins)
+
+    samples = tuple(
+        tuple(_beam_radius_at_plane(channel, axis=axis, z_um=0.,
+              interaction_length_um=grid.spec.z_length_um, refractive_index=index)/spacing
+              for axis, spacing in (("x", grid.dx_um), ("y", grid.dy_um)))
+        for channel in beams.channels
+    )
+    if (
+        min(value for pair in samples for value in pair)
+        < minimum_samples_per_waist
+    ):
+        warnings.append("beam waist is inadequately sampled")
+
+    minimum_coherent_samples = math.inf
+    groups = beams.coherence_groups
+    for first, channel_a in enumerate(beams.channels):
+        for second in range(first + 1, len(beams.channels)):
+            if groups[first] != groups[second]:
+                continue
+            channel_b = beams.channels[second]
+            delta_kx = (
+                float(channel_b.tilt_x_rad_per_um)
+                - float(channel_a.tilt_x_rad_per_um)
+            )
+            delta_ky = (
+                float(channel_b.tilt_y_rad_per_um)
+                - float(channel_a.tilt_y_rad_per_um)
+            )
+            maximum_phase_step = max(
+                abs(delta_kx) * float(grid.dx_um),
+                abs(delta_ky) * float(grid.dy_um),
+            )
+            coherent_samples = (
+                math.inf
+                if maximum_phase_step == 0.0
+                else 2.0 * math.pi / maximum_phase_step
+            )
+            minimum_coherent_samples = min(
+                minimum_coherent_samples,
+                coherent_samples,
+            )
+    if minimum_coherent_samples < minimum_grating_samples:
+        warnings.append("coherent-beam grating period is inadequately sampled")
+
+    longitudinal_steps = int(grid.Nz)
+    if longitudinal_steps < minimum_longitudinal_steps:
+        warnings.append("interaction region has too few longitudinal steps")
+
+    unique_warnings = tuple(dict.fromkeys(warnings))
+    if strict and unique_warnings:
+        raise ValueError("; ".join(unique_warnings))
+    return PRBeamStackApertureReport(
+        radii_um=radii,
+        boundary_margins_um=margins,
+        samples_per_waist=samples,
+        minimum_coherent_grating_samples=minimum_coherent_samples,
+        longitudinal_steps=longitudinal_steps,
+        warnings=unique_warnings,
+    )
+
+
+def analyze_crossing_aperture(
+    grid,
+    channels: tuple[BeamChannel, BeamChannel],
+    *,
+    refractive_index: float,
+    crossing_z_um: float,
+    envelope_radii: float = 2.0,
+    minimum_samples_per_waist: float = 6.0,
+    minimum_grating_samples: float = 6.0,
+    minimum_longitudinal_steps: int = 10,
+    strict: bool = True,
+) -> PRApertureReport:
+    """Report and optionally reject inadequate finite crossing geometry.
+
+    Boundary margins use ``envelope_radii`` times each Gaussian's 1/e²
+    intensity radius; the default therefore treats the two-radius envelope as
+    the closest acceptable approach to a periodic boundary.
+    """
+
+    z_cross = float(crossing_z_um)
+    length = float(grid.spec.z_length_um)
+    if not 0.0 <= z_cross <= length:
+        raise ValueError("crossing_z_um must lie within the interaction region")
+    if len(channels) != 2:
+        raise ValueError("exactly two channels are required")
+
+    planes = {"entrance": 0.0, "crossing": z_cross, "output": length}
+    radii: dict[str, tuple[tuple[float, float], tuple[float, float]]] = {}
+    margins: dict[str, tuple[dict[str, float], dict[str, float]]] = {}
+    warnings: list[str] = []
+    half_x = float(grid.spec.x_aperture_um) / 2.0
+    half_y = float(grid.spec.y_aperture_um) / 2.0
+    index = float(refractive_index)
+
+    for plane_name, z_um in planes.items():
+        plane_radii = []
+        plane_margins = []
+        for channel in channels:
+            sx, sy = scalar_kernel_slopes(
+                kx_rad_per_um=channel.tilt_x_rad_per_um,
+                ky_rad_per_um=channel.tilt_y_rad_per_um,
+                wavelength_um=channel.wavelength_um, refractive_index=index,
+            )
+            cx = float(channel.x0_um) + z_um * sx
+            cy = float(channel.y0_um) + z_um * sy
+            wx = _beam_radius_at_plane(
+                channel,
+                axis="x",
+                z_um=z_um,
+                interaction_length_um=length,
+                refractive_index=index,
+            )
+            wy = _beam_radius_at_plane(
+                channel,
+                axis="y",
+                z_um=z_um,
+                interaction_length_um=length,
+                refractive_index=index,
+            )
+            plane_radii.append((wx, wy))
+            beam_margins = {
+                "x_min": cx - envelope_radii * wx + half_x,
+                "x_max": half_x - cx - envelope_radii * wx,
+                "y_min": cy - envelope_radii * wy + half_y,
+                "y_max": half_y - cy - envelope_radii * wy,
+            }
+            plane_margins.append(beam_margins)
+            if min(beam_margins.values()) <= 0.0:
+                warnings.append(
+                    f"{channel.name} {plane_name} envelope approaches a periodic boundary"
+                )
+        radii[plane_name] = tuple(plane_radii)  # type: ignore[assignment]
+        margins[plane_name] = tuple(plane_margins)  # type: ignore[assignment]
+
+    samples = tuple(
+        tuple(_beam_radius_at_plane(channel, axis=axis, z_um=0.,
+              interaction_length_um=grid.spec.z_length_um, refractive_index=index)/spacing
+              for axis, spacing in (("x", grid.dx_um), ("y", grid.dy_um)))
+        for channel in channels
+    )
+    if min(value for pair in samples for value in pair) < minimum_samples_per_waist:
+        warnings.append("beam waist is inadequately sampled")
+
+    delta_kx = (
+        float(channels[1].tilt_x_rad_per_um)
+        - float(channels[0].tilt_x_rad_per_um)
+    )
+    delta_ky = (
+        float(channels[1].tilt_y_rad_per_um)
+        - float(channels[0].tilt_y_rad_per_um)
+    )
+    delta_k = math.hypot(delta_kx, delta_ky)
+    if delta_k == 0.0:
+        grating_period = math.inf
+        grating_samples = math.inf
+    else:
+        grating_period = 2.0 * math.pi / delta_k
+        maximum_phase_step = max(
+            abs(delta_kx) * float(grid.dx_um),
+            abs(delta_ky) * float(grid.dy_um),
+        )
+        grating_samples = 2.0 * math.pi / maximum_phase_step
+        if grating_samples < minimum_grating_samples:
+            warnings.append("two-beam grating period is inadequately sampled")
+
+    if int(grid.Nz) < int(minimum_longitudinal_steps):
+        warnings.append("interaction region has too few longitudinal steps")
+    unique_warnings = tuple(dict.fromkeys(warnings))
+    if strict and unique_warnings:
+        raise ValueError("; ".join(unique_warnings))
+    return PRApertureReport(
+        launch_offsets_um=tuple(
+            (float(channel.x0_um), float(channel.y0_um)) for channel in channels
+        ),  # type: ignore[arg-type]
+        radii_um=radii,
+        boundary_margins_um=margins,
+        samples_per_waist=samples,  # type: ignore[arg-type]
+        grating_period_um=grating_period,
+        grating_samples_per_period=grating_samples,
+        longitudinal_steps=int(grid.Nz),
+        warnings=unique_warnings,
+    )
+
+
+__all__ = [
+    "paraxial_kernel_slope",
+    "scalar_kernel_slopes",
+    "crossing_beam_channels",
+    "PRApertureReport",
+    "PRBeamStackApertureReport",
+    "analyze_beam_stack_aperture",
+    "analyze_crossing_aperture",
+]

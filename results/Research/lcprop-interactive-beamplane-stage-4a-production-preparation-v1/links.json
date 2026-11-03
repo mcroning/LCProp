@@ -1,0 +1,98 @@
+{
+  "remote": [
+    "https://colab.research.google.com/github/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/notebooks/lc_static_interactive_cpu.ipynb",
+    "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/LICENSE",
+    "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/THIRD_PARTY_NOTICES.md",
+    "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/README.md",
+    "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/STATUS.md",
+    "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/architecture/LCProp_Target_Architecture.md",
+    "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/codex/README.md",
+    "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/development_plan.md",
+    "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/science/lc_model_contracts.md",
+    "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/science/pr_model_contracts.md",
+    "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/user/quick_start.md",
+    "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/user/user_guide.md",
+    "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/src/lcprop/pr/README.md",
+    "https://github.com/mcroning/LCProp/blob/publication/colab-lc-0.4.0rc1/docs/notebook_package.md",
+    "https://github.com/mcroning/LaunchPlane"
+  ],
+  "local": [],
+  "checks": [
+    {
+      "url": "https://colab.research.google.com/github/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/notebooks/lc_static_interactive_cpu.ipynb",
+      "error": "HTTP Error 405: Method Not Allowed",
+      "get_status": 200,
+      "get_final_url": "https://colab.research.google.com/github/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/notebooks/lc_static_interactive_cpu.ipynb"
+    },
+    {
+      "url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/LICENSE",
+      "status": 200,
+      "final_url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/LICENSE"
+    },
+    {
+      "url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/THIRD_PARTY_NOTICES.md",
+      "status": 200,
+      "final_url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/THIRD_PARTY_NOTICES.md"
+    },
+    {
+      "url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/README.md",
+      "status": 200,
+      "final_url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/README.md"
+    },
+    {
+      "url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/STATUS.md",
+      "status": 200,
+      "final_url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/STATUS.md"
+    },
+    {
+      "url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/architecture/LCProp_Target_Architecture.md",
+      "status": 200,
+      "final_url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/architecture/LCProp_Target_Architecture.md"
+    },
+    {
+      "url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/codex/README.md",
+      "status": 200,
+      "final_url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/codex/README.md"
+    },
+    {
+      "url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/development_plan.md",
+      "status": 200,
+      "final_url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/development_plan.md"
+    },
+    {
+      "url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/science/lc_model_contracts.md",
+      "status": 200,
+      "final_url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/science/lc_model_contracts.md"
+    },
+    {
+      "url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/science/pr_model_contracts.md",
+      "status": 200,
+      "final_url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/science/pr_model_contracts.md"
+    },
+    {
+      "url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/user/quick_start.md",
+      "status": 200,
+      "final_url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/user/quick_start.md"
+    },
+    {
+      "url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/user/user_guide.md",
+      "status": 200,
+      "final_url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/docs/user/user_guide.md"
+    },
+    {
+      "url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/src/lcprop/pr/README.md",
+      "status": 200,
+      "final_url": "https://github.com/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/src/lcprop/pr/README.md"
+    },
+    {
+      "url": "https://github.com/mcroning/LCProp/blob/publication/colab-lc-0.4.0rc1/docs/notebook_package.md",
+      "status": 200,
+      "final_url": "https://github.com/mcroning/LCProp/blob/publication/colab-lc-0.4.0rc1/docs/notebook_package.md"
+    },
+    {
+      "url": "https://github.com/mcroning/LaunchPlane",
+      "status": 200,
+      "final_url": "https://github.com/mcroning/LaunchPlane"
+    }
+  ]
+}

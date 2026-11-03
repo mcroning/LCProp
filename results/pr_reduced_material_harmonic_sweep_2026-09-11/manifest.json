@@ -1,0 +1,86 @@
+{
+  "analysis": "reduced 1-D material-only nonlinear/linearized harmonic sweep",
+  "artifact_sha256": {
+    "figures/fundamental_ratio_vs_modulation.png": "a44e89df94d62472b39e31dfa7da47ea6a5a53d144b84301e3415decb96bb76b",
+    "figures/harmonic_ratios_vs_modulation.png": "c9e0177d6980d8b7064a6bae002835bd546f71756d17fc907ce67da461db72a7",
+    "figures/harmonic_spectrum_strong_modulation.png": "c62ed9bf1d52c88776452eab4dc7680226141de534204c7e1ab6d429bc98b7d4",
+    "figures/nonlinear_vs_linearized_profiles.png": "4780a956b6e407bc826d58deb9980e5424307d7ddbbc09ccf287cc86c3e9b100",
+    "figures/small_m_scaling.png": "7e3b19dd3ea1a350960bcae9a5a161f4d195a7262b7f7599ad4034f0e040ae3c",
+    "representative_profiles.csv": "22b88db3390fe42365e5609522e44c26b1983da28fb7f8a11f77e0ca6d7e6ea7",
+    "representative_spectra.csv": "148198a61c59d6b7e0f5319c325b84b873691ed92050fe541e0348a7d8827b56",
+    "summary.csv": "9a91a09cc5cdf0c9cd9474b1b643d6c6ffba6016113a9220a7733f2feee2a10c"
+  },
+  "fixture": {
+    "I0": 1.0,
+    "N": 512,
+    "applied_field": 0.0,
+    "background_intensity": 0.0,
+    "domain_length_um": 2.0,
+    "k_rad_per_um": 3.141592653589793,
+    "modulations": [
+      0.01,
+      0.02,
+      0.05,
+      0.1,
+      0.2,
+      0.4,
+      0.6,
+      0.8,
+      0.95
+    ],
+    "representative_modulations": [
+      0.1,
+      0.6,
+      0.95
+    ]
+  },
+  "harness_sha256": "b07fc221902173b42d5c3b27bd6bf86749d8efb924dee0d4f799f10d3a30ee61",
+  "matplotlib_version": "3.11.0",
+  "numpy_version": "2.5.1",
+  "production_source_clean": true,
+  "production_source_commit": "f534f0c7dabcae963688b8561bbfeb01b04f3869",
+  "production_source_status_porcelain": "",
+  "profile_rows_sha256": "625752d2599ea74fe86a309e6c522c7ef7485fb494e159fcfb830caff454000e",
+  "provisional_comparison": {
+    "absolute_exponent_differences": {
+      "A1_ratio_minus_one": 0.0,
+      "A2": 0.0,
+      "A3": 0.0,
+      "difference_rms": 0.0,
+      "relative_L2_error": 0.0
+    },
+    "clean_small_m_exponents": {
+      "A1_ratio_minus_one": 2.0021657692750043,
+      "A2": 2.002134791586535,
+      "A3": 3.0031486961438953,
+      "difference_rms": 2.004337270270573,
+      "relative_L2_error": 1.0043372702705726
+    },
+    "maximum_absolute_metric_differences": {
+      "A1_ratio": 0.0,
+      "A2_over_A1_nonlinear": 0.0,
+      "A3_over_A1_nonlinear": 0.0,
+      "delta_phase_rad": 0.0,
+      "relative_L2_error": 0.0
+    },
+    "provisional_csv_sha256": "9a91a09cc5cdf0c9cd9474b1b643d6c6ffba6016113a9220a7733f2feee2a10c",
+    "provisional_small_m_exponents": {
+      "A1_ratio_minus_one": 2.0021657692750043,
+      "A2": 2.002134791586535,
+      "A3": 3.0031486961438953,
+      "difference_rms": 2.004337270270573,
+      "relative_L2_error": 1.0043372702705726
+    },
+    "scientific_conclusions_changed": false
+  },
+  "python_version": "3.12.13",
+  "scientific_rows_sha256": "4b576905bd69f2e079562aeafd793e93e060d27237fa893f51e0c38ea3eb95cd",
+  "small_m_exponents": {
+    "A1_ratio_minus_one": 2.0021657692750043,
+    "A2": 2.002134791586535,
+    "A3": 3.0031486961438953,
+    "difference_rms": 2.004337270270573,
+    "relative_L2_error": 1.0043372702705726
+  },
+  "spectrum_rows_sha256": "42e2366446c69a22db446950cc77f8cf53bfd8c8df83d2c3c1646c501331f5f4"
+}

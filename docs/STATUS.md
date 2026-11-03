@@ -1,308 +1,116 @@
 # LCProp Status
-Version 1.0 Architecture
-July 2026
 
-## Overview
+**Checkpoint:** September 2026
 
-LCProp has completed migration of the numerical engine from the validated
-research code into the new architecture.
+**Architecture source of truth:**
+[`architecture/LCProp_Target_Architecture.md`](architecture/LCProp_Target_Architecture.md)
 
-The architecture now separates:
+## Current architecture
 
-- Core data model
-- LC physics
-- Optical propagation
-- Numerical algorithms
-- Workflows
+LCProp has completed the ownership migration from an LC-centric package to a
+peer-material architecture:
 
-The numerical algorithms are largely unchanged from the validated code.
-Most migration effort has consisted of API cleanup and architectural
-separation rather than numerical modification.
+- `lcprop.core`, `lcprop.optics`, `lcprop.products`, `lcprop.runners`,
+  `lcprop.persistence`, and the shared parts of `lcprop.gui` provide
+  material-neutral infrastructure.
+- `lcprop.lc` canonically owns LC specifications, director physics,
+  algorithms, workflows, persistence, products, operations, and application.
+- `lcprop.pr` independently owns PR specifications, material state and
+  evolution, workflows, persistence, products, operations, and application.
+- Historical LC import locations remain compatibility shims where required;
+  canonical definitions are not duplicated there.
 
----
+The shared optical contract is a prepared multiplicative complex response
+consumed by `advance_prepared_response()`. Material packages remain
+responsible for source construction, material evolution, and conversion of
+their state to that optical response.
 
-# Current Package
+## Implemented capabilities
 
-```
-lcprop/
+### Shared platform
 
-    core/
-        backend.py
-        context.py
-        derived.py
-        grid.py
-        beams.py
-        requests.py
-        results.py
+- physical runtime grids and Fourier coordinates;
+- multichannel Gaussian launch and grouped coherence;
+- focus-defined, collimated, and uniform launch intent through LaunchPlane;
+- NumPy/CuPy backend and precision selection;
+- angular-spectrum propagation with explicit optical substepping;
+- periodic, distance-scaled sponge, and discrete Tukey optical boundaries;
+- shared execution, cancellation, progress, and presentation products;
+- explicit workflow-operation and checkpoint-codec composition;
+- reusable GUI workers, workspace, beam editing, and result views.
 
-    lc/
-        bias.py
-        coupling.py
+### Liquid crystal
 
-    optics/
-        launch.py
-        splitstep.py
+- fixed-director and local self-consistent static propagation;
+- time-dependent director evolution;
+- stationary soliton and soliton-existence workflows;
+- sequential and parallel parameter sweeps;
+- LC checkpoint persistence and continuation;
+- canonical LC model contract and explicit single-wavelength, periodic-only
+  stationary, NumPy backend, and precision boundaries;
+- standalone LC PySide6 application;
+- in-application Help plus current Quick Start and User Guide.
 
-    algorithms/
-        fft_y.py
-        thomas.py
-        thomas_fast.py
-        theta_cn.py
-        theta_picard.py
-        theta_cn_zcoupled.py
-        static_relax.py
-        td_zmarch.py
+### Photorefractive
 
-    workflows/
-        static.py
-```
+- seven supported production choices: reduced Static offers nonlinear hopping
+  or local-intensity field-linear paper Eq. (5); reduced TD offers nonlinear
+  hopping only; full transverse retains nonlinear and uniform-reference tangent
+  models for Static and TD;
+- exact-modal time evolution for the full-transverse tangent model;
+- coupled nonlinear and analytic field-linear/tangent static solvers;
+- canonical partition-independent scattering where request schemas support it;
+- Image Amplification and carrier-resolved two-beam diagnostics;
+- PR experiment/checkpoint persistence and continuation;
+- Local and Slurm execution with explicit NumPy/CuPy semantics;
+- Fast/Full remote retention, exact Fast longitudinal cuts, bounded orthogonal-slice
+  previews, TD accepted-state curves, and compact preview movies;
+- structured progress and advisory runtime/resource planning;
+- standalone PR PySide6 application with in-application Help.
 
----
+Physical model choice is independent of validation and hardware commissioning
+status. The [User Guide](user/user_guide.md) records those distinctions and
+the [PR model contracts](science/pr_model_contracts.md) define the current
+equations and profile boundaries.
 
-# Implemented
+## Validation policy
 
-## Core
+The repository contains focused tests for shared boundaries and both material
+packages. Use Python 3.11 or newer for the GUI and normal Product-test
+environment, install the separate LaunchPlane Product, then install LCProp
+with its GUI and test extras:
 
-✓ Experiment data model
-
-- GridSpec
-- LCMaterial
-- BiasSpec
-- BeamChannel
-- BeamStack
-- RuntimeGrid
-
----
-
-## Optical system
-
-✓ Multichannel launch
-
-- channel stacks
-- coherent / incoherent propagation
-- arbitrary beam count
-- normalized optical power
-
-✓ Split-step propagation
-
-- nonlinear phase
-- Fourier propagation
-- midpoint intensity
-- multichannel support
-
----
-
-## LC system
-
-✓ Derived coefficients
-
-- b
-- bi
-- Freedericksz voltage
-- effective refractive index
-
-✓ Bias preparation
-
-- cosine seed
-- theta stack builder
-
----
-
-## Numerical algorithms
-
-Imported directly from validated code.
-
-- FFT operators
-- Thomas solvers
-- CN theta solver
-- Picard correction
-- Static relaxation
-- TD z-march
-- Z-coupled CN
-
----
-
-## Workflows
-
-Implemented
-
-✓ fixed_theta
-
-✓ local_self_consistent
-
-using the new workflow architecture.
-
----
-
-# Validation
-
-Current automated tests:
-
-27 passing
-
-Coverage includes
-
-- core objects
-- derived physics
-- beam objects
-- launch normalization
-- split-step propagation
-- bias generation
-- workflow smoke tests
-- self-consistent static workflow
-
----
-
-# Architecture
-
-Current workflow configuration
-
-```python
-StaticWorkflowOptions(
-    strategy="fixed_theta" |
-             "local_self_consistent",
-
-    theta_solver="none" |
-                 "picard_cn",
-
-    optics_solver="splitstep",
-
-    coupling="frozen" |
-             "self_consistent",
-)
+```bash
+python -m pip install -e '.[gui,test]'
 ```
 
-This is intended to grow naturally into future workflow strategies without
-changing the public API.
+Run the complete local suite with:
 
----
+```bash
+python -m pytest -q
+```
 
-# Remaining Work
+GPU execution is validated separately on CUDA hardware. Test counts are not
+embedded in this status document because they change as coverage grows;
+committed validation records and continuous local review should report the
+exact command and result for each milestone.
 
-## Immediate
+## Current boundaries
 
-- Time-dependent workflow
-- Existence-curve workflow
-- Stability workflow
+- LC supports Local execution for displayed workflows. LC Slurm execution is
+  implemented only for canonical NumPy static propagation on CPU, with real
+  scheduler commissioning pending; other LC remote workflows are unsupported.
+  PR exposes Local and Slurm execution for its registered production
+  operations.
+- LC and PR have separate user applications rather than one material-selector
+  window.
+- Prepared responses currently cover the supported scalar multiplicative
+  optical interaction. Future nonlocal, vector, or operator-valued responses
+  require their own justified design.
+- External dynamic plugin discovery, a universal material-state hierarchy,
+  and a public third-party plugin SDK are intentionally deferred.
+- Research-scale runs, raw outputs, unpublished references, and historical
+  experiment notebooks are maintained outside the public package.
 
----
-
-## Physics
-
-- Dual-grid workflow
-- Global z-coupled static workflow
-- Bidirectional static solver
-- Newton static solver
-
----
-
-## User Interface
-
-- PySide6 GUI
-- Job management
-- Progress monitoring
-- Result browser
-
----
-
-# Guiding Principles
-
-LCProp separates
-
-- experiment description
-- numerical algorithms
-- workflows
-
-Numerical algorithms remain experiment-independent.
-
-Workflows coordinate algorithms but contain minimal numerical logic.
-
-The public API is centered on request objects and workflow execution rather
-than low-level numerical routines.
-
-# Design Goals
-
-LCProp is intended to be a long-lived research platform.
-
-Primary goals are:
-
-- Preserve validated numerical algorithms unchanged whenever possible.
-- Isolate physics from numerical implementation.
-- Make all workflows reproducible from serializable request objects.
-- Treat multichannel propagation as the fundamental optical representation.
-- Allow future extensions (dual grid, vector optics, multiple wavelengths, global z-coupled solvers) without redesigning the core architecture.
-
-
-
-# LCProp Status (July 2026)
-
-## Core
-✓ Context objects
-✓ Request/result objects
-✓ Grid builder
-✓ Derived physics
-✓ Backend abstraction
-
-## LC
-✓ Bias builder
-✓ Coupling coefficients
-
-## Optics
-✓ Beam model
-✓ Multichannel launch builder
-✓ Split-step propagation
-✓ Optical eigenmode utilities
-
-## Algorithms
-✓ FFT operators
-✓ Thomas solvers
-✓ CN theta solver
-✓ Picard corrector
-✓ Static relaxation
-✓ TD z-march
-✓ Z-coupled CN
-
-## Products
-✓ Diagnostics
-
-## Runtime
-✓ Runtime component builder
-
-## Workflows
-✓ Fixed-theta propagation
-✓ Static relaxation
-✓ Time-dependent
-✓ Soliton
-✓ Soliton existence curve
-
-## Tests
-
-**33 automated tests passing**
-
-Coverage includes:
-
-- Core objects
-- Runtime builders
-- Optics
-- Algorithms
-- Workflow integration
-- Soliton existence workflow
-
-## Sanity validation
-
-The migrated LCProp package successfully executes representative research workflows:
-
-✓ 3 mm static self-consistent propagation (3 μm waist)
-
-✓ 3 mm time-dependent propagation
-
-✓ Soliton existence curve (0.5, 1.0, 2.0 mW)
-
-These reproduce the expected workflow behavior of the validated LC package.
-
-## Remaining work
-
-- Stability workflow
-- Dual-grid support
-- Global z-coupled workflow
-- PySide6 GUI
+See [`development_plan.md`](development_plan.md) for forward-looking package
+work.

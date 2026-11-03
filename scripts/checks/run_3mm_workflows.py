@@ -1,18 +1,22 @@
 import time
 import numpy as np
 
-from lcprop.core.context import GridSpec, LCMaterial, BiasSpec
 from lcprop.core.beams import BeamChannel, BeamStack
-from lcprop.core.requests import (
+from lcprop.core.context import GridSpec
+from lcprop.lc import (
+    BiasSpec,
+    LCMaterial,
+    OutputOptions,
+    SolitonExistenceRequest,
     StaticRunRequest,
     StaticSolverOptions,
     StaticWorkflowOptions,
     TimeDependentRunRequest,
     TimeDependentSolverOptions,
-    OutputOptions,
+    run_soliton_existence,
+    run_static,
+    run_timedependent,
 )
-from lcprop.workflows import run_static, run_timedependent, run_soliton_existence
-from lcprop.workflows.soliton_existence import SolitonExistenceRequest
 
 
 def base_static_request(power_mW=1.0):

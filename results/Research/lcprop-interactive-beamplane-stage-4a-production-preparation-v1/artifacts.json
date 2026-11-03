@@ -1,0 +1,14 @@
+{
+  "lcprop-0.4.0-py3-none-any.whl": {
+    "sha256": "1bd9e9ba8f7226a4a596221368007d667009a84fe1c90129bcc2ea0296695404",
+    "bytes": 760371,
+    "files": 276,
+    "runtime_files_identical": 269
+  },
+  "lcprop-0.4.0.tar.gz": {
+    "sha256": "74ff25fb7b97197d244690868125a7cd717d6306f2425e8381cb02787ea2944d",
+    "bytes": 667346,
+    "files": 289,
+    "runtime_files_identical": 269
+  }
+}

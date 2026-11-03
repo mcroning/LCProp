@@ -1,0 +1,513 @@
+from __future__ import annotations
+
+from dataclasses import replace
+
+import numpy as np
+
+from lcprop.core.backend import BackendSpec
+from lcprop.core.beams import BeamChannel, BeamStack
+from lcprop.core.context import GridSpec
+from lcprop.optics.splitstep import scalar_angular_spectrum_kernel
+from lcprop.pr.scattering import (
+    PR_CANONICAL_SCATTERING_V2,
+    PRCanonicalScatteringSpec,
+)
+from lcprop.pr.source import channel_peak_intensity_reference, pr_driving_intensity
+from lcprop.pr.specs import PRMaterialSpec
+from lcprop.pr.transverse import (
+    PR_TRANSVERSE_STATIC_OPERATION,
+    PRTransverseMarchingStaticOptions,
+    PRTransverseMarchingStaticRunRequest,
+    PRTransverseStaticRunRequest,
+    PRTransverseStaticWorkflowOptions,
+    run_pr_transverse_static,
+    run_pr_transverse_static_marching,
+)
+from lcprop.pr.transverse.marching_static import (
+    PR_MARCHING_FLOAT64_MATERIAL_COMPLEX64_OPTICS_V1,
+)
+from lcprop.pr.transverse.projection import project_active_field
+from lcprop.pr.transverse.static import (
+    project_production_resolved_modes,
+    static_equilibrium_residual,
+)
+from lcprop.pr.transverse.transport import state_from_potential
+from lcprop.pr.workflow import advance_pr_slice_with_midpoint_source
+
+
+def _request(
+    *,
+    dz_um: float = 5.0,
+    z_length_um: float = 15.0,
+    gain_length_product: float = 1.0e-3,
+    scattering=None,
+    initial_A=None,
+    solver=None,
+    backend: str = "numpy",
+    precision: str = "float64",
+):
+    return PRTransverseMarchingStaticRunRequest(
+        grid=GridSpec(
+            Nx=16,
+            Ny=16,
+            x_aperture_um=40.0,
+            y_aperture_um=40.0,
+            dz_um=dz_um,
+            z_length_um=z_length_um,
+        ),
+        beams=BeamStack(channels=(BeamChannel(
+            wavelength_um=0.633,
+            coherence_group='marching-static',
+            w1_um=10.0,
+            w2_um=10.0,
+        ),)),
+        material=PRMaterialSpec(
+            dark_intensity=0.4,
+            uniform_background_intensity=0.1,
+            applied_field=0.0,
+            gain_length_product=gain_length_product,
+            refractive_index=2.4,
+            characteristic_wavenumber_per_um_override=0.1,
+        ),
+        solver=solver or PRTransverseMarchingStaticOptions(),
+        backend=BackendSpec(
+            backend=backend, precision=precision, verbose=False
+        ),
+        initial_A=initial_A,
+        scattering=scattering,
+    )
+
+
+def _global_request(request):
+    return PRTransverseStaticRunRequest(
+        grid=request.grid,
+        beams=request.beams,
+        material=request.material,
+        transport=request.transport,
+        dielectric=request.dielectric,
+        boundary=request.boundary,
+        projection=request.projection,
+        solver=PRTransverseStaticWorkflowOptions(
+            material_solver=request.solver.material_solver,
+            max_coupled_iterations=10,
+            equilibrium_rms_tolerance=request.solver.equilibrium_rms_tolerance,
+            equilibrium_max_tolerance=request.solver.equilibrium_max_tolerance,
+            optical_substeps=request.solver.optical_substeps,
+        ),
+        backend=request.backend,
+        initial_A=request.initial_A,
+        scattering=request.scattering,
+    )
+
+
+def _relative_l2(left, right):
+    return float(np.linalg.norm((left - right).ravel()) / np.linalg.norm(right.ravel()))
+
+
+def test_uniform_intensity_is_exact_uniform_zero_flux_equilibrium():
+    initial_A = np.ones((1, 16, 16), dtype=np.complex128)
+    result = run_pr_transverse_static_marching(
+        _request(initial_A=initial_A, gain_length_product=0.2)
+    )
+
+    assert result.converged
+    assert np.array_equal(result.psi_accepted, np.zeros_like(result.psi_accepted))
+    assert all(summary.local_iterations == 0 for summary in result.interval_summaries)
+    assert all(summary.carrier_minimum == 1.0 for summary in result.interval_summaries)
+    assert all(summary.carrier_mean_error == 0.0 for summary in result.interval_summaries)
+    assert all(summary.potential_gauge_error == 0.0 for summary in result.interval_summaries)
+
+
+def test_zero_optical_response_matches_existing_global_optical_propagation():
+    request = _request(gain_length_product=0.0)
+    marching = run_pr_transverse_static_marching(request)
+    global_result = run_pr_transverse_static(_global_request(request))
+
+    assert marching.converged and global_result.converged
+    np.testing.assert_allclose(marching.A_final, global_result.A_final, rtol=0, atol=2e-14)
+    assert abs(marching.diagnostics["optical_power_relative_drift"]) < 2e-14
+
+
+def test_no_scattering_march_converges_and_records_local_work():
+    result = run_pr_transverse_static_marching(_request())
+
+    assert result.converged
+    assert result.completed_intervals == 3
+    assert result.failed_interval is None
+    assert all(summary.converged for summary in result.interval_summaries)
+    assert all(summary.local_iterations <= 2 for summary in result.interval_summaries)
+    assert sum(summary.backtracks for summary in result.interval_summaries) == 0
+    assert result.psi_accepted.shape == (3, 16, 16)
+    assert result.incoming_field_stack.shape == (4, 1, 16, 16)
+    assert result.pre_scattering_exit_stack.shape == (3, 1, 16, 16)
+    assert PR_TRANSVERSE_STATIC_OPERATION.run is run_pr_transverse_static
+
+
+def test_accepted_source_is_exact_entrance_exit_arithmetic_midpoint():
+    request = _request()
+    result = run_pr_transverse_static_marching(request)
+    peak = channel_peak_intensity_reference(result.A_initial, xp=np)
+
+    for index in range(result.completed_intervals):
+        before = pr_driving_intensity(
+            result.incoming_field_stack[index],
+            peak_intensity_reference=peak,
+            background_intensity=request.material.background_intensity,
+            coherence_groups=request.beams.coherence_groups,
+            xp=np,
+        )
+        after = pr_driving_intensity(
+            result.pre_scattering_exit_stack[index],
+            peak_intensity_reference=peak,
+            background_intensity=request.material.background_intensity,
+            coherence_groups=request.beams.coherence_groups,
+            xp=np,
+        )
+        np.testing.assert_allclose(
+            result.source_intensity_stack[index],
+            0.5 * (before + after),
+            rtol=0,
+            atol=2e-15,
+        )
+
+
+def test_every_accepted_plane_satisfies_refreshed_zero_flux_residual():
+    request = _request()
+    result = run_pr_transverse_static_marching(request)
+    dxn = request.material.characteristic_wavenumber_per_um * result.grid_summary["dx_um"]
+    dyn = request.material.characteristic_wavenumber_per_um * result.grid_summary["dy_um"]
+
+    for index, summary in enumerate(result.interval_summaries):
+        residual = static_equilibrium_residual(
+            result.psi_accepted[index],
+            result.source_intensity_stack[index],
+            dx_normalized=dxn,
+            dy_normalized=dyn,
+        )
+        resolved = project_production_resolved_modes(
+            residual, dx_normalized=dxn, dy_normalized=dyn
+        )
+        rms = float(np.sqrt(np.mean(resolved * resolved)))
+        maximum = float(np.max(np.abs(resolved)))
+        assert rms <= request.solver.equilibrium_rms_tolerance
+        assert maximum <= request.solver.equilibrium_max_tolerance
+        np.testing.assert_allclose(
+            residual, result.equilibrium_residual_stack[index], rtol=0, atol=0
+        )
+        assert rms == summary.equilibrium_rms
+        assert maximum == summary.equilibrium_max
+
+
+def test_scattering_is_applied_once_after_source_and_is_phase_only():
+    scattering = PRCanonicalScatteringSpec(
+        epsilon=1.0e-8,
+        transverse_correlation_um=2.0,
+        realization_seed=9182,
+        canonical_dz_um=5.0,
+        algorithm_version=PR_CANONICAL_SCATTERING_V2,
+    )
+    request = _request(scattering=scattering)
+    first = run_pr_transverse_static_marching(request)
+    second = run_pr_transverse_static_marching(request)
+
+    assert first.converged and second.converged
+    np.testing.assert_array_equal(first.psi_accepted, second.psi_accepted)
+    np.testing.assert_array_equal(first.A_final, second.A_final)
+    for index in range(first.completed_intervals):
+        np.testing.assert_allclose(
+            np.abs(first.pre_scattering_exit_stack[index]) ** 2,
+            np.abs(first.incoming_field_stack[index + 1]) ** 2,
+            rtol=2e-15,
+            atol=2e-15,
+        )
+    assert abs(first.diagnostics["optical_power_relative_drift"]) < 2e-14
+
+
+def test_failure_preserves_bitwise_identical_accepted_upstream_prefix(monkeypatch):
+    import lcprop.pr.transverse.marching_static as module
+
+    baseline = run_pr_transverse_static_marching(_request())
+    original_scattering = module._apply_canonical_scattering_after_slice
+    original_solve = module.solve_pr_transverse_static_intensity
+    accepted_boundaries = 0
+
+    def counted_scattering(*args, **kwargs):
+        nonlocal accepted_boundaries
+        original_scattering(*args, **kwargs)
+        accepted_boundaries += 1
+
+    def fail_after_two_intervals(*args, **kwargs):
+        material = original_solve(*args, **kwargs)
+        if accepted_boundaries >= 2:
+            return replace(material, converged=False, status="forced_test_failure")
+        return material
+
+    monkeypatch.setattr(module, "_apply_canonical_scattering_after_slice", counted_scattering)
+    monkeypatch.setattr(module, "solve_pr_transverse_static_intensity", fail_after_two_intervals)
+    failed = run_pr_transverse_static_marching(_request())
+
+    assert not failed.converged
+    assert failed.completed_intervals == 2
+    assert failed.failed_interval == 2
+    assert failed.interval_summaries[-1].termination_reason == "material_forced_test_failure"
+    np.testing.assert_array_equal(failed.psi_accepted, baseline.psi_accepted[:2])
+    np.testing.assert_array_equal(
+        failed.incoming_field_stack, baseline.incoming_field_stack[:3]
+    )
+    assert failed.psi_accepted.shape[0] == 2
+    assert failed.source_intensity_stack.shape[0] == 2
+    assert failed.restart_state is not None
+    assert failed.restart_state.next_interval_index == 2
+    assert failed.failure_state is not None
+    assert failed.failure_state.interval_index == 2
+    np.testing.assert_array_equal(
+        failed.failure_state.A_incoming, baseline.incoming_field_stack[2]
+    )
+    assert failed.failure_state.midpoint_source.shape == (16, 16)
+    assert failed.failure_state.pre_scattering_output.shape == (1, 16, 16)
+    assert failed.failure_state.material_iteration_records
+
+
+def test_boundary_checkpoint_restart_matches_uninterrupted_scattering_run():
+    scattering = PRCanonicalScatteringSpec(
+        epsilon=1.0e-8,
+        transverse_correlation_um=2.0,
+        realization_seed=9182,
+        canonical_dz_um=5.0,
+        algorithm_version=PR_CANONICAL_SCATTERING_V2,
+    )
+    request = _request(scattering=scattering)
+    baseline = run_pr_transverse_static_marching(request)
+    partial = run_pr_transverse_static_marching(
+        request, stop_after_accepted_intervals=2
+    )
+
+    assert partial.status == "stopped_at_accepted_boundary"
+    assert partial.restart_state is not None
+    assert partial.restart_state.next_interval_index == 2
+    resumed = run_pr_transverse_static_marching(
+        request, restart_state=partial.restart_state
+    )
+
+    assert resumed.converged
+    assert resumed.start_interval == 2
+    assert resumed.completed_intervals == 3
+    np.testing.assert_array_equal(resumed.A_final, baseline.A_final)
+    np.testing.assert_array_equal(
+        np.concatenate((partial.psi_accepted, resumed.psi_accepted)),
+        baseline.psi_accepted,
+    )
+    np.testing.assert_array_equal(
+        np.concatenate(
+            (partial.source_intensity_stack, resumed.source_intensity_stack)
+        ),
+        baseline.source_intensity_stack,
+    )
+
+
+def test_streaming_recording_controls_do_not_change_final_solution():
+    request = _request()
+    baseline = run_pr_transverse_static_marching(request)
+    streaming = run_pr_transverse_static_marching(replace(
+        request,
+        solver=replace(
+            request.solver,
+            record_material_stacks=False,
+            record_residual_stack=False,
+            record_optical_audit_fields=False,
+        ),
+    ))
+
+    assert streaming.converged
+    np.testing.assert_array_equal(streaming.A_final, baseline.A_final)
+    assert streaming.psi_accepted.shape == (0, 16, 16)
+    assert streaming.source_intensity_stack.shape == (0, 16, 16)
+    assert streaming.equilibrium_residual_stack.shape == (0, 16, 16)
+    assert streaming.incoming_field_stack.shape == (0, 1, 16, 16)
+
+
+def test_float32_optics_retains_float64_material_and_explicit_screen_boundary(
+    monkeypatch,
+):
+    import lcprop.pr.transverse.marching_static as module
+
+    captured_response_dtypes = []
+    captured_material_dtypes = []
+    original_advance = module._advance_mixed_precision_slice
+    original_solve = module.solve_pr_transverse_static_intensity
+
+    def audited_advance(*args, **kwargs):
+        captured_response_dtypes.append(kwargs["optical_complex_dtype"])
+        return original_advance(*args, **kwargs)
+
+    def audited_solve(intensity, *args, **kwargs):
+        captured_material_dtypes.append(
+            (intensity.dtype, kwargs["initial_psi"].dtype)
+        )
+        return original_solve(intensity, *args, **kwargs)
+
+    monkeypatch.setattr(module, "_advance_mixed_precision_slice", audited_advance)
+    monkeypatch.setattr(module, "solve_pr_transverse_static_intensity", audited_solve)
+    result = run_pr_transverse_static_marching(_request(precision="float32"))
+
+    assert result.converged
+    assert result.A_initial.dtype == np.complex64
+    assert result.A_final.dtype == np.complex64
+    assert result.incoming_field_stack.dtype == np.complex64
+    assert result.pre_scattering_exit_stack.dtype == np.complex64
+    assert result.psi_accepted.dtype == np.float64
+    assert result.source_intensity_stack.dtype == np.float64
+    assert result.equilibrium_residual_stack.dtype == np.float64
+    assert captured_response_dtypes
+    assert all(np.dtype(value) == np.dtype(np.complex64) for value in captured_response_dtypes)
+    assert captured_material_dtypes
+    assert all(
+        np.dtype(source) == np.dtype(np.float64)
+        and np.dtype(psi) == np.dtype(np.float64)
+        for source, psi in captured_material_dtypes
+    )
+    assert (
+        result.diagnostics["precision_policy_id"]
+        == PR_MARCHING_FLOAT64_MATERIAL_COMPLEX64_OPTICS_V1
+    )
+
+
+def test_mixed_precision_restart_preserves_policy_and_dtypes_and_is_exact():
+    scattering = PRCanonicalScatteringSpec(
+        epsilon=1.0e-8,
+        transverse_correlation_um=2.0,
+        realization_seed=9182,
+        canonical_dz_um=5.0,
+        algorithm_version=PR_CANONICAL_SCATTERING_V2,
+    )
+    request = _request(precision="float32", scattering=scattering)
+    baseline = run_pr_transverse_static_marching(request)
+    partial = run_pr_transverse_static_marching(
+        request, stop_after_accepted_intervals=2
+    )
+    checkpoint = partial.restart_state
+
+    assert checkpoint is not None
+    assert (
+        checkpoint.precision_policy_id
+        == PR_MARCHING_FLOAT64_MATERIAL_COMPLEX64_OPTICS_V1
+    )
+    assert checkpoint.A_incoming.dtype == np.complex64
+    assert checkpoint.previous_psi is not None
+    assert checkpoint.previous_psi.dtype == np.float64
+    assert checkpoint.entrance_intensity.dtype == np.float32
+    assert checkpoint.previous_material_source is not None
+    assert checkpoint.previous_material_source.dtype == np.float64
+
+    resumed = run_pr_transverse_static_marching(
+        request, restart_state=checkpoint
+    )
+    assert resumed.converged
+    np.testing.assert_array_equal(resumed.A_final, baseline.A_final)
+    np.testing.assert_array_equal(
+        np.concatenate((partial.psi_accepted, resumed.psi_accepted)),
+        baseline.psi_accepted,
+    )
+
+
+def test_mixed_precision_restart_rejects_policy_or_material_downcast():
+    request = _request(precision="float32")
+    partial = run_pr_transverse_static_marching(
+        request, stop_after_accepted_intervals=2
+    )
+    checkpoint = partial.restart_state
+    assert checkpoint is not None
+
+    with np.testing.assert_raises_regex(ValueError, "precision policy"):
+        run_pr_transverse_static_marching(
+            request,
+            restart_state=replace(
+                checkpoint, precision_policy_id="incompatible_policy"
+            ),
+        )
+    with np.testing.assert_raises_regex(ValueError, "potential must remain float64"):
+        run_pr_transverse_static_marching(
+            request,
+            restart_state=replace(
+                checkpoint,
+                previous_psi=checkpoint.previous_psi.astype(np.float32),
+            ),
+        )
+
+
+def test_marching_and_global_workflows_agree_on_benign_case():
+    request = _request(gain_length_product=1.0e-3)
+    marching = run_pr_transverse_static_marching(request)
+    global_result = run_pr_transverse_static(_global_request(request))
+
+    assert marching.converged and global_result.converged
+    assert _relative_l2(marching.A_final, global_result.A_final) < 2e-10
+    assert _relative_l2(marching.psi_accepted, global_result.psi_final) < 2e-7
+    assert (
+        _relative_l2(
+            marching.source_intensity_stack,
+            global_result.source_intensity_stack,
+        )
+        < 2e-10
+    )
+
+
+def test_small_longitudinal_refinement_probe_runs_at_two_spacings():
+    coarse = run_pr_transverse_static_marching(
+        _request(dz_um=5.0, z_length_um=10.0)
+    )
+    fine = run_pr_transverse_static_marching(
+        _request(dz_um=2.5, z_length_um=10.0)
+    )
+
+    assert coarse.converged and fine.converged
+    assert coarse.completed_intervals == 2
+    assert fine.completed_intervals == 4
+    assert np.isfinite(_relative_l2(coarse.A_final, fine.A_final))
+
+
+def test_accepted_local_state_replays_one_interval_without_scattering():
+    request = _request(z_length_um=5.0)
+    result = run_pr_transverse_static_marching(request)
+    dx = request.grid.x_aperture_um / request.grid.Nx
+    dy = request.grid.y_aperture_um / request.grid.Ny
+    fxy2 = (
+        np.fft.fftfreq(request.grid.Nx, d=dx)[:, None] ** 2
+        + np.fft.fftfreq(request.grid.Ny, d=dy)[None, :] ** 2
+    )
+    kernel = scalar_angular_spectrum_kernel(
+        fxy2,
+        dz=request.grid.dz_um,
+        wavelength=0.633,
+        n_ref=request.material.refractive_index,
+        xp=np,
+    )
+    dxn = request.material.characteristic_wavenumber_per_um * dx
+    dyn = request.material.characteristic_wavenumber_per_um * dy
+    state = state_from_potential(
+        result.psi_accepted[0], dx_normalized=dxn, dy_normalized=dyn
+    )
+    active = project_active_field(
+        state.E_x, state.E_y, profile=request.projection, xp=np
+    )
+    peak = channel_peak_intensity_reference(result.A_initial, xp=np)
+    replay_A, replay_source = advance_pr_slice_with_midpoint_source(
+        result.A_initial,
+        active,
+        kernel=kernel,
+        optical_substeps=1,
+        dz_um=request.grid.dz_um,
+        wavelength_um=0.633,
+        interaction_length_um=request.grid.z_length_um,
+        gain_length_product=request.material.gain_length_product,
+        peak_intensity_reference=peak,
+        background_intensity=request.material.background_intensity,
+        coherence_groups=request.beams.coherence_groups,
+        xp=np,
+    )
+    np.testing.assert_allclose(
+        replay_A, result.pre_scattering_exit_stack[0], rtol=0, atol=0
+    )
+    np.testing.assert_allclose(
+        replay_source, result.source_intensity_stack[0], rtol=0, atol=0
+    )

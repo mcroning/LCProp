@@ -1,0 +1,62 @@
+{
+  "files": {
+    "results/Research/lcprop-colab-rc1-restart-free-audit-v1/REPORT.md": {
+      "bytes": 9012,
+      "sha256": "f1e56e855117217a63d986a2f44b449f2bbdc5ee6e9672b51b030409f26f0e8f"
+    },
+    "results/Research/lcprop-colab-rc1-restart-free-hosted-v1/REPORT.md": {
+      "bytes": 11612,
+      "sha256": "bbc353da285cbcf545a0a8f36db1cd7ee06d103b0080c9e766eff9d255cb3648"
+    },
+    "results/Research/lcprop-colab-rc1-restart-free-hosted-v1/case-a-archive-review.json": {
+      "bytes": 1012,
+      "sha256": "7cab06dc912a12a4ecc8f412031b5539bda0f819e339388d5e6bffe3f9b08681"
+    },
+    "results/Research/lcprop-colab-rc1-numpy-identity-v1/REPORT.md": {
+      "bytes": 10127,
+      "sha256": "450be74fc051b43f6b026bb8d02ac57bbd4015cfeb962bbdc6ebe77a197ebbd4"
+    },
+    "results/Research/lcprop-colab-rc1-numpy-identity-v1/hosted-origin-verification.json": {
+      "bytes": 2674,
+      "sha256": "4df1fdf99c300813216b5485f22e403594a46c9a6a017f00bf74fb5d9792a841"
+    },
+    "results/Research/lcprop-interactive-beamplane-stage-3k-hosted-science-v1/REPORT.md": {
+      "bytes": 15858,
+      "sha256": "c0bc1aaae64dac6f95fe60c46e73e18d99968e37e643a837687e08f3ca37e205"
+    },
+    "results/Research/lcprop-interactive-beamplane-stage-3k-hosted-science-v1/hosted-user-reported-results.json": {
+      "bytes": 1311,
+      "sha256": "a64536d1f49aae9935cca59ef7682c6ab86e726aeba42859d246e0929f99af75"
+    },
+    "results/Research/lcprop-interactive-beamplane-stage-3k-hosted-science-v1/independent-archive-review.json": {
+      "bytes": 4279,
+      "sha256": "78f0f50fbdec654b2ad89e1e400c4cc94c07992588a13a33069ca447d507ae71"
+    },
+    "results/Research/lcprop-interactive-beamplane-stage-3k-hosted-science-v1/preparation.json": {
+      "bytes": 497,
+      "sha256": "84238d1d8bbf24eb0afa8d1a0a545b493c1f0e2ff386f43455dcf5c01ca9f302"
+    },
+    "results/Research/lcprop-interactive-beamplane-stage-3k-hosted-science-v1/request.json": {
+      "bytes": 1518,
+      "sha256": "ad125e48aaf3aecbaebc56278baf11a8dedc6c49bd64062a55e502cae6245020"
+    },
+    "results/Research/lcprop-interactive-beamplane-stage-3k-hosted-science-v1/runtime-sha256.json": {
+      "bytes": 27843,
+      "sha256": "a8aee5f98545eeeb6efce897fca40131ae356dcdc97456d276306471a7231ade"
+    },
+    "results/Research/lcprop-interactive-beamplane-stage-3l-hosted-closure-v1/REPORT.md": {
+      "bytes": 6115,
+      "sha256": "1ad1b748bf713b615fd824ddf4a49aae668bcf9bc1ed81ce04be4f8eae0f13cd"
+    }
+  },
+  "retained_not_committed": {
+    "results/Research/lcprop-colab-rc1-restart-free-hosted-v1/lcprop-stage3i-case-a.zip": {
+      "bytes": 78833,
+      "sha256": "f8a4b23cdc0e053876fb087ca5087a9a3a72a440e2750aed31cd67d5aa325c54"
+    },
+    "results/Research/lcprop-interactive-beamplane-stage-3k-hosted-science-v1/lcprop-stage3k-evidence.zip": {
+      "bytes": 39052884,
+      "sha256": "65aa3736fd8e08783ce70f76396c7761f30197d76b4f81ef5665ce642b547199"
+    }
+  }
+}

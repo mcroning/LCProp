@@ -1,0 +1,26 @@
+{
+  "commissioning_classification": "Commissioned",
+  "job": {
+    "elapsed": "00:00:12",
+    "exit_code": "0:0",
+    "job_id": "3593204",
+    "node": "pax009",
+    "state": "COMPLETED"
+  },
+  "launch": {
+    "harness_sha256": "0e58fce9bb6d4558c2ff3631eac82b0575592abbca68ab4c29416adc83072fbf",
+    "launch_checksums_sha256": "299d9f3fdedcbaaed883b5a63aeaa13da2ba186dca71a5c93904fecdcfdee305",
+    "scheduler_sha256": "1758e2cba66115de4448575faf21c5763ae6596476c0775da6b07c20c86838df",
+    "source_bundle_sha256": "3a5cee151b63dcfe5a494e02233a49a5855f214fe0809077b5043e449e88c15d"
+  },
+  "production_git_sha": "f865c5e30c5233c8f5b89e478f0bde68b28b2763",
+  "production_git_status_porcelain": "",
+  "remote_cleanup": {
+    "immutable_launch_inputs_retained": true,
+    "logs_retained": true,
+    "transient_run_directory_removed": true
+  },
+  "retrieved_evidence_checksum_manifest_sha256": "694767aa0f653530987549b483683966e66c2385804bda032b73d5d048c4589d",
+  "stderr_sha256": "86512ef0acae80d268a43b6d8da92fa59e9a8974da65620e402c7b719c9aa15d",
+  "stdout_sha256": "d9f6c5bf8a72a0543050d26dcdb118e162c2e6101a050f18ff36dbbf8f681107"
+}

@@ -1,0 +1,92 @@
+{
+  "schema": "lcprop.pr_figure6_corrected_panel_comparison.v1",
+  "job": 2231455,
+  "git_sha": "4e82d997ba5c227f5296b8dc5f22dccc0b18ede7",
+  "comparison_kind": "publication-raster-to-normalized-LCProp-product",
+  "published_panel_extraction": {
+    "input_crop_pixels_yx": [
+      [
+        95,
+        734
+      ],
+      [
+        282,
+        921
+      ]
+    ],
+    "output_crop_pixels_yx": [
+      [
+        89,
+        728
+      ],
+      [
+        282,
+        921
+      ]
+    ],
+    "colormap": "viridis",
+    "scale": "linear",
+    "input_limits_normalized_intensity": [
+      0.0,
+      0.5
+    ],
+    "output_limits_normalized_intensity": [
+      0.0,
+      1.5
+    ],
+    "field_of_view_um": [
+      -2000.0,
+      2000.0,
+      -2000.0,
+      2000.0
+    ]
+  },
+  "registration": {
+    "orientation": "horizontal reflection from persisted LCProp raster to published panel convention",
+    "search_limit_pixels_each_axis": 24,
+    "input_shift_publication_pixels_yx": [
+      -1,
+      6
+    ],
+    "output_shift_publication_pixels_yx": [
+      -2,
+      -24
+    ],
+    "input_reached_search_boundary": false,
+    "output_reached_search_boundary": true
+  },
+  "metrics": {
+    "input_registered": {
+      "pearson_correlation": 0.8080381019060113,
+      "normalized_rmse": 0.1910122807878033,
+      "edge_correlation": 0.45734580769997757
+    },
+    "output_registered": {
+      "pearson_correlation": 0.3865469932601577,
+      "normalized_rmse": 0.26063748304424755,
+      "edge_correlation": 0.27975810427248504
+    }
+  },
+  "run_metrics": {
+    "measured_absolute_signal_gain": 2.7337712060298593,
+    "analytic_absolute_signal_gain": 1.9995001249687578,
+    "normalized_power_relative_drift": -0.13399059371593683,
+    "workflow_status": "converged",
+    "deterministic_replay_consistent": true
+  },
+  "sources": {
+    "reference/prprop/photonics-12-00113-v3/Fig 6-a.png": "14a36afa232a06cdeab16b7b009ab4c7c2ac83848af83e09979b9a9f945fb5dc",
+    "reference/prprop/photonics-12-00113-v3/Fig 6-b.png": "55f192f5a043082467d4c11ae38b31ee8dbf6b1aa67148d55da9705ef15bfbca",
+    "job_2231455_input_signal.png": "cea5ae865d3ffc8d53dca193b08dda4afd2ec051f2c3e7cce748c23898ceee69",
+    "job_2231455_output_signal.png": "797e98cf87e3e26132ea23942c3c26e47df7842695de4015559137f73cdfa571",
+    "job_2231455_metrics.json": "6c05d05bda4aaab5a3daf8d9aec49c57f9fd9dd5ee76c2bc486490fe09e6ede6",
+    "job_2231455_provenance.txt": "974334c6279fc3b067f700857d1ccdcf8e5f2ef561917a32926628488ec2e60e"
+  },
+  "limitations": [
+    "Published values were recovered from 8-bit rendered panels by inverse-colormap lookup.",
+    "LCProp products are 8-bit rasters independently normalized by their own maxima.",
+    "The LCProp input is placed on the known 0 to 0.5 scale; the LCProp output absolute maximum is not recoverable.",
+    "Output metrics measure registered normalized spatial structure, not absolute-intensity agreement.",
+    "Registration uses periodic pixel rolling only as a bounded presentation alignment and is not a field transformation."
+  ]
+}

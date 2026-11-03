@@ -1,3 +1,5 @@
+import numpy as np
+
 from lcprop.core.context import GridSpec, LCMaterial, BiasSpec
 from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.requests import StaticRunRequest, StaticSolverOptions, OutputOptions
@@ -5,7 +7,7 @@ from lcprop.workflows.runtime import (
     build_runtime_components,
     initial_theta_intensity,
     make_picard_theta_relax,
-    make_static_optics_update,
+    make_global_uniform_theta_iteration,
     make_td_optics_step,
     make_zcoupled_theta_step,
 )
@@ -25,12 +27,7 @@ def make_request():
         bias=BiasSpec(theta_bc=0.0),
         beams=BeamStack(
             channels=(
-                BeamChannel(
-                    wavelength_um=0.633,
-                    power_mW=0.1,
-                    waist_x_um=3.0,
-                    waist_y_um=3.0,
-                ),
+                BeamChannel(wavelength_um=0.633, power_mW=0.1, w1_um=3.0, w2_um=3.0),
             )
         ),
         solver=StaticSolverOptions(),
@@ -44,6 +41,9 @@ def test_build_runtime_components_smoke():
     assert components.grid.Nx == 32
     assert components.grid.Nz == 4
     assert components.launch.A0.shape == (1, 32, 32)
+    assert components.coherence_groups == components.launch.coherence_groups
+    assert components.physical_total_power_mW == 0.1
+    assert np.allclose(components.power_fractions, [1.0])
     assert components.bias.theta_stack.shape == (4, 32, 32)
     assert components.b > 0.0
     assert components.bi > 0.0
@@ -59,7 +59,7 @@ def test_builder_callbacks_smoke():
     theta1 = theta_relax(components.bias.theta_2d, I0, 1)
     assert theta1.shape == (32, 32)
 
-    optics_update = make_static_optics_update(components)
+    optics_update = make_global_uniform_theta_iteration(components)
     A2, I2 = optics_update(components.launch.A0, theta1, 1)
     assert A2.shape == (1, 32, 32)
     assert I2.shape == (32, 32)

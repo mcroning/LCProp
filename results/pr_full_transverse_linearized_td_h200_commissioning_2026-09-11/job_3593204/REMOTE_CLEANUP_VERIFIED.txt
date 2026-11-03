@@ -1,0 +1,8 @@
+2026-09-11: checksum-verified evidence for Slurm job 3593204 was retrieved.
+Removed only:
+/cluster/tufts/cglab/mcroning/lcprop_runs/pr-linearized-td-f865c5e/launch/runs/3593204
+
+Verified that the transient run directory is absent.
+Retained the immutable source bundle, harness, scheduler script, launch checksum
+manifest, and stdout/stderr under:
+/cluster/tufts/cglab/mcroning/lcprop_runs/pr-linearized-td-f865c5e/launch/

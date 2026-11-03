@@ -1,0 +1,13 @@
+{
+  "inspection_root": "/Users/mcroning/miniforge3/envs/lcprop-interactive-test/lib/python3.12/site-packages",
+  "files_sha256": {
+    "ipympl/nbextension/index.js.map": "f514b2b590f6345a2e5e265b505a3debcdd1b8f95a4f4471dd0faf630a77b46d",
+    "ipympl/labextension/static/643.717608b8dea13aad5293.js": "717608b8dea13aad529303f1778809ca3c09100f5f0befce510d3894e7fcf1ad",
+    "ipympl/labextension/static/688.7f16beda883825078f42.js": "7f16beda883825078f42a259a3ffc164d4c650f76f2f50c763040fd73e1f8611",
+    "matplotlib/backends/backend_webagg_core.py": "c490d4d9e82b5801af1dff4353b1cd3ff1c1fc72c8639239696c884e314dfe8f"
+  },
+  "browser_assets_independently_verified": false,
+  "product_changes": false,
+  "new_simulations": false,
+  "decision": "stop: no frame-correlated reception or paint acknowledgments"
+}

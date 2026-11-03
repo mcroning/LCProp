@@ -1,0 +1,410 @@
+{
+  "test_sha256": "d937e73fc0bd2760cfa078bc94763426183fcaa7002a9b58cd28be7342d1f988",
+  "files": {
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre0/capture/events.json": "aa5404929e00bf41ed6f23678989f650ade41182809067d27b01f6b8ba2aa84a",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre0/capture/frame-00.png": "0d1bdc7a1f3f29d1d83ef891df613b1e01d4ebc7ba3abef99114d5914425d836",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre0/capture/frame-01.png": "959133360b2f95c0deac5d3bf40240003f12e6825a7a53d498b6a7a1e9d12897",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre0/capture/frame-02.png": "59708a1364257b6e6c1e6c58cfdb1d125522d58fe3d62b0076a07440a996e566",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre0/capture/frame-03.png": "54986d317f0690a4fa33b99e6af900d628d9cd07d9d0f7283006a72b5e013f7e",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre0/capture/frames.json": "8c5349dabe9bb33aa8d6b6f6d5ff0820a6e0796145e48cafff59a35f404f68bc",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre0/capture/two-beam-arrays.npz": "54b0bdb479917cf04f08c928e446b734adcf7ffbb2a0457b5566ce5f11ddba41",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre0/capture/two-beam-request.json": "215c4f3aab3f5a397529e7a8402abf67b29d096d86dee5999b80025b05bc0c76",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre1/capture/events.json": "0d9a0434c30d0409bc05f9ff8777b4624967754663082fc3d57dd13187b06458",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre1/capture/frame-00.png": "0d1bdc7a1f3f29d1d83ef891df613b1e01d4ebc7ba3abef99114d5914425d836",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre1/capture/frame-01.png": "959133360b2f95c0deac5d3bf40240003f12e6825a7a53d498b6a7a1e9d12897",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre1/capture/frame-02.png": "59708a1364257b6e6c1e6c58cfdb1d125522d58fe3d62b0076a07440a996e566",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre1/capture/frame-03.png": "3061228f5ef5d852d3268da8c06a26d6c5e5feb365c8291a0bf46fc6c873cd80",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre1/capture/frames.json": "4832583ab4fbe7e9ed3eebc2d7da4c6ef2004d580f5e5148cf93a3abffe35540",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre1/capture/two-beam-arrays.npz": "54b0bdb479917cf04f08c928e446b734adcf7ffbb2a0457b5566ce5f11ddba41",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre1/capture/two-beam-request.json": "215c4f3aab3f5a397529e7a8402abf67b29d096d86dee5999b80025b05bc0c76",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre2/capture/events.json": "093a6c031803d3f404eb9dd15b269172c7e555385acac664b208ac5bdac2fb72",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre2/capture/frame-00.png": "0d1bdc7a1f3f29d1d83ef891df613b1e01d4ebc7ba3abef99114d5914425d836",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre2/capture/frame-01.png": "959133360b2f95c0deac5d3bf40240003f12e6825a7a53d498b6a7a1e9d12897",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre2/capture/frame-02.png": "59708a1364257b6e6c1e6c58cfdb1d125522d58fe3d62b0076a07440a996e566",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre2/capture/frame-03.png": "3abe2820f0d3ed5fe5d1b6a800b783f4e2d45d0b60bab0c8134746f191870a72",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre2/capture/frames.json": "c8ed3a35bab740c2b7fe416ceab71c2e46f7114643b1345554483b82141e7860",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre2/capture/two-beam-arrays.npz": "54b0bdb479917cf04f08c928e446b734adcf7ffbb2a0457b5566ce5f11ddba41",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre2/capture/two-beam-request.json": "215c4f3aab3f5a397529e7a8402abf67b29d096d86dee5999b80025b05bc0c76",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/beam2-off-again-arrays.npz": "ae9225a8262a8c92f7b54f01cd36cf0b56a70a8192ed1d09e16fa32e1311099d",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/beam2-off-again-request.json": "28ee3ecbd6c9093393dcc874111a6400d90a24a9b20aa8de902b88c468ad7f1e",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/beam2-off-arrays.npz": "ae9225a8262a8c92f7b54f01cd36cf0b56a70a8192ed1d09e16fa32e1311099d",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/beam2-off-request.json": "28ee3ecbd6c9093393dcc874111a6400d90a24a9b20aa8de902b88c468ad7f1e",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/beam2-on-again-arrays.npz": "c26fcd912b6ca9ebe3930523be55a6e22d2cccecc24d99ebcd64463da9836aac",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/beam2-on-again-request.json": "76df647902188d0c80e7be244250227f735bcee37ee34aa56c21534be2589bdf",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/beam2-on-arrays.npz": "54b0bdb479917cf04f08c928e446b734adcf7ffbb2a0457b5566ce5f11ddba41",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/beam2-on-request.json": "215c4f3aab3f5a397529e7a8402abf67b29d096d86dee5999b80025b05bc0c76",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/events.json": "5c0ca4847384c1e63933bdbff586eaf7ae2e14363bc882e751daf074ff9887d0",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/final-two-beam-arrays.npz": "cd72f3343a904cf0c969f31faf8e1c051911198f8b215a966ad771f6e7f9a799",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/final-two-beam-request.json": "d072518c7a8ac8db88254179060923a754f13242658ac8d5f70eab105e1bd3bb",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-00.png": "0d1bdc7a1f3f29d1d83ef891df613b1e01d4ebc7ba3abef99114d5914425d836",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-01.png": "959133360b2f95c0deac5d3bf40240003f12e6825a7a53d498b6a7a1e9d12897",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-02.png": "59708a1364257b6e6c1e6c58cfdb1d125522d58fe3d62b0076a07440a996e566",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-03.png": "9c4e286a0c2d410fd64075dedb6a0ff19b5da98795d6d793a0e5f99191320c00",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-04.png": "59708a1364257b6e6c1e6c58cfdb1d125522d58fe3d62b0076a07440a996e566",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-05.png": "e662a96627a15bf693099307a030f70ecd63a8a23f0e954484c55f7bc5dfbc71",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-06.png": "59708a1364257b6e6c1e6c58cfdb1d125522d58fe3d62b0076a07440a996e566",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-07.png": "c403e74752a8f5ec6bd2b4b66e1e1c28218126b9b9b177f84b1124190e13325a",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-08.png": "59708a1364257b6e6c1e6c58cfdb1d125522d58fe3d62b0076a07440a996e566",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-09.png": "37cfd207af166218aa93f4a2e9c656018986fffd39a8d9baa671306d70e7cae0",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-10.png": "59708a1364257b6e6c1e6c58cfdb1d125522d58fe3d62b0076a07440a996e566",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-11.png": "8b57a93ead7e094d62e3371f9d19e07d726782bfbe107ffd96d53127ef850f15",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-12.png": "59708a1364257b6e6c1e6c58cfdb1d125522d58fe3d62b0076a07440a996e566",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-13.png": "d8f7d7556b8a51ee2815bb46beb31f6a0874e0fe5ce7a8465d4e34c489722c79",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-14.png": "59708a1364257b6e6c1e6c58cfdb1d125522d58fe3d62b0076a07440a996e566",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-15.png": "59708a1364257b6e6c1e6c58cfdb1d125522d58fe3d62b0076a07440a996e566",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-16.png": "e014f60cc559022f84bfe7dc5ff2f04ed0ec9c7c32742d3af3bc4be35293a807",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frame-17.png": "59708a1364257b6e6c1e6c58cfdb1d125522d58fe3d62b0076a07440a996e566",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/frames.json": "8c87c5abd4bf3ec6d38b0a4b70ee3c27bb57a2fed87fe33195f9aff0855db441",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/radius-12-arrays.npz": "c26fcd912b6ca9ebe3930523be55a6e22d2cccecc24d99ebcd64463da9836aac",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/radius-12-request.json": "76df647902188d0c80e7be244250227f735bcee37ee34aa56c21534be2589bdf",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/radius-7-arrays.npz": "cd72f3343a904cf0c969f31faf8e1c051911198f8b215a966ad771f6e7f9a799",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/radius-7-request.json": "d072518c7a8ac8db88254179060923a754f13242658ac8d5f70eab105e1bd3bb",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/dropped.png": "0d1bdc7a1f3f29d1d83ef891df613b1e01d4ebc7ba3abef99114d5914425d836",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/metrics.json": "cb54ba8a8305c9a3e8dc409d1f9e949c14a138ae97ae0e6a75e3eff618077e9c",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/ordered.png": "e014f60cc559022f84bfe7dc5ff2f04ed0ec9c7c32742d3af3bc4be35293a807",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/reordered.png": "0d1bdc7a1f3f29d1d83ef891df613b1e01d4ebc7ba3abef99114d5914425d836",
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/repaired.png": "e014f60cc559022f84bfe7dc5ff2f04ed0ec9c7c32742d3af3bc4be35293a807"
+  },
+  "arrays": {
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre0/capture/two-beam-arrays.npz": {
+      "canonical": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "2b5c5862a99c615a720234c2966ee0884c5e457c612fba85d3ff8afd58c48b40"
+      },
+      "mesh": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "2b5c5862a99c615a720234c2966ee0884c5e457c612fba85d3ff8afd58c48b40"
+      },
+      "rgba": {
+        "shape": [
+          375,
+          375,
+          4
+        ],
+        "dtype": "uint8",
+        "sha256_c_bytes": "e4861f551107c7713973ca223c8434116ebff3c4450c8853871aec1b070187ff"
+      },
+      "clim": {
+        "shape": [
+          2
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "782b705aa7baa2aae9ee767df0ab1a1cae71ce8b5c842c0841940c4a47608f40"
+      }
+    },
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre1/capture/two-beam-arrays.npz": {
+      "canonical": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "2b5c5862a99c615a720234c2966ee0884c5e457c612fba85d3ff8afd58c48b40"
+      },
+      "mesh": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "2b5c5862a99c615a720234c2966ee0884c5e457c612fba85d3ff8afd58c48b40"
+      },
+      "rgba": {
+        "shape": [
+          375,
+          375,
+          4
+        ],
+        "dtype": "uint8",
+        "sha256_c_bytes": "e4861f551107c7713973ca223c8434116ebff3c4450c8853871aec1b070187ff"
+      },
+      "clim": {
+        "shape": [
+          2
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "782b705aa7baa2aae9ee767df0ab1a1cae71ce8b5c842c0841940c4a47608f40"
+      }
+    },
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_component_draws_are_corre2/capture/two-beam-arrays.npz": {
+      "canonical": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "2b5c5862a99c615a720234c2966ee0884c5e457c612fba85d3ff8afd58c48b40"
+      },
+      "mesh": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "2b5c5862a99c615a720234c2966ee0884c5e457c612fba85d3ff8afd58c48b40"
+      },
+      "rgba": {
+        "shape": [
+          375,
+          375,
+          4
+        ],
+        "dtype": "uint8",
+        "sha256_c_bytes": "e4861f551107c7713973ca223c8434116ebff3c4450c8853871aec1b070187ff"
+      },
+      "clim": {
+        "shape": [
+          2
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "782b705aa7baa2aae9ee767df0ab1a1cae71ce8b5c842c0841940c4a47608f40"
+      }
+    },
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/beam2-off-again-arrays.npz": {
+      "canonical": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "25e5178e27bf0ee30544771d4ad6d4ab06f8ba9766a44ae22e0b85670fd1614d"
+      },
+      "mesh": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "25e5178e27bf0ee30544771d4ad6d4ab06f8ba9766a44ae22e0b85670fd1614d"
+      },
+      "rgba": {
+        "shape": [
+          375,
+          375,
+          4
+        ],
+        "dtype": "uint8",
+        "sha256_c_bytes": "37a736c4e621a576f48cbaf9277c6adb1eb5aa6f3f08b0352f4b454fb9a72af3"
+      },
+      "clim": {
+        "shape": [
+          2
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "a76e474c7cfb2692c2391b6486f3a0b165ff96dd5313ca5da75d4a2dc76a16dd"
+      }
+    },
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/beam2-off-arrays.npz": {
+      "canonical": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "25e5178e27bf0ee30544771d4ad6d4ab06f8ba9766a44ae22e0b85670fd1614d"
+      },
+      "mesh": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "25e5178e27bf0ee30544771d4ad6d4ab06f8ba9766a44ae22e0b85670fd1614d"
+      },
+      "rgba": {
+        "shape": [
+          375,
+          375,
+          4
+        ],
+        "dtype": "uint8",
+        "sha256_c_bytes": "37a736c4e621a576f48cbaf9277c6adb1eb5aa6f3f08b0352f4b454fb9a72af3"
+      },
+      "clim": {
+        "shape": [
+          2
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "a76e474c7cfb2692c2391b6486f3a0b165ff96dd5313ca5da75d4a2dc76a16dd"
+      }
+    },
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/beam2-on-again-arrays.npz": {
+      "canonical": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "0ae3990f95b46cbcdbcadfa5e0fbf54d7c8e187f44ca85b6791a485f3bf699fe"
+      },
+      "mesh": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "0ae3990f95b46cbcdbcadfa5e0fbf54d7c8e187f44ca85b6791a485f3bf699fe"
+      },
+      "rgba": {
+        "shape": [
+          375,
+          375,
+          4
+        ],
+        "dtype": "uint8",
+        "sha256_c_bytes": "5ef925f1a2e91e0435e4af413a5b8a8f5c70c468aadad058cbfc61e2608295e3"
+      },
+      "clim": {
+        "shape": [
+          2
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "eb784c64fbf7956ebe729d218c41f7b1b6d28d25ff095653ed4d2a013a663b86"
+      }
+    },
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/beam2-on-arrays.npz": {
+      "canonical": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "2b5c5862a99c615a720234c2966ee0884c5e457c612fba85d3ff8afd58c48b40"
+      },
+      "mesh": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "2b5c5862a99c615a720234c2966ee0884c5e457c612fba85d3ff8afd58c48b40"
+      },
+      "rgba": {
+        "shape": [
+          375,
+          375,
+          4
+        ],
+        "dtype": "uint8",
+        "sha256_c_bytes": "e4861f551107c7713973ca223c8434116ebff3c4450c8853871aec1b070187ff"
+      },
+      "clim": {
+        "shape": [
+          2
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "782b705aa7baa2aae9ee767df0ab1a1cae71ce8b5c842c0841940c4a47608f40"
+      }
+    },
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/final-two-beam-arrays.npz": {
+      "canonical": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "60e80c1bcbe5b9b6c1426f76765af4f7e20eb099bfadec3840ab169829d859a1"
+      },
+      "mesh": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "60e80c1bcbe5b9b6c1426f76765af4f7e20eb099bfadec3840ab169829d859a1"
+      },
+      "rgba": {
+        "shape": [
+          375,
+          375,
+          4
+        ],
+        "dtype": "uint8",
+        "sha256_c_bytes": "36a860ef92007955b2750648a104e3c166daf61a75eeb1fa8fdfd4d1800e6f7e"
+      },
+      "clim": {
+        "shape": [
+          2
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "119095aaf5272ea3afe51a079bc00769c3dcc75fb6ac039256e59313ffc737a9"
+      }
+    },
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/radius-12-arrays.npz": {
+      "canonical": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "0ae3990f95b46cbcdbcadfa5e0fbf54d7c8e187f44ca85b6791a485f3bf699fe"
+      },
+      "mesh": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "0ae3990f95b46cbcdbcadfa5e0fbf54d7c8e187f44ca85b6791a485f3bf699fe"
+      },
+      "rgba": {
+        "shape": [
+          375,
+          375,
+          4
+        ],
+        "dtype": "uint8",
+        "sha256_c_bytes": "5ef925f1a2e91e0435e4af413a5b8a8f5c70c468aadad058cbfc61e2608295e3"
+      },
+      "clim": {
+        "shape": [
+          2
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "eb784c64fbf7956ebe729d218c41f7b1b6d28d25ff095653ed4d2a013a663b86"
+      }
+    },
+    ".codex-work/beam-stage2c-two-beam/qualified-output/test_two_beam_callbacks_delive0/capture/radius-7-arrays.npz": {
+      "canonical": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "60e80c1bcbe5b9b6c1426f76765af4f7e20eb099bfadec3840ab169829d859a1"
+      },
+      "mesh": {
+        "shape": [
+          128,
+          128
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "60e80c1bcbe5b9b6c1426f76765af4f7e20eb099bfadec3840ab169829d859a1"
+      },
+      "rgba": {
+        "shape": [
+          375,
+          375,
+          4
+        ],
+        "dtype": "uint8",
+        "sha256_c_bytes": "36a860ef92007955b2750648a104e3c166daf61a75eeb1fa8fdfd4d1800e6f7e"
+      },
+      "clim": {
+        "shape": [
+          2
+        ],
+        "dtype": "float64",
+        "sha256_c_bytes": "119095aaf5272ea3afe51a079bc00769c3dcc75fb6ac039256e59313ffc737a9"
+      }
+    }
+  }
+}

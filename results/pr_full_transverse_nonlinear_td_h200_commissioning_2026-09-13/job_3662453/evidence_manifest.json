@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "commissioning_classification": "Not Commissioned",
+  "production_git_sha": "1a129dc3cb93f6c8a005a198f40d86a31792f223",
+  "source_clean": true,
+  "production_git_status_porcelain": "",
+  "backend": "cupy",
+  "precision": "float64",
+  "job_id": "3662453",
+  "submission_count": 1,
+  "retry_count": 0,
+  "scheduler_state": "FAILED",
+  "scheduler_exit_code": "1:0",
+  "harness_failure_stage": "canonical scientific JSON serialization",
+  "canonical_scientific_data_sha256": null,
+  "canonical_scientific_data_status": "missing; blocking commissioning evidence",
+  "quantitative_numpy_cupy_parity_status": "assertions completed but values were not serialized; blocking commissioning evidence",
+  "launch_input_checksums": {
+    "lcprop-1a129dc.bundle": "dbba0dcf54da3da9cff41c98928507aa4f51ec4461d1d940580c1becb77f3ba0",
+    "pr_full_transverse_nonlinear_td_h200_commissioning.py": "57ac722051b3b4c775c2440a76db6c8da855b51f7c2f4f1c181af06e4dd86807",
+    "pr_full_transverse_nonlinear_td_h200.sbatch": "a439aa3888bf1cc5d174cd98ddf44f138af6ea57ea6bcc6ec7cc84390063c72e",
+    "launch_manifest.json": "53a568f99f7001d420b5a8634d02e35a5abf5c2b3706820d995e2e28b1b1b110",
+    "launch_checksums.sha256": "00d027b2b20b9472fc087eab434e81bef60a83375cc671a0954a894563d68638"
+  },
+  "report": {
+    "path": "docs/development/pr_full_transverse_nonlinear_td_h200_slurm_commissioning.md",
+    "sha256": "439bbbb302906212fe351633b3ab5eae2629d0741f02266c8f4d58e88cce7e2e"
+  },
+  "retained_artifact_checksums": {
+    "LOCAL_RECONSTRUCTION.json": "c18fb89ce90431b2b6dd4ed091eaa5960cb66e9d3d61c76302870fa0edb7823c",
+    "REMOTE_CLEANUP_VERIFIED.txt": "f1331f6d52aa02bb419304529e8295fee9ac715e6de8d5cc73957f7c3b52b0f7",
+    "evidence/primary_fast/output/RESULT_READY.json": "3aead8d00d81b89889b153f258a679252b9f41d4670c0bb7e45b47d32bbfff8d",
+    "evidence/primary_fast/output/checksums.sha256": "14561678d33b19c6a526234b7de40ac2bd13a0faf34a66720960fa3c49df7149",
+    "evidence/primary_fast/output/manifest.json": "249603c83597e0c4ac7250debf806c94b326a3a370f2c3776f61d0237c46780b",
+    "evidence/primary_fast/output/result.json": "bcb938a30242e3d4fa1d66b87f935509cba7791e0399681190b7c264773ec20f",
+    "evidence/primary_fast/output/result_arrays.npz": "886acdde1e900c06a297ccb911e6922c6df4adfb960920b18352a2e8ed7c4283",
+    "evidence/primary_fast/request/READY.json": "5b8880e5e04e77c1ec339b09eb1808e188ace252f8c26f84d0437254c001e528",
+    "evidence/primary_fast/request/checksums.sha256": "614523cfc24c87f3ddeb56379fad65b9aa15745fe53274a730e6880b66864c4d",
+    "evidence/primary_fast/request/manifest.json": "745fbbcb0085f414fc1312f094811ee4264f68c1bb54138025b2ea8ca9bb273b",
+    "evidence/primary_fast/request/request.json": "81815457e1b9ef21e477ce00f87f6447427dc08688bf4941746b6c52c177f9f6",
+    "execution_provenance.json": "fc4d846ff80abba1d233d0261c7597992b97d7a786adb1327da06a39462ce3da",
+    "gpu_memory_baseline.csv": "b0a777f429358f42156b90e652e1c8583dbff9d90e0ff8af24587f4e009a8f16",
+    "gpu_process_memory_samples.csv": "81990563166d1a83702a9e03805f39a79e3413ba44bdfcb3db6fbf547d23950e",
+    "sacct-3662453-final.txt": "0cf4d08c2279f4f64b8fea265ad185afe556a86290c529d7f0c750cc3e819b1c",
+    "slurm-3662453.err": "778bde804ba135bb088a2d5ecb51454602af7c781efa641a2824c57b490328a4",
+    "slurm-3662453.out": "0317ccc5d5d4c5fdf3239f37998b4bd425c909123de59949fe88b62842bda8a5"
+  },
+  "evidence_verdict": {
+    "actual_h200_cupy_execution": true,
+    "physical_fast_result": true,
+    "fast_reconstruction_and_products": true,
+    "gpu_memory_samples": true,
+    "final_scheduler_accounting": true,
+    "remote_cleanup_verified": true,
+    "quantitative_cpu_gpu_parity_retained": false,
+    "canonical_scientific_checksum_retained": false,
+    "commissioning_complete": false
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "fixture": "tests/test_static_local_zmarch.py::test_static_local_self_consistent_marches_theta_and_field_along_z",
+  "grid": [
+    128,
+    128,
+    100
+  ],
+  "primary_float64_volumes_MiB": 37.5,
+  "planning_RSS_cap_MiB": 1024,
+  "runtime_cap_seconds_per_calculation": 120,
+  "runtime_estimate": "unmeasured, anticipated seconds to tens of seconds; stop at cap",
+  "maximum_director_iterations": 60000,
+  "no_parameter_changes": true
+}

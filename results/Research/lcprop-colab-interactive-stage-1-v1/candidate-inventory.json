@@ -1,0 +1,6 @@
+{
+  "examples/lc_static_interactive.py": "fcb555933b2bfeb569413a44169c6c61c641fcf1cb8e659d434b13858514319e",
+  "notebooks/lc_static_interactive_cpu.ipynb": "884fc95736a99998f0f83724ae0d55b2c01cf0b5068d1c750a55c8564a551e30",
+  "notebooks/lc_static_interactive_cpu.md": "2f23957cfd79edb572020706d298288fd20272ce363ad77339f9ef01ebfa3b50",
+  "tests/test_lc_static_interactive.py": "dc8fbc0f9c5e4c1d77af880f0e340e3303c86d8390dcedab7e1bacef172e9b82"
+}

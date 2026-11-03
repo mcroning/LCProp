@@ -1,0 +1,131 @@
+{
+  "release": "lcprop",
+  "version": "0.3.0",
+  "source_commit": "fa8c3b292f2cfd38379870d0c8d085f5ff0c3f78",
+  "production_release_url": "https://pypi.org/project/lcprop/0.3.0/",
+  "status": "qualified and documented",
+  "artifacts": [
+    {
+      "filename": "lcprop-0.3.0-py3-none-any.whl",
+      "sha256": "9ab34f4ec244716b3e6f0431e4cac1e0d8a1ebeb17a7064c6422f1ed6b4e3d60",
+      "url": "https://files.pythonhosted.org/packages/23/68/3bdba56270d2115bdec4934dc11bb3e1f8966a86cd4753ea7d5ec2534dd9/lcprop-0.3.0-py3-none-any.whl",
+      "bytes": 749946
+    },
+    {
+      "filename": "lcprop-0.3.0.tar.gz",
+      "sha256": "6ca4fab1b4d0a5343f9094af39b00a2437cd203da05609d0f10a93935a1eb399",
+      "url": "https://files.pythonhosted.org/packages/4e/7a/e484baed940cfc55cc55f6374ed691d9df5d4e03072982126261d437df65/lcprop-0.3.0.tar.gz",
+      "bytes": 655126
+    }
+  ],
+  "verification": {
+    "wheel-core": {
+      "runtime_files_verified": 267,
+      "deployment_digest": "03d1b4090e94aff93b13f74cdce72dda4271c9ace6ffc4e2424b8a08af55589e",
+      "python": "3.12.13 | packaged by Anaconda, Inc. | (main, Mar 19 2026, 20:12:32) [Clang 20.1.8 ]",
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "dependencies": {
+        "pexpect": "4.9.0",
+        "ptyprocess": "0.7.0",
+        "packaging": "26.3",
+        "pygments": "2.21.0",
+        "traitlets": "5.16.1",
+        "numpy": "2.5.4",
+        "wcwidth": "0.9.2",
+        "widgetsnbextension": "4.0.16",
+        "pip": "25.0.1",
+        "lcprop": "0.3.0",
+        "pure_eval": "0.2.4",
+        "psutil": "7.2.2",
+        "parso": "0.8.7",
+        "pillow": "12.3.0",
+        "pyparsing": "3.3.3",
+        "six": "1.17.0",
+        "scipy": "1.18.1"
+      },
+      "widget_initialized_without_solver": false,
+      "inventory_limitation": "Partial optional-dependency installation overlaps inventory capture; use sdist-core for uncontaminated core-only dependency evidence."
+    },
+    "sdist-core": {
+      "runtime_files_verified": 267,
+      "deployment_digest": "03d1b4090e94aff93b13f74cdce72dda4271c9ace6ffc4e2424b8a08af55589e",
+      "python": "3.12.13 | packaged by Anaconda, Inc. | (main, Mar 19 2026, 20:12:32) [Clang 20.1.8 ]",
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "dependencies": {
+        "numpy": "2.5.4",
+        "pip": "25.0.1",
+        "lcprop": "0.3.0",
+        "scipy": "1.18.1"
+      },
+      "widget_initialized_without_solver": false
+    },
+    "colab": {
+      "runtime_files_verified": 267,
+      "deployment_digest": "03d1b4090e94aff93b13f74cdce72dda4271c9ace6ffc4e2424b8a08af55589e",
+      "python": "3.12.13 | packaged by Anaconda, Inc. | (main, Mar 19 2026, 20:12:32) [Clang 20.1.8 ]",
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "dependencies": {
+        "pexpect": "4.9.0",
+        "kiwisolver": "1.5.1",
+        "ptyprocess": "0.7.0",
+        "packaging": "26.3",
+        "pygments": "2.21.0",
+        "prompt_toolkit": "3.0.53",
+        "matplotlib-inline": "0.2.2",
+        "traitlets": "5.16.1",
+        "jedi": "0.20.1",
+        "ipython_pygments_lexers": "1.1.1",
+        "numpy": "2.5.4",
+        "wcwidth": "0.9.2",
+        "stack-data": "0.6.3",
+        "widgetsnbextension": "4.0.16",
+        "contourpy": "1.4.0",
+        "pip": "25.0.1",
+        "lcprop": "0.3.0",
+        "python-dateutil": "2.9.0.post0",
+        "matplotlib": "3.11.2",
+        "pure_eval": "0.2.4",
+        "cycler": "0.12.1",
+        "executing": "2.3.0",
+        "asttokens": "3.0.2",
+        "psutil": "7.2.2",
+        "ipywidgets": "8.1.9",
+        "fonttools": "4.67.0",
+        "parso": "0.8.7",
+        "pillow": "12.3.0",
+        "pyparsing": "3.3.3",
+        "six": "1.17.0",
+        "scipy": "1.18.1",
+        "jupyterlab_widgets": "3.0.17",
+        "comm": "0.2.3",
+        "ipython": "9.17.1"
+      },
+      "widget_initialized_without_solver": true
+    }
+  },
+  "pip_check": "passed for both installation paths and after optional extra installation",
+  "limitations": [
+    "No new scientific simulations; retained numerical qualification only.",
+    "No direct browser-rendering verification: PyPI served a JavaScript challenge; JSON README and local rendering verified.",
+    "Installation qualification is local macOS arm64 Python 3.12.13; no new hosted Colab, GUI, GPU or Slurm qualification.",
+    "The retained wheel-core dependency inventory was captured during installation of optional dependencies and contains a partial extra dependency set. Do not treat it as a pristine core-only inventory. The independent sdist-core environment has only lcprop, numpy, scipy and pip and establishes isolated headless core operation. No new installation was performed during closure."
+  ],
+  "retained_evidence_sha256": {
+    "results/Research/lcprop-pypi-stage-5b-production-release-v1/REPORT.md": "5ab5c98305f820092423b237607010287bb0b8817cf990c990cf97c7fb60bbaf",
+    "results/Research/lcprop-pypi-stage-5b-production-release-v1/source-provenance.json": "e5b4f802dc7c53646bacd1fe6b52e8b4b6c3d14b15a1cecbd07ca067e503e560",
+    "results/Research/lcprop-pypi-stage-5b-production-release-v1/comparison.json": "bf767243ffc6cab7066962364f8e27a196a82dc4a5395b73535557abeae07fd1",
+    "results/Research/lcprop-pypi-stage-5b-production-release-v1/retained-parity.json": "a04b34df8f28792ed6ad2a7cba0448d505910285959340b7fd4b0c2bf61c6dd6",
+    "results/Research/lcprop-pypi-stage-6a-production-verification-v1/REPORT.md": "91d41780ae11bf2cfaab96af341b1bbb9e72dbe2910145739e64db9f6213705b",
+    "results/Research/lcprop-pypi-stage-6a-production-verification-v1/pypi.json": "a7a168c550977d894fb32f474ab599a2aa8155d10cebfd8f95e6b7d07a9cede1",
+    "results/Research/lcprop-pypi-stage-6a-production-verification-v1/wheel-install.json": "4837be59743ef0c6afd8e9273b2cdde53bbbc9d81535d626ee1a8780031ba1d0",
+    "results/Research/lcprop-pypi-stage-6a-production-verification-v1/sdist-install.json": "e9ecb99070b0010c933e3f72d33bf941197c87736f93146712b43727b22a2c3c",
+    "results/Research/lcprop-pypi-stage-6a-production-verification-v1/colab-install.json": "94890c87ec143728bfa04ed4949360a319211d9e74622929e1c81961aaeefd93",
+    "results/Research/lcprop-pypi-stage-6a-production-verification-v1/wheel-core-verification.json": "d80b62d8696bfdb5573a111a1d830dc3f8b7940f00067e2d8e7860d2718791c6",
+    "results/Research/lcprop-pypi-stage-6a-production-verification-v1/sdist-core-verification.json": "42f72d701ba5b8e78f97ee58840227fa75532a886c7777b8d65041adb56b11c0",
+    "results/Research/lcprop-pypi-stage-6a-production-verification-v1/colab-verification.json": "11414dbaa0530431628155f1c1ad1b0a565850107a562ed17c4c174e26b96cff",
+    "results/Research/lcprop-pypi-stage-6a-production-verification-v1/colab-pip-check.txt": "9261363b733079a641c2e4cc9bc46ffa1d8336945a87f807b6cf68847dbc9b09",
+    "results/Research/lcprop-pypi-stage-6a-production-verification-v1/sdist-pip-check.txt": "9261363b733079a641c2e4cc9bc46ffa1d8336945a87f807b6cf68847dbc9b09",
+    "results/Research/lcprop-pypi-stage-6a-production-verification-v1/links.json": "ceb5576e0f4bb0eed08837aeeaef6201e462a3b652bcb1af8e37b24bcc197077"
+  },
+  "evidence_note": "Detailed logs, binaries and environment reports remain retained locally; only this compact metadata and the Stage 5B/6A reports are committed."
+}

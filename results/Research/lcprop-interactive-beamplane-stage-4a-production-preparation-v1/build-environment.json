@@ -1,0 +1,11 @@
+{
+  "python": "3.12.15 | packaged by Anaconda, Inc. | (main, Oct  1 2026, 20:11:32) [Clang 20.1.8 ]",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "tools": {
+    "build": "1.6.1",
+    "setuptools": "84.0.0",
+    "wheel": "0.48.0",
+    "twine": "7.0.0"
+  },
+  "packaging_change": "version only; optional extras unchanged"
+}

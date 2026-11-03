@@ -1,0 +1,891 @@
+"""Backend-native nonlinear and linearized full-transverse PR dynamics."""
+
+from __future__ import annotations
+
+from lcprop.pr.specs import material_metadata
+
+from dataclasses import asdict, replace
+from time import perf_counter
+from typing import Callable
+
+import numpy as np
+
+from lcprop.core.backend import asnumpy, get_backend, scalar_float
+from lcprop.core.execution import CancellationToken, RunProgress
+from lcprop.core.grid import make_grid
+from lcprop.optics.launch import OpticalLaunchContext, LaunchResult, build_launch, normalized_power
+from lcprop.optics.launch_configuration import reject_prepared_launch_conflict
+from lcprop.optics.screens import validate_channel_launch_elements
+from lcprop.optics.splitstep import scalar_angular_spectrum_kernel, total_intensity
+from lcprop.pr.illumination import resolve_material_illumination, PhysicalIlluminationReference, INTEGRAL_NORMALIZATION
+from lcprop.pr.source import channel_peak_intensity_reference
+from lcprop.pr.longitudinal_cuts import (
+    extract_backend_longitudinal_optical_intensity_cuts,
+)
+from lcprop.pr.visualization import (
+    downsample_td_movie_frame,
+    encode_td_preview_movie,
+    td_movie_frame_indices,
+)
+from lcprop.pr.scattering import canonical_scattering_provenance
+from lcprop.pr.transverse.diagnostics import state_diagnostics
+from lcprop.pr.transverse.storage import TDStoragePolicy, BoundedStorage
+from lcprop.pr.transverse.linearized_reference import (
+    FIXED_MEAN_FIELD_ENSEMBLE,
+    PRBiasedLinearizedReferenceSpec,
+)
+from lcprop.pr.transverse.linearized_timedependent_reference import (
+    PR_PERIODIC_BIASED_LINEARIZED_TIMEDEPENDENT_REFERENCE_V1,
+    linearized_timedependent_rhs,
+    solve_pr_biased_linearized_timedependent_reference,
+)
+from lcprop.pr.transverse.projection import project_active_field
+from lcprop.pr.transverse.specs import (
+    PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1,
+    PR_FULL_TRANSVERSE_PROFILE_V1,
+    PR_MATERIAL_RESPONSE_LINEARIZED,
+    PR_MATERIAL_RESPONSE_NONLINEAR,
+    PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE,
+    PR_TRANSVERSE_IMEX_EULER,
+    PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+    PRTransverseRunRequest,
+    PRTransverseRunResult,
+)
+from lcprop.pr.transverse.transport import (
+    explicit_euler_step,
+    imex_euler_step,
+    potential_rhs,
+    state_from_potential,
+)
+from lcprop.pr.workflow import (
+    _apply_canonical_scattering_after_slice,
+    _canonical_scattering_phase_stack,
+    _canonical_scattering_phase_for_slice,
+    _validate_canonical_scattering_for_grid,
+    advance_pr_slice_with_midpoint_source,
+    advance_pr_published_frozen_slice,
+)
+
+from lcprop.pr.specs import PR_TD_PUBLISHED_COUPLING
+
+
+ProgressCallback = Callable[[RunProgress], None]
+
+
+class _CancellationRequested(Exception):
+    def __init__(self, stage: str):
+        super().__init__(stage)
+        self.stage = stage
+
+
+def _check_cancel(token: CancellationToken | None, stage: str) -> None:
+    if token is not None and token.is_cancelled():
+        raise _CancellationRequested(stage)
+
+
+def _validate_request(request: PRTransverseRunRequest) -> None:
+    request.resolved_optical_coupling  # Validate the explicit/default coupling identity.
+    request.grid.validate()
+    request.beams.validate()
+    request.material.validate()
+    if request.material.normalization_identity != "pr_channel_peak_reference_v1" and request.initial_A is not None:
+        raise ValueError("physical TD prepared initial_A requires an explicit physical scale; use the physical launch configuration")
+    request.transport.validate()
+    request.dielectric.validate()
+    request.boundary.validate()
+    request.projection.validate()
+    if request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR:
+        if request.boundary.profile_id != PR_FULL_TRANSVERSE_PROFILE_V1:
+            raise ValueError(
+                "time-dependent Profile v1 does not support the periodic biased "
+                "electrical profile"
+            )
+        if float(request.material.applied_field) != 0.0:
+            raise ValueError("Profile v1 requires material.applied_field=0")
+    request.material_response.validate_configuration(
+        material_applied_field=request.material.applied_field,
+        transport=request.transport,
+        dielectric=request.dielectric,
+        boundary=request.boundary,
+        projection=request.projection,
+    )
+    request.solver.validate()
+    request.backend.validate()
+    request.optical_boundary.validate()
+    if request.scattering is not None:
+        request.scattering.validate()
+    validate_channel_launch_elements(
+        request.launch_elements,
+        n_channels=len(request.beams.channels),
+    )
+    reject_prepared_launch_conflict(request.initial_A, request.launch_elements)
+    if request.backend.backend not in ("numpy", "cupy"):
+        raise ValueError(
+            "Profile v1 requires explicit backend='numpy' or backend='cupy'"
+        )
+
+
+def _linearized_reference_spec(
+    request: PRTransverseRunRequest,
+    *,
+    dx_normalized: float,
+    dy_normalized: float,
+) -> PRBiasedLinearizedReferenceSpec:
+    reference_intensity = request.material_response.reference_intensity
+    if reference_intensity is None:  # guarded by request validation
+        raise ValueError("linearized material response requires reference_intensity")
+    return PRBiasedLinearizedReferenceSpec(
+        reference_intensity=float(reference_intensity),
+        applied_field=float(request.boundary.applied_field_x),
+        dx_normalized=dx_normalized,
+        dy_normalized=dy_normalized,
+        m_y=float(request.transport.m_y),
+        h_y=float(request.dielectric.h_y),
+    )
+
+
+def _linearized_material_step(
+    psi,
+    source,
+    *,
+    request: PRTransverseRunRequest,
+    spec: PRBiasedLinearizedReferenceSpec,
+    xp,
+    cancellation_token: CancellationToken | None,
+    material_response_calls: list[int],
+):
+    """Advance independent planes with the accepted exact modal propagator."""
+
+    candidate = xp.empty_like(psi)
+    for plane_index in range(source.shape[0]):
+        _check_cancel(cancellation_token, "linearized_material_plane")
+        response = solve_pr_biased_linearized_timedependent_reference(
+            source[plane_index],
+            time_normalized=float(request.solver.dt_normalized),
+            spec=spec,
+            initial_delta_psi=psi[plane_index],
+            backend=request.backend,
+        )
+        candidate[plane_index] = response.delta_psi
+        material_response_calls[0] += 1
+        _check_cancel(cancellation_token, "linearized_material_plane")
+    return candidate
+
+
+def _initial_fields(request, *, launch, grid, complex_dtype, real_dtype, storage=None):
+    xp = grid.xp
+    if request.initial_A is None:
+        A0 = launch.A0.copy()
+    else:
+        A0 = xp.asarray(request.initial_A, dtype=complex_dtype).copy()
+        if A0.shape != launch.A0.shape:
+            raise ValueError(f"initial_A shape {A0.shape} does not match {launch.A0.shape}")
+        if not bool(asnumpy(xp.all(xp.isfinite(A0)))):
+            raise ValueError("initial_A must contain only finite values")
+    expected = (grid.Nz, grid.Nx, grid.Ny)
+    if storage is not None:
+        return A0, storage.initial(request.initial_psi)
+    if request.initial_psi is None:
+        psi = xp.zeros(expected, dtype=real_dtype)
+    else:
+        psi = xp.asarray(request.initial_psi, dtype=real_dtype).copy()
+        if psi.shape != expected:
+            raise ValueError(f"initial_psi shape {psi.shape} does not match {expected}")
+        if not bool(asnumpy(xp.all(xp.isfinite(psi)))):
+            raise ValueError("initial_psi must contain only finite values")
+    psi -= xp.mean(psi, axis=(-2, -1), keepdims=True)
+    return A0, psi
+
+
+def _optical_pass(
+    A0,
+    psi,
+    *,
+    request,
+    grid,
+    kernel,
+    peak_reference,
+    wavelength_um,
+    dx_normalized,
+    dy_normalized,
+    cancellation_token=None,
+    scattering_phase_stack=None,
+    storage=None,
+):
+    xp = grid.xp
+    A = A0.copy()
+    source = (xp if storage is None else np).empty(psi.shape, dtype=grid.real_dtype)
+    intensity_before = None
+    def project(block):
+        state = state_from_potential(
+            block, dx_normalized=dx_normalized, dy_normalized=dy_normalized,
+            h_y=request.dielectric.h_y, applied_field_x=request.boundary.applied_field_x, xp=xp)
+        return project_active_field(state.E_x, state.E_y, profile=request.projection, xp=xp)
+    active = project(psi) if storage is None else None
+    for z_index in range(grid.Nz):
+        _check_cancel(cancellation_token, "material_source_optical_z_march")
+        if storage is not None and z_index % storage.k == 0:
+            active = None  # release previous chunk before constructing its replacement
+            active = project(storage.upload(psi[z_index:z_index+storage.k]))
+        active_plane = active[z_index if storage is None else z_index % storage.k]
+        if request.resolved_optical_coupling == PR_TD_PUBLISHED_COUPLING:
+            A, source_plane = advance_pr_published_frozen_slice(
+                A, active_plane, request=request, grid=grid, kernel=kernel,
+                peak_reference=peak_reference, wavelength_um=wavelength_um,
+            )
+        else:
+            A, source_plane, intensity_before = advance_pr_slice_with_midpoint_source(
+                A,
+                active_plane,
+                kernel=kernel,
+                optical_substeps=request.solver.optical_substeps,
+                dz_um=grid.dz_um,
+                wavelength_um=wavelength_um,
+                interaction_length_um=request.grid.z_length_um,
+                gain_length_product=request.material.gain_length_product,
+                peak_intensity_reference=peak_reference,
+                background_intensity=request.material.background_intensity,
+                coherence_groups=request.beams.coherence_groups,
+                xp=xp,
+                optical_boundary=request.optical_boundary,
+                boundary_grid=grid,
+                _intensity_before=intensity_before,
+                _return_exit_intensity=True,
+            )
+        source[z_index] = source_plane if storage is None else asnumpy(source_plane)
+        _apply_canonical_scattering_after_slice(
+            A,
+            scattering=request.scattering,
+            z_index=z_index,
+            grid=grid,
+            z_length_um=request.grid.z_length_um,
+            xp=xp,
+            phase=(
+                None
+                if scattering_phase_stack is None
+                else (scattering_phase_stack[z_index] if storage is None
+                      else storage.upload(scattering_phase_stack[z_index]))
+            ),
+        )
+    return A, source
+
+
+def run_pr_transverse_timedependent(
+    request: PRTransverseRunRequest,
+    *,
+    cancellation_token: CancellationToken | None = None,
+    progress_callback: ProgressCallback | None = None,
+    _continuation_psi=None,
+    _accepted_callback=None,
+    storage_policy: TDStoragePolicy | None = None,
+    optical_preview=None,
+) -> PRTransverseRunResult:
+    """Run the full-transverse PR workflow on the requested backend.
+
+    A material candidate becomes physical only after its complete source pass
+    and finite Euler update. Cancellation during either discardable stage
+    returns the preceding accepted ψ state, followed by a consistent replay.
+    """
+
+    started = perf_counter()
+    _validate_request(request)
+    if optical_preview is not None:
+        from .live_preview import supported
+        if not supported(request):
+            raise ValueError("live optical preview requires Local NumPy nonlinear published IMEX TD")
+    backend = get_backend(request.backend)
+    xp = backend.xp
+    real_dtype = backend.real_dtype
+    complex_dtype = backend.complex_dtype
+    policy = storage_policy or TDStoragePolicy()
+    policy.validate()
+    if policy.mode == "bounded" and (
+        request.material_response.model != PR_MATERIAL_RESPONSE_NONLINEAR
+        or request.solver.integrator != PR_TRANSVERSE_IMEX_EULER
+        or request.backend.precision != "float64"
+    ):
+        raise ValueError("bounded TD requires nonlinear float64 spectral_imex_euler")
+    grid = make_grid(request.grid, xp=xp, real_dtype=real_dtype)
+    storage = (BoundedStorage(policy, (grid.Nz, grid.Nx, grid.Ny), real_dtype, xp)
+               if policy.mode == "bounded" else None)
+    mxp = np if storage is not None else xp
+    _validate_canonical_scattering_for_grid(
+        request.scattering,
+        grid=grid,
+        z_length_um=request.grid.z_length_um,
+    )
+    if _continuation_psi is not None:
+        from .continuation import _eligible
+        _eligible(request)
+        expected = (grid.Nz, grid.Nx, grid.Ny)
+        if _continuation_psi.shape != expected or _continuation_psi.dtype != np.dtype(real_dtype):
+            raise ValueError("accepted continuation state shape/dtype mismatch")
+    dark_launch = (request.material.normalization_identity == INTEGRAL_NORMALIZATION
+                   and sum(ch.power_mW for ch in request.beams.channels) == 0)
+    if dark_launch:
+        # No fractional-power launch is defined at zero power. The physical
+        # optical field is exactly zero; passive launch elements cannot change it.
+        n = len(request.beams.channels)
+        launch = LaunchResult(
+            A0=xp.zeros((n, grid.Nx, grid.Ny), dtype=complex_dtype),
+            physical_powers_mW=xp.zeros(n, dtype=real_dtype),
+            power_fractions=xp.zeros(n, dtype=real_dtype), physical_total_power_mW=0.,
+            wavelengths_um=xp.asarray([ch.wavelength_um for ch in request.beams.channels]),
+            coherence=request.beams.coherence, coherence_groups=request.beams.coherence_groups,
+            power_metadata={"convention":"exact_zero_physical_optical_launch_v1"})
+    else:
+        launch = build_launch(
+            request.beams,
+            grid,
+            complex_dtype=complex_dtype,
+            launch_elements=request.launch_elements,
+            context=OpticalLaunchContext(
+                grid=grid,
+                n_ref=float(request.material.refractive_index),
+                interaction_length_um=float(request.grid.z_length_um),
+            ),
+        )
+    A0, psi = _initial_fields(
+        request,
+        launch=launch,
+        grid=grid,
+        complex_dtype=complex_dtype,
+        real_dtype=real_dtype, storage=storage,
+    )
+    if _continuation_psi is not None:
+        # The accepted state is authoritative: do not repeat gauge subtraction.
+        psi = _continuation_psi.copy()
+    psi_initial = psi.copy()
+    wavelengths = tuple(float(ch.wavelength_um) for ch in request.beams.channels)
+    if any(value != wavelengths[0] for value in wavelengths[1:]):
+        raise ValueError("transverse PR workflow requires one shared wavelength")
+    wavelength_um = wavelengths[0]
+    kernel = scalar_angular_spectrum_kernel(
+        grid.fxy2_um,
+        dz=grid.dz_um / int(request.solver.optical_substeps),
+        wavelength=wavelength_um,
+        n_ref=request.material.refractive_index,
+        xp=xp,
+        complex_dtype=backend.complex_dtype,
+    )
+    input_request = request
+    source_reference, runtime_material = resolve_material_illumination(
+        request.material, A0,
+        grid=grid, optical_scale_W_cm2=launch.physical_total_power_mW * 1e5,
+        coherence_groups=request.beams.coherence_groups, xp=grid.xp)
+    request = replace(request, material=runtime_material)
+    peak_reference = source_reference
+    if storage is None:
+        scattering_phase_stack = _canonical_scattering_phase_stack(
+            request.scattering, grid=grid, z_length_um=request.grid.z_length_um, xp=xp)
+    else:
+        scattering_phase_stack = None
+        if request.scattering is not None:
+            scattering_phase_stack = np.empty(storage.shape, dtype=real_dtype)
+            for z in range(grid.Nz):
+                phase = _canonical_scattering_phase_for_slice(request.scattering,
+                    z_index=z, grid=grid, z_length_um=request.grid.z_length_um, xp=xp)
+                scattering_phase_stack[z] = asnumpy(phase)
+                del phase
+    k0 = request.material.characteristic_wavenumber_per_um
+    dx_normalized = k0 * grid.dx_um
+    dy_normalized = k0 * grid.dy_um
+    state_kwargs = dict(dx_normalized=dx_normalized, dy_normalized=dy_normalized,
+                        h_y=request.dielectric.h_y, applied_field_x=request.boundary.applied_field_x)
+    if storage is not None:
+        initial_summary = storage.summarize(psi, **state_kwargs)
+        if not initial_summary['physical']:
+            raise ValueError("initial_psi must reconstruct a finite positive carrier state")
+        initial_carrier = initial_summary['carrier_sums']
+        max_carrier_drift = np.asarray(0., dtype=real_dtype)
+    else:
+        initial_state = state_from_potential(
+            psi,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=request.dielectric.h_y,
+            applied_field_x=request.boundary.applied_field_x,
+            xp=xp,
+        )
+        if request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR:
+            initial_state_is_physical = xp.all(
+                xp.isfinite(initial_state.psi)
+                & xp.isfinite(initial_state.carrier_density)
+                & xp.isfinite(initial_state.E_x)
+                & xp.isfinite(initial_state.E_y)
+                & (initial_state.carrier_density > 0.0)
+            )
+            if not bool(asnumpy(initial_state_is_physical)):
+                raise ValueError(
+                    "initial_psi must reconstruct a finite positive carrier state"
+                )
+        initial_carrier = xp.sum(initial_state.carrier_density, axis=(-2, -1))
+        max_carrier_drift = xp.asarray(0.0, dtype=real_dtype)
+    completed_steps = 0
+    cancelled = False
+    cancellation_stage = None
+    material_response_calls = [0]
+    optical_passes_completed = 0
+    td_scalar_history: list[dict[str, float]] = []
+    movie_indices = set(td_movie_frame_indices(int(request.solver.Nt)).tolist())
+    from lcprop.pr.td_movie_products import AcceptedMovieProducts
+    extra_movies = AcceptedMovieProducts()
+    movie_frames: list[np.ndarray] = []
+    material_movie_frames: list[np.ndarray] = []
+    movie_frame_indices: list[int] = []
+    movie_times: list[float] = []
+
+    def retain_movie_frame(index: int, optical_field, accepted_source) -> None:
+        if progress_callback is None or index not in movie_indices:
+            return
+        if movie_frame_indices and movie_frame_indices[-1] == int(index):
+            return
+        intensity = total_intensity(
+            optical_field,
+            coherence_groups=launch.coherence_groups,
+            xp=xp,
+        )
+        movie_frames.append(
+            downsample_td_movie_frame(intensity, xp=grid.xp, asnumpy=asnumpy)
+        )
+        material_movie_frames.append(downsample_td_movie_frame(
+            psi[grid.Nz // 2], xp=mxp, asnumpy=asnumpy))
+        extra_movies.append(optical_field, accepted_source, grid=grid, request=request,
+                            reference=peak_reference, groups=launch.coherence_groups, asnumpy=asnumpy, source_xp=mxp)
+        movie_frame_indices.append(int(index))
+        movie_times.append(int(index) * float(request.solver.dt_normalized))
+    linearized_spec = (
+        _linearized_reference_spec(
+            request,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+        )
+        if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+        else None
+    )
+
+    if _accepted_callback is not None:
+        _accepted_callback(psi, 0, source_reference.metadata())
+    for step_index in range(int(request.solver.Nt)):
+        try:
+            _check_cancel(cancellation_token, "material_step_boundary")
+            observed_A, source = _optical_pass(
+                A0,
+                psi,
+                request=request,
+                grid=grid,
+                kernel=kernel,
+                peak_reference=peak_reference,
+                wavelength_um=wavelength_um,
+                dx_normalized=dx_normalized,
+                dy_normalized=dy_normalized,
+                cancellation_token=cancellation_token,
+                scattering_phase_stack=scattering_phase_stack,
+                **({"storage": storage} if storage is not None else {}),
+            )
+            optical_passes_completed += 1
+            if optical_preview is not None:
+                optical_preview.observe(source, grid=grid, reference=peak_reference,
+                    background=request.material.background_intensity,
+                    step=completed_steps, dt=request.solver.dt_normalized,
+                    pass_id=optical_passes_completed)
+            retain_movie_frame(completed_steps, observed_A, source)
+            if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
+                candidate = _linearized_material_step(
+                    psi,
+                    source,
+                    request=request,
+                    spec=linearized_spec,
+                    xp=xp,
+                    cancellation_token=cancellation_token,
+                    material_response_calls=material_response_calls,
+                )
+            else:
+                if request.solver.integrator == PR_TRANSVERSE_IMEX_EULER:
+                    step_function = imex_euler_step
+                elif request.solver.integrator == PR_TRANSVERSE_EXPLICIT_EULER_REFERENCE:
+                    step_function = explicit_euler_step
+                else:  # guarded by PRTransverseSolverOptions.validate()
+                    raise ValueError(
+                        f"unknown transverse PR integrator: {request.solver.integrator}"
+                    )
+                if storage is not None:
+                    candidate = storage.step(step_function, psi, source,
+                        check=lambda stage: _check_cancel(cancellation_token, stage),
+                        dt_normalized=request.solver.dt_normalized,
+                        m_y=request.transport.m_y, **state_kwargs)
+                else:
+                    candidate = step_function(
+                        psi,
+                        source,
+                        dt_normalized=request.solver.dt_normalized,
+                        dx_normalized=dx_normalized,
+                        dy_normalized=dy_normalized,
+                        m_y=request.transport.m_y,
+                        h_y=request.dielectric.h_y,
+                        applied_field_x=request.boundary.applied_field_x,
+                        xp=xp,
+                    )
+                material_response_calls[0] += 1
+            _check_cancel(cancellation_token, "after_material_candidate")
+        except _CancellationRequested as exc:
+            cancelled = True
+            cancellation_stage = exc.stage
+            break
+
+        if storage is not None:
+            summary = storage.summarize(candidate, **state_kwargs)
+            if not summary['physical']:
+                raise FloatingPointError("nonlinear transverse TD candidate is nonfinite or has nonpositive carrier density")
+            current_carrier = summary['carrier_sums']
+            minimum_carrier = summary['carrier_minimum']
+        else:
+            accepted_state = state_from_potential(
+                candidate,
+                dx_normalized=dx_normalized,
+                dy_normalized=dy_normalized,
+                h_y=request.dielectric.h_y,
+                applied_field_x=request.boundary.applied_field_x,
+                xp=xp,
+            )
+            if request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR:
+                candidate_is_physical = xp.all(
+                    xp.isfinite(accepted_state.psi)
+                    & xp.isfinite(accepted_state.carrier_density)
+                    & xp.isfinite(accepted_state.E_x)
+                    & xp.isfinite(accepted_state.E_y)
+                    & (accepted_state.carrier_density > 0.0)
+                )
+                if not bool(asnumpy(candidate_is_physical)):
+                    raise FloatingPointError(
+                        "nonlinear transverse TD candidate is nonfinite or has "
+                        "nonpositive carrier density"
+                    )
+            current_carrier = xp.sum(accepted_state.carrier_density, axis=(-2, -1))
+            minimum_carrier = scalar_float(xp.min(accepted_state.carrier_density))
+        material_change_rms = scalar_float(
+            mxp.sqrt(mxp.mean((candidate - psi) * (candidate - psi)))
+        )
+        psi = candidate
+        completed_steps = step_index + 1
+        max_carrier_drift = mxp.maximum(max_carrier_drift,
+            mxp.max(mxp.abs(current_carrier - initial_carrier) / mxp.abs(initial_carrier)))
+        scalar_row = {
+            "material_time_normalized": (
+                completed_steps * float(request.solver.dt_normalized)
+            ),
+            "material_state_change_rms": material_change_rms,
+        }
+        if request.material_response.model == PR_MATERIAL_RESPONSE_NONLINEAR:
+            scalar_row["minimum_carrier_density"] = minimum_carrier
+        td_scalar_history.append(scalar_row)
+        if _accepted_callback is not None:
+            _accepted_callback(psi, completed_steps, source_reference.metadata())
+        if progress_callback is not None:
+            material_time = completed_steps * float(request.solver.dt_normalized)
+            progress_callback(
+                RunProgress(
+                    workflow=PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+                    status="running",
+                    completed_units=completed_steps,
+                    total_units=int(request.solver.Nt),
+                    current_coordinate=material_time,
+                    coordinate_name="material_time",
+                    coordinate_unit="normalized",
+                    elapsed_wall_time=perf_counter() - started,
+                    # Owned observation on its compute backend; callbacks must
+                    # explicitly sample before requesting host presentation data.
+                    latest_field_state={
+                        "psi_current": psi.copy(),
+                        "psi_current_backend": "numpy" if storage is not None else backend.name
+                    },
+                    message="transverse PR material-time step accepted",
+                    diagnostics={
+                        "material_response": request.material_response.model,
+                        "optical_coupling": request.resolved_optical_coupling,
+                        "material_update": (
+                            "exact_frozen_source_modal"
+                            if request.material_response.model
+                            == PR_MATERIAL_RESPONSE_LINEARIZED
+                            else request.solver.integrator
+                        ),
+                    },
+                    completed_step=completed_steps,
+                    total_steps=int(request.solver.Nt),
+                    current_time=material_time,
+                    segment_completed_steps=completed_steps,
+                    segment_total_steps=int(request.solver.Nt),
+                    cumulative_completed_steps=completed_steps,
+                    segment_elapsed_time=material_time,
+                    cumulative_time=material_time,
+                )
+            )
+
+    # A complete replay through the last accepted state keeps products physical.
+    A_final, final_source = _optical_pass(
+        A0,
+        psi,
+        request=request,
+        grid=grid,
+        kernel=kernel,
+        peak_reference=peak_reference,
+        wavelength_um=wavelength_um,
+        dx_normalized=dx_normalized,
+        dy_normalized=dy_normalized,
+        scattering_phase_stack=scattering_phase_stack,
+        **({"storage": storage} if storage is not None else {}),
+    )
+    optical_passes_completed += 1
+    if optical_preview is not None:
+        optical_preview.observe(final_source, grid=grid, reference=peak_reference,
+            background=request.material.background_intensity, step=completed_steps,
+            dt=request.solver.dt_normalized, pass_id=optical_passes_completed, final=True)
+    retain_movie_frame(completed_steps, A_final, final_source)
+    if storage is not None:
+        final_summary = storage.summarize(psi, diagnostics=True, **state_kwargs)
+        diagnostics = final_summary['diagnostics']
+    else:
+        final_state = state_from_potential(
+            psi,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=request.dielectric.h_y,
+            applied_field_x=request.boundary.applied_field_x,
+            xp=xp,
+        )
+        diagnostics = state_diagnostics(
+            final_state,
+            dx_normalized=dx_normalized,
+            dy_normalized=dy_normalized,
+            h_y=request.dielectric.h_y,
+            xp=xp,
+        )
+    power_initial = normalized_power(A0, grid)
+    power_final = normalized_power(A_final, grid)
+    diagnostics.update(
+        {
+            "carrier_relative_drift_max": scalar_float(max_carrier_drift),
+            "optical_power_relative_drift": ((power_final - power_initial) / power_initial
+                if power_initial else 0.0),
+            "finite_optical_state": bool(asnumpy(xp.all(xp.isfinite(A_final)))),
+            "cancellation_observed_stage": cancellation_stage,
+            "integrator_policy": (
+                "exact_frozen_source_linearized_modal_update"
+                if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+                else (
+                    "production_first_order_spectral_imex"
+                    if request.solver.integrator == PR_TRANSVERSE_IMEX_EULER
+                    else "transparent_reference_not_production_default"
+                )
+            ),
+            "complete_final_optical_replay": True,  # Historical result key; observational only.
+            "final_optical_march_role": "accepted_state_products_only",
+            "source_sample_z_um": ((np.arange(grid.Nz) + 1) * grid.dz_um).tolist()
+                if request.resolved_optical_coupling == PR_TD_PUBLISHED_COUPLING
+                else None,
+            "material_response": request.material_response.model,
+            "optical_coupling": request.resolved_optical_coupling,
+            "material_response_validation": (
+                "experimental"
+                if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+                else "validated"
+            ),
+            "material_response_calls": material_response_calls[0],
+            "accepted_material_steps": completed_steps,
+            "material_time_normalized": (
+                completed_steps * float(request.solver.dt_normalized)
+            ),
+        }
+    )
+    if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
+        rhs_sum_squares = 0.0
+        rhs_max = 0.0
+        rhs_cells = 0
+        for plane_index in range(final_source.shape[0]):
+            rhs_plane = linearized_timedependent_rhs(
+                psi[plane_index] if storage is None else storage.upload(psi[plane_index]),
+                final_source[plane_index] if storage is None else storage.upload(final_source[plane_index]),
+                spec=linearized_spec,
+                backend=request.backend,
+            )
+            rhs_sum_squares += scalar_float(xp.sum(rhs_plane * rhs_plane))
+            rhs_max = max(rhs_max, scalar_float(xp.max(xp.abs(rhs_plane))))
+            rhs_cells += int(rhs_plane.size)
+        diagnostics.update({
+            "frozen_intensity_material_equation": (
+                "exact_analytic_fourier_transient"
+            ),
+            "source_cadence": "one_complete_optical_pass_per_material_interval",
+            "nonlinear_material_iterations": "not_applicable",
+            "linearized_rhs_rms": (rhs_sum_squares / rhs_cells) ** 0.5,
+            "linearized_rhs_max": rhs_max,
+            "memory_policy": {
+                "backend_working_set": "one_transverse_material_plane",
+                "retained_material_state": "full_longitudinal_volume",
+                "fft_batch_axes": "transverse_only",
+            },
+        })
+    else:
+        rhs_sum_squares = 0.0
+        rhs_max = 0.0
+        rhs_cells = 0
+        for plane_index in range(final_source.shape[0]):
+            rhs_plane = potential_rhs(
+                psi[plane_index] if storage is None else storage.upload(psi[plane_index]),
+                final_source[plane_index] if storage is None else storage.upload(final_source[plane_index]),
+                dx_normalized=dx_normalized,
+                dy_normalized=dy_normalized,
+                m_y=request.transport.m_y,
+                h_y=request.dielectric.h_y,
+                applied_field_x=request.boundary.applied_field_x,
+                xp=xp,
+            )
+            rhs_sum_squares += scalar_float(xp.sum(rhs_plane * rhs_plane))
+            rhs_max = max(rhs_max, scalar_float(xp.max(xp.abs(rhs_plane))))
+            rhs_cells += int(rhs_plane.size)
+        carrier_minimum = (scalar_float(xp.min(final_state.carrier_density)) if storage is None
+                           else final_summary["carrier_minimum"])
+        diagnostics.update({
+            "frozen_intensity_material_equation": (
+                "full_transverse_nonlinear_potential_rate"
+            ),
+            "source_cadence": (
+                "one_complete_optical_pass_per_material_interval_with_"
+                "source_frozen_during_each_material_update"
+            ),
+            "optical_passes_completed": optical_passes_completed,
+            "nonlinear_td_rhs_rms": (
+                rhs_sum_squares / rhs_cells
+            ) ** 0.5,
+            "nonlinear_td_rhs_max": rhs_max,
+            "carrier_density_minimum": carrier_minimum,
+            "physical_state_valid": bool(
+                diagnostics["finite_material_state"]
+                and carrier_minimum > 0.0
+            ),
+            "nonlinear_material_iterations": (
+                "not_applicable_fixed_step_time_integrator"
+            ),
+            "memory_policy": {
+                "backend_working_set": (
+                    "accepted material and frozen source volumes with "
+                    "transverse FFT batches"
+                ),
+                "retained_material_state": "initial_and_final_longitudinal_volumes",
+                "retained_material_time_history": False,
+            },
+        })
+    if storage is not None:
+        diagnostics['storage_execution'] = dict(storage.plan,
+            max_uploaded_planes=storage.max_uploaded_planes, observed_array_samples=storage.samples,
+            reduction_contract="chunk RMS recombination; existing backend numerical parity contract")
+    scattering_provenance = None
+    if request.scattering is not None:
+        scattering_provenance = canonical_scattering_provenance(
+            request.scattering,
+            z_length_um=request.grid.z_length_um,
+            Nx=grid.Nx,
+            Ny=grid.Ny,
+            x_aperture_um=request.grid.x_aperture_um,
+            y_aperture_um=request.grid.y_aperture_um,
+            real_dtype=grid.real_dtype,
+            xp=xp,
+        )
+        diagnostics["canonical_scattering"] = scattering_provenance
+    physics_profile_id = (
+        PR_FULL_TRANSVERSE_PERIODIC_BIASED_CURRENT_V1
+        if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED
+        else PR_FULL_TRANSVERSE_PROFILE_V1
+    )
+    resolved_profile = {
+        "physics_profile_id": physics_profile_id,
+        "workflow": PR_TRANSVERSE_TIMEDEPENDENT_WORKFLOW,
+        "transport_model": "full_transverse",
+        "material_response": asdict(request.material_response),
+        "grid_request": asdict(request.grid),
+        "beam_request": asdict(request.beams),
+        "material": material_metadata(input_request.material),
+        **({"source_normalization": source_reference.metadata()} if isinstance(source_reference, PhysicalIlluminationReference) else {}),
+        "transport": asdict(request.transport),
+        "dielectric": asdict(request.dielectric),
+        "boundary": asdict(request.boundary),
+        "projection": asdict(request.projection),
+        "solver": asdict(request.solver),
+        "characteristic_wavenumber_per_um": k0,
+        "dx_normalized": dx_normalized,
+        "dy_normalized": dy_normalized,
+    }
+    if isinstance(source_reference, PhysicalIlluminationReference):
+        from .continuation import request_metadata
+        try:
+            resolved_profile['continuation_request'] = request_metadata(input_request)
+        except ValueError:
+            # Array-backed launch elements need their own portable checkpoint
+            # contract; their ordinary execution/products remain supported.
+            pass
+    if request.material_response.model == PR_MATERIAL_RESPONSE_LINEARIZED:
+        resolved_profile.update({
+            "linearized_model_id": (
+                PR_PERIODIC_BIASED_LINEARIZED_TIMEDEPENDENT_REFERENCE_V1
+            ),
+            "electrical_ensemble": FIXED_MEAN_FIELD_ENSEMBLE,
+            "reference_intensity": float(
+                request.material_response.reference_intensity
+            ),
+            "applied_field": float(request.boundary.applied_field_x),
+            "validation_status": "experimental",
+        })
+    if scattering_provenance is not None:
+        resolved_profile["canonical_scattering"] = scattering_provenance
+    longitudinal_cuts = extract_backend_longitudinal_optical_intensity_cuts(
+        final_source,
+        grid_summary=grid.summary(),
+        peak_intensity_reference=0.0 if dark_launch else peak_reference,
+        allow_zero_reference=dark_launch,
+        background_intensity=(
+            float(request.material.dark_intensity)
+            + float(request.material.uniform_background_intensity)
+        ),
+        asnumpy=asnumpy,
+    )
+    movie = encode_td_preview_movie(
+        movie_frames,
+        material_frames=material_movie_frames,
+        material_metadata={"quantity": "psi", "label": "Material potential ψ",
+                           "material_plane_index": grid.Nz // 2},
+        frame_indices=movie_frame_indices,
+        material_times=movie_times,
+        original_grid=grid.summary(),
+        original_cadence=float(request.solver.dt_normalized),
+    )
+    extra_movies.attach(movie.metadata)
+    if movie.warning is not None:
+        diagnostics["td_preview_warning"] = movie.warning
+    return PRTransverseRunResult(
+        A_initial=np.asarray(asnumpy(A0)).copy(),
+        A_final=np.asarray(asnumpy(A_final)).copy(),
+        psi_initial=np.asarray(asnumpy(psi_initial)).copy() if storage is None else psi_initial,
+        psi_final=np.asarray(asnumpy(psi)).copy() if storage is None else psi,
+        power_initial=power_initial,
+        power_final=power_final,
+        completed_steps=completed_steps,
+        time_normalized=completed_steps * float(request.solver.dt_normalized),
+        grid_summary=grid.summary(),
+        launch_summary=launch.summary(),
+        backend_summary=backend.summary(),
+        resolved_profile=resolved_profile,
+        status="cancelled" if cancelled else "completed",
+        requested_steps=int(request.solver.Nt),
+        diagnostics=diagnostics,
+        longitudinal_intensity_xz=longitudinal_cuts.xz,
+        longitudinal_intensity_yz=longitudinal_cuts.yz,
+        x_cut_um=longitudinal_cuts.x_cut_um,
+        y_cut_um=longitudinal_cuts.y_cut_um,
+        source_intensity_stack=np.asarray(asnumpy(final_source)).copy() if storage is None else final_source,
+        td_scalar_history=tuple(td_scalar_history),
+        td_preview_movie=movie.data,
+        td_preview_movie_metadata=movie.metadata,
+    )
+
+
+__all__ = ["run_pr_transverse_timedependent"]

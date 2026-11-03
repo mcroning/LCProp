@@ -1,0 +1,51 @@
+job_id=2209653
+start_utc=2026-08-05T19:51:14Z
+hostname=pax020
+repository=/cluster/tufts/cglab/mcroning/LCProp
+expected_git_sha=ea22bf574f5375750ee5f3ec9e8a1c218abdd093
+actual_git_sha=ea22bf574f5375750ee5f3ec9e8a1c218abdd093
+input_image=/cluster/tufts/cglab/mcroning/lcprop_runs/inputs/AF_Res_Chart.png
+expected_image_sha256=e424f1070587d79d2a91f4a3bd14e7c11e80adfe7c723e45432d9d4fc5bb85b7
+actual_image_sha256=e424f1070587d79d2a91f4a3bd14e7c11e80adfe7c723e45432d9d4fc5bb85b7
+persistent_run_dir=/cluster/tufts/cglab/mcroning/lcprop_runs/image-pilot-2209653
+scratch_dir=/tmp/lcprop-pr-image-pilot-2209653
+stdout=/cluster/tufts/cglab/mcroning/lcprop_runs/lcprop-pr-image-pilot-2209653.stdout
+stderr=/cluster/tufts/cglab/mcroning/lcprop_runs/lcprop-pr-image-pilot-2209653.stderr
+slurm_job_gpus=3
+slurm_gpus_on_node=1
+cuda_visible_devices=0
+ld_library_path=/cluster/tufts/apps/spack/9/x86_64/apps/linux-broadwell/cuda-12.9.0-rawz6ldivpmqfoshs6r7xn3bledbwgjg/lib64
+loaded_modules:
+
+Currently Loaded Modules:
+  1) cuda/12.9.0
+
+ 
+
+nvcc_version:
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2025 NVIDIA Corporation
+Built on Wed_Apr__9_19:24:57_PDT_2025
+Cuda compilation tools, release 12.9, V12.9.41
+Build cuda_12.9.r12.9/compiler.35813241_0
+python=Python 3.10.4
+lcprop=/cluster/tufts/cglab/mcroning/condaenv/prenv/lib/python3.10/site-packages/lcprop/__init__.py
+numpy=2.1.0
+scipy=1.15.2
+cupy=13.6.0
+pillow=11.1.0
+0, NVIDIA L40S, 575.57.08, 46068 MiB, 45458 MiB
+end_utc=2026-08-05T19:51:58Z
+scratch_bytes=579048
+persistent_bytes=573487
+output_manifest:
+metrics.json 3609 bytes
+products/E_final_midplane.npy 262272 bytes
+products/input_signal.png 7915 bytes
+products/input_target.png 5649 bytes
+products/output_signal.png 7863 bytes
+products/reconstructed_signal_intensity.npy 262272 bytes
+products/reconstructed_signal.png 6286 bytes
+products/zero_response_reconstruction.png 7915 bytes
+provenance.txt 1555 bytes
+exit_code=0

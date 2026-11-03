@@ -1,0 +1,17 @@
+{
+  "PROCEDURE.md": "bbdd489378b01eecb6267ad91d6025edd8cfdcbdf49c4cf3090884d0877b0de6",
+  "compare_saved.py": "ba84c47f08ef28241c8a4a916a2e08dbbee598d2ca6d472acac732901c45c9bb",
+  "expected-arrays.json": "e9b55360195fe97e3ef75c4617bdad1619d2d24237c80de71a2af98e16c60879",
+  "expected-installed-files.json": "71aa29c55973ef422378b7616208e1dea064d64d2fea66cdede22ea567972299",
+  "lc_static_nonlinear_cpu.md": "cf5cf44f6be8fafcd211b5ad6053cc4733eb448d166e66c7b1e589ceb988d479",
+  "lc_static_nonlinear_cpu.py": "2ffed40dfc82d47b73bd1f9770c2ef4a12a2918e32bd2c137f6a252ed07f90a3",
+  "lcprop-0.1.0-py3-none-any.whl": "1322400b31fac3a28d439f281cc189fb790f1526940dc36af9bf50971fdc5c20",
+  "reference/comparison.png": "0876a71d8e8e861f4862aec761f92631365350eba4a893ff56ef2e1e4edf3ac8",
+  "reference/fixed.lcprop.json": "7aa94ff4e54b94105ad82ccb0a0e946e7031366e18c1b8c93e20ac3d2d570718",
+  "reference/fixed.npz": "fb3dcffbea72bbd3016c1d4d09694d0ed305110ac1929a97e96c4c6144c87c14",
+  "reference/nonlinear.lcprop.json": "b620ee2ebd878b89993dbe9ee66645da3aaabe6f793ff94089542ef19ebbbaa2",
+  "reference/nonlinear.npz": "8cfddcfc2c870fbfa5f3c4ffb020f2756e220f2638e22a3b7cc173971fd857e3",
+  "reference/sha256.json": "969a4b50290a4954b8395c8eec5ef001a1d174c6ade4a29a2267a125ecae189b",
+  "reference/summary.json": "b64fbb97b611767d3da43fbd6a90a53fd25e1d0fcc9e7735c01de2fc85b74301",
+  "run_hosted.py": "9a44e70357492fb42ffa7d6e07da70f9ad3e5a5f18a030e2f3e047bfc11e36b4"
+}

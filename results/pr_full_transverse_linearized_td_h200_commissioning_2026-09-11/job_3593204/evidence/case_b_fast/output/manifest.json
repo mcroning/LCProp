@@ -1,0 +1,21 @@
+{
+  "files": [
+    {
+      "byte_size": 7817,
+      "filename": "result.json",
+      "required": true,
+      "role": "envelope",
+      "sha256": "ba5e033fa4e98ea7e42a910235f5da7ba28db6afb96699aaceda82769e930356"
+    },
+    {
+      "byte_size": 4195190,
+      "filename": "result_arrays.npz",
+      "required": true,
+      "role": "host_arrays",
+      "sha256": "1ae621759cfd8e47ce4a9c1b579ab164a48e4c6f2eaf48808f482e28f3a8dccd"
+    }
+  ],
+  "format": "lcprop-artifact-manifest",
+  "manifest_schema_version": 1,
+  "run_id": "3593204"
+}

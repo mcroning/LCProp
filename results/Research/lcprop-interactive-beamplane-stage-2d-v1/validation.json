@@ -1,0 +1,23 @@
+{
+  "sha256": {
+    "src/lcprop/notebook/_launch_preview.py": "1197384bf2c074a709249652c0f02854decc937a0f8f31970812a685aefcaae9",
+    "src/lcprop/notebook/_beam_position_editor.py": "4e5665cf4809daa67680f6bb15b7eaa7c7426d946eafa87196c09817125e9a22",
+    "src/lcprop/notebook/interactive_lc.py": "45556b6f4f227c95d5bc5900764b3c996fa26d2f39cad5d31cfaba3479779aa1",
+    "tests/test_interactive_lc_unified_preview.py": "7a3179a358ed0668cda6f2209efe39f6f1b5bd8a136707985fe9146ddf67e7a5",
+    "docs/notebook_package.md": "ad66183adf55647bc74e19c0d3ef562cc9921b3611a623469b7ce3f2c84605b3",
+    ".codex-work/beam-stage2d/regressions.txt": "a3314aaa969ee98b66034b35b1a9ac36ed65820f5d0e3f7b9acecaa188e82f3e",
+    ".codex-work/beam-stage2d/frames.txt": "a759f7165fca51275992798fa006dbfc114dbf46ba3b8282e5738885df9fc78e"
+  },
+  "tests": {
+    "bounded_regressions": 53,
+    "real_ipympl_frames": 4
+  },
+  "preservation_before": {
+    "src/lcprop/notebook/interactive_lc.py": "1c5ba390a52a95e803cc46395718c07ef221e56e11e50fa90425b66aacc59dd0",
+    "src/lcprop/notebook/_beam_position_editor.py": "59e3356958a06cd0054632d7cc901e3d4bb9cad535e00104e1c1c41ec8fca197",
+    "src/lcprop/pr/published_static.py": "6b63f6452edf6c7964e39663394adec7fe866e4de913e6814cd9e04f9fb39fca",
+    "tests/test_pr_published_static.py": "ec5d4bb54ad301a266be4eb49f7116ef1f6594d8bee593595c33b60f438e0e18",
+    "notebooks/lc_static_local.ipynb": "a6ae0f4747aab14ecd7fae4ac24043c2d67298a49e71292418b4a581bb58d466"
+  },
+  "pixel_parity": "exact after aligning backend layout boxes; native browser parity not claimed"
+}

@@ -1,0 +1,122 @@
+{
+  "schema": "lcprop.pr_coupled_static_gpu_commissioning.v1",
+  "date": "2026-08-06",
+  "status": "passed",
+  "git": {
+    "branch": "feature/pr-second-order-static",
+    "sha": "243c2f62501829d03170fb3f05c2b1c266b3d6a5",
+    "repository": "/cluster/tufts/cglab/mcroning/LCProp",
+    "lcprop_import_path": "/cluster/tufts/cglab/mcroning/LCProp/src/lcprop/__init__.py"
+  },
+  "successful_job": {
+    "slurm_job_id": "2221987",
+    "state": "COMPLETED",
+    "exit_code": "0:0",
+    "node": "pax007",
+    "elapsed_seconds": 24,
+    "pytest_seconds": 13.688,
+    "batch_max_rss_kib": 139620,
+    "stdout_empty": false,
+    "stderr_empty": true
+  },
+  "blocked_job": {
+    "slurm_job_id": "2221964",
+    "state": "FAILED",
+    "exit_code": "4:0",
+    "node": "pax007",
+    "elapsed_seconds": 11,
+    "root_cause": "The environment imported an older lcprop installation from site-packages instead of the detached checkout.",
+    "incorrect_import_path": "/cluster/tufts/cglab/mcroning/condaenv/prenv/lib/python3.10/site-packages/lcprop/__init__.py",
+    "remediation": "Prepend /cluster/tufts/cglab/mcroning/LCProp/src to PYTHONPATH in the Slurm environment and record the resolved value in provenance.",
+    "production_code_changed": false,
+    "tests_changed": false
+  },
+  "cluster": {
+    "gpu": "NVIDIA A100 80GB PCIe",
+    "gpu_device_id": 0,
+    "cuda_visible_devices": "0",
+    "nvidia_driver": "575.57.08",
+    "cuda_module": "cuda/12.9.0",
+    "cuda_compiler": "12.9.41",
+    "cupy": "13.6.0",
+    "python": "3.10.4",
+    "numpy": "2.1.0",
+    "scipy": "1.15.2",
+    "pytest": "8.4.2"
+  },
+  "scheduler": {
+    "account": "default",
+    "partition": "gpu",
+    "qos": "normal",
+    "nodes": 1,
+    "tasks": 1,
+    "cpus_per_task": 2,
+    "memory_gib": 8,
+    "wall_time_seconds": 300,
+    "gpus": 1
+  },
+  "slurm_script": {
+    "path": "/cluster/tufts/cglab/mcroning/lcprop_runs/lcprop_pr_static_gpu_validation.sbatch",
+    "blocked_run_sha256": "c1702d12ec70fb5c7911ba6b10e5e755afe1a496a4cf21319a0dccdfa92cb351",
+    "successful_run_sha256": "34f794321bd6eeebdbf8d0e7858d8cb2401e6b378a88d3dd7c5942b94c85ca34"
+  },
+  "tests": [
+    {
+      "nodeid": "tests/test_pr_cyclic.py::test_batched_cyclic_solver_is_cupy_compatible_when_available",
+      "seconds": 9.835,
+      "result": "passed",
+      "comparison": {
+        "quantity": "cyclic-solver result versus dense CPU reference",
+        "rtol": 2e-13,
+        "atol": 2e-13
+      }
+    },
+    {
+      "nodeid": "tests/test_pr_static.py::test_batched_static_material_solve_stays_on_cupy_when_available",
+      "seconds": 1.331,
+      "result": "passed",
+      "comparison": {
+        "quantity": "batched CuPy fixed-intensity E versus dense NumPy E",
+        "rtol": 2e-12,
+        "atol": 2e-13
+      }
+    },
+    {
+      "nodeid": "tests/test_pr_static_workflow.py::test_cupy_static_workflow_agrees_with_numpy_when_available",
+      "seconds": 1.97,
+      "result": "passed",
+      "comparison": {
+        "quantities": [
+          "E_final",
+          "A_final",
+          "source_intensity_stack"
+        ],
+        "rtol": 2e-11,
+        "atol": 2e-12
+      },
+      "power_conservation": {
+        "result": "passed",
+        "relative_tolerance": 2e-13,
+        "absolute_tolerance": "pytest.approx default",
+        "measured_relative_drift_recorded": false
+      },
+      "backend_checks": {
+        "reported_backend": "cupy",
+        "is_gpu": true
+      }
+    }
+  ],
+  "junit": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "numerical_measurement_note": "All asserted comparisons passed. The tests did not emit the actual CPU/GPU differences or relative power drift, so only tolerance-bounded results are claimed.",
+  "artifacts": {
+    "remote_run_directory": "/cluster/tufts/cglab/mcroning/lcprop_runs/pr-static-gpu-2221987",
+    "remote_stdout": "/cluster/tufts/cglab/mcroning/lcprop_runs/lcprop-pr-static-gpu-2221987.stdout",
+    "remote_stderr": "/cluster/tufts/cglab/mcroning/lcprop_runs/lcprop-pr-static-gpu-2221987.stderr",
+    "local_retrieval_directory": "/private/tmp/lcprop-pr-static-gpu-2221987"
+  }
+}

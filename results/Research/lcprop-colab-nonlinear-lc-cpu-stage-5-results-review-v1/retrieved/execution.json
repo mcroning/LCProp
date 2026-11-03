@@ -1,0 +1,12 @@
+{
+  "script_sha256": "2ffed40dfc82d47b73bd1f9770c2ef4a12a2918e32bd2c137f6a252ed07f90a3",
+  "input_manifest_sha256": "9be0fdb38372a9112aa9b91a10374df5dee3065fdab4fefa4d2f5b1c4a938a15",
+  "command": [
+    "/usr/bin/python3",
+    "-I",
+    "/content/lc-nonlinear-colab-results/executed-example.py",
+    "--output",
+    "/content/lc-nonlinear-colab-results/result"
+  ],
+  "started_unix": 1791566734.585379
+}
