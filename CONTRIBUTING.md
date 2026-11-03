@@ -15,6 +15,7 @@
 5. Open a pull request against `main` once it is established as the public entry.
    State your base commit, problem, changes, checks, warnings and numerical scope.
    Do not include private cluster paths, credentials or bulk research outputs.
+   Opening a pull request starts review; it does not authorize merging it.
 
 ## Owner approval and the current-account model
 
