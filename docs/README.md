@@ -6,14 +6,18 @@ procedures. Private experiment logs, raw scheduler output, unpublished
 references, and event-specific prompts are maintained outside this repository.
 
 The GUI **Help** menu renders concise topics directly. For full guides, use the
-[rendered documentation index](https://github.com/mcroning/LCProp/blob/feature/pr-second-order-static/docs/README.md)
+[rendered documentation index](https://github.com/mcroning/LCProp/blob/main/docs/README.md)
 in a browser; no Markdown editor is required. Published guides can lag a local
 development checkout. Built-in Help ships with the installed Product.
 
 ## Start here
 
-- [`user/quick_start.md`](user/quick_start.md) — shortest path to a small LC
-  or PR run.
+- [`developer_quickstart.md`](developer_quickstart.md) — exact tested core reference
+  in a new environment; no GUI dependency.
+- [`user/quick_start.md`](user/quick_start.md) — desktop setup, exact schema-4
+  companion requirement, and small LC/PR starting cases.
+- [`developer_testing.md`](developer_testing.md) — concrete focused, CPU, GUI and
+  GPU test tiers with prerequisites and explicit exclusions.
 - [`user/user_guide.md`](user/user_guide.md) — controls, workflows, execution,
   retention, results, warnings, and limitations.
 - [`../README.md`](../README.md) — package overview, installation, examples,

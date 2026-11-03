@@ -52,6 +52,7 @@ plan; do not disable protections automatically.
 
 See the [extension map](docs/developer_extension_map.md) before changing physics,
 products or a frontend. Small examples are preferred to a new plugin framework.
-Relevant tests live under `tests/`; run selected checks in your new environment
-before proposing a broader suite. State skipped, large, GPU and cluster checks
-explicitly rather than implying they were exercised.
+Use the [concrete test tiers](docs/developer_testing.md) to select focused checks
+in your new environment before proposing a broader suite. The tiers identify
+real paths, prerequisites, optional device checks, and exclusions. State skipped,
+large, GPU and cluster checks explicitly rather than implying they were exercised.
