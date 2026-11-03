@@ -47,10 +47,12 @@ requested complex64/complex128 optical dtype. Cutoff refers to the supplied
 frequency grid, including its rounding. Near-cutoff phase is ill-conditioned;
 CPU local tests do not constitute GPU commissioning.
 
-The four ordinary workflows, marching static, streaming production, and
-coupling trace/references use this same dispersion for substeps and replay.
-Response half-screens, optical-substep counts, sponge/Tukey/scattering placement,
-source cadence, material updates and acceptance logic are unchanged.
+The shared dispersion is used by the propagation paths, including optical
+substeps and replay where configured. It does not identify the material-update
+ordering: full-cell hops and frozen-material half-screen propagation are
+separate consumers. See the static workflow table below for exact identities
+and sequences; do not infer source cadence or scattering placement from the
+diffraction kernel alone.
 This remains scalar homogeneous diffraction plus local material phase screens,
 not a full-vector or exact inhomogeneous Helmholtz solver.
 
@@ -103,19 +105,44 @@ For zero bias, the full nonlinear equation additionally retains `(I_x/I)E_x`
 and `-E E_x` on the right. The first of these is itself linear in E at fixed I.
 Do not describe local-I forcing as the full nonlinear hopping equation.
 
-Fresh GUI Local-I Static uses `pr_static_local_intensity_planes_v1`, with
-`per_cell_half_linear_full_local_phase_v1` arithmetic: optical half hop,
-one direct response from the arriving center-plane intensity, one full material
-phase, one canonical V2 cell phase, then the second optical half hop. It has no
-coupled iteration, backtracking or independent replay. Scattering increments
-cover the original cells and are applied at their centers. Periodic boundaries
-are required. No historical launch, windows or legacy scattering are imported.
+The material equation does not identify the optical/material update sequence.
+Use the explicit workflow and arithmetic identities below when interpreting a
+saved request or extending a solver.
+
+### Static workflow ordering
+
+Here `P(d)` is shared angular-spectrum diffraction over distance `d`, `T(I)` is
+a material solve for the stated intensity, `M(d,E)` is the corresponding local
+material phase over `d`, and `S(h)` is optional canonical scattering for that
+physical cell. These are implementation sequences, not numerical-order or new
+scientific-validation guarantees. Optical substeps and half response screens
+inside a frozen-material propagator do not imply a material update at every
+substep.
+
+| Variant and identity | Implemented sequence and source |
+|---|---|
+| Published optical-first reduced Static: `pr_static_published_optical_first_v1`; arithmetic `per_cell_full_linear_arriving_material_full_phase_scattering_v1` | For a cell of length `h`: `P(h) -> arriving I -> T(I) -> M(h,E) -> S(h)`. The material callback selects Local-I direct response or reduced nonlinear hopping. Material and scattering placement is at the cell's right endpoint; there is no final optical half hop. See [run_published_static / solve_arriving_material](../../src/lcprop/pr/published_static.py) and [step_published_cell](../../src/lcprop/pr/published_static_step.py). |
+| Unified nonlinear Static: `pr_static_unified_published_optical_first_v1`; arithmetic `per_cell_full_linear_arriving_unified_material_full_phase_scattering_v1` | Also `P(h) -> arriving I -> unified material equilibrium -> M(h,E_active) -> S(h)`. It uses explicit electrical closure, spatial discretization, solver and projection contracts, rather than the published reduced material callback. See [execute_unified](../../src/lcprop/pr/unified/integration.py), [run_unified_static](../../src/lcprop/pr/unified/workflow.py) and [closure specifications](../../src/lcprop/pr/unified/specs.py). Do not substitute the reduced A7 equation for every unified closure or assume identical normalization. |
+| Retained Local-I plane workflow: `pr_static_local_intensity_planes_v1`; arithmetic `per_cell_half_linear_full_local_phase_v1` | `P(h/2) -> center-plane I -> direct Local-I solve -> M(h,E) -> S(h) -> P(h/2)`. This is the distinct retained center-plane implementation, not the fresh GUI Local-I selection. See [run_local_intensity_planes](../../src/lcprop/pr/local_plane_workflow.py) and [step_local_intensity_cell](../../src/lcprop/pr/local_plane_step.py). |
+| Coupled midpoint Static: `pr_static` | Trial material corrections repropagate the entrance field and refresh the source `0.5*(I_before+I_after)`; accepted states are checked by an independent optical replay. For frozen `E`, each of `Nsub` optical substeps uses material half-screen, `P(h/Nsub)`, material half-screen; scattering is applied after the slice. See [run_pr_static](../../src/lcprop/pr/static_workflow.py), [advance_pr_slice_with_midpoint_source](../../src/lcprop/pr/workflow.py), and [advance_prepared_response](../../src/lcprop/optics/splitstep.py). This differs from `P(h/2) -> T -> P(h/2)`. |
+| Coupled transverse Static: `pr_transverse_static` | Material/optical fixed-point iterations use transverse material state and the same frozen-material midpoint optical primitive. See [run_pr_transverse_static / optical passes](../../src/lcprop/pr/transverse/static_workflow.py). It is distinct from the fresh nonlinear unified selection. |
+| Streaming modes | `production_nonlinear_strang` uses coupled midpoint optical propagation and a second independent solve from the original launch for replay. `full_nonlinear_lie_reference` and `legacy_linearized_spectral_lie` retain reference-loop full-hop/arriving-source/material-phase ordering with optional windows and their own material operators. These reference modes are not fresh GUI defaults. See [static_streaming](../../src/lcprop/pr/static_streaming.py). |
+
+The [GUI selector](../../src/lcprop/pr/gui/evolution_panel.py) routes fresh
+nonlinear reduced/transverse Static to the unified workflow unless legacy or
+image-amplification mode applies. Reduced Static Local-I selects the published
+optical-first workflow. [Request construction](../../src/lcprop/pr/gui/request_adapter.py)
+preserves their distinct request types. A historical half-hop description must
+not be applied to those fresh GUI selections. The separate
+[transverse marching reference](../../src/lcprop/pr/transverse/marching_static.py)
+also uses frozen-material half response screens and optical substeps; it is not
+the unified optical-first implementation.
 
 Old `pr_static` requests retain their midpoint identity and remain headlessly
-executable under that identity. The GUI rejects loading old midpoint Local-I
-requests rather than converting them implicitly. Nonlinear reduced, transverse
-and TD workflows are unchanged. Native certification of the newly integrated
-local-plane path remains pending.
+executable under that identity. The GUI rejects old midpoint Local-I requests
+rather than converting them implicitly. This documentation reconciliation does
+not certify native execution, convergence order, or scientific validity of any
+new combination; use matching workflow-specific evidence.
 
 ## Uniform-reference tangent: research reduced operator and transverse model
 

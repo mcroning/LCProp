@@ -298,7 +298,9 @@ plugins, and an SDK are not required.
 
 ## 15. Current Repository Mapping
 
-The Stage 1-4 working tree establishes the following canonical LC ownership:
+The ownership mapping below is checked against public baseline
+`cb17b6be8c0621a57e13e0a1410f7d7201f5b424` (2026-11-03). The original August
+migration plan is retained in section 18 as historical context, not pending work.
 
 | Concern | Canonical location | Historical compatibility location |
 |---|---|---|
@@ -310,7 +312,9 @@ The Stage 1-4 working tree establishes the following canonical LC ownership:
 | LC torque-balance products | `lcprop.lc.static_torque_balance` | `lcprop.products.static_torque_balance` |
 | LC workflows and runtime composition | `lcprop.lc.workflows.*` | `lcprop.workflows.*` |
 | LC operation registration | `lcprop.lc.operations` | composed by runners/applications |
-| LC checkpoint facade | `lcprop.lc.persistence` | implementations remain under `lcprop.persistence` |
+| LC algorithms | `lcprop.lc.theta_cn`, `theta_cn_zcoupled`, `theta_picard`, `static_relax`, `td_zmarch` | matching `lcprop.algorithms.*` module aliases |
+| LC checkpoint implementation | `lcprop.lc.persistence.static`, `timedependent` | `lcprop.persistence.static`, `timedependent` module aliases |
+| LC application | `lcprop.lc.gui.*` | selected `lcprop.gui.*` launchers/module aliases; reusable GUI framework remains shared |
 
 PR already owns its material specifications, source construction, evolution,
 static and time-dependent workflows, prepared optical response, product
@@ -323,9 +327,10 @@ Shared infrastructure currently includes beam/grid/backend records, optical
 launch and propagation, `WorkflowOperation`, runner protocols, presentation
 records, reusable views/workspace components, and persistence composition.
 
-The Stage 1-4 implementation is locally complete but is not part of the HEAD on
-which this ADR is first committed. It requires its own bounded review and
-separate implementation commit before becoming the architectural baseline.
+The original ADR described a then-uncommitted Stage 1-4 implementation. At the
+baseline above, the canonical implementations and aliases are committed; that
+old pre-commit gate is not a current instruction. This source inspection does
+not assert complete scientific, platform, or remote-workflow qualification.
 
 ## 16. Compatibility-Shim Policy
 
@@ -343,36 +348,51 @@ Shims may be retained intentionally for public API stability. Retirement must
 be a controlled compatibility decision after canonical paths are proven; it is
 not a prerequisite for architectural completion.
 
-## 17. Present Migration Gaps
+## 17. Implemented ownership and retained compatibility
 
-The repository does not yet satisfy the target in these areas:
+The original migration-gap list is preserved in the historical version linked
+below. At the recorded baseline:
 
-1. `BeamChannel.theta_weight`, `LaunchResult.theta_weights`, shared weighted
-   theta intensity, and related adapters/tests mix LC source coupling into
-   shared optical models.
-2. Shared `optics.splitstep` retains LC theta/index compatibility helpers.
-3. `RuntimeGrid.du` and `RuntimeGrid.dv` encode LC-normalized quantities in a
-   shared grid record.
-4. Semantically LC-owned algorithms remain physically under
-   `lcprop.algorithms`.
-5. LC checkpoint implementations remain under shared-looking persistence
-   modules, while shared persistence composition imports built-in materials.
-6. `LocalRunner` retains historical LC-oriented compatibility paths in
-   addition to registered operations.
-7. The top-level GUI remains LC-oriented; shared components and LC application
-   ownership are not fully separated.
-8. Compatibility shims in core, products, and workflows intentionally invert
-   normal dependency direction during migration.
-9. PR request/result naming and placement are workflow-specific but should be
-   audited only for inconsistent ownership or unclear semantics, not forced
-   into cosmetic symmetry.
+- Shared [BeamChannel](../../src/lcprop/core/beams.py),
+  [launch records](../../src/lcprop/optics/launch.py) and
+  [split-step propagation](../../src/lcprop/optics/splitstep.py) have no
+  `theta_weight`/`theta_weights` source-coupling field. LC constructs its source
+  in [lc.source](../../src/lcprop/lc/source.py) and response in
+  [lc.propagation](../../src/lcprop/lc/propagation.py).
+- [RuntimeGrid](../../src/lcprop/core/grid.py) stores physical spacing; LC's
+  normalized spacing is owned by [lc.normalization](../../src/lcprop/lc/normalization.py).
+  The lazy legacy `from_cell` export remains an explicit compatibility exception.
+- LC algorithms and checkpoint implementations live in the canonical locations
+  in section 15. Historical modules alias those implementations; they are not
+  alternate places to add physics.
+- [LocalRunner](../../src/lcprop/runners/local.py) dispatches explicit registered
+  operations. Its convenience methods such as `run_static` still import LC
+  operations for compatibility; removal is not required or authorized here.
+- The LC application lives under `lcprop.lc.gui`; shared views/workspace and
+  selected legacy LC launchers/aliases coexist under `lcprop.gui`.
 
-The validated full-transverse PR solver and BaTiO3 dielectric-anisotropy work
-remain isolated reference and validation artifacts. They are not production
-PR workflows and are not a reason to expand PR physics during architecture
-migration.
+Identity/provenance obligations are represented by
+[LC facade tests](../../tests/test_lc_ownership_facades.py),
+[algorithm ownership tests](../../tests/test_lc_algorithm_ownership.py) and
+[GUI ownership tests](../../tests/test_gui_ownership.py). Their presence is not a
+claim of a fresh test run. Compatibility exports in core, products, workflows,
+persistence and GUI remain deliberate exceptions, not generic material APIs.
 
-## 18. Ordered Remaining Migration Plan
+PR has both production integration and isolated reference paths. Do not apply
+the original assertion that all transverse work is reference-only to current
+requests; use the [PR model contracts](../science/pr_model_contracts.md) and
+workflow-specific support evidence. This update does not claim every migration
+or commissioning task is complete. Future alias retirement, new shared
+abstractions, or automatic remote environment provisioning needs its own scope;
+no current source relocation follows from this ADR.
+
+## 18. Historical ordered migration plan
+
+The plan below records the original sequencing, including work subsequently
+implemented. It is retained for provenance, not an executable backlog. Use
+sections 15 and 17 for the checked implementation status. The
+[original gap list and plan](https://github.com/mcroning/LCProp/blob/cb17b6be8c0621a57e13e0a1410f7d7201f5b424/docs/architecture/LCProp_Target_Architecture.md#17-present-migration-gaps)
+remain available at an immutable revision.
 
 Migration proceeds conservatively, one seam per task whenever practical:
 

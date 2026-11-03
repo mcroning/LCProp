@@ -235,9 +235,46 @@ before submission. Structured `progress.json` telemetry is atomically replaced
 when possible and is always best-effort: progress-write failure cannot change
 the scientific result, packaging, cancellation, or original exception.
 
-Automatic Slurm source deployment is a source-checkout workflow: it archives
-the committed `src/` tree and `pyproject.toml` from a clean Git revision. An
-installed wheel alone is not a remote-source deployment mechanism.
+### Package deployment and remote environment prerequisites
+
+Automatic deployment follows the **active LCProp import**, not merely the current
+working directory. [automatic_deployment_manager](../../src/lcprop/runners/distribution_deployment.py)
+supports two providers:
+
+- **Verified installed distribution:** a non-editable, pure-Python `py3-none-any`
+  LCProp installation with unambiguous ownership and a wheel `RECORD`. The
+  provider verifies owned file sizes/SHA-256 checksums and package resources,
+  constructs a content-addressed payload, and verifies it remotely before
+  scientific execution. The original wheel file and a Git checkout are not
+  required. Modified, missing, unowned, symlinked, unsupported native/executable,
+  ambiguous or editable distribution content is rejected; installed version
+  labels alone are insufficient evidence.
+- **Clean source checkout:** the active import must belong to its supported
+  `src/lcprop` tree. The [source provider](../../src/lcprop/runners/source_deployment.py)
+  uses a clean deployable committed revision and archives its supported source
+  content. Dirty or invalid deployable source fails validation; selecting this
+  provider does not silently fall back to an installed copy to hide that error.
+
+Both routes require a configured cluster profile, SSH authentication, scheduler
+access, permitted run/source roots, and an already provisioned remote Python
+with compatible scientific dependencies. The profile's `remote_python` path is
+exposed as **Remote Python** in the current connection/settings GUI. It must be
+supplied through site configuration; a wheel does not provision an interpreter,
+install remote dependencies, or discover/select a Conda environment.
+
+[Connection checks](../../src/lcprop/runners/cluster_connection.py) test the
+configured interpreter and scheduler access. Source identity verification and
+[GPU preflight](../../src/lcprop/runners/slurm.py) are additional existing checks;
+GPU profiles check CuPy/backend/device requirements before execution. These do
+not establish automatic environment provisioning or blanket workflow qualification.
+Identity failures and transport/startup failures are reported rather than
+accepted as matching artifacts.
+
+Automatic remote interpreter provisioning/selection is deferred to a separate
+functional milestone. The intended ordinary-user workflow should use an
+administrator-provisioned, qualified profile without manually choosing or
+troubleshooting Python/Conda environments. The current GUI/profile requirement
+is a documented limitation, not a promise of zero-configuration cluster setup.
 
 ## Runtime and resource planning
 

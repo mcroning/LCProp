@@ -61,7 +61,8 @@ with `python -m pip install -e '.[test]'`. An editable installation should now
 resolve `lcprop.__file__` inside **your fork's `src/lcprop`**, not the environment's
 package directory and never the maintainer's working checkout. Check the source
 commit and import location again before testing. Run checks relevant to your
-change; do not automatically run large solvers or cluster workflows.
+change using the [test tiers](developer_testing.md); do not automatically run
+large solvers or cluster workflows.
 
 Desktop GUI work is a separate route: the `gui` extra supplies GUI dependencies,
 but LaunchPlane is a separate companion with its own compatibility requirements.
