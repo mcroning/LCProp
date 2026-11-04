@@ -23,7 +23,7 @@ class ImageView(FigureCanvasQTAgg):
     def __init__(self, *, compact_vertical: bool = False):
         self.figure = Figure(figsize=(5, 5))
         super().__init__(self.figure)
-        self.setMinimumSize(360, 300)
+        self.setMinimumSize(160, 140)
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,

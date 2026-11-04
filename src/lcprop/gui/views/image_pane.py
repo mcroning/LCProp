@@ -107,7 +107,7 @@ class ImagePane(QWidget):
         self.scales.changed.connect(self._refresh_scale)
         self.image_view = ImageView()
         self.image_view.positionSelected.connect(self._position_selected)
-        layout.addWidget(self.image_view)
+        layout.addWidget(self.image_view, 1)
 
     def _refresh_scale(self):
         self._field_changed(self.field_selector.currentIndex())

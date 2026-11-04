@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from lcprop.gui.layout import readable_form
+from lcprop.gui.layout import bounded_form
 from lcprop.gui.numeric_widgets import CompactDoubleSpinBox
 
 from PySide6.QtWidgets import (
@@ -39,7 +39,7 @@ class PRMaterialPanel(QWidget):
         super().__init__(parent)
         defaults = PRMaterialSpec()
         layout = QVBoxLayout(self)
-        primary = readable_form(QFormLayout())
+        primary = bounded_form(QFormLayout())
 
         self.normalization_mode = QComboBox()
         self.normalization_mode.addItem("Physical total illumination", INTEGRAL_NORMALIZATION)
@@ -90,7 +90,7 @@ class PRMaterialPanel(QWidget):
         layout.addLayout(primary)
 
         advanced_box = QGroupBox("Advanced material normalization")
-        advanced = readable_form(QFormLayout(advanced_box))
+        advanced = bounded_form(QFormLayout(advanced_box))
         self.relative_permittivity = _double_spin(
             1e-9,
             1e12,

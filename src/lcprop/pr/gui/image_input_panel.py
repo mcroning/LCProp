@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from lcprop.gui.layout import readable_form
+from lcprop.gui.layout import bounded_form
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import (
     QComboBox,
@@ -65,7 +65,7 @@ class PRImageInputPanel(QWidget):
         self._enabled_channel_names: list[str] = []
 
         layout = QVBoxLayout(self)
-        form = readable_form(QFormLayout())
+        form = bounded_form(QFormLayout())
         self.input_mode = QComboBox()
         self.input_mode.addItem("General beams / two-beam coupling", PR_GAUSSIAN_INPUT_MODE)
         self.input_mode.addItem(
@@ -99,7 +99,7 @@ class PRImageInputPanel(QWidget):
         form.addRow("Signal channel", self.signal_channel)
         layout.addLayout(form)
         layout.addWidget(self.role_note)
-        layout.addWidget(self.clear_roles)
+        layout.addWidget(self.clear_roles, alignment=Qt.AlignLeft)
         layout.addWidget(self.analysis_note)
         layout.addStretch(1)
         self._image_widgets = tuple(

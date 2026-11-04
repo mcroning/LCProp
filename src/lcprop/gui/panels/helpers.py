@@ -1,9 +1,9 @@
 from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
-from lcprop.gui.numeric_widgets import CompactDoubleSpinBox
+from lcprop.gui.numeric_widgets import CompactDoubleSpinBox, GridSpinBox
 
 
 def spin_box(lo: int, hi: int, value: int) -> QSpinBox:
-    w = QSpinBox()
+    w = GridSpinBox()
     w.setRange(lo, hi)
     w.setValue(value)
     return w
