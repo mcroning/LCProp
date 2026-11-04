@@ -13,7 +13,7 @@ from lcprop.gui.runtime_status import RuntimeStatusLabel, reserve_button_text
 
 from lcprop.gui.layout import FlowLayout, application_layout
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from functools import partial
 from time import monotonic
 import traceback
@@ -143,6 +143,16 @@ from lcprop.pr.runtime_estimator import (
 )
 from lcprop.runners.base import RunnerResult
 from lcprop.runners.local import LocalRunner
+
+
+@dataclass(frozen=True)
+class _PRExecutionSnapshot:
+    """Execution choices captured on the GUI thread before worker dispatch."""
+
+    runner: object
+    remote: bool
+    result_policy: str
+    remote_kwargs: tuple[tuple[str, str], ...]
 
 
 def _image_amplification_validation_status(capability, base_request) -> str:
@@ -765,7 +775,7 @@ class PRMainWindow(QWidget):
             allowed = (name in UNIFIED_ANALYSIS_PRODUCTS) if unified else (name in PUBLISHED_STATIC_ANALYSIS_PRODUCTS if local_plane else not name.startswith('unified_'))
             if unified and name=="unified_face_y_volume":
                 allowed = self.evolution_panel.unified_closure.dimension==2
-            action.setEnabled(allowed)
+            action.setEnabled(allowed and not self._background_running)
             if not allowed:
                 with QSignalBlocker(action):
                     action.setChecked(False)
@@ -793,11 +803,14 @@ class PRMainWindow(QWidget):
                 for label, value in items:
                     self.result_policy_selector.addItem(label, value)
             self.result_policy_selector.setCurrentIndex(self.result_policy_selector.findData(selected))
-        self.analysis_products_button.setEnabled(supported)
+        self.analysis_products_button.setEnabled(supported and not self._background_running)
         self.analysis_products_button.setToolTip(
             'Unified Static: selecting far-field requests the exact M5 accepted-boundary spectrum and Product axes.'
             if unified else 'Reduced x-only Static only; select before execution. Unselected exact products will not be retrievable later.')
-        self.result_policy_selector.setEnabled(supported or self.execution_target_selector.currentData() == "slurm")
+        self.result_policy_selector.setEnabled(
+            not self._background_running
+            and (supported or self.execution_target_selector.currentData() == "slurm")
+        )
 
     def _analysis_selection_changed(self, *event):
         if (event and event[0] is True and hasattr(self,'evolution_panel')
@@ -1047,6 +1060,8 @@ class PRMainWindow(QWidget):
         )
 
     def preview_request_clicked(self) -> None:
+        if self._background_running or self._close_requested:
+            return
         workspace = self.results_panel.workspace
         workspace.begin_request('Inspect current Run PR configuration')
         workspace.set_request_summary('Current Run PR configuration: inspection pending; not executed.')
@@ -1567,9 +1582,23 @@ class PRMainWindow(QWidget):
         values["result_policy"] = str(self.result_policy_selector.currentData())
         return values
 
-    def _run_registered(self, request, **kwargs):
+    def _capture_execution_snapshot(self):
         self._require_execution_intent_resolved()
-        policy = str(self.result_policy_selector.currentData())
+        runner = self.runner
+        remote = runner is self.slurm_runner
+        return _PRExecutionSnapshot(
+            runner=runner,
+            remote=remote,
+            result_policy=str(self.result_policy_selector.currentData()),
+            remote_kwargs=tuple(self._remote_runner_kwargs().items()) if remote else (),
+        )
+
+    def _run_registered(self, request, *, execution_snapshot=None, **kwargs):
+        # Direct synchronous callers may capture here. Background Run always
+        # supplies its GUI-thread snapshot; that path never reads GUI controls.
+        snapshot = (self._capture_execution_snapshot()
+                    if execution_snapshot is None else execution_snapshot)
+        policy = snapshot.result_policy
         if policy.startswith("analysis") and not isinstance(request, (PRStaticRunRequest, PublishedStaticRequest, UnifiedFreshRequest)):
             raise ValueError("Analysis product selection is supported only by reduced Static")
         if isinstance(
@@ -1585,12 +1614,10 @@ class PRMainWindow(QWidget):
                 else image_amplification_experiment_request(request)
             )
             runner_kwargs = (
-                self._remote_runner_kwargs()
-                if self.runner is self.slurm_runner
-                else None
+                dict(snapshot.remote_kwargs) if snapshot.remote else None
             )
             return run_image_amplification_experiment(
-                self.runner,
+                snapshot.runner,
                 composite,
                 cancellation_token=kwargs.get("cancellation_token"),
                 progress_callback=kwargs.get("progress_callback"),
@@ -1645,13 +1672,13 @@ class PRMainWindow(QWidget):
                 )
 
             kwargs["_before_product_conversion"] = before_product_conversion
-        if self.runner is self.slurm_runner:
-            kwargs.update(self._remote_runner_kwargs())
+        if snapshot.remote:
+            kwargs.update(dict(snapshot.remote_kwargs))
         elif isinstance(request, (PRStaticRunRequest, PublishedStaticRequest, UnifiedFreshRequest)):
             kwargs["_result_policy"] = policy
         elif isinstance(request, PRRunRequest):
             kwargs["live_preview_policy"] = PRLivePreviewPolicy()
-        return self.runner.run_registered(
+        return snapshot.runner.run_registered(
             PR_MATERIAL_ID,
             self._workflow_id_for_request(request),
             request,
@@ -1953,6 +1980,12 @@ class PRMainWindow(QWidget):
             self.results_panel.workspace.set_operation_status("Run not started")
             return
 
+        try:
+            execution_snapshot = self._capture_execution_snapshot()
+        except Exception:
+            report_failure(self, traceback.format_exc())
+            return
+
         if (
             self.last_checkpoint is not None
             and self._workflow_id_for_request(request)
@@ -1962,7 +1995,9 @@ class PRMainWindow(QWidget):
                 "Starting a fresh PR run; previous checkpoint cleared."
             )
             self.last_checkpoint = None
-        runner_callable = self._run_registered
+        runner_callable = partial(
+            self._run_registered, execution_snapshot=execution_snapshot,
+        )
         if self.input_panel.requests_optional_image_analysis():
             # Snapshot roles on the GUI thread. The worker never reads widgets
             # or lets subsequent editing change this run's analysis ownership.
@@ -1972,6 +2007,7 @@ class PRMainWindow(QWidget):
             )
             runner_callable = partial(
                 self._run_with_optional_image_analysis, selection=selection,
+                execution_snapshot=execution_snapshot,
             )
         self._start_background(
             request,
@@ -2229,6 +2265,12 @@ class PRMainWindow(QWidget):
         self.execution_target_selector.setEnabled(enabled)
         self.remote_execution_controls.setEnabled(enabled)
         self.run_button.setEnabled(enabled)
+        self.preview_button.setEnabled(enabled)
+        if enabled:
+            self._update_product_controls()
+        else:
+            self.result_policy_selector.setEnabled(False)
+            self.analysis_products_button.setEnabled(False)
         self.experiment_file_buttons.setEnabled(enabled)
         self.load_checkpoint_button.setEnabled(enabled)
         self.stop_button.setVisible(not enabled)
