@@ -114,7 +114,18 @@ class Workspace(QWidget):
         fields_layout.setContentsMargins(2, 2, 2, 2)
         fields_layout.setSpacing(2)
         field_header = QHBoxLayout()
+        field_header.addWidget(QLabel("Field"))
         field_header.addWidget(self.spatial_selector, 1)
+        self.aspect_selector = QComboBox()
+        self.aspect_selector.setAccessibleName("Plot aspect ratio")
+        self.aspect_selector.addItem("Physical aspect", False)
+        self.aspect_selector.addItem("Square aspect", True)
+        self.aspect_selector.setToolTip(
+            "Physical uses the same screen distance for the same physical length. "
+            "Square fits the displayed extent into a square."
+        )
+        self.aspect_selector.currentIndexChanged.connect(self._set_plot_aspect)
+        field_header.addWidget(self.aspect_selector)
         self.display_options = QToolButton()
         self.display_options.setText("Display options")
         self.display_options.setCheckable(True)
@@ -197,6 +208,38 @@ class Workspace(QWidget):
         layout.addWidget(self.open_td_preview)
         self._td_preview_artifact = None
         self._artifact_directory = None
+        self._show_pending_fields()
+
+    def _set_plot_aspect(self, _index):
+        square = self.aspect_selector.currentData()
+        for view in (self.image_pane.image_view, self.longitudinal_pane.xz_view,
+                     self.longitudinal_pane.yz_view):
+            view.set_square_aspect(square)
+
+    def _show_pending_fields(self):
+        self.spatial_selector.blockSignals(True)
+        self.spatial_selector.clear()
+        for name in ("Input intensity", "Output intensity"):
+            self.spatial_selector.addItem(name, ["pending", name])
+        self.spatial_selector.blockSignals(False)
+        self._select_spatial_product()
+
+    def _show_pending_cuts(self, name):
+        image, longitudinal = self.image_pane, self.longitudinal_pane
+        image.selection_message.setText("x–y cut")
+        image.image_view.show()
+        longitudinal.show()
+        longitudinal.cuts.show()
+        longitudinal.no_data_label.hide()
+        for slider in (longitudinal.z_plane_slider, longitudinal.y_cut_slider,
+                       longitudinal.x_cut_slider):
+            slider.setEnabled(False)
+        for view, horizontal, vertical in (
+            (image.image_view, "x", "y"),
+            (longitudinal.xz_view, "z", "x"),
+            (longitudinal.yz_view, "z", "y"),
+        ):
+            view.show_empty_cut(horizontal, vertical, name)
 
     def _show_display_options(self, expanded: bool) -> None:
         # Hide parents only: data-dependent visibility/enabled states of their
@@ -420,6 +463,13 @@ class Workspace(QWidget):
         if selection is None:
             return
         mode, key = selection
+        if mode == "pending":
+            self._show_pending_cuts(key)
+            return
+        for slider in (self.longitudinal_pane.z_plane_slider,
+                       self.longitudinal_pane.y_cut_slider,
+                       self.longitudinal_pane.x_cut_slider):
+            slider.setEnabled(True)
         # Reset presentation transforms before ImageView installs a signed plane.
         from lcprop.gui.views.display_scale import reset_display_norm
         for view in (self.image_pane.image_view, self.longitudinal_pane.xz_view,
@@ -456,7 +506,9 @@ class Workspace(QWidget):
         self._apply_linked_norm()
 
     def _remember_spatial_selection(self, _index):
-        self._explicit_spatial_selection = self.spatial_selector.currentData()
+        selection = self.spatial_selector.currentData()
+        if selection and selection[0] != "pending":
+            self._explicit_spatial_selection = selection
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

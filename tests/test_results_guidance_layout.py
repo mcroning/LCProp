@@ -67,6 +67,30 @@ class ResultsGuidanceTests(unittest.TestCase):
                         self.assertEqual((v.ax.get_xlim(),v.ax.get_ylim()),original_limits)
                         self.assertEqual(hashlib.sha256(f.data.tobytes()).hexdigest(),digest)
 
+    def test_pending_cut_labels_and_aspect_selector(self):
+        workspace = self.display(Workspace())
+        views = (workspace.image_pane.image_view, workspace.longitudinal_pane.xz_view,
+                 workspace.longitudinal_pane.yz_view)
+        self.assertGreaterEqual(workspace.spatial_selector.count(), 2)
+        workspace.spatial_selector.setCurrentIndex(1)
+        for view, labels in zip(views, (("x", "y"), ("z", "x"), ("z", "y"))):
+            self.assertEqual((view.ax.get_xlabel(), view.ax.get_ylabel()), labels)
+            self.assertIn("Output intensity", view.ax.get_title())
+            self.assertFalse(view.image.get_visible())
+            self.assertFalse(view.colorbar.ax.get_visible())
+
+        cut = views[1]
+        field = synthetic(("z", "x"), {"z": "mm", "x": "um"})
+        cut.set_field(field, extent=(0, .008, -1, 1), vmin=0, vmax=31)
+        limits = cut.ax.get_xlim(), cut.ax.get_ylim()
+        self.check_aspect(cut, 4.)
+        workspace.aspect_selector.setCurrentIndex(1)
+        self.check_aspect(cut, 1.)
+        workspace.aspect_selector.setCurrentIndex(0)
+        self.check_aspect(cut, 4.)
+        self.assertEqual((cut.ax.get_xlim(), cut.ax.get_ylim()), limits)
+        self.assertTrue(np.array_equal(cut.image.get_array(), field.data.T))
+
     def test_placeholder_is_stable_but_not_scientific_aspect_evidence(self):
         v=self.display(ImageView())
         for size in ((550,300),(400,700)):
