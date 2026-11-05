@@ -53,7 +53,7 @@ class ImageView(FigureCanvasQTAgg):
         self.image = self.ax.imshow(
             np.zeros((2, 2)),
             origin="lower",
-            aspect="auto",
+            aspect="equal",
             interpolation="nearest",
             vmin=0.0,
             vmax=1.0,
@@ -151,7 +151,7 @@ class ImageView(FigureCanvasQTAgg):
         self.image.set_extent(display_extent)
         self.image.set_cmap(getattr(field, "colormap", "viridis"))
         self.image.set_clim(vmin=vmin, vmax=vmax)
-        self.ax.set_aspect(_image_aspect(field))
+        self.ax.set_aspect(_image_aspect(field, swap_axes=swap_axes))
         self.ax.set_xlim(initial_limits[0], initial_limits[1])
         self.ax.set_ylim(initial_limits[2], initial_limits[3])
 
@@ -184,20 +184,21 @@ class ImageView(FigureCanvasQTAgg):
         import textwrap
         width, height = self.figure.bbox.width, self.figure.bbox.height
         point = self.figure.dpi / 72.
-        left, right, bottom, top = (v * point for v in (52., 78., 44., 44.))
+        # Keep font-sized label gutters, using less empty title space.
+        title = getattr(self, '_title_text', '')
+        left, right, bottom, top = (v * point for v in
+                                   (48., 66., 34., 30. if title else 18.))
         plot_width = max(width - left - right, 20 * point)
         plot_height = max(height - bottom - top, 20 * point)
-        axes = tuple(getattr(self._field, 'axes', ()))
-        if axes == ('s_x', 's_y') or (axes == ('x', 'y') and
-                                      getattr(self, '_time_evolution_layout', False)):
-            # The field, not the caller, owns angular layout. Center image + gap
-            # + bar together between the label gutters and use all available
-            # height unless the physical angular aspect makes width limiting.
+        aspect = self.ax.get_aspect()
+        if aspect != 'auto':
+            # Preserve coordinate scale for spatial images (including cuts),
+            # not a square canvas. Fit the physical extent and colorbar together.
             gap, bar_width = 14 * point, 9 * point
             right_labels = right - gap - bar_width
             available = max(width - left - right_labels, gap + bar_width + 1)
             x0, x1 = self.ax.get_xlim(); y0, y1 = self.ax.get_ylim()
-            ratio = abs((x1-x0)/(y1-y0)) if y1 != y0 else 1.
+            ratio = abs((x1-x0)/(y1-y0)) / float(aspect) if y1 != y0 else 1.
             fitted_width = min(available - gap - bar_width, plot_height * ratio)
             fitted_height = fitted_width / ratio
             group_width = fitted_width + gap + bar_width
@@ -481,14 +482,28 @@ def _extent_value_to_index(value: float, n: int, lo: float, hi: float) -> int:
     return int(round(frac * float(n - 1)))
 
 
-def _image_aspect(field) -> str:
-    """Preserve equal-coordinate aspect for transverse and angular images."""
+def _image_aspect(field, *, swap_axes=False) -> str | float:
+    """Spatial axes use physical scale, including anisotropic longitudinal cuts.
+
+    A z extent four times x stays 4:1, rather than stretching with the window.
+    Known differing length units are converted for display aspect only; stored
+    extents, units and arrays are unchanged. Mixed/nonspatial axes retain auto.
+    """
     axes = tuple(getattr(field, "axes", ()))
-    return (
-        "equal"
-        if axes in (("x", "y"), ("s_x", "s_y"), ("source_x", "source_y"))
-        else "auto"
-    )
+    if swap_axes:
+        axes = axes[::-1]
+    if len(axes) == 2 and set(axes) in ({"s_x", "s_y"}, {"source_x", "source_y"}):
+        return "equal"
+    if len(axes) == 2 and set(axes) <= {"x", "y", "z"}:
+        scales = {"m": 1., "mm": 1e-3, "um": 1e-6,
+                  "µm": 1e-6, "μm": 1e-6, "nm": 1e-9}
+        units = getattr(field, "units", {})
+        horizontal, vertical = (units.get(axis, "") for axis in axes)
+        if horizontal in scales and vertical in scales:
+            return scales[vertical] / scales[horizontal]
+        if horizontal == vertical:
+            return "equal"
+    return "auto"
 
 
 def _label_with_unit(label: str, units: dict[str, str]) -> str:

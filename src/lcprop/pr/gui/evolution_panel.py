@@ -14,8 +14,11 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
+    QScrollArea,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -65,8 +68,19 @@ class PREvolutionPanel(QWidget):
             optical_substeps=1,
             integrator=PR_SEMI_IMPLICIT_INTEGRATOR,
         )
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.form_scroll = QScrollArea()
+        self.form_scroll.setFrameShape(QFrame.NoFrame)
+        self.form_scroll.setWidgetResizable(True)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        self.form_scroll.setWidget(content)
+        outer.addWidget(self.form_scroll)
         form = bounded_form(QFormLayout())
+        # Numeric/choice controls keep their natural widths; explanatory labels
+        # alone request expansion and supply height-for-width to the form.
+        form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         self.evolution = QComboBox()
         self.evolution.addItem("Static", "static")
@@ -97,6 +111,11 @@ class PREvolutionPanel(QWidget):
         )
         self.algorithm_status = QLabel()
         self.algorithm_status.setWordWrap(True)
+        policy = self.algorithm_status.sizePolicy()
+        policy.setHorizontalPolicy(QSizePolicy.Expanding)
+        policy.setVerticalPolicy(QSizePolicy.Minimum)
+        policy.setHeightForWidth(True)
+        self.algorithm_status.setSizePolicy(policy)
         self.Nt = spin_box(0, 1_000_000_000, defaults.Nt)
         self.dt_normalized = CompactDoubleSpinBox()
         self.dt_normalized.setRange(1e-12, 1e6)
@@ -160,6 +179,11 @@ class PREvolutionPanel(QWidget):
         )
         self.execution_guidance = QLabel()
         self.execution_guidance.setWordWrap(True)
+        policy = self.execution_guidance.sizePolicy()
+        policy.setHorizontalPolicy(QSizePolicy.Expanding)
+        policy.setVerticalPolicy(QSizePolicy.Minimum)
+        policy.setHeightForWidth(True)
+        self.execution_guidance.setSizePolicy(policy)
 
         form.addRow("Evolution", self.evolution)
         form.addRow("Transport", self.transport_model)

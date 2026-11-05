@@ -111,13 +111,26 @@ class Workspace(QWidget):
         self.fields_splitter.setSizes([420, 560])
         self.fields_page = QWidget()
         fields_layout = QVBoxLayout(self.fields_page)
-        fields_layout.addWidget(self.spatial_selector)
+        fields_layout.setContentsMargins(2, 2, 2, 2)
+        fields_layout.setSpacing(2)
+        field_header = QHBoxLayout()
+        field_header.addWidget(self.spatial_selector, 1)
+        self.display_options = QToolButton()
+        self.display_options.setText("Display options")
+        self.display_options.setCheckable(True)
+        self.display_options.setArrowType(Qt.RightArrow)
+        self.display_options.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.display_options.setToolTip("Show fit, color limits, orientation and guide controls")
+        self.display_options.toggled.connect(self._show_display_options)
+        field_header.addWidget(self.display_options)
+        fields_layout.addLayout(field_header)
         fields_layout.addWidget(self.linked_log)
         fields_layout.addWidget(self.fields_splitter, 1)
         self.fields_scroll = QScrollArea()
         self.fields_scroll.setWidgetResizable(True)
         self.fields_scroll.setWidget(self.fields_page)
         self.tabs.addTab(self.fields_scroll, "Fields")
+        self._show_display_options(False)
 
         self.image_pane.physicalPositionSelected.connect(
             self._image_position_selected
@@ -184,6 +197,14 @@ class Workspace(QWidget):
         layout.addWidget(self.open_td_preview)
         self._td_preview_artifact = None
         self._artifact_directory = None
+
+    def _show_display_options(self, expanded: bool) -> None:
+        # Hide parents only: data-dependent visibility/enabled states of their
+        # children remain owned by the existing panes and scale callbacks.
+        self.image_pane.controls_widget.setVisible(expanded)
+        self.longitudinal_pane.options_widget.setVisible(expanded)
+        self.linked_log.setVisible(expanded)
+        self.display_options.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
 
     def begin_request(self, operation: str) -> None:
         """Identify a new attempt before construction can fail."""
