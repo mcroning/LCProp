@@ -30,6 +30,14 @@ Current public-entry documentation may be newer than that reference while keepin
 runtime source unchanged. Other historical and experimental branches remain
 available; do not assume a branch name identifies a validated scientific result.
 
+## Optional Beam-editor compatibility
+
+The physical-intent Beam integration requires LaunchPlane **schema 4**;
+schema-3 files and the old beam API are intentionally incompatible. There is
+no automatic migration. See the [compatibility notice](docs/architecture/beamplane_physical_launch_contract.md#schema-4-compatibility)
+before recreating or explicitly re-exporting obsolete definitions. The
+calculation engine remains independent of this optional GUI companion.
+
 ## Development boundaries
 
 LC and PR own their physics and workflows. Shared propagation accepts prepared

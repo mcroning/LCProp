@@ -1,13 +1,37 @@
 # BeamPlane physical launch: external direction, beam-normal profiles and power
 
-Date: 2026-09-22. Status: **Future design candidate; implementation NOT
+Original date: 2026-09-22. Original status: **Future design candidate; implementation NOT
 AUTHORIZED.** This document makes design decisions and analytic derivations;
 it does not claim implemented or numerically validated high-angle physics.
 
-Source baselines: LCProp `5131648f7a7560b0a4f635d2c6a6bb1e70ffeacf` on
+Original source baselines: LCProp `5131648f7a7560b0a4f635d2c6a6bb1e70ffeacf` on
 `feature/pr-second-order-static`; LaunchPlane
 `add5f6bdbfcceaea7a8f2fd132e4ebf70b6eb5a8`; read-only Research context
 `b947fac51722eafa971e756a2cc2053be065294d`.
+
+## Current-source clarification (2026-11-04)
+
+The reviewed LCProp `9ff9164ca0d285b99399d9ad5f56b912c3da25e8` and
+LaunchPlane `f938bb765d25242e5ce8f722dbd1b6613591837c` use signed external
+incidence and LaunchPlane schema 4. The signed-direction and compatibility
+clarifications below describe that source contract. Other original design
+rationale, prospective milestones and references to the then-current sources
+remain historical context tied to the original baselines above; they are not
+claims that those baselines or every planned feature are current today.
+This documentation update changes no implementation and establishes no new
+numerical, native-GUI or high-angle physics qualification.
+
+## Schema-4 compatibility
+
+The physical-intent Beam integration requires **LaunchPlane schema 4**. This is
+an intentional breaking change: schema-3 files and the old laboratory-waist /
+wavevector beam API are incompatible. The current serializer rejects other
+schema versions, and LCProp's adapter requires a schema-4 companion. There is
+**no automatic migration or reinterpretation** of obsolete beam definitions.
+Recreate definitions, or explicitly re-export them through a separately
+justified process with known external-medium, waist-plane and phase-reference
+provenance. Preserve original files and results. No converter or compatibility
+shim is introduced or authorized by this clarification.
 
 ## Ownership and precedence
 
@@ -37,6 +61,9 @@ the [architecture standard](../codex/01_Architecture/architecture_review.md)
 and [Development/evidence gates](../codex/README.md) in later milestones.
 
 ## Current source facts and the archival lesson
+
+These source facts describe the original baselines above, not the reviewed
+schema-4 pair.
 
 - LaunchPlane's public `README.md`, `src/launchplane/model.py` and
   `src/launchplane/serialization.py` at the baseline above already support
@@ -80,7 +107,7 @@ and [Development/evidence gates](../codex/README.md) in later milestones.
 ## Canonical physical intent
 
 The first consumer-ready contract carries vacuum wavelength in micrometres,
-requested incident power in mW, external medium index, external polar angle and
+requested incident power in mW, external medium index, signed external incidence angle and
 azimuth, external beam-normal collimated Gaussian radii, beam roll, entrance
 intersection `(x0,y0)`, phase, coherence group and existing laboratory-plane
 launch elements. Lengths are physical micrometres, internal angular values
@@ -110,10 +137,14 @@ test/periodic-cell prescription, not a finite physical beam with an unexplained
 ## Direction, refraction and admissibility
 
 Use a right-handed laboratory frame: x to the right, y upward, material
-entrance at z=0, forward into the material along +z. Define
+entrance at z=0, forward into the material along +z. The earlier design used
+`0 <= theta_ext < pi/2` as an unsigned canonical representation. The current
+[BeamChannel](../../src/lcprop/core/beams.py) and reviewed LaunchPlane model
+accept signed incidence instead; they preserve theta's sign while wrapping
+phi modulo 2*pi. Define
 
 ```text
-0 <= theta_ext < pi/2
+-pi/2 < theta_ext < pi/2
 phi modulo 2*pi, measured from +x toward +y
 s_ext = (sin(theta_ext)*cos(phi), sin(theta_ext)*sin(phi), cos(theta_ext))
 k_ext = 2*pi*n_ext/lambda0
@@ -121,10 +152,15 @@ kx = k_ext*sin(theta_ext)*cos(phi)
 ky = k_ext*sin(theta_ext)*sin(phi)
 ```
 
-Thus phi=0 points toward +x, phi=pi/2 toward +y, and opposite transverse
-directions use phi+pi. At theta=0, phi has no directional meaning; display a
-normal-incidence symbol, not a meaningful arrow. Beam roll still orients an
-elliptical cross-section at normal incidence.
+For positive theta, phi=0 points toward +x and phi=pi/2 toward +y. Negative
+theta reverses the transverse direction: `(-a, phi)` and `(a, phi+pi)` have the
+same physical propagation direction. The editor does not force the latter
+unsigned representation. The [inverse direction resolver](../../src/lcprop/optics/physical_launch.py)
+chooses the equivalent signed-theta branch nearest the existing azimuth; ties
+retain the current theta sign. At zero displacement it retains phi and signed
+zero. At theta=0, phi has no directional meaning; use a normal-incidence symbol
+rather than a directional arrow. Beam roll still orients an elliptical
+cross-section at normal incidence.
 
 For a forward scalar mode at a planar isotropic interface:
 
@@ -132,10 +168,15 @@ For a forward scalar mode at a planar isotropic interface:
 k_int = 2*pi*n_int/lambda0
 kz_int = sqrt(k_int**2 - kx**2 - ky**2) > 0
 s_int = (kx,ky,kz_int)/k_int
-n_ext*sin(theta_ext) = n_int*sin(theta_int)
+theta_int = atan2(hypot(kx,ky), kz_int)  # nonnegative resolver readout
+n_ext*abs(sin(theta_ext)) = n_int*sin(theta_int)
 ```
 
-Tangential k is conserved; phi is the same on both sides. Reject a carrier
+Tangential k and the physical transverse ray direction are conserved. The
+resolver's theta_int above is a nonnegative magnitude, not signed editor
+intent; for negative theta_ext the ray azimuth is phi+pi. Equivalently, when
+using a signed internal inclination about the same phi, the signed Snell
+relation is `n_ext*sin(theta_ext) = n_int*sin(theta_int_signed)`. Reject a carrier
 with `kx**2+ky**2 >= k_int**2`: negative radicand means no propagating
 transmitted carrier (total internal reflection where applicable); equality is
 grazing, with no positive face-normal flux for the proposed finite-power beam.
@@ -159,8 +200,9 @@ interface needs a separately reviewed dispersion/energy-flow model.
 
 For coherent beams at the same vacuum wavelength through the same planar
 isotropic interface, define `K_perp = k2_perp - k1_perp`. The cosine intensity
-fringes have transverse period `2*pi/|K_perp|` along K_perp. For equal polar
-angles theta_ext and opposing azimuths in one external medium:
+fringes have transverse period `2*pi/|K_perp|` along K_perp. For equal
+nonnegative polar-angle magnitudes theta_ext and opposing azimuths in one
+external medium (use `abs(theta_ext)` when starting from signed editor intent):
 
 ```text
 Lambda_perp = lambda0 / (2*n_ext*sin(theta_ext)).
@@ -414,15 +456,19 @@ changing an index must not silently move a manually specified center. An
 external source-plane center, an internal target and a focus center are
 different concepts. Initial implementation needs only explicit entrance centers.
 
-Draw arrows at those centers in laboratory x-horizontal/y-up coordinates.
-Use `L=L_max*sin(theta_ext)` in bounded display units and an explicit theta_ext
-annotation. The arrow points `(cos(phi),sin(phi))`; Qt's scene adapter maps
-that direction to `(cos(phi),-sin(phi))`, without changing physical data.
-Normal incidence uses a dot/normal symbol. Large angles saturate naturally
-below L_max; zoom must not turn arrows into physical trajectory lengths.
-Retain readable per-beam colors/names and distinguish disabled selections.
+The original bounded external-direction glyph proposal uses laboratory
+x-horizontal/y-up coordinates at those centers. With signed intent, its
+physical direction offset is
+`L_max*sin(theta_ext)*(cos(phi),sin(phi))`; its nonnegative display length is
+`L_max*abs(sin(theta_ext))`. Qt maps an offset `(dx,dy)` to `(dx,-dy)`, without
+changing physical data. Normal incidence uses a dot/normal symbol. This
+proposed bounded glyph is distinct from the current LaunchPlane canvas, which
+consumes host-resolved physical entrance-to-exit ray endpoints in micrometres
+and does not infer an external-direction glyph. Retain readable per-beam
+colors/names and distinguish disabled selections.
 
-One solid external-direction arrow is the default. Show derived theta_int and
+In that original glyph proposal, one solid external-direction arrow is the
+default. Show derived theta_int and
 slopes in the inspector. If a contextual internal-trajectory overlay is later
 enabled, draw it dashed over a stated physical z span with a separate legend;
 at an isotropic planar interface its azimuth is identical, not a second
