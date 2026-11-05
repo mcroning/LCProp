@@ -208,6 +208,7 @@ class Workspace(QWidget):
         layout.addWidget(self.open_td_preview)
         self._td_preview_artifact = None
         self._artifact_directory = None
+        self._startup_input_preview = None
         self._show_pending_fields()
 
     def _set_plot_aspect(self, _index):
@@ -215,6 +216,11 @@ class Workspace(QWidget):
         for view in (self.image_pane.image_view, self.longitudinal_pane.xz_view,
                      self.longitudinal_pane.yz_view):
             view.set_square_aspect(square)
+
+    def set_startup_input_preview(self, preview):
+        self._startup_input_preview = preview
+        if self.spatial_selector.currentData() == ["pending", "Input intensity"]:
+            self._show_pending_cuts("Input intensity")
 
     def _show_pending_fields(self):
         self.spatial_selector.blockSignals(True)
@@ -240,6 +246,11 @@ class Workspace(QWidget):
             (longitudinal.yz_view, "z", "y"),
         ):
             view.show_empty_cut(horizontal, vertical, name)
+        if name == "Input intensity" and self._startup_input_preview is not None:
+            field, extent = self._startup_input_preview
+            image.image_view.set_field(field, extent=extent, vmin=0)
+            for view in (longitudinal.xz_view, longitudinal.yz_view):
+                view.show_empty_cut("z", view.ax.get_ylabel(), "Longitudinal intensity")
 
     def _show_display_options(self, expanded: bool) -> None:
         # Hide parents only: data-dependent visibility/enabled states of their

@@ -466,6 +466,9 @@ class PRMainWindow(QWidget):
             self._configuration_changed
         )
         self._input_mode_changed(self.input_panel.mode_id())
+        self.results_panel.workspace.set_startup_input_preview(
+            self.beam_panel.entrance_intensity_preview()
+        )
         self._connect_checkpoint_compatibility_signals()
         self._update_product_controls()
 

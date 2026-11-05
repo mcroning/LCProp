@@ -79,6 +79,15 @@ class ResultsGuidanceTests(unittest.TestCase):
             self.assertFalse(view.image.get_visible())
             self.assertFalse(view.colorbar.ax.get_visible())
 
+        preview = synthetic()
+        workspace.set_startup_input_preview((preview, (-2, 2, -1, 1)))
+        self.assertFalse(views[0].image.get_visible())
+        workspace.spatial_selector.setCurrentIndex(0)
+        self.assertTrue(views[0].image.get_visible())
+        self.assertTrue(np.array_equal(views[0].image.get_array(), preview.data.T))
+        self.assertFalse(views[1].image.get_visible())
+        self.assertFalse(views[2].image.get_visible())
+
         cut = views[1]
         field = synthetic(("z", "x"), {"z": "mm", "x": "um"})
         cut.set_field(field, extent=(0, .008, -1, 1), vmin=0, vmax=31)
