@@ -1,3 +1,4 @@
+from lcprop.gui.layout import bounded_form
 from PySide6.QtWidgets import QFormLayout, QVBoxLayout, QWidget
 
 from lcprop.core.context import GridSpec
@@ -8,7 +9,7 @@ class GridPanel(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        form = QFormLayout()
+        form = bounded_form(QFormLayout())
 
         self.Nx = spin_box(16, 4096, 64)
         self.Ny = spin_box(16, 4096, 64)

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QScrollArea,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -77,7 +78,7 @@ class Workspace(QWidget):
         self.convergence_box.hide()
 
         self.tabs = QTabWidget()
-        layout.addWidget(self.tabs)
+        layout.addWidget(self.tabs, 1)
 
         self.display_scales = DisplayScales()
         self.image_pane = ImagePane(self.display_scales)
@@ -141,7 +142,20 @@ class Workspace(QWidget):
 
         from lcprop.gui.trajectory_player import TrajectoryPlayer
         self.trajectory_player = TrajectoryPlayer(self)
+        # Playback/export controls remain available without consuming plot height
+        # in the empty Results view. This changes presentation, not run data.
+        self.trajectory_disclosure = QToolButton()
+        self.trajectory_disclosure.setText("Time evolution / playback / export controls")
+        self.trajectory_disclosure.setCheckable(True)
+        self.trajectory_disclosure.setArrowType(Qt.RightArrow)
+        self.trajectory_disclosure.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.trajectory_disclosure.toggled.connect(self.trajectory_player.setVisible)
+        self.trajectory_disclosure.toggled.connect(
+            lambda expanded: self.trajectory_disclosure.setArrowType(
+                Qt.DownArrow if expanded else Qt.RightArrow))
+        layout.addWidget(self.trajectory_disclosure, alignment=Qt.AlignLeft)
         layout.addWidget(self.trajectory_player)
+        self.trajectory_player.hide()
 
         self.curve_pane = CurvePane()
         self.tabs.addTab(self.curve_pane, "Curves")

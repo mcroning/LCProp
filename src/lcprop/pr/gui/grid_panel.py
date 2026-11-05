@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from lcprop.gui.layout import readable_form
+from lcprop.gui.layout import bounded_form
 
 from PySide6.QtWidgets import QFormLayout, QVBoxLayout, QWidget
 
@@ -28,7 +28,7 @@ class PRGridPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        form = readable_form(QFormLayout())
+        form = bounded_form(QFormLayout())
 
         self.Nx = spin_box(2, PR_GUI_MAX_TRANSVERSE_SAMPLES, PR_DEFAULT_GRID.Nx)
         self.Ny = spin_box(2, PR_GUI_MAX_TRANSVERSE_SAMPLES, PR_DEFAULT_GRID.Ny)

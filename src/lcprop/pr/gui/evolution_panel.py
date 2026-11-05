@@ -7,7 +7,7 @@ from lcprop.pr.published_static import PR_PUBLISHED_STATIC_WORKFLOW
 
 from lcprop.gui.numeric_widgets import CompactDoubleSpinBox
 
-from lcprop.gui.layout import readable_form
+from lcprop.gui.layout import bounded_form
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -66,7 +66,7 @@ class PREvolutionPanel(QWidget):
             integrator=PR_SEMI_IMPLICIT_INTEGRATOR,
         )
         layout = QVBoxLayout(self)
-        form = readable_form(QFormLayout())
+        form = bounded_form(QFormLayout())
 
         self.evolution = QComboBox()
         self.evolution.addItem("Static", "static")

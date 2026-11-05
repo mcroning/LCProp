@@ -1,5 +1,7 @@
 """Liquid-crystal material and bias controls."""
 
+from lcprop.gui.layout import bounded_form
+
 from PySide6.QtWidgets import QFormLayout, QLabel, QGridLayout, QVBoxLayout, QWidget
 
 from lcprop.lc.specs import BiasSpec, LCMaterial
@@ -15,7 +17,7 @@ class PhysicsPanel(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        form = QFormLayout()
+        form = bounded_form(QFormLayout())
 
         self.ne = double_spin_box(0.1, 10.0, 1.7)
         self.no = double_spin_box(0.1, 10.0, 1.5)

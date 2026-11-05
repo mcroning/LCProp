@@ -17,6 +17,15 @@ def readable_form(form):
     return form
 
 
+def bounded_form(form):
+    """Use full editor hints without filling otherwise empty form width."""
+    # Keep arrows adjacent to values; editors provide content-aware size hints.
+    form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+    form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
+    form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+    return form
+
+
 class FlowLayout(QLayout):
     """Lay out visible controls at their natural size, wrapping to available width."""
 

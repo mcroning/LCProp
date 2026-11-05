@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
 
 
@@ -23,7 +23,7 @@ class PRResourceEstimatorPanel(QWidget):
         layout.addWidget(explanation)
         self.estimate_button = QPushButton("Estimate current configuration")
         self.estimate_button.clicked.connect(self.estimateRequested)
-        layout.addWidget(self.estimate_button)
+        layout.addWidget(self.estimate_button, alignment=Qt.AlignLeft)
         self.output = QPlainTextEdit()
         self.output.setReadOnly(True)
         self.output.setPlainText("No estimate yet.")
