@@ -69,18 +69,25 @@ class ImagePane(QWidget):
         self._z_index = None
         self._scale_limits: dict[str, tuple[float, float]] = {}
 
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(2, 2, 2, 2)
+        outer.setSpacing(2)
+        self.controls_widget = QWidget()
+        layout = QVBoxLayout(self.controls_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
 
         self.td_time_label = RuntimeStatusLabel()
         time_policy = self.td_time_label.sizePolicy()
-        time_policy.setRetainSizeWhenHidden(True)
+        time_policy.setRetainSizeWhenHidden(False)
         self.td_time_label.setSizePolicy(time_policy)
         self.td_time_label.setVisible(False)
-        layout.addWidget(self.td_time_label)
+        outer.addWidget(self.td_time_label)
 
         self.selection_message = QLabel("Independent plane product")
         self.selection_message.setWordWrap(True)
-        layout.addWidget(self.selection_message)
+        outer.addWidget(self.selection_message)
+        outer.addWidget(self.controls_widget)
         self.field_selector = QComboBox()
         self.field_selector.setMinimumWidth(285)
         self.field_selector.setSizeAdjustPolicy(
@@ -106,8 +113,10 @@ class ImagePane(QWidget):
         layout.addWidget(self.scale_controls)
         self.scales.changed.connect(self._refresh_scale)
         self.image_view = ImageView()
+        # Small stacked layouts scroll rather than shrink the image to a thumbnail.
+        self.image_view.setMinimumHeight(200)
         self.image_view.positionSelected.connect(self._position_selected)
-        layout.addWidget(self.image_view, 1)
+        outer.addWidget(self.image_view, 1)
 
     def _refresh_scale(self):
         self._field_changed(self.field_selector.currentIndex())

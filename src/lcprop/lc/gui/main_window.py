@@ -304,6 +304,9 @@ class LCPropMainWindow(QWidget):
         self.use_last_static.toggled.connect(
             self._legacy_static_source_toggled
         )
+        self.results_panel.workspace.set_startup_input_preview(
+            self.beam_panel.entrance_intensity_preview()
+        )
         self.update_run_button()
         self.resize(1450, 900)
 

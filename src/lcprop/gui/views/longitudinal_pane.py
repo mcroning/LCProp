@@ -5,7 +5,7 @@ from lcprop.gui.number_format import format_number
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QBoxLayout,
+    QTabWidget,
     QCheckBox,
     QComboBox,
     QHBoxLayout,
@@ -58,6 +58,11 @@ class LongitudinalPane(QWidget):
         self.no_data_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.no_data_label.hide()
 
+        self.options_widget = QWidget()
+        options_layout = QVBoxLayout(self.options_widget)
+        options_layout.setContentsMargins(0, 0, 0, 0)
+        options_layout.setSpacing(2)
+        layout.addWidget(self.options_widget)
         self.controls_widget = QWidget()
         self.controls_widget.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -94,10 +99,10 @@ class LongitudinalPane(QWidget):
         self.show_guides.toggled.connect(self._show_guides_changed)
         position_row.addWidget(self.show_guides)
         controls.addStretch(1)
-        layout.addWidget(self.controls_widget)
+        options_layout.addWidget(self.controls_widget)
 
         self.scale_controls = DisplayScaleControls(self.scales)
-        layout.addWidget(self.scale_controls)
+        options_layout.addWidget(self.scale_controls)
         self.scales.changed.connect(self._update_views)
 
         z_controls = QHBoxLayout()
@@ -108,12 +113,9 @@ class LongitudinalPane(QWidget):
         z_controls.addWidget(self.z_plane_slider, 1)
         layout.addLayout(z_controls)
 
-        # Keep both cuts readable in a short Results area. Wide panes place
-        # them side by side; narrow panes stack and use the outer scroll area.
-        self.cuts = QWidget()
-        self.cuts_layout = QBoxLayout(QBoxLayout.LeftToRight, self.cuts)
-        self.cuts_layout.setContentsMargins(0, 0, 0, 0)
-        self.cuts_layout.setSpacing(4)
+        # Each longitudinal cut gets the full available plot area. Both remain
+        # accessible without squeezing two small canvases into the same pane.
+        self.cuts = QTabWidget()
         layout.addWidget(self.cuts, 1)
 
         self.xz_row = QWidget()
@@ -135,7 +137,7 @@ class LongitudinalPane(QWidget):
         self.xz_view.setMinimumSize(160, 200)
         xz_layout.addWidget(self.xz_view, 1)
         self.xz_view.positionSelected.connect(self._xz_position_selected)
-        self.cuts_layout.addWidget(self.xz_row, 1)
+        self.cuts.addTab(self.xz_row, "x–z cut")
 
         self.yz_row = QWidget()
         self.yz_row.setSizePolicy(
@@ -156,14 +158,9 @@ class LongitudinalPane(QWidget):
         self.yz_view.setMinimumSize(160, 200)
         yz_layout.addWidget(self.yz_view, 1)
         self.yz_view.positionSelected.connect(self._yz_position_selected)
-        self.cuts_layout.addWidget(self.yz_row, 1)
+        self.cuts.addTab(self.yz_row, "y–z cut")
 
         layout.addWidget(self.no_data_label)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.cuts_layout.setDirection(
-            QBoxLayout.LeftToRight if self.width() >= 600 else QBoxLayout.TopToBottom)
 
     def _orientation_changed(self, _index):
         self._update_views()
@@ -285,8 +282,7 @@ class LongitudinalPane(QWidget):
         self.controls_widget.setVisible(has_fields)
         self.scale_controls.setEnabled(has_fields)
         for widget in (
-            self.xz_row,
-            self.yz_row,
+            self.cuts,
             self.z_plane_label,
             self.z_plane_slider,
         ):
@@ -666,7 +662,7 @@ class LongitudinalPane(QWidget):
 
     def set_independent(self, independent):
         self._independent = independent
-        for widget in (self.xz_row, self.yz_row, self.z_plane_label, self.z_plane_slider):
+        for widget in (self.cuts, self.z_plane_label, self.z_plane_slider):
             widget.setVisible(not independent and self.field_selector.count() > 0)
         if independent:
             self.xz_view.clear_field()

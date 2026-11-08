@@ -305,6 +305,7 @@ class BeamPanel(QWidget):
         )
 
     def _boundary_changed(self, _value=None) -> None:
+        self._entrance_preview = None
         contours = []
         endpoints = [None] * len(self.beam_stack_definition.beams)
         try:
@@ -344,8 +345,33 @@ class BeamPanel(QWidget):
             contours = []
             endpoints = [None] * len(self.beam_stack_definition.beams)
             description = f"Resolved preview unavailable: {exc}"
+        else:
+            if launch is not None:
+                self._entrance_preview = (launch, grid)
         self.launch_plane_widget.set_resolved_preview(
             contours, description=description, ray_endpoints=endpoints)
+
+    def entrance_intensity_preview(self):
+        """Return the already sampled entrance plane for the startup display."""
+        if getattr(self, "_entrance_preview", None) is None:
+            return None
+        from lcprop.optics.splitstep import total_intensity
+        from lcprop.products.data_model import make_field
+
+        launch, grid = self._entrance_preview
+        intensity = total_intensity(launch.A0, coherence_groups=launch.coherence_groups)
+        extent = (
+            float(grid.x_um[0]) - grid.dx_um / 2,
+            float(grid.x_um[-1]) + grid.dx_um / 2,
+            float(grid.y_um[0]) - grid.dy_um / 2,
+            float(grid.y_um[-1]) + grid.dy_um / 2,
+        )
+        field = make_field(
+            "startup_input_preview", "Startup input intensity preview",
+            intensity, ("x", "y"), "intensity", {"x": "um", "y": "um"},
+            value_unit="1/µm²",
+        )
+        return field, extent
 
     def showEvent(self, event) -> None:
         """Fit once after Qt has assigned the embedded view its real size."""
