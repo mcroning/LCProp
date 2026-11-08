@@ -1,5 +1,9 @@
 # Portable LCProp notebooks
 
+The [bounded interactive LC/PR candidate](colab_first_batch.ipynb) uses the
+[separate notebook controller](../docs/colab_first_batch.md). Its hosted CPU
+acceptance is pending.
+
 `pr_reduced_cpu.ipynb` is a small NumPy float64 reduced nonlinear PR TD demonstration.
 It uses the Product preflight, Local runner, result adapters and persistence codecs.
 No Qt, LaunchPlane, GPU, notebook-specific scientific equations or automatic setup is used.

@@ -1,6 +1,6 @@
 """Optional notebook interfaces, loaded only when explicitly requested."""
 
-__all__ = ["InteractiveLC"]
+__all__ = ["InteractiveLC", "InteractiveBatch"]
 
 
 def __getattr__(name):
@@ -9,6 +9,11 @@ def __getattr__(name):
 
         globals()[name] = InteractiveLC
         return InteractiveLC
+    if name == "InteractiveBatch":
+        from .interactive_batch import InteractiveBatch
+
+        globals()[name] = InteractiveBatch
+        return InteractiveBatch
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
