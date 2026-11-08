@@ -77,11 +77,9 @@ The allowlists intentionally exclude:
 - Hosted/notebook evidence, full workflow simulations, large-grid/resource tests,
   packaging/build/install tests and Slurm commissioning. Some deployment unit
   tests use temporary fake transports; that does not establish live cluster access.
-- Historical documentation assertions outside the tiers need separate review:
-  for example, `tests/test_release_documentation.py` still expects version
-  `0.3.0` and the older README installation layout, while the current package
-  metadata declares `0.4.0`. Those pre-existing assertions are not repaired or
-  represented as passing by this documentation-only milestone.
+- Release documentation contracts are checked separately with
+  `python -m pytest -q tests/test_release_documentation.py`. This checks the
+  current wheel installation instructions and README link format.
 
 Do not start with unrestricted `python -m pytest -q`. A broader regression plan
 must state selected workflows, fixture identities, optional dependencies, time/

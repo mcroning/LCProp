@@ -1,6 +1,8 @@
 # LCProp 0.4.0 notebook interface
 
-The 0.4.0 runtime is byte-identical to the qualified 0.4.0rc1 implementation.
+The historical 0.4.0 release documentation described the qualified 0.4.0rc1
+implementation. A wheel built from current main has a different source identity.
+Use the notebook artifact and source revision identified by its qualification.
 Both `from lcprop.notebook import InteractiveLC` and
 `from lcprop.notebook.interactive_lc import InteractiveLC` are supported.
 Only Run executes propagation. Initialization and editing sample the canonical launch.

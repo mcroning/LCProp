@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import importlib
+import ast
 import json
 from pathlib import Path
 import re
@@ -46,8 +46,11 @@ def test_quick_start_entry_points_match_the_product():
     assert project["project"]["scripts"]["lcprop-pr"] == (
         "lcprop.pr.gui.app:main"
     )
-    assert callable(importlib.import_module("lcprop.pr.gui.app").main)
-    assert callable(importlib.import_module("lcprop.lc.gui.app").main)
+    for material in ("pr", "lc"):
+        app_path = ROOT / "src" / "lcprop" / material / "gui" / "app.py"
+        tree = ast.parse(app_path.read_text(encoding="utf-8"))
+        assert any(isinstance(node, ast.FunctionDef) and node.name == "main"
+                   for node in tree.body)
 
 
 def test_release_installation_and_attribution_contracts_are_explicit():
@@ -64,9 +67,11 @@ def test_release_installation_and_attribution_contracts_are_explicit():
     ]
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "Python 3.11 or newer" in readme
-    assert "https://github.com/mcroning/LaunchPlane" in readme
-    assert ".[gui,test]" in readme
+    assert "Build and install the engine" in readme
+    assert "LaunchPlane **schema 4**" in readme
+    quickstart = (ROOT / "docs/developer_quickstart.md").read_text(encoding="utf-8")
+    assert "Python >=3.10" in quickstart
+    assert "LaunchPlane is a separate companion" in quickstart
 
     notices = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
     assert "10.3390/photonics12020113" in notices

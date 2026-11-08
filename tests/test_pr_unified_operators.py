@@ -89,7 +89,7 @@ def test_sensitive_linear_solve_is_double(monkeypatch, precision):
         B.status([np.float64(1)]*33)
 
 
-def test_no_workflow_imports_or_longitudinal_allocation(monkeypatch):
+def test_unified_imports_are_limited_to_explicit_adapters():
     root = Path(__file__).resolve().parents[1]/'src/lcprop'
     for path in root.rglob('*.py'):
         # M6 adds only explicit adapter/registration imports, never legacy science.
@@ -99,11 +99,31 @@ def test_no_workflow_imports_or_longitudinal_allocation(monkeypatch):
         if 'unified' in path.parts or path.relative_to(root).as_posix() in adapters:
             continue
         tree = ast.parse(path.read_text())
+        relative_path = path.relative_to(root).as_posix()
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
+                # Presentation adapters consume products or capability
+                # metadata. Neither may import the workflow directly.
+                allowed_names = {
+                    ('pr/material_previews.py', 'lcprop.pr.unified.products'):
+                        {'material_products'},
+                    ('pr/gui/presentation_guidance.py', 'lcprop.pr.unified'):
+                        {'solver_specs'},
+                    ('pr/gui/presentation_guidance.py', 'lcprop.pr.unified.specs'):
+                        {'PRMaterialPrecisionSpec', 'PRElectricalClosureSpec',
+                         'DOUBLE_PRECISION', 'POSITIVE_PRECISION', 'UNBIASED',
+                         'FIXED_FIELD', 'PRESCRIBED_CURRENT', 'OPEN_TRANSVERSE'},
+                }
+                if {alias.name for alias in node.names} <= allowed_names.get(
+                    (relative_path, node.module), set()
+                ):
+                    continue
                 assert 'unified' not in (node.module or '').split('.'), path
             elif isinstance(node, ast.Import):
                 assert not any('unified' in alias.name.split('.') for alias in node.names), path
+
+
+def test_static_material_does_not_allocate_longitudinal_volumes(monkeypatch):
     I = np.ones((12, 3))
     seen = []
     original = np.empty

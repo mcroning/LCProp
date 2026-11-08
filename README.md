@@ -9,15 +9,15 @@ sit alongside the engine; core calculations do not require a GUI or LaunchPlane.
 - **Try a notebook:** [historical CPU demonstration](https://colab.research.google.com/github/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/notebooks/lc_static_interactive_cpu.ipynb).
   This demonstration pins its own historical engine/helper versions; it does not
   exercise the tested release identified below. Review its stated limits before use.
-- **Use the tested engine:** [install in a new environment](docs/developer_quickstart.md).
-- **Contribute or customize:** [contribution guide](CONTRIBUTING.md) and
-  [extension map](docs/developer_extension_map.md).
-- **Explore:** [documentation index](docs/README.md),
-  [architecture](docs/architecture/LCProp_Target_Architecture.md), and [license](LICENSE).
+- **Build and install the engine:** [install in a new environment](https://github.com/mcroning/LCProp/blob/main/docs/developer_quickstart.md).
+- **Contribute or customize:** [contribution guide](https://github.com/mcroning/LCProp/blob/main/CONTRIBUTING.md) and
+  [extension map](https://github.com/mcroning/LCProp/blob/main/docs/developer_extension_map.md).
+- **Explore:** [documentation index](https://github.com/mcroning/LCProp/blob/main/docs/README.md),
+  [architecture](https://github.com/mcroning/LCProp/blob/main/docs/architecture/LCProp_Target_Architecture.md), and [license](https://github.com/mcroning/LCProp/blob/main/LICENSE).
 
 ## Which version?
 
-The tested reference for this public entry is commit
+The historical qualification reference is commit
 `4299ec618810f63ed39431ad1cb374f8f7e6cb93` (distribution label `0.4.0`). Its recorded
 installed-package qualification was 907 passed, 24 skipped and two excluded large
 checks, plus 30 focused review checks. These are dated, bounded qualifications;
@@ -26,15 +26,15 @@ Use the commit identity rather than the version label alone. The
 [previous detailed README](https://github.com/mcroning/LCProp/blob/4299ec618810f63ed39431ad1cb374f8f7e6cb93/README.md)
 is retained at that exact historical revision.
 
-Current public-entry documentation may be newer than that reference while keeping
-runtime source unchanged. Other historical and experimental branches remain
-available; do not assume a branch name identifies a validated scientific result.
+Main includes changes after that qualification. For a wheel built from Git,
+record the source commit and wheel SHA-256. The distribution version alone
+does not identify which source revision produced a wheel.
 
 ## Optional Beam-editor compatibility
 
 The physical-intent Beam integration requires LaunchPlane **schema 4**;
 schema-3 files and the old beam API are intentionally incompatible. There is
-no automatic migration. See the [compatibility notice](docs/architecture/beamplane_physical_launch_contract.md#schema-4-compatibility)
+no automatic migration. See the [compatibility notice](https://github.com/mcroning/LCProp/blob/main/docs/architecture/beamplane_physical_launch_contract.md#schema-4-compatibility)
 before recreating or explicitly re-exporting obsolete definitions. The
 calculation engine remains independent of this optional GUI companion.
 
@@ -47,5 +47,5 @@ separate environment. There is no general third-party plugin SDK promised here.
 
 Pull requests propose upstream changes; they do not update anyone's installed
 working environment. Maintainer approval, package publication and installation
-are separate steps. See [CONTRIBUTING](CONTRIBUTING.md) for the sole-maintainer
+are separate steps. See [CONTRIBUTING](https://github.com/mcroning/LCProp/blob/main/CONTRIBUTING.md) for the sole-maintainer
 review policy and its limits.
