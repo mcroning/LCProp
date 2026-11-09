@@ -402,7 +402,7 @@ def desktop_fixture(session, path, route, *, remote=False):
     b = replace(a, name="second", x0_um=19., theta_ext_rad=.01,
                 phase_rad=.6, coherence_group="second")
     stack = beam_stack_to_launchplane(replace(request.beams, channels=(a, b)))
-    disabled = replace(stack.beams[0], name="stored-disabled", enabled=False,
+    disabled = replace(stack.beams[0], name="beam-2", enabled=False,
                        phase_rad=-.4, x_um=24.)
     stack = replace(stack, beams=(stack.beams[0], disabled, stack.beams[1]))
     request = replace(request, beams=beam_stack_definition_to_lcprop(stack))
@@ -479,3 +479,33 @@ def test_remote_desktop_intent_rejected_without_replacing_metadata(tmp_path):
     assert session.draft is draft and session.presentation is presentation
     assert session.execution_intent is intent and session.generation == generation
     assert remote.read_bytes() == original
+
+
+def test_add_beam_avoids_disabled_desktop_name(tmp_path, monkeypatch):
+    import ipywidgets as W
+
+    monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
+    app = InteractiveBatch(validator=validate, preview_factory=preview)
+    path = tmp_path / "desktop.json"
+    desktop_fixture(app.session, path, "lc")
+    app.session.load_draft(path)
+    app._sync()
+
+    def beam_count():
+        return next(widget for widget in app.editor.children
+                    if isinstance(widget, W.Dropdown) and widget.description == "Beams")
+
+    beam_count().value = 1
+    saved = tmp_path / "one-beam.json"
+    app.session.save_draft(saved)
+    app.session.load_draft(saved)
+    app._sync()
+    beam_count().value = 2
+    assert [beam.name for beam in app.session.draft.beams.channels] == [
+        "off-axis", "beam-3"]
+    assert app.session.presentation["beam_editor"]["beam_stack"]["beams"][1]["enabled"] is False
+    edited = tmp_path / "two-beams.json"
+    app.session.save_draft(edited)
+    app.session.load_draft(edited)
+    assert app.session.draft.beams.channels[1].name == "beam-3"
+    asyncio.run(app.dispose())

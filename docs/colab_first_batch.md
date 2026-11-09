@@ -47,13 +47,28 @@ provenance.
 Expand Save / load / export for draft JSON and completed result ZIP files.
 Batch-compatible desktop files can retain LaunchPlane schema-4 beam editor
 metadata and local NumPy float64 execution intent. The notebook uses only the
-headless LaunchPlane model and serializer. To enable desktop file interchange
-in a fresh notebook environment, install the verified schema-4 companion
-without its desktop dependencies:
+headless LaunchPlane model and serializer. After wheel verification, stage the
+pinned companion source in the fresh kernel's working directory:
 
 ```bash
-python -m pip install --no-deps 'launchplane @ git+https://github.com/mcroning/LaunchPlane.git@b71d125eb08074b0992dc849a5f4fc39e45eabc2'
+git clone https://github.com/mcroning/LaunchPlane.git LaunchPlane-interchange
+git -C LaunchPlane-interchange checkout --detach b71d125eb08074b0992dc849a5f4fc39e45eabc2
 ```
+
+Before the interface cell, add that source directory to the kernel import path:
+
+```python
+from pathlib import Path
+import sys
+
+companion_source = Path("LaunchPlane-interchange/src").resolve(strict=True)
+sys.path.insert(0, str(companion_source))
+from launchplane.serialization import SCHEMA_VERSION
+assert SCHEMA_VERSION == 4
+```
+
+This source-only setup leaves pip's installed dependency graph unchanged.
+Use a fresh kernel so an earlier LaunchPlane import cannot shadow the pin.
 
 The notebook preserves saved retrieval preference for desktop round trips.
 Reduced TD runs use the same local full-result path regardless of that saved

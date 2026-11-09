@@ -129,7 +129,15 @@ class InteractiveBatch:
             material_panel = W.VBox([*material.values(), steps, timestep])
         channels = list(request.beams.channels)
         if len(channels) == 1:
-            channels.append(BeamChannel(name="beam-2", x0_um=20., w1_um=10., w2_um=10.,
+            names = {channel.name for channel in channels}
+            editor = session.presentation.get("beam_editor")
+            if editor is not None:
+                names.update(beam["name"] for beam in editor["beam_stack"]["beams"])
+            number_suffix = 2
+            while f"beam-{number_suffix}" in names:
+                number_suffix += 1
+            name = f"beam-{number_suffix}"
+            channels.append(BeamChannel(name=name, x0_um=20., w1_um=10., w2_um=10.,
                                         coherence_group="beam-2"))
         beam_inputs = [
             {name: number(label, getattr(channel, name))
