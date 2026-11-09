@@ -83,7 +83,7 @@ def test_unsupported_draft_is_atomic(tmp_path):
     write_experiment_file(path, original, material_id="lc", workflow_id="static",
                           registry=session.experiments, presentation_payload={"unknown": {"keep": 1}})
     saved = path.read_bytes()
-    with pytest.raises(ValueError, match="Presentation"):
+    with pytest.raises(ValueError, match="presentation fields: unknown"):
         session.load_draft(path)
     assert session.draft is original and path.read_bytes() == saved
     request = requests.preset("pr")
@@ -387,3 +387,95 @@ def test_notebook_display_cell_reuses_controller(monkeypatch):
     assert len(instances) == 1
     assert views == [instances[0].widget] * 2
     assert setup == ["widgets", ("matplotlib", "widget")]
+
+
+def desktop_fixture(session, path, route, *, remote=False):
+    pytest.importorskip("launchplane.serialization")
+    from lcprop.adapters.launchplane import beam_stack_definition_to_lcprop, beam_stack_to_launchplane
+    from lcprop.persistence import write_experiment_file
+    from lcprop.persistence.execution_intent import ExecutionIntent
+    from launchplane.serialization import beam_stack_to_dict
+
+    request = requests.preset(route)
+    a = replace(request.beams.channels[0], theta_ext_rad=-.021, phi_rad=.4,
+                phase_rad=-.7, coherence_group="first")
+    b = replace(a, name="second", x0_um=19., theta_ext_rad=.01,
+                phase_rad=.6, coherence_group="second")
+    stack = beam_stack_to_launchplane(replace(request.beams, channels=(a, b)))
+    disabled = replace(stack.beams[0], name="stored-disabled", enabled=False,
+                       phase_rad=-.4, x_um=24.)
+    stack = replace(stack, beams=(stack.beams[0], disabled, stack.beams[1]))
+    request = replace(request, beams=beam_stack_definition_to_lcprop(stack))
+    presentation = {"beam_editor": {"provider": "launchplane", "schema_version": 1,
+                                   "beam_stack": beam_stack_to_dict(stack)}}
+    intent = None
+    if route == "pr":
+        intent = ExecutionIntent("slurm" if remote else "local",
+                                 "cluster" if remote else None,
+                                 "profile" if remote else None,
+                                 "numpy", "float64", "fast")
+    operation = requests.ROUTES[route][0]
+    write_experiment_file(path, request, material_id=operation.material_id,
+                          workflow_id=operation.workflow_id, registry=session.experiments,
+                          presentation_payload=presentation, execution_intent=intent)
+    return request, presentation, intent
+
+
+@pytest.mark.parametrize("route", ["lc", "pr"])
+def test_normal_desktop_draft_roundtrip_and_beam_edits(tmp_path, route):
+    import sys
+
+    from lcprop.persistence import read_experiment_file
+    beam_stack_from_dict = pytest.importorskip("launchplane.serialization").beam_stack_from_dict
+    from lcprop.adapters.launchplane import beam_stack_definition_to_lcprop
+
+    session = BatchSession(validator=validate)
+    original = tmp_path / "desktop.lcprop.json"
+    request, presentation, intent = desktop_fixture(session, original, route)
+    original_bytes = original.read_bytes()
+    session.load_draft(original)
+    untouched = tmp_path / "untouched.lcprop.json"
+    session.save_draft(untouched)
+    assert untouched.read_bytes() == original_bytes
+    session.load_draft(untouched)
+    assert session.draft == request
+
+    first, second = request.beams.channels
+    beams = requests.beam_stack(request.beams, (
+        replace(first, theta_ext_rad=-.017, phase_rad=-1.2, power_mW=.8),
+        replace(second, x0_um=23.),
+    ), "coherent")
+    assert session.set_draft(route, replace(request, beams=beams), session.generation)
+    edited = tmp_path / "edited.lcprop.json"
+    session.save_draft(edited)
+    loaded = read_experiment_file(edited, registry=session.experiments)
+    assert loaded.request == session.draft
+    assert loaded.execution_intent == intent
+    assert loaded.request.beams.coherence_groups == ("first", "first")
+    assert loaded.request.beams.channels[0].theta_ext_rad == -.017
+    assert loaded.request.beams.channels[0].phase_rad == -1.2
+    assert [ch.name for ch in loaded.request.beams.channels] == [first.name, second.name]
+    stack = beam_stack_from_dict(loaded.presentation_payload["beam_editor"]["beam_stack"])
+    assert beam_stack_definition_to_lcprop(stack) == loaded.request.beams
+    assert loaded.presentation_payload["beam_editor"]["beam_stack"]["beams"][1] == (
+        presentation["beam_editor"]["beam_stack"]["beams"][1])
+    session.load_draft(edited)
+    assert session.draft == loaded.request and original.read_bytes() == original_bytes
+    assert not any(name.startswith(("PySide6", "PyQt6")) for name in sys.modules)
+
+
+def test_remote_desktop_intent_rejected_without_replacing_metadata(tmp_path):
+    session = BatchSession(validator=validate)
+    local = tmp_path / "local.json"
+    remote = tmp_path / "remote.json"
+    desktop_fixture(session, local, "pr")
+    desktop_fixture(session, remote, "pr", remote=True)
+    session.load_draft(local)
+    draft, presentation, intent, generation = (
+        session.draft, session.presentation, session.execution_intent, session.generation)
+    original = remote.read_bytes()
+    with pytest.raises(ValueError, match="Slurm execution intent"):
+        session.load_draft(remote)
+    assert session.draft is draft and session.presentation is presentation
+    assert session.execution_intent is intent and session.generation == generation
+    assert remote.read_bytes() == original

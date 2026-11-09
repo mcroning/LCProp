@@ -45,8 +45,22 @@ square plot. Executed request and diagnostics show the admitted hash and
 provenance.
 
 Expand Save / load / export for draft JSON and completed result ZIP files.
-Unsupported scientific inputs, saved presentation metadata or execution
-intent cause editable load to fail atomically. Keep the original file. A
+Batch-compatible desktop files can retain LaunchPlane schema-4 beam editor
+metadata and local NumPy float64 execution intent. The notebook uses only the
+headless LaunchPlane model and serializer. To enable desktop file interchange
+in a fresh notebook environment, install the verified schema-4 companion
+without its desktop dependencies:
+
+```bash
+python -m pip install --no-deps 'launchplane @ git+https://github.com/mcroning/LaunchPlane.git@b71d125eb08074b0992dc849a5f4fc39e45eabc2'
+```
+
+The notebook preserves saved retrieval preference for desktop round trips.
+Reduced TD runs use the same local full-result path regardless of that saved
+preference. Enabled presentation beams follow edits, and disabled editor
+objects are retained. Unsupported scientific inputs, unknown presentation
+fields, remote intent and unsupported retrieval policies fail editable load
+atomically. Keep the original file. A
 verified completed package may reopen read-only even when its request falls
 outside the editor. Uploads are bounded at 128 MiB. Completed export remains
 bound to the admitted request after draft edits. Colab downloads explicitly

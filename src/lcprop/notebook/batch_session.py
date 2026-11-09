@@ -1,7 +1,7 @@
 """Kernel-loop ownership for one bounded notebook execution."""
 import asyncio
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 from importlib.metadata import PackageNotFoundError, version
 import json
@@ -13,6 +13,7 @@ from uuid import uuid4
 import warnings as runtime_warnings
 
 from lcprop.core.execution import CancellationToken
+from lcprop.notebook.batch_desktop import desktop_metadata, update_presentation
 from lcprop.notebook.batch_files import MAX_UPLOAD_BYTES, PACKAGE_FILES
 from lcprop.notebook.batch_requests import ROUTES, preset, validate
 from lcprop.persistence.experiments import (
@@ -60,6 +61,8 @@ class BatchSession:
         self.notify = notify or (lambda: None)
         self.route = "lc"
         self.draft = preset("lc")
+        self.presentation = {}
+        self.execution_intent = None
         self.completed = self.partial = None
         self.status = "idle"
         self.message = ""
@@ -91,7 +94,17 @@ class BatchSession:
     def set_draft(self, route, request, generation):
         if generation != self.generation or self.busy or self.disposed:
             return False
+        presentation = self.presentation if route == self.route else {}
+        intent = self.execution_intent if route == self.route else None
+        if presentation:
+            # Desktop derives interference from explicit groups and retains
+            # the canonical legacy flag. Preserve that flag when regrouping.
+            beams = replace(request.beams, coherence=self.draft.beams.coherence)
+            request = replace(request, beams=beams)
+            if beams != self.draft.beams:
+                presentation = update_presentation(presentation, beams)
         self.route, self.draft = route, deepcopy(request)
+        self.presentation, self.execution_intent = presentation, intent
         return True
 
     def start(self, generation):
@@ -202,17 +215,17 @@ class BatchSession:
         self.validator(self.route, self.draft)
         operation = ROUTES[self.route][0]
         return write_experiment_file(path, self.draft, material_id=operation.material_id,
-                                     workflow_id=operation.workflow_id, registry=self.experiments)
+                                     workflow_id=operation.workflow_id, registry=self.experiments,
+                                     presentation_payload=self.presentation,
+                                     execution_intent=self.execution_intent)
 
     def load_draft(self, path):
         self._editable()
         loaded = read_experiment_file(path, registry=self.experiments)
-        if loaded.presentation_payload:
-            raise ValueError("Presentation metadata is outside this editor. Keep the original file.")
-        if loaded.execution_intent is not None:
-            raise ValueError("Saved execution intent is outside this editor. Keep the original file.")
+        presentation, intent = desktop_metadata(loaded)
         self.validator(loaded.material_id, loaded.request)
         self.route, self.draft = loaded.material_id, loaded.request
+        self.presentation, self.execution_intent = presentation, intent
         self.generation += 1
 
     def export_completed(self, path):
