@@ -6,6 +6,8 @@ sit alongside the engine; core calculations do not require a GUI or LaunchPlane.
 
 ## Start here
 
+For the 0.5.0rc1 engine prerelease, see the [release notes and wheel install instructions](docs/releases/0.5.0rc1.md). The [pinned Colab notebook](notebooks/colab_first_batch.ipynb) is an optional CPU preview.
+
 - **Try a notebook:** [historical CPU demonstration](https://colab.research.google.com/github/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/notebooks/lc_static_interactive_cpu.ipynb).
   This demonstration pins its own historical engine/helper versions; it does not
   exercise the tested release identified below. Review its stated limits before use.

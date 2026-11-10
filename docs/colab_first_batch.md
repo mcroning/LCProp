@@ -6,8 +6,7 @@ first batch uses the existing LC static and reduced nonlinear PR TD operations.
 This is a bounded CPU preview. Earlier candidate builds passed the two local
 preset comparisons and hosted checks for Stop with Refresh status, the PR
 preset, single-canvas redraws and native ZIP reopen. These checks cover the
-recorded presets and hosted environment. The combined release wheel has its
-own acceptance check.
+recorded presets and hosted environment. The [release notes](releases/0.5.0rc1.md) distinguish earlier preview checks from exact-wheel verification.
 
 ## Start in a fresh CPU kernel
 
@@ -26,7 +25,8 @@ Disposal waits for the worker to acknowledge cancellation.
 ## Configure and run
 
 The fixed LC grid is 128 × 128 with 100 z slices and the existing bounded
-local self-consistent preset. Edit voltage and one or two Gaussian beams.
+local self-consistent preset. Edit voltage and one or two Gaussian beams. The Beam 1 controls appear below
+Coherence. Set Beams to 2 to show the Beam 2 controls.
 The fixed PR grid is 64 × 48 with 20 slices. Edit physical dark and uniform
 irradiance, gain-length product, one to three normalized material steps, and
 normalized dt up to 0.001. The integrator is semi-implicit trapezoidal.
@@ -61,7 +61,7 @@ upload path for Colab. In local Jupyter, use Upload
 and then Load / reopen under Save / load / export.
 Batch-compatible desktop files can retain LaunchPlane schema-4 beam editor
 metadata and local NumPy float64 execution intent. The notebook uses only the
-headless LaunchPlane model and serializer. After wheel verification, stage the
+headless LaunchPlane model and serializer. For editable desktop interchange only, after wheel verification, stage the
 pinned companion source in the fresh kernel's working directory:
 
 ```bash
@@ -108,6 +108,5 @@ print(zip_path.name)
 ```
 
 In Colab's Files pane, refresh the list and choose **Download** from the
-ZIP's file menu. To reopen it, use the native picker above. Local Jupyter
-reports the saved path. The interface does not
+ZIP's file menu. To reopen it, use the native picker above. The Files-pane procedure is a workaround. Browser download has not been qualified. Local Jupyter reports the saved path. The interface does not
 offer continuation or checkpoint editing.

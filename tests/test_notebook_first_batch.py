@@ -627,3 +627,32 @@ def test_native_colab_picker_reuses_validated_reopen(monkeypatch):
     assert received == [app.directory / "decoded"]
     assert app.notice.value == "Reopened <b>completed.zip</b>."
     asyncio.run(app.dispose())
+
+
+def test_beam_controls_are_visible_without_expanding_a_panel(monkeypatch):
+    import ipywidgets as W
+
+    monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
+    app = InteractiveBatch(validator=validate, preview_factory=preview)
+    try:
+        count = next(widget for widget in app.editor.children
+                     if isinstance(widget, W.Dropdown) and widget.description == "Beams")
+        beams = next(widget for widget in app.editor.children
+                     if isinstance(widget, W.VBox) and len(widget.children) == 2
+                     and all(isinstance(panel, W.VBox) for panel in widget.children))
+        first, second = beams.children
+        assert first.children[0].value == "<b>Beam 1</b>"
+        assert first.layout.display != "none"
+        assert second.children[0].value == "<b>Beam 2</b>"
+        assert second.layout.display == "none"
+        count.value = 2
+        assert second.layout.display != "none"
+        center = next(widget for widget in second.children[1:]
+                      if widget.description == "x center (µm)")
+        center.value = 15.0
+        assert app.session.draft.beams.channels[1].x0_um == 15.0
+        count.value = 1
+        assert second.layout.display == "none"
+        assert len(app.session.draft.beams.channels) == 1
+    finally:
+        asyncio.run(app.dispose())

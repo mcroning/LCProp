@@ -149,12 +149,10 @@ class InteractiveBatch:
             {name: number(label, getattr(channel, name))
              for name, label in BEAM_CONTROLS.items()} for channel in channels
         ]
-        second = W.VBox(list(beam_inputs[1].values()))
+        first = W.VBox([W.HTML("<b>Beam 1</b>"), *beam_inputs[0].values()])
+        second = W.VBox([W.HTML("<b>Beam 2</b>"), *beam_inputs[1].values()])
         second.layout.display = "" if count.value == 2 else "none"
-        beams = W.Accordion(children=[W.VBox(list(beam_inputs[0].values())), second])
-        beams.set_title(0, "Beam 1")
-        beams.set_title(1, "Beam 2")
-        beams.selected_index = None
+        beams = W.VBox([first, second])
         grid = request.grid
         grid_summary = W.HTML(
             f"Fixed grid: {grid.Nx} × {grid.Ny}, aperture "

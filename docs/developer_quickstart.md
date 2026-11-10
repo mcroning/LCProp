@@ -36,21 +36,13 @@ the new environment, not an unrelated source checkout. This is an installation/i
 of numerical correctness. No Qt, LaunchPlane or GPU dependency is required for
 these imports.
 
-For editable development, clone your fork into a separate new directory. A fork
-that copied only the old default branch may not contain the tested commit. Fetch
-the retained reference without changing your fork's remote configuration:
+For editable development, clone your fork into a separate directory. Fetch
+upstream main and branch from that revision. Record the starting commit.
 
 ```bash
-git fetch https://github.com/mcroning/LCProp.git publication/colab-lc-0.4.0rc1
-git rev-parse FETCH_HEAD
-```
-
-Stop if `FETCH_HEAD` is not exactly
-`4299ec618810f63ed39431ad1cb374f8f7e6cb93`; do not silently substitute a newer tip.
-Then create your feature branch from that exact commit:
-
-```bash
-git switch -c my-change 4299ec618810f63ed39431ad1cb374f8f7e6cb93
+git fetch https://github.com/mcroning/LCProp.git main
+git switch -c my-change FETCH_HEAD
+git rev-parse HEAD
 ```
 
 Create a new virtual environment in that fork as above, activate it, and install
