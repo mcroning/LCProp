@@ -4,13 +4,14 @@ from copy import deepcopy
 from dataclasses import replace
 
 from lcprop.adapters.launchplane import beam_stack_to_launchplane
+from lcprop.notebook.batch_beams import DISABLED_BEAMS
 from lcprop.transport.result_policy import normalize_result_policy
 
 
 def desktop_metadata(loaded):
     """Admit only metadata the notebook can faithfully write back."""
     presentation = loaded.presentation_payload
-    unknown = set(presentation) - {"beam_editor"}
+    unknown = set(presentation) - {"beam_editor", DISABLED_BEAMS}
     if unknown:
         raise ValueError(f"Unsupported presentation fields: {', '.join(sorted(unknown))}.")
     if "beam_editor" in presentation and presentation["beam_editor"] is None:

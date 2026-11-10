@@ -10,10 +10,10 @@ import ipywidgets as W
 from IPython.display import display
 from matplotlib import pyplot as plt
 
-from lcprop.core.beams import BeamChannel
+from lcprop.notebook.batch_beam_plane import BatchBeamPlane
 from lcprop.notebook.batch_files import archive_completed, selected_upload, unpack_completed
 from lcprop.notebook.batch_requests import (
-    BEAM_CONTROLS, PR_MATERIAL_CONTROLS, beam_stack, preset, preview, validate,
+    PR_MATERIAL_CONTROLS, preset, preview, validate,
 )
 from lcprop.notebook.batch_results import draw_plane, field_coordinates, retained_plane
 from lcprop.notebook.batch_session import BatchSession
@@ -49,6 +49,7 @@ class InteractiveBatch:
         self.session = BatchSession(runner=runner, validator=validator, notify=self._sync,
                                     fixed_route=self.fixed_route)
         self.editor = W.VBox()
+        self.beam_plane = BatchBeamPlane(self)
         self.status = W.HTML()
         self.progress_view = W.HTML()
         self.notice = W.HTML()
@@ -72,7 +73,7 @@ class InteractiveBatch:
         self.refresh_button.on_click(self._refresh_status)
         self.actions = W.HBox([self.stop_button, self.refresh_button])
         self.widget = W.VBox([
-            self.editor, self.actions, self.status, self.progress_view, self.notice,
+            self.editor, self.beam_plane.widget, self.actions, self.status, self.progress_view, self.notice,
             W.HBox([self.source, self.field]), W.HBox([self.cut, self.aspect]),
             self.position, self.plot_message, self.canvas_host, self.plot, self.extra,
         ])
@@ -115,12 +116,6 @@ class InteractiveBatch:
         route_control = W.Dropdown(description="Workflow", options=[
             ("LC static", "lc"), ("PR reduced nonlinear TD", "pr")
         ], value=route)
-        count = W.Dropdown(description="Beams", options=[1, 2],
-                           value=len(request.beams.channels))
-        coherence = W.Dropdown(description="Coherence", options=[
-            ("Preserve saved groups", None), ("Coherent", "coherent"),
-            ("Incoherent", "incoherent"),
-        ])
         inputs = []
 
         def number(label, value, cls=W.FloatText):
@@ -138,26 +133,6 @@ class InteractiveBatch:
             steps = number("Material steps", request.solver.Nt, W.IntText)
             timestep = number("Normalized dt", request.solver.dt_normalized)
             material_panel = W.VBox([*material.values(), steps, timestep])
-        channels = list(request.beams.channels)
-        if len(channels) == 1:
-            names = {channel.name for channel in channels}
-            editor = session.presentation.get("beam_editor")
-            if editor is not None:
-                names.update(beam["name"] for beam in editor["beam_stack"]["beams"])
-            number_suffix = 2
-            while f"beam-{number_suffix}" in names:
-                number_suffix += 1
-            name = f"beam-{number_suffix}"
-            channels.append(BeamChannel(name=name, x0_um=20., w1_um=10., w2_um=10.,
-                                        coherence_group="beam-2"))
-        beam_inputs = [
-            {name: number(label, getattr(channel, name))
-             for name, label in BEAM_CONTROLS.items()} for channel in channels
-        ]
-        first = W.VBox([W.HTML("<b>Beam 1</b>"), *beam_inputs[0].values()])
-        second = W.VBox([W.HTML("<b>Beam 2</b>"), *beam_inputs[1].values()])
-        second.layout.display = "" if count.value == 2 else "none"
-        beams = W.VBox([first, second])
         grid = request.grid
         grid_summary = W.HTML(
             f"Fixed grid: {grid.Nx} × {grid.Ny}, aperture "
@@ -168,9 +143,7 @@ class InteractiveBatch:
         def update():
             if session.busy:
                 return
-            selected = [replace(channel, **{name: widget.value for name, widget in controls.items()})
-                        for channel, controls in zip(channels[:count.value], beam_inputs)]
-            draft = replace(request, beams=beam_stack(request.beams, selected, coherence.value))
+            draft = session.draft
             if route == "lc":
                 draft = replace(draft, bias=replace(request.bias, V_bias=voltage.value))
             else:
@@ -186,7 +159,6 @@ class InteractiveBatch:
                 self._update_selection()
 
         def changed(_):
-            second.layout.display = "" if count.value == 2 else "none"
             self._guard(generation, update)
 
         def select_route(_):
@@ -204,16 +176,16 @@ class InteractiveBatch:
         reset = W.Button(description="Restore preset")
 
         def restore():
-            if session.set_draft(route, preset(route), generation):
+            if session.set_draft(route, preset(route), generation, reset_presentation=True):
                 session.generation += 1
                 self._refresh_preview()
                 self._sync()
 
         reset.on_click(lambda _: self._guard(generation, restore))
-        controls = (route_control, count, coherence, *inputs, button, reset)
+        controls = (route_control, *inputs, button, reset)
         for control in controls:
             control.disabled = session.busy
-        for control in (*inputs, count, coherence):
+        for control in inputs:
             control.observe(changed, names="value")
         route_control.observe(select_route, names="value")
         self.run_button = button
@@ -223,8 +195,7 @@ class InteractiveBatch:
         else:
             workflow = W.HTML(f"<b>{escape(route_control.label)}</b>")
             route_control.close()
-        self.editor.children = (workflow, grid_summary, material_panel, count,
-                                coherence, beams, W.HBox([button, reset]))
+        self.editor.children = (workflow, grid_summary, material_panel, W.HBox([button, reset]))
         for control in old_controls:
             close_widgets(control)
 
@@ -325,7 +296,7 @@ class InteractiveBatch:
             if state != last_state:
                 self._refresh_status(None)
                 self.stop_button.send_state("disabled")
-                for control in (self.upload, self.load_button, self.save_button,
+                for control in (*self.beam_plane.inputs, self.upload, self.load_button, self.save_button,
                                 self.export_button):
                     control.send_state("disabled")
             elif session.busy:
@@ -391,6 +362,7 @@ class InteractiveBatch:
         if changed:
             self._generation = session.generation
             self._make_editor()
+            self.beam_plane.sync()
             self.stop_button.close()
             self.stop_button = W.Button(description="Stop")
             generation = session.generation
@@ -527,6 +499,7 @@ class InteractiveBatch:
 
             output.unregister_callback(self._colab_callback)
             self._colab_callback = None
+        self.beam_plane.close()
         close_widgets(self.widget)
         self.session.notify = lambda: None
         if getattr(self, "_figure", None) is not None:

@@ -488,7 +488,6 @@ def test_remote_desktop_intent_rejected_without_replacing_metadata(tmp_path):
 
 
 def test_add_beam_avoids_disabled_desktop_name(tmp_path, monkeypatch):
-    import ipywidgets as W
 
     monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
     app = InteractiveBatch(validator=validate, preview_factory=preview)
@@ -497,16 +496,13 @@ def test_add_beam_avoids_disabled_desktop_name(tmp_path, monkeypatch):
     app.session.load_draft(path)
     app._sync()
 
-    def beam_count():
-        return next(widget for widget in app.editor.children
-                    if isinstance(widget, W.Dropdown) and widget.description == "Beams")
-
-    beam_count().value = 1
+    app.beam_plane.beam.value = app.session.draft.beams.channels[1].name
+    app.beam_plane.delete.click()
     saved = tmp_path / "one-beam.json"
     app.session.save_draft(saved)
     app.session.load_draft(saved)
     app._sync()
-    beam_count().value = 2
+    app.beam_plane.add.click()
     assert [beam.name for beam in app.session.draft.beams.channels] == [
         "off-axis", "beam-3"]
     assert app.session.presentation["beam_editor"]["beam_stack"]["beams"][1]["enabled"] is False
@@ -635,33 +631,153 @@ def test_native_colab_picker_reuses_validated_reopen(monkeypatch):
     asyncio.run(app.dispose())
 
 
-def test_beam_controls_are_visible_without_expanding_a_panel(monkeypatch):
-    import ipywidgets as W
+@pytest.mark.parametrize("route", ["lc", "pr"])
+def test_beam_plane_objects_and_native_roundtrip(tmp_path, monkeypatch, route):
+    from lcprop.notebook import LCNotebook, PRNotebook
+    from lcprop.notebook.batch_beams import objects
 
     monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
-    app = InteractiveBatch(validator=validate, preview_factory=preview)
+    app = (LCNotebook if route == "lc" else PRNotebook)(
+        validator=validate, preview_factory=preview)
+    panel = app.beam_plane
     try:
-        count = next(widget for widget in app.editor.children
-                     if isinstance(widget, W.Dropdown) and widget.description == "Beams")
-        beams = next(widget for widget in app.editor.children
-                     if isinstance(widget, W.VBox) and len(widget.children) == 2
-                     and all(isinstance(panel, W.VBox) for panel in widget.children))
-        first, second = beams.children
-        assert first.children[0].value == "<b>Beam 1</b>"
-        assert first.layout.display != "none"
-        assert second.children[0].value == "<b>Beam 2</b>"
-        assert second.layout.display == "none"
-        count.value = 2
-        assert second.layout.display != "none"
-        center = next(widget for widget in second.children[1:]
-                      if widget.description == "x center (µm)")
-        center.value = 15.0
+        first = panel.beam.value
+        assert panel.enabled.disabled and panel.delete.disabled
+        panel.add.click()
+        second = panel.beam.value
+        assert second != first and len(app.session.draft.beams.channels) == 2
+        panel.fields["x0_um"].value = 15.0
+        panel.fields["theta_ext_rad"].value = -0.03
+        panel.fields["phase_rad"].value = -0.8
         assert app.session.draft.beams.channels[1].x0_um == 15.0
-        count.value = 1
-        assert second.layout.display == "none"
-        assert len(app.session.draft.beams.channels) == 1
+        panel.duplicate.click()
+        third = panel.beam.value
+        assert third not in {first, second} and not panel.enabled.value
+        assert panel.fields["phase_rad"].value == -0.8
+        panel.beam.value = second
+        panel.enabled.value = False
+        panel.beam.value = third
+        panel.enabled.value = True
+        assert [ch.name for ch in app.session.draft.beams.channels] == [first, third]
+        saved = tmp_path / "draft.json"
+        app.session.save_draft(saved)
+        snapshot = objects(app.session.draft.beams, app.session.presentation)
+        app.session.load_draft(saved)
+        app._refresh_preview()
+        app._sync()
+        assert objects(app.session.draft.beams, app.session.presentation) == snapshot
+        panel.beam.value = second
+        assert not panel.enabled.value
+        assert panel.fields["theta_ext_rad"].value == -0.03
+        panel.delete.click()
+        assert second not in [name for _, name in panel.beam.options]
+
+        # A busy or stale editor cannot change the admitted draft.
+        draft = app.session.draft
+        app.session.active_id = "synthetic-admitted"
+        try:
+            panel.sync()
+            assert all(widget.disabled for widget in panel.inputs)
+            panel.fields["x0_um"].value = 7.0
+            panel.add.click()
+            assert app.session.draft is draft
+        finally:
+            app.session.active_id = None
+        panel.sync()
+        assert not panel.add.disabled
     finally:
         asyncio.run(app.dispose())
+
+
+@pytest.mark.parametrize("route", ["lc", "pr"])
+def test_beam_plane_canvas_gestures_and_stale_drag(monkeypatch, route):
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    from lcprop.notebook import LCNotebook, PRNotebook
+    from lcprop.notebook import batch_beam_plane
+    from lcprop.notebook._launch_preview import ray_endpoint
+
+    monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
+
+    # Supply an actual Agg canvas for transforms and artists. Its display slot
+    # is replaced by a widget without changing the canvas used by the editor.
+    import ipywidgets as W
+
+    class Canvas(FigureCanvasAgg, W.HTML):
+        def __init__(self, figure):
+            W.HTML.__init__(self)
+            FigureCanvasAgg.__init__(self, figure)
+
+    def canvas():
+        figure = Figure()
+        return figure, Canvas(figure)
+
+    monkeypatch.setattr(batch_beam_plane, "widget_canvas", canvas)
+    samples = []
+
+    def sample(route, request):
+        samples.append(request.beams)
+        field = preview()
+        return replace(field, data=np.full_like(field.data, request.beams.channels[0].x0_um))
+
+    app = (LCNotebook if route == "lc" else PRNotebook)(
+        validator=validate, preview_factory=sample)
+    panel = app.beam_plane
+
+    def event(x, y):
+        px, py = panel.ax.transData.transform((x, y))
+        return SimpleNamespace(inaxes=panel.ax, x=px, y=py, xdata=x, ydata=y, button=1)
+
+    try:
+        figure = panel.figure
+        first = panel.beam.value
+        panel.duplicate.click()
+        channel = app.session.draft.beams.channels[1]
+        start = event(channel.x0_um, channel.y0_um)
+        panel.press(start)
+        assert panel.overlap.layout.display == ""
+        panel.overlap.value = first
+        assert panel.beam.value == first
+        panel.press(start)
+        end = event(channel.x0_um + 12, channel.y0_um + 4)
+        old = app.session.draft
+        panel.motion(end)
+        assert app.session.draft is old and panel.drag_marker is not None
+        panel.release(end)
+        assert panel.fields["x0_um"].value == channel.x0_um + 12
+        assert app.session.draft.beams.channels[1] == channel
+        assert samples[-1] == app.session.draft.beams and panel.figure is figure
+        np.testing.assert_equal(panel.ax.collections[0].get_array(),
+                                np.full((3, 4), channel.x0_um + 12))
+
+        panel.mode.value = "Tilt"
+        channel = app.session.draft.beams.channels[0]
+        x, y = channel.x0_um, channel.y0_um
+        panel.press(event(x, y))
+        panel.release(event(x - 2, y))
+        tilted = app.session.draft.beams.channels[0]
+        assert tilted.theta_ext_rad < 0
+        index = requests.refractive_index(route, app.session.draft)
+        np.testing.assert_allclose(ray_endpoint(tilted, app.session.draft, index), (x - 2, y))
+
+        panel.mode.value = "Move"
+        panel.press(event(x, y))
+        app.session.generation += 1
+        panel.release(event(x + 4, y))
+        assert app.session.draft.beams.channels[0] == tilted
+        full = panel.ax.get_xlim()
+        panel.extent.value = "Fit"
+        assert panel.ax.get_xlim() != full
+        panel.extent.value = "Full aperture"
+        assert panel.ax.get_xlim() == full
+        panel.coherence.value = "coherent"
+        assert len(set(app.session.draft.beams.coherence_groups)) == 1
+        panel.coherence.value = "incoherent"
+        assert len(set(app.session.draft.beams.coherence_groups)) == 2
+    finally:
+        asyncio.run(app.dispose())
+        assert panel.gesture is None
 
 
 def test_material_notebooks_and_progress_lifecycle(monkeypatch):

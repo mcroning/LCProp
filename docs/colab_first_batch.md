@@ -25,8 +25,7 @@ Disposal waits for the worker to acknowledge cancellation.
 ## Configure and run
 
 The fixed LC grid is 128 × 128 with 100 z slices and the existing bounded
-local self-consistent preset. Edit voltage and one or two Gaussian beams. The Beam 1 controls appear below
-Coherence. Set Beams to 2 to show the Beam 2 controls.
+local self-consistent preset. Edit voltage and one or two enabled Gaussian beams using BeamPlane.
 The fixed PR grid is 64 × 48 with 20 slices. Edit physical dark and uniform
 irradiance, gain-length product, one to three normalized material steps, and
 normalized dt up to 0.001. The integrator is semi-implicit trapezoidal.
@@ -40,6 +39,30 @@ the validated request, disables draft edits and runs one background worker.
 busy until acknowledgement. If Colab misses a background status update,
 use **Refresh status** to request the current kernel state. The elapsed budgets are cooperative. A stopped
 attempt has its own view and leaves the previous completed result available.
+
+## Edit beams in BeamPlane
+
+Select an active beam by name or by clicking its center in **Move** mode.
+In **Tilt** mode, select its internal-ray endpoint. If handles overlap, choose
+a beam from the overlap menu, then drag its handle. **Move** changes the
+entrance center. **Tilt** uses the endpoint at the exit face to edit signed
+external angle and azimuth. The numeric controls display the same draft.
+A drag marker follows the pointer. The draft and combined intensity update on
+release. Escape or leaving the canvas cancels the gesture. **Fit** frames
+centers and ray endpoints. **Full aperture** shows the configured entrance face.
+
+Add or duplicate to create a named beam. A new object starts disabled if two
+are already enabled. Use **Enabled** or **Delete** to manage the stack. At
+least one beam must stay enabled. Disabled objects remain editable, and the
+draft file preserves their intent. Notebook-only disabled-object metadata
+is for notebook round trips. Existing compatible LaunchPlane presentation
+files retain the LaunchPlane format and require the pinned companion below.
+
+The canvas needs the notebook widget backend. Numeric editing remains available
+without it. The editor supports collimated Gaussian beams. Screen and other
+object editing are deferred, and unsupported editable files are rejected
+before replacing the draft. Completed package views retain their existing
+read-only behavior.
 
 ## Browse and exchange files
 

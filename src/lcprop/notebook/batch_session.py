@@ -13,6 +13,7 @@ from uuid import uuid4
 import warnings as runtime_warnings
 
 from lcprop.core.execution import CancellationToken
+from lcprop.notebook.batch_beams import DISABLED_BEAMS, edited_stack, objects, validate_objects
 from lcprop.notebook.batch_desktop import desktop_metadata, update_presentation
 from lcprop.notebook.batch_files import MAX_UPLOAD_BYTES, PACKAGE_FILES
 from lcprop.notebook.batch_requests import ROUTES, preset, validate
@@ -93,14 +94,15 @@ class BatchSession:
         if self.busy or self.disposed:
             raise RuntimeError("Draft controls are unavailable while running or disposed")
 
-    def set_draft(self, route, request, generation):
+    def set_draft(self, route, request, generation, *, reset_presentation=False):
         if generation != self.generation or self.busy or self.disposed:
             return False
         if self.fixed_route is not None and route != self.fixed_route:
             raise ValueError(f"This notebook only accepts {self.fixed_route.upper()} drafts")
-        presentation = self.presentation if route == self.route else {}
-        intent = self.execution_intent if route == self.route else None
-        if presentation:
+        preserve = route == self.route and not reset_presentation
+        presentation = self.presentation if preserve else {}
+        intent = self.execution_intent if preserve else None
+        if "beam_editor" in presentation:
             # Desktop derives interference from explicit groups and retains
             # the canonical legacy flag. Preserve that flag when regrouping.
             beams = replace(request.beams, coherence=self.draft.beams.coherence)
@@ -109,6 +111,15 @@ class BatchSession:
                 presentation = update_presentation(presentation, beams)
         self.route, self.draft = route, deepcopy(request)
         self.presentation, self.execution_intent = presentation, intent
+        return True
+
+    def edit_beams(self, items, generation, coherence=None):
+        if generation != self.generation or self.busy or self.disposed:
+            return False
+        beams, presentation = edited_stack(self.draft.beams, items, self.presentation, coherence)
+        beams.validate()
+        self.draft = replace(self.draft, beams=beams)
+        self.presentation = presentation
         return True
 
     def start(self, generation):
@@ -243,6 +254,9 @@ class BatchSession:
         if self.fixed_route is not None and loaded.material_id != self.fixed_route:
             raise ValueError(f"This notebook only accepts {self.fixed_route.upper()} drafts")
         presentation, intent = desktop_metadata(loaded)
+        if DISABLED_BEAMS in presentation and "beam_editor" in presentation:
+            raise ValueError("Conflicting beam editor metadata")
+        validate_objects(objects(loaded.request.beams, presentation))
         self.validator(loaded.material_id, loaded.request)
         self.route, self.draft = loaded.material_id, loaded.request
         self.presentation, self.execution_intent = presentation, intent
