@@ -26,7 +26,8 @@ Disposal waits for the worker to acknowledge cancellation.
 
 The fixed LC grid is 128 × 128 with 100 z slices and the existing bounded
 local self-consistent preset. Edit voltage and one or two enabled Gaussian beams using BeamPlane.
-The fixed PR grid is 64 × 48 with 20 slices. Edit physical dark and uniform
+The PR preset is 64 × 48 with a 1 mm cell and 1 µm longitudinal spacing
+(1,000 slices). Saved 20 µm preset drafts retain their original length. Edit physical dark and uniform
 irradiance, gain-length product, one to three normalized material steps, and
 normalized dt up to 0.001. The integrator is semi-implicit trapezoidal.
 Both editors preserve signed external tilt and beam phase, and allow explicit
@@ -47,7 +48,7 @@ In **Tilt** mode, select its internal-ray endpoint. If handles overlap, choose
 a beam from the overlap menu, then drag its handle. **Move** changes the
 entrance center. **Tilt** uses the square endpoint at the exit face to edit
 signed external angle and azimuth. Tilt switches to **Fit**. For short cells
-such as the PR preset, Fit zooms to the reachable exit region. Release the
+such as the earlier 20 µm PR preset, Fit zooms to the reachable exit region. Release the
 square inside the dashed circle. Out-of-range targets leave the draft unchanged. The numeric controls display the same draft.
 A drag marker follows the pointer. The draft and combined intensity update on
 release. Escape or leaving the canvas cancels the gesture. **Fit** frames

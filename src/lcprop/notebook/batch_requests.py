@@ -47,7 +47,7 @@ def preset(route):
         raise ValueError(f"Unsupported route: {route}")
     return PRRunRequest(
         grid=GridSpec(Nx=64, Ny=48, x_aperture_um=80., y_aperture_um=60.,
-                      dz_um=1., z_length_um=20.),
+                      dz_um=1., z_length_um=1000.),
         beams=BeamStack(channels=(BeamChannel(name="demo", w1_um=12., w2_um=12.,
                                              coherence_group="demo-laser"),)),
         material=PRMaterialSpec.physical(dark_irradiance_W_cm2=0.01,
@@ -117,6 +117,9 @@ def validate(route, request, *, sampling=qualify_launch_sampling,
                 name: getattr(reference.material, name) for name in PR_MATERIAL_CONTROLS
             }),
         )
+    if route == "pr" and request.grid == replace(reference.grid, z_length_um=20.):
+        # Previously saved short-preset drafts keep their original grid.
+        fixed = replace(fixed, grid=reference.grid)
     for name in reference.__dataclass_fields__:
         if getattr(fixed, name) != getattr(reference, name):
             raise ValueError(f"{name} differs from the bounded {route.upper()} preset")

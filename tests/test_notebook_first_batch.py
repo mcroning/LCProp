@@ -724,6 +724,14 @@ def test_beam_plane_canvas_gestures_and_stale_drag(monkeypatch, route):
     app = (LCNotebook if route == "lc" else PRNotebook)(
         validator=validate, preview_factory=sample)
     panel = app.beam_plane
+    if route == "pr":
+        draft = app.session.draft
+        assert draft.grid.z_length_um == 1000 and draft.grid.dz_um == 1
+        short = replace(draft, grid=replace(draft.grid, z_length_um=20))
+        validate(route, short)
+        app.session.set_draft(route, short, app.session.generation)
+        app._refresh_preview()
+        panel.sync()
 
     def event(x, y):
         px, py = panel.ax.transData.transform((x, y))
