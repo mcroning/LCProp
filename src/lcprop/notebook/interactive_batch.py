@@ -11,7 +11,7 @@ from IPython.display import display
 from matplotlib import pyplot as plt
 
 from lcprop.core.beams import BeamChannel
-from lcprop.notebook.batch_files import MAX_UPLOAD_BYTES, archive_completed, unpack_completed
+from lcprop.notebook.batch_files import archive_completed, selected_upload, unpack_completed
 from lcprop.notebook.batch_requests import (
     BEAM_CONTROLS, PR_MATERIAL_CONTROLS, beam_stack, preset, preview, validate,
 )
@@ -61,7 +61,9 @@ class InteractiveBatch:
             disclosure("Save / load / export", self.files),
             disclosure("Executed request and diagnostics", self.details),
         ])
-        self.actions = W.HBox([self.stop_button])
+        self.refresh_button = W.Button(description="Refresh status")
+        self.refresh_button.on_click(self._refresh_status)
+        self.actions = W.HBox([self.stop_button, self.refresh_button])
         self.widget = W.VBox([
             self.editor, self.actions, self.status, self.notice,
             W.HBox([self.source, self.field]), W.HBox([self.cut, self.aspect]),
@@ -224,13 +226,8 @@ class InteractiveBatch:
         self.export_button = export
 
         def read():
-            if not upload.value:
-                raise ValueError("Select an experiment JSON or completed ZIP")
-            file = upload.value[0]
-            data = file["content"]
-            if len(data) > MAX_UPLOAD_BYTES:
-                raise ValueError("Upload exceeds 128 MiB")
-            if file["name"].lower().endswith(".zip"):
+            name, data = selected_upload(upload.value)
+            if name.lower().endswith(".zip"):
                 session.reopen(unpack_completed(data, self.directory))
                 return
             path = self.directory / f"upload-{uuid4().hex}.lcprop.json"
@@ -261,6 +258,16 @@ class InteractiveBatch:
         for control in old_controls:
             close_widgets(control)
 
+    def _refresh_status(self, _):
+        """Resend state from a live frontend callback after a missed update."""
+        if self.session.disposed:
+            return
+        self._generation = None
+        self._sync()
+        self.status.send_state("value")
+        for control in (self.editor, self.actions, self.files, self.source):
+            control.send_state()
+
     def _sync(self):
         session = self.session
         progress = ""
@@ -276,7 +283,7 @@ class InteractiveBatch:
             self.stop_button = W.Button(description="Stop")
             generation = session.generation
             self.stop_button.on_click(lambda _: self._guard(generation, session.stop))
-            self.actions.children = (self.stop_button,)
+            self.actions.children = (self.stop_button, self.refresh_button)
         self.stop_button.disabled = session.status != "running"
         self.export_button.disabled = session.completed is None
         records = (session.completed, session.partial)

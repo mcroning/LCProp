@@ -1,4 +1,5 @@
 """Bounded upload/download of existing LCProp file formats."""
+from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 import shutil
 import tempfile
@@ -11,6 +12,21 @@ PACKAGE_FILES = {
     "request/manifest.json", "request/checksums.sha256",
     "output/manifest.json", "output/checksums.sha256",
 }
+
+
+def selected_upload(value):
+    """Normalize ipywidgets 7 filename mappings and 8 upload records."""
+    if not value or len(value) != 1:
+        raise ValueError("Select one experiment JSON or completed ZIP")
+    if isinstance(value, Mapping):
+        name, entry = next(iter(value.items()))
+    else:
+        entry = value[0]
+        name = entry["name"]
+    content = entry["content"]
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise ValueError("Upload exceeds 128 MiB")
+    return name, bytes(content)
 
 
 def unpack_completed(upload, directory):

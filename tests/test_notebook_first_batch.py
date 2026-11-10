@@ -509,3 +509,29 @@ def test_add_beam_avoids_disabled_desktop_name(tmp_path, monkeypatch):
     app.session.load_draft(edited)
     assert app.session.draft.beams.channels[1].name == "beam-3"
     asyncio.run(app.dispose())
+
+
+@pytest.mark.parametrize("value", [
+    {"draft.json": {"metadata": {"name": "draft.json"}, "content": b"{}"}},
+    ({"name": "draft.json", "content": memoryview(b"{}")},),
+])
+def test_upload_normalizes_both_widget_formats(value):
+    from lcprop.notebook.batch_files import selected_upload
+
+    assert selected_upload(value) == ("draft.json", b"{}")
+
+
+def test_refresh_recovers_terminal_controls(monkeypatch):
+    monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
+    app = InteractiveBatch(validator=validate, preview_factory=preview)
+    app.status.value = "Stopping"
+    app.session.status = "stopped"
+    app.session.generation += 1
+    sent = []
+    monkeypatch.setattr(app.status, "send_state", lambda *args, **kwargs: sent.append(args))
+    app.refresh_button.click()
+    assert app.status.value.startswith("<b>stopped</b>")
+    assert not app.run_button.disabled
+    assert app.stop_button.disabled
+    assert ("value",) in sent
+    asyncio.run(app.dispose())

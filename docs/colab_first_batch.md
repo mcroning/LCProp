@@ -33,7 +33,8 @@ The draft input preview samples the entrance plane. Only **Run** admits
 propagation. Finish submitting browser edits before Run. The kernel freezes
 the validated request, disables draft edits and runs one background worker.
 **Stop** requests cancellation at the next safe workflow boundary and stays
-busy until acknowledgement. The elapsed budgets are cooperative. A stopped
+busy until acknowledgement. If Colab misses a background status update,
+use **Refresh status** to request the current kernel state. The elapsed budgets are cooperative. A stopped
 attempt has its own view and leaves the previous completed result available.
 
 ## Browse and exchange files
