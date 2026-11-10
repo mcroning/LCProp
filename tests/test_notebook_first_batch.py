@@ -567,3 +567,35 @@ def test_widget_backend_reuses_canvas_across_redraws(monkeypatch):
     assert app.canvas_host.layout.display == ""
     assert len(figures) == 1 and len(figures[0].axes) == 2
     asyncio.run(app.dispose())
+
+
+def test_zip_selection_survives_status_refresh(monkeypatch):
+    import ipywidgets as W
+    from traitlets import Any, Bool
+    from lcprop.notebook import interactive_batch
+
+    class LegacyUpload(W.Box):
+        value = Any()
+        disabled = Bool(False)
+
+    monkeypatch.setattr(W, "FileUpload", lambda **_: LegacyUpload())
+    monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
+    app = InteractiveBatch(validator=validate, preview_factory=preview)
+    upload = app.upload
+    upload.value = {"completed.zip": {"content": b"synthetic ZIP bytes"}}
+    calls = []
+
+    def unpack(data, directory):
+        assert data == b"synthetic ZIP bytes"
+        return directory / "decoded"
+
+    monkeypatch.setattr(interactive_batch, "unpack_completed", unpack)
+    monkeypatch.setattr(app.session, "reopen", calls.append)
+    app.session.generation += 1
+    app.refresh_button.click()
+    assert app.upload is upload and app.files.children[0] is upload
+    assert "completed.zip" in app.upload_receipt.value
+    app.load_button.click()
+    assert calls == [app.directory / "decoded"]
+    assert "Reopened" in app.notice.value
+    asyncio.run(app.dispose())

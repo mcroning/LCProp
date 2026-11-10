@@ -82,6 +82,7 @@ class InteractiveBatch:
             control.observe(self._update_selection, names="value")
         for control in (self.aspect, self.position):
             control.observe(self._draw, names="value")
+        self._make_files()
         self._refresh_preview()
         self._sync()
 
@@ -218,20 +219,42 @@ class InteractiveBatch:
                                 coherence, beams, W.HBox([button, reset]))
         for control in old_controls:
             close_widgets(control)
-        self._make_files(generation)
 
-    def _make_files(self, generation):
+    def _make_files(self):
         session = self.session
         upload = W.FileUpload(accept=".json,.zip", multiple=False, disabled=session.busy)
         load = W.Button(description="Load / reopen", disabled=session.busy)
         save = W.Button(description="Download draft", disabled=session.busy)
         export = W.Button(description="Download completed")
+        self.upload = upload
+        self.load_button = load
+        self.save_button = save
         self.export_button = export
+        self.upload_receipt = W.HTML(value="No file received by the kernel.")
+
+        def receipt(change):
+            if not change["new"]:
+                self.upload_receipt.value = "No file received by the kernel."
+                return
+            try:
+                name, data = selected_upload(change["new"])
+            except ValueError as error:
+                self.upload_receipt.value = escape(str(error))
+            else:
+                self.upload_receipt.value = f"Received <b>{escape(name)}</b> ({len(data):,} bytes)."
+
+        upload.observe(receipt, names="value")
+
+        def editable(action):
+            if session.busy:
+                return
+            self._guard(session.generation, action)
 
         def read():
             name, data = selected_upload(upload.value)
             if name.lower().endswith(".zip"):
                 session.reopen(unpack_completed(data, self.directory))
+                self.notice.value = f"Reopened <b>{escape(name)}</b>."
                 return
             path = self.directory / f"upload-{uuid4().hex}.lcprop.json"
             path.write_bytes(data)
@@ -252,14 +275,11 @@ class InteractiveBatch:
             path = session.export_completed(self.directory / f"completed-{uuid4().hex}")
             download(archive_completed(path))
 
-        load.on_click(lambda _: self._guard(generation, read))
-        save.on_click(lambda _: self._guard(generation, lambda: download(
+        load.on_click(lambda _: editable(read))
+        save.on_click(lambda _: editable(lambda: download(
             session.save_draft(self.directory / f"draft-{uuid4().hex}.lcprop.json"))))
-        export.on_click(lambda _: self._guard(generation, download_completed))
-        old_controls = self.files.children
-        self.files.children = (upload, W.HBox([load, save, export]))
-        for control in old_controls:
-            close_widgets(control)
+        export.on_click(lambda _: self._guard(session.generation, download_completed))
+        self.files.children = (upload, self.upload_receipt, W.HBox([load, save, export]))
 
     def _refresh_status(self, _):
         """Resend state from a live frontend callback after a missed update."""
@@ -288,6 +308,9 @@ class InteractiveBatch:
             self.stop_button.on_click(lambda _: self._guard(generation, session.stop))
             self.actions.children = (self.stop_button, self.refresh_button)
         self.stop_button.disabled = session.status != "running"
+        self.upload.disabled = session.busy
+        self.load_button.disabled = session.busy
+        self.save_button.disabled = session.busy
         self.export_button.disabled = session.completed is None
         records = (session.completed, session.partial)
         if changed or self._record != tuple(id(record) for record in records):
