@@ -535,3 +535,35 @@ def test_refresh_recovers_terminal_controls(monkeypatch):
     assert app.stop_button.disabled
     assert ("value",) in sent
     asyncio.run(app.dispose())
+
+
+def test_widget_backend_reuses_canvas_across_redraws(monkeypatch):
+    import ipywidgets as W
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+    from lcprop.notebook import interactive_batch
+
+    class Canvas(FigureCanvasAgg, W.Box):
+        def __init__(self, figure):
+            W.Box.__init__(self)
+            FigureCanvasAgg.__init__(self, figure)
+
+    figures = []
+
+    def make_figure(**kwargs):
+        figure = Figure(**kwargs)
+        Canvas(figure)
+        figures.append(figure)
+        return figure
+
+    monkeypatch.setattr(interactive_batch.plt, "figure", make_figure)
+    app = InteractiveBatch(validator=validate, preview_factory=preview)
+    canvas, = app.canvas_host.children
+    app.aspect.value = "Square"
+    app.cut.value = "x–z"
+    assert app.canvas_host.layout.display == "none"
+    app.cut.value = "x–y"
+    assert app.canvas_host.children == (canvas,)
+    assert app.canvas_host.layout.display == ""
+    assert len(figures) == 1 and len(figures[0].axes) == 2
+    asyncio.run(app.dispose())

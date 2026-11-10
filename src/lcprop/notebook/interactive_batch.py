@@ -55,6 +55,9 @@ class InteractiveBatch:
         self.aspect = W.Dropdown(description="Aspect", options=["Physical", "Square"])
         self.position = W.IntSlider(description="Cut sample", continuous_update=False)
         self.plot = W.Output()
+        self.canvas_host = W.VBox()
+        self.plot_message = W.HTML()
+        self._figure = None
         self.details = W.HTML()
         self.files = W.VBox()
         self.extra = W.VBox([
@@ -67,7 +70,7 @@ class InteractiveBatch:
         self.widget = W.VBox([
             self.editor, self.actions, self.status, self.notice,
             W.HBox([self.source, self.field]), W.HBox([self.cut, self.aspect]),
-            self.position, self.plot, self.extra,
+            self.position, self.plot_message, self.canvas_host, self.plot, self.extra,
         ])
         self._generation = None
         self._record = None
@@ -371,31 +374,40 @@ class InteractiveBatch:
             return
         fields, geometry, _ = self._products()
         field = fields.get(self.field.value)
-        with self.plot:
-            self.plot.clear_output(wait=True)
-            try:
-                if field is None:
-                    raise ValueError(self._preview_message or "No retained field")
-                if self.source.value == "Draft preview" and self.cut.value != "x–y":
-                    raise ValueError("Longitudinal intensity is awaiting propagation results")
-                plane = retained_plane(field, geometry, PLANES[self.cut.value],
-                                       None if self.position.disabled else self.position.value)
+        try:
+            if field is None:
+                raise ValueError(self._preview_message or "No retained field")
+            if self.source.value == "Draft preview" and self.cut.value != "x–y":
+                raise ValueError("Longitudinal intensity is awaiting propagation results")
+            plane = retained_plane(field, geometry, PLANES[self.cut.value],
+                                   None if self.position.disabled else self.position.value)
+            fig = self._figure
+            if fig is None:
                 with plt.ioff():
-                    fig, ax = plt.subplots(figsize=(6, 4), layout="constrained")
-                try:
-                    artist = draw_plane(ax, plane, self.aspect.value == "Square")
-                    fig.colorbar(artist, ax=ax, label=plane.value_unit)
-                    display(fig.canvas if isinstance(fig.canvas, W.Widget) else fig)
-                finally:
-                    if not isinstance(fig.canvas, W.Widget):
-                        plt.close(fig)
-                    else:
-                        old = getattr(self, "_figure", None)
-                        self._figure = fig
-                        if old is not None:
-                            plt.close(old)
-            except ValueError as error:
-                print(f"Unavailable: {error}")
+                    fig = plt.figure(figsize=(6, 4), layout="constrained")
+                if isinstance(fig.canvas, W.Widget):
+                    self._figure = fig
+                    self.canvas_host.children = (fig.canvas,)
+            try:
+                fig.clear()
+                ax = fig.add_subplot()
+                artist = draw_plane(ax, plane, self.aspect.value == "Square")
+                fig.colorbar(artist, ax=ax, label=plane.value_unit)
+                self.plot_message.value = ""
+                self.canvas_host.layout.display = ""
+                if self._figure is not None:
+                    fig.canvas.draw_idle()
+                else:
+                    with self.plot:
+                        self.plot.clear_output(wait=True)
+                        display(fig)
+            finally:
+                if self._figure is None:
+                    plt.close(fig)
+        except ValueError as error:
+            self.canvas_host.layout.display = "none"
+            self.plot.clear_output()
+            self.plot_message.value = f"Unavailable: {escape(str(error))}"
 
     async def dispose(self):
         close_widgets(self.widget)
