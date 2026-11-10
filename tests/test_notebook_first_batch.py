@@ -752,6 +752,7 @@ def test_beam_plane_canvas_gestures_and_stale_drag(monkeypatch, route):
                                 np.full((3, 4), channel.x0_um + 12))
 
         panel.mode.value = "Tilt"
+        assert panel.extent.value == "Fit"
         channel = app.session.draft.beams.channels[0]
         x, y = channel.x0_um, channel.y0_um
         panel.press(event(x, y))
@@ -761,7 +762,16 @@ def test_beam_plane_canvas_gestures_and_stale_drag(monkeypatch, route):
         index = requests.refractive_index(route, app.session.draft)
         np.testing.assert_allclose(ray_endpoint(tilted, app.session.draft, index), (x - 2, y))
 
+        if route == "pr":
+            circle, = panel.ax.patches
+            assert 9 < circle.radius < 10
+            panel.press(event(x - 2, y))
+            panel.release(event(x + circle.radius * 1.05, y))
+            assert app.session.draft.beams.channels[0] == tilted
+            assert "outside the reachable exit region" in panel.preview_status.value
+
         panel.mode.value = "Move"
+        panel.extent.value = "Full aperture"
         panel.press(event(x, y))
         app.session.generation += 1
         panel.release(event(x + 4, y))

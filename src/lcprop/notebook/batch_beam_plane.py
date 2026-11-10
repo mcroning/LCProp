@@ -1,6 +1,7 @@
 """Shared notebook BeamPlane using canonical channel edits and draft samples."""
 from dataclasses import replace
 from html import escape
+from matplotlib.patches import Circle
 import math
 
 import ipywidgets as W
@@ -41,6 +42,7 @@ class BatchBeamPlane:
         self.figure = self.canvas = self.ax = None
         self.connections = ()
         self.gesture = self.drag_marker = None
+        self.tilt_error = ""
         self.overlap_choice = None
         self.syncing = False
         self.generation = None
@@ -64,7 +66,7 @@ class BatchBeamPlane:
         ])
         self.beam.observe(self._selection, names="value")
         self.overlap.observe(self._choose_overlap, names="value")
-        self.mode.observe(self.cancel, names="value")
+        self.mode.observe(self._change_mode, names="value")
         self.extent.observe(lambda _: self.draw(), names="value")
         self.enabled.observe(self._enabled, names="value")
         self.coherence.observe(self._regroup, names="value")
@@ -196,6 +198,14 @@ class BatchBeamPlane:
             channel = replace(channel, coherence_group=group)
         self._commit([*items, (channel, len(self.session.draft.beams.channels) < 2)], select=name)
 
+    def _change_mode(self, change):
+        self.overlap_choice = None
+        self.tilt_error = ""
+        if change["new"] == "Tilt" and self.extent.value != "Fit":
+            self.extent.value = "Fit"
+        else:
+            self.draw()
+
     def draw(self):
         if self.session.disposed:
             return
@@ -213,7 +223,7 @@ class BatchBeamPlane:
         if self.owner._preview is not None:
             plane = retained_plane(self.owner._preview, None, ("x", "y"), None)
             draw_plane(ax, plane, False)
-        ax.set(title="Draft input intensity · internal rays to exit",
+        ax.set(title="Draft input intensity\nInternal rays to exit",
                xlabel="x (µm)", ylabel="y (µm)", aspect="equal")
         self.markers, self.labels, self.arrows, self.tips = [], [], [], []
         selected = next((i for i, channel in enumerate(request.beams.channels)
@@ -224,6 +234,27 @@ class BatchBeamPlane:
             if not enabled:
                 ax.plot(channel.x0_um, channel.y0_um, marker="x", color="gray")
         ax.set(xlim=(-x_half, x_half), ylim=(-y_half, y_half))
+        if self.mode.value == "Tilt" and selected is not None:
+            channel = request.beams.channels[selected]
+            # The grazing external ray is the limiting internal exit radius.
+            # The canonical inverse still validates every proposed endpoint.
+            radius = (grid.z_length_um * channel.n_ext /
+                      math.sqrt(index**2 - channel.n_ext**2)
+                      if index > channel.n_ext else math.inf)
+            if radius < min(x_half, y_half):
+                ax.add_patch(Circle((channel.x0_um, channel.y0_um), radius,
+                                    fill=False, color="cyan", linestyle="--"))
+                self.preview_status.value += (
+                    f"<br>Drag the square inside the dashed circle "
+                    f"(exit radius &lt; {radius:.2f} µm).")
+                if self.tilt_error:
+                    self.preview_status.value += f"<br><b>{escape(self.tilt_error)}</b>"
+                if self.extent.value == "Fit":
+                    span = radius * 1.12
+                    ax.set(xlim=(channel.x0_um - span, channel.x0_um + span),
+                           ylim=(channel.y0_um - span, channel.y0_um + span))
+                    self.canvas.draw_idle()
+                    return
         if self.extent.value == "Fit":
             points = [(channel.x0_um, channel.y0_um) for channel, _ in self._objects()]
             for channel in request.beams.channels:
@@ -254,7 +285,9 @@ class BatchBeamPlane:
         hits = []
         for channel, enabled in self._objects():
             target = (channel.x0_um, channel.y0_um)
-            if self.mode.value == "Tilt" and enabled:
+            if self.mode.value == "Tilt":
+                if not enabled:
+                    continue
                 try:
                     target = ray_endpoint(channel, request, index)
                 except ValueError:
@@ -307,9 +340,17 @@ class BatchBeamPlane:
             def tilt():
                 items = self._objects()
                 channel, _ = items[self._current(items)]
-                theta, phi = external_direction_for_exit(
-                    channel, refractive_index(self.session.route, request),
-                    request.grid.z_length_um, x, y)
+                try:
+                    theta, phi = external_direction_for_exit(
+                        channel, refractive_index(self.session.route, request),
+                        request.grid.z_length_um, x, y)
+                except ValueError as error:
+                    self.tilt_error = (
+                        "Tilt target is outside the reachable exit region. "
+                        "Release the square closer to the beam center."
+                    )
+                    raise ValueError(self.tilt_error) from error
+                self.tilt_error = ""
                 self._replace(theta_ext_rad=theta, phi_rad=phi)
 
             self._run(tilt)
