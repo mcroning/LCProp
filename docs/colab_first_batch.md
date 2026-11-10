@@ -45,7 +45,16 @@ reported. Physical aspect uses matching physical scales and Square fits a
 square plot. Executed request and diagnostics show the admitted hash and
 provenance.
 
-Expand Save / load / export for draft JSON and completed result ZIP files.
+In hosted Colab, run this in a separate code cell and select one experiment
+JSON or completed ZIP in Colab's native picker:
+
+```python
+lcprop_batch.open_from_colab()
+```
+
+The picker waits for a selection in the cell. This is the supported hosted
+upload path when widget file transfer fails. In local Jupyter, use Upload
+and then Load / reopen under Save / load / export.
 Batch-compatible desktop files can retain LaunchPlane schema-4 beam editor
 metadata and local NumPy float64 execution intent. The notebook uses only the
 headless LaunchPlane model and serializer. After wheel verification, stage the

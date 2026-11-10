@@ -252,15 +252,7 @@ class InteractiveBatch:
 
         def read():
             name, data = selected_upload(upload.value)
-            if name.lower().endswith(".zip"):
-                session.reopen(unpack_completed(data, self.directory))
-                self.notice.value = f"Reopened <b>{escape(name)}</b>."
-                return
-            path = self.directory / f"upload-{uuid4().hex}.lcprop.json"
-            path.write_bytes(data)
-            session.load_draft(path)
-            self._refresh_preview()
-            self._sync()
+            self._open_uploaded(name, data)
 
         def download(path):
             # Colab transport is imported only on explicit download.
@@ -280,6 +272,35 @@ class InteractiveBatch:
             session.save_draft(self.directory / f"draft-{uuid4().hex}.lcprop.json"))))
         export.on_click(lambda _: self._guard(session.generation, download_completed))
         self.files.children = (upload, self.upload_receipt, W.HBox([load, save, export]))
+
+    def _open_uploaded(self, name, data):
+        self.session._editable()
+        if name.lower().endswith(".zip"):
+            self.session.reopen(unpack_completed(data, self.directory))
+            self.notice.value = f"Reopened <b>{escape(name)}</b>."
+            return
+        if not name.lower().endswith(".json"):
+            raise ValueError("Select an experiment JSON or completed ZIP")
+        path = self.directory / f"upload-{uuid4().hex}.lcprop.json"
+        path.write_bytes(data)
+        self.session.load_draft(path)
+        self._refresh_preview()
+        self._sync()
+        self.notice.value = f"Loaded <b>{escape(name)}</b>."
+
+    def open_from_colab(self):
+        """Run in a notebook cell to use Colab's native blocking picker."""
+        self.session._editable()
+        from google.colab import files
+
+        with tempfile.TemporaryDirectory(dir=self.directory) as staging:
+            uploaded = files.upload(target_dir=staging)
+            if not uploaded:
+                return
+            name, data = selected_upload({
+                path: {"content": content} for path, content in uploaded.items()
+            })
+            self._open_uploaded(Path(name).name, data)
 
     def _refresh_status(self, _):
         """Resend state from a live frontend callback after a missed update."""

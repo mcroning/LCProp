@@ -599,3 +599,31 @@ def test_zip_selection_survives_status_refresh(monkeypatch):
     assert calls == [app.directory / "decoded"]
     assert "Reopened" in app.notice.value
     asyncio.run(app.dispose())
+
+
+def test_native_colab_picker_reuses_validated_reopen(monkeypatch):
+    import sys
+    from pathlib import Path
+    from lcprop.notebook import interactive_batch
+
+    monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
+    app = InteractiveBatch(validator=validate, preview_factory=preview)
+    received = []
+
+    def upload(*, target_dir):
+        path = Path(target_dir) / "completed.zip"
+        path.write_bytes(b"test ZIP")
+        return {str(path): path.read_bytes()}
+
+    def unpack(data, directory):
+        assert data == b"test ZIP"
+        return directory / "decoded"
+
+    monkeypatch.setitem(sys.modules, "google.colab", SimpleNamespace(
+        files=SimpleNamespace(upload=upload)))
+    monkeypatch.setattr(interactive_batch, "unpack_completed", unpack)
+    monkeypatch.setattr(app.session, "reopen", received.append)
+    app.open_from_colab()
+    assert received == [app.directory / "decoded"]
+    assert app.notice.value == "Reopened <b>completed.zip</b>."
+    asyncio.run(app.dispose())
