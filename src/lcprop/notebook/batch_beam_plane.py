@@ -201,10 +201,6 @@ class BatchBeamPlane:
     def _change_mode(self, change):
         self.overlap_choice = None
         self.tilt_error = ""
-        if change["new"] == "Tilt" and self.extent.value != "Fit":
-            self.extent.value = "Fit"
-        else:
-            self.draw()
 
     def draw(self):
         if self.session.disposed:

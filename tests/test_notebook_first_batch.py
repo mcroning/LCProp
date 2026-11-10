@@ -760,7 +760,8 @@ def test_beam_plane_canvas_gestures_and_stale_drag(monkeypatch, route):
                                 np.full((3, 4), channel.x0_um + 12))
 
         panel.mode.value = "Tilt"
-        assert panel.extent.value == "Fit"
+        assert panel.extent.value == "Full aperture"
+        panel.extent.value = "Fit"
         channel = app.session.draft.beams.channels[0]
         x, y = channel.x0_um, channel.y0_um
         panel.press(event(x, y))

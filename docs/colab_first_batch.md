@@ -47,7 +47,7 @@ Select an active beam by name or by clicking its center in **Move** mode.
 In **Tilt** mode, select its internal-ray endpoint. If handles overlap, choose
 a beam from the overlap menu, then drag its handle. **Move** changes the
 entrance center. **Tilt** uses the square endpoint at the exit face to edit
-signed external angle and azimuth. Tilt switches to **Fit**. For short cells
+signed external angle and azimuth. Tilt preserves the selected view. Full aperture is the default. For short cells
 such as the earlier 20 µm PR preset, Fit zooms to the reachable exit region. Release the
 square inside the dashed circle. Out-of-range targets leave the draft unchanged. The numeric controls display the same draft.
 A drag marker follows the pointer. The draft and combined intensity update on
