@@ -76,6 +76,7 @@ class InteractiveBatch:
             W.HBox([self.source, self.field]), W.HBox([self.cut, self.aspect]),
             self.position, self.plot_message, self.canvas_host, self.plot, self.extra,
         ])
+        self._colab_callback = None
         self._generation = None
         self._record = None
         self._updating_results = False
@@ -309,6 +310,51 @@ class InteractiveBatch:
             })
             self._open_uploaded(Path(name).name, data)
 
+    def display_in_colab(self):
+        """Display the controller and pull updates through Colab's browser callback."""
+        from google.colab import output
+        from IPython.display import JSON
+
+        if self._colab_callback is not None:
+            output.unregister_callback(self._colab_callback)
+        name = self._colab_callback = f"lcprop.status.{uuid4().hex}"
+
+        def poll(last_state):
+            session = self.session
+            state = [session.generation, session.status]
+            if state != last_state:
+                self._refresh_status(None)
+                self.stop_button.send_state("disabled")
+                for control in (self.upload, self.load_button, self.save_button,
+                                self.export_button):
+                    control.send_state("disabled")
+            elif session.busy:
+                self.progress_view.send_state("value")
+            return JSON({"state": state, "busy": session.busy})
+
+        output.register_callback(name, poll)
+        display(self.widget)
+        output.eval_js("""
+(async () => {
+  const mount = document.createElement('div');
+  document.body.appendChild(mount);
+  let state = null;
+  while (mount.isConnected) {
+    try {
+      const response = await google.colab.kernel.invokeFunction(CALLBACK, [state], {});
+      const update = response.data['application/json'];
+      state = update.state;
+      await new Promise(resolve => setTimeout(resolve, update.busy ? 500 : 1500));
+    } catch (error) {
+      if (mount.isConnected) {
+        mount.textContent = 'Automatic progress connection ended. Redisplay the notebook controls to reconnect.';
+      }
+      break;
+    }
+  }
+})();
+""".replace("CALLBACK", json.dumps(name)), ignore_result=True)
+
     def _refresh_status(self, _):
         """Resend state from a live frontend callback after a missed update."""
         if self.session.disposed:
@@ -474,6 +520,11 @@ class InteractiveBatch:
             self.plot_message.value = f"Unavailable: {escape(str(error))}"
 
     async def dispose(self):
+        if self._colab_callback is not None:
+            from google.colab import output
+
+            output.unregister_callback(self._colab_callback)
+            self._colab_callback = None
         close_widgets(self.widget)
         self.session.notify = lambda: None
         if getattr(self, "_figure", None) is not None:

@@ -374,6 +374,7 @@ def test_notebook_display_cell_reuses_controller(monkeypatch, filename, controll
 
     def new_controller():
         controller = SimpleNamespace(widget=object(), session=SimpleNamespace(disposed=False))
+        controller.display_in_colab = lambda: views.append(controller.widget)
         instances.append(controller)
         return controller
 
