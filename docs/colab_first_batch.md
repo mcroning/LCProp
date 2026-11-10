@@ -3,7 +3,11 @@
 `InteractiveBatch` is a separate optional notebook frontend. The original
 `InteractiveLC` teaching controller retains its preset and file rules. The
 first batch uses the existing LC static and reduced nonlinear PR TD operations.
-Hosted acceptance and bounded CPU acceptance are pending.
+This is a bounded CPU preview. Earlier candidate builds passed the two local
+preset comparisons and hosted checks for Stop with Refresh status, the PR
+preset, single-canvas redraws and native ZIP reopen. These checks cover the
+recorded presets and hosted environment. The combined release wheel has its
+own acceptance check.
 
 ## Start in a fresh CPU kernel
 
@@ -53,7 +57,7 @@ lcprop_batch.open_from_colab()
 ```
 
 The picker waits for a selection in the cell. This is the supported hosted
-upload path when widget file transfer fails. In local Jupyter, use Upload
+upload path for Colab. In local Jupyter, use Upload
 and then Load / reopen under Save / load / export.
 Batch-compatible desktop files can retain LaunchPlane schema-4 beam editor
 metadata and local NumPy float64 execution intent. The notebook uses only the
@@ -88,6 +92,22 @@ fields, remote intent and unsupported retrieval policies fail editable load
 atomically. Keep the original file. A
 verified completed package may reopen read-only even when its request falls
 outside the editor. Uploads are bounded at 128 MiB. Completed export remains
-bound to the admitted request after draft edits. Colab downloads explicitly
-to your device. Local Jupyter reports the saved path. The interface does not
+bound to the admitted request after draft edits.
+
+If **Download completed** does not start a browser download in Colab, create
+a ZIP in the runtime with this separate cell:
+
+```python
+from pathlib import Path
+from uuid import uuid4
+from lcprop.notebook.batch_files import archive_completed
+
+folder = Path("/content") / f"lcprop-completed-{uuid4().hex[:8]}"
+zip_path = archive_completed(lcprop_batch.session.export_completed(folder))
+print(zip_path.name)
+```
+
+In Colab's Files pane, refresh the list and choose **Download** from the
+ZIP's file menu. To reopen it, use the native picker above. Local Jupyter
+reports the saved path. The interface does not
 offer continuation or checkpoint editing.
