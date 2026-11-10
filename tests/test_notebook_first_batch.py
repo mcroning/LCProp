@@ -356,7 +356,12 @@ def test_pr_worker_dispatch_freezes_admitted_request():
     asyncio.run(exercise())
 
 
-def test_notebook_display_cell_reuses_controller(monkeypatch):
+@pytest.mark.parametrize(("filename", "controller_name"), [
+    ("colab_first_batch.ipynb", "InteractiveBatch"),
+    ("lcprop_lc_colab.ipynb", "LCNotebook"),
+    ("lcprop_pr_colab.ipynb", "PRNotebook"),
+])
+def test_notebook_display_cell_reuses_controller(monkeypatch, filename, controller_name):
     import json
     from pathlib import Path
     import sys
@@ -372,14 +377,14 @@ def test_notebook_display_cell_reuses_controller(monkeypatch):
         instances.append(controller)
         return controller
 
-    monkeypatch.setattr(lcprop.notebook, "InteractiveBatch", new_controller)
+    monkeypatch.setattr(lcprop.notebook, controller_name, new_controller)
     monkeypatch.setattr(IPython, "get_ipython", lambda: SimpleNamespace(
         run_line_magic=lambda *args: setup.append(args)))
     monkeypatch.setattr(IPython.display, "display", views.append)
     monkeypatch.setattr(IPython.display, "clear_output", lambda **_: None)
     monkeypatch.setitem(sys.modules, "google.colab", SimpleNamespace(
         output=SimpleNamespace(enable_custom_widget_manager=lambda: setup.append("widgets"))))
-    notebook = Path(__file__).resolve().parents[1] / "notebooks/colab_first_batch.ipynb"
+    notebook = Path(__file__).resolve().parents[1] / "notebooks" / filename
     cells = json.loads(notebook.read_text())["cells"]
     namespace = {}
     for _ in range(2):
@@ -656,3 +661,81 @@ def test_beam_controls_are_visible_without_expanding_a_panel(monkeypatch):
         assert len(app.session.draft.beams.channels) == 1
     finally:
         asyncio.run(app.dispose())
+
+
+def test_material_notebooks_and_progress_lifecycle(monkeypatch):
+    from lcprop.notebook import LCNotebook, PRNotebook
+
+    monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
+    advance, finish = Event(), Event()
+    callbacks = []
+
+    class Fake:
+        def run_operation(self, operation, request, *, cancellation_token, progress_callback):
+            callbacks.append(progress_callback)
+            if len(callbacks) == 1:
+                progress_callback(SimpleNamespace(completed_units=None, total_units=None,
+                                                   message="Preparing"))
+                assert advance.wait(3)
+                progress_callback(SimpleNamespace(completed_units=1, total_units=3,
+                                                   message="Material step"))
+                assert finish.wait(3)
+                return SimpleNamespace(result=SimpleNamespace(status="completed"),
+                                       run_data=products(), message="done")
+            for _ in range(600):
+                if cancellation_token.is_cancelled():
+                    break
+                Event().wait(.005)
+            assert cancellation_token.is_cancelled()
+            return SimpleNamespace(result=SimpleNamespace(status="stopped"),
+                                   run_data=products(), message="stopped")
+
+    async def wait_until(predicate):
+        async def poll():
+            while not predicate():
+                await asyncio.sleep(.01)
+
+        await asyncio.wait_for(poll(), 3)
+
+    async def exercise():
+        runner = Fake()
+        lc = LCNotebook(runner=runner, preview_factory=preview)
+        pr = PRNotebook(runner=runner, preview_factory=preview)
+        try:
+            assert (lc.session.route, pr.session.route) == ("lc", "pr")
+            with pytest.raises(ValueError, match="only accepts LC"):
+                lc.session.set_draft("pr", requests.preset("pr"), lc.session.generation)
+            pr.run_button.click()
+            await wait_until(lambda: "Preparing <progress>" in pr.progress_view.value)
+            elapsed = pr.session.elapsed
+            await wait_until(lambda: pr.session.elapsed > elapsed)
+            assert lc.progress_view.value == "CPU · No admitted run"
+            advance.set()
+            await wait_until(lambda: "Material step" in pr.progress_view.value)
+            assert "1/3" in pr.progress_view.value
+            assert pr.session.active_id in pr.progress_view.value
+            finish.set()
+            await asyncio.wait_for(pr.session.task, 3)
+            first = pr.session.completed
+            assert first is not None
+            pr.run_button.click()
+            await wait_until(lambda: len(callbacks) == 2)
+            callbacks[0](SimpleNamespace(completed_units=2, total_units=3, message="Stale"))
+            pr.stop_button.click()
+            assert "Stop requested" in pr.progress_view.value
+            await asyncio.wait_for(pr.session.task, 3)
+            assert "Stop acknowledged" in pr.progress_view.value
+            assert "Stale" not in pr.progress_view.value
+            assert pr.session.completed is first
+            pr.run_button.click()
+            await wait_until(lambda: len(callbacks) == 3)
+            await asyncio.wait_for(pr.dispose(), 3)
+            assert pr.session.task.done() and not pr.session.busy
+        finally:
+            advance.set()
+            finish.set()
+            await lc.dispose()
+            if not pr.session.disposed:
+                await pr.dispose()
+
+    asyncio.run(exercise())

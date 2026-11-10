@@ -39,14 +39,18 @@ def close_widgets(widget):
 
 
 class InteractiveBatch:
-    """Single controller per kernel. Run requires an active notebook event loop."""
+    """One controller instance. Run requires an active notebook event loop."""
+
+    fixed_route = None
 
     def __init__(self, *, runner=None, validator=validate, preview_factory=preview):
         self.preview_factory = preview_factory
         self.directory = Path(tempfile.mkdtemp(prefix="lcprop-notebook-"))
-        self.session = BatchSession(runner=runner, validator=validator, notify=self._sync)
+        self.session = BatchSession(runner=runner, validator=validator, notify=self._sync,
+                                    fixed_route=self.fixed_route)
         self.editor = W.VBox()
         self.status = W.HTML()
+        self.progress_view = W.HTML()
         self.notice = W.HTML()
         self.stop_button = W.Button(description="Stop", disabled=True)
         self.source = W.Dropdown(description="View", options=["Draft preview"])
@@ -68,7 +72,7 @@ class InteractiveBatch:
         self.refresh_button.on_click(self._refresh_status)
         self.actions = W.HBox([self.stop_button, self.refresh_button])
         self.widget = W.VBox([
-            self.editor, self.actions, self.status, self.notice,
+            self.editor, self.actions, self.status, self.progress_view, self.notice,
             W.HBox([self.source, self.field]), W.HBox([self.cut, self.aspect]),
             self.position, self.plot_message, self.canvas_host, self.plot, self.extra,
         ])
@@ -213,7 +217,12 @@ class InteractiveBatch:
         route_control.observe(select_route, names="value")
         self.run_button = button
         old_controls = self.editor.children
-        self.editor.children = (route_control, grid_summary, material_panel, count,
+        if self.fixed_route is None:
+            workflow = route_control
+        else:
+            workflow = W.HTML(f"<b>{escape(route_control.label)}</b>")
+            route_control.close()
+        self.editor.children = (workflow, grid_summary, material_panel, count,
                                 coherence, beams, W.HBox([button, reset]))
         for control in old_controls:
             close_widgets(control)
@@ -307,16 +316,29 @@ class InteractiveBatch:
         self._generation = None
         self._sync()
         self.status.send_state("value")
+        self.progress_view.send_state("value")
         for control in (self.editor, self.actions, self.files, self.source):
             control.send_state()
 
     def _sync(self):
         session = self.session
-        progress = ""
-        if session.progress:
-            done, total, message = session.progress
-            progress = f" · {done}/{total} · {escape(message)}"
-        self.status.value = f"<b>{escape(session.status)}</b>{progress} {escape(session.message)}"
+        self.status.value = f"<b>{escape(session.status)}</b> {escape(session.message)}"
+        if session.last_run_id is None:
+            self.progress_view.value = "CPU · No admitted run"
+        else:
+            done, total, stage = session.progress or (None, None, "")
+            stage = stage or ("Preparing / executing" if session.busy else session.status)
+            known = done is not None and total is not None and 0 <= done <= total and total > 0
+            meter = ""
+            if known:
+                meter = f'<progress max="{total}" value="{done}"></progress> {done}/{total}'
+            elif session.busy:
+                meter = "<progress></progress>"
+            stop = {"stopping": " · Stop requested", "stopped": " · Stop acknowledged"}
+            self.progress_view.value = (
+                f"Run {session.last_run_id} · CPU · {session.elapsed:.1f} s"
+                f"{stop.get(session.status, '')}<br>{escape(stage)} {meter}"
+            )
         changed = self._generation != session.generation
         if changed:
             self._generation = session.generation
@@ -457,3 +479,15 @@ class InteractiveBatch:
         if getattr(self, "_figure", None) is not None:
             plt.close(self._figure)
         await self.session.dispose()
+
+
+class LCNotebook(InteractiveBatch):
+    """LC static Colab entry controller."""
+
+    fixed_route = "lc"
+
+
+class PRNotebook(InteractiveBatch):
+    """PR reduced nonlinear TD Colab entry controller."""
+
+    fixed_route = "pr"

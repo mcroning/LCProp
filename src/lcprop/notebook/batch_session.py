@@ -55,19 +55,21 @@ def environment_identity():
 
 
 class BatchSession:
-    def __init__(self, *, runner=None, validator=validate, notify=None):
+    def __init__(self, *, runner=None, validator=validate, notify=None, fixed_route=None):
         self.runner = LocalRunner() if runner is None else runner
         self.validator = validator
         self.notify = notify or (lambda: None)
-        self.route = "lc"
-        self.draft = preset("lc")
+        self.fixed_route = fixed_route
+        self.route = fixed_route or "lc"
+        self.draft = preset(self.route)
         self.presentation = {}
         self.execution_intent = None
         self.completed = self.partial = None
         self.status = "idle"
         self.message = ""
         self.progress = None
-        self.active_id = None
+        self.active_id = self.last_run_id = None
+        self.elapsed = 0.0
         self.task = None
         self.disposed = False
         self.generation = 0
@@ -94,6 +96,8 @@ class BatchSession:
     def set_draft(self, route, request, generation):
         if generation != self.generation or self.busy or self.disposed:
             return False
+        if self.fixed_route is not None and route != self.fixed_route:
+            raise ValueError(f"This notebook only accepts {self.fixed_route.upper()} drafts")
         presentation = self.presentation if route == self.route else {}
         intent = self.execution_intent if route == self.route else None
         if presentation:
@@ -116,7 +120,8 @@ class BatchSession:
         encoded, digest = identity(payload)
         run_id = uuid4().hex
         self.token = CancellationToken()
-        self.active_id = run_id
+        self.active_id = self.last_run_id = run_id
+        self.elapsed = 0.0
         self.generation += 1
         self.status, self.message = "running", "\n".join(warnings)
         self.progress = self.partial = None
@@ -133,7 +138,10 @@ class BatchSession:
         def progress(event):
             if monotonic() - started >= limit:
                 token.cancel()
-            item = (run_id, event.completed_units, event.total_units, event.message)
+            stage = getattr(event, "stage", None) or event.message
+            if not stage:
+                stage = "LC optical propagation" if route == "lc" else "PR material evolution"
+            item = (run_id, event.completed_units, event.total_units, stage)
             try:
                 mailbox.get_nowait()
             except Empty:
@@ -154,17 +162,26 @@ class BatchSession:
                     token.cancel()
                     self.status = "stopping"
                     self.message = "Elapsed budget reached. Waiting for a safe boundary."
-                    self._notify()
                 try:
                     item = mailbox.get_nowait()
                 except Empty:
-                    continue
-                if not self.disposed and self.active_id == item[0]:
-                    self.progress = item[1:]
+                    item = None
+                if not self.disposed and self.active_id == run_id:
+                    self.elapsed = monotonic() - started
+                    if item is not None and item[0] == run_id:
+                        self.progress = item[1:]
                     self._notify()
             output = await asyncio.shield(worker)
             if self.disposed or self.active_id != run_id:
                 return
+            self.elapsed = monotonic() - started
+            try:
+                item = mailbox.get_nowait()
+            except Empty:
+                pass
+            else:
+                if item[0] == run_id:
+                    self.progress = item[1:]
             result = output.result
             status = getattr(result, "status", "completed")
             if status in {"completed", "stopped", "cancelled"}:
@@ -188,7 +205,8 @@ class BatchSession:
             await asyncio.shield(worker)
             raise
         except Exception as error:
-            if not self.disposed:
+            if not self.disposed and self.active_id == run_id:
+                self.elapsed = monotonic() - started
                 self.status, self.message = "failed", f"Execution: {type(error).__name__}: {error}"
         finally:
             if self.active_id == run_id:
@@ -222,6 +240,8 @@ class BatchSession:
     def load_draft(self, path):
         self._editable()
         loaded = read_experiment_file(path, registry=self.experiments)
+        if self.fixed_route is not None and loaded.material_id != self.fixed_route:
+            raise ValueError(f"This notebook only accepts {self.fixed_route.upper()} drafts")
         presentation, intent = desktop_metadata(loaded)
         self.validator(loaded.material_id, loaded.request)
         self.route, self.draft = loaded.material_id, loaded.request
@@ -258,6 +278,8 @@ class BatchSession:
         if output.envelope.cancelled or output.envelope.scientific_status != "completed":
             raise ValueError("Only completed packages can replace the completed view")
         route = request.envelope.material_id
+        if self.fixed_route is not None and route != self.fixed_route:
+            raise ValueError(f"This notebook only accepts {self.fixed_route.upper()} results")
         operation, experiment, _ = ROUTES[route]
         # Transport packages can contain requests outside the editable subset.
         # Use their verified envelope as identity if the draft codec rejects it.
