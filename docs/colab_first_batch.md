@@ -43,9 +43,10 @@ attempt has its own view and leaves the previous completed result available.
 
 ## Edit beams in BeamPlane
 
-Select an active beam by name or by clicking its center in **Move** mode.
-In **Tilt** mode, select its internal-ray endpoint. If handles overlap, choose
-a beam from the overlap menu, then drag its handle. **Move** changes the
+Select the active beam using the **Active beam** dropdown. Canvas clicks
+preserve that selection. Drag the selected beam's center in **Move** mode
+or its internal-ray endpoint in **Tilt** mode. Overlapping handles act on
+the selected beam. **Move** changes the
 entrance center. **Tilt** uses the square endpoint at the exit face to edit
 signed external angle and azimuth. Tilt preserves the selected view. Full aperture is the default. For short cells
 such as the earlier 20 µm PR preset, Fit zooms to the reachable exit region. Release the

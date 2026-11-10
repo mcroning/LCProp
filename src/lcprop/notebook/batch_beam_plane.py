@@ -19,8 +19,6 @@ class BatchBeamPlane:
     def __init__(self, owner):
         self.owner = owner
         self.beam = W.Dropdown(description="Active beam")
-        self.overlap = W.Dropdown(description="Overlapping beams")
-        self.overlap.layout.display = "none"
         self.mode = W.ToggleButtons(options=["Move", "Tilt"])
         self.extent = W.ToggleButtons(options=["Fit", "Full aperture"], value="Full aperture")
         self.enabled = W.Checkbox(description="Enabled")
@@ -37,13 +35,12 @@ class BatchBeamPlane:
         self.add = W.Button(description="Add beam")
         self.duplicate = W.Button(description="Duplicate")
         self.delete = W.Button(description="Delete")
-        self.inputs = (self.beam, self.overlap, self.mode, self.extent, self.enabled,
+        self.inputs = (self.beam, self.mode, self.extent, self.enabled,
                        self.coherence, *self.fields.values(), self.add, self.duplicate, self.delete)
         self.figure = self.canvas = self.ax = None
         self.connections = ()
         self.gesture = self.drag_marker = None
         self.tilt_error = ""
-        self.overlap_choice = None
         self.syncing = False
         self.generation = None
         try:
@@ -60,12 +57,11 @@ class BatchBeamPlane:
             canvas = self.canvas
         self.widget = W.VBox([
             W.HTML("<b>BeamPlane · draft launch</b>"),
-            self.beam, self.overlap, W.HBox([self.add, self.duplicate, self.delete]),
+            self.beam, W.HBox([self.add, self.duplicate, self.delete]),
             self.enabled, self.coherence, self.mode, self.extent, self.preview_status, canvas,
             *self.fields.values(),
         ])
         self.beam.observe(self._selection, names="value")
-        self.overlap.observe(self._choose_overlap, names="value")
         self.mode.observe(self._change_mode, names="value")
         self.extent.observe(lambda _: self.draw(), names="value")
         self.enabled.observe(self._enabled, names="value")
@@ -94,17 +90,7 @@ class BatchBeamPlane:
 
     def _selection(self, _):
         if not self.syncing:
-            if self.beam.value != self.overlap_choice:
-                self.overlap_choice = None
             self.sync()
-
-    def _choose_overlap(self, change):
-        if not self.syncing and change["new"] is not None and not self.session.busy:
-            self.overlap_choice = change["new"]
-            if self.beam.value == change["new"]:
-                self.sync()
-            else:
-                self.beam.value = change["new"]
 
     def _current(self, items):
         return next(i for i, (channel, _) in enumerate(items) if channel.name == self.beam.value)
@@ -113,8 +99,6 @@ class BatchBeamPlane:
         if self.session.disposed:
             return
         self.cancel()
-        if self.generation != self.session.generation:
-            self.overlap_choice = None
         self.generation = self.session.generation
         items = self._objects()
         self.syncing = True
@@ -134,7 +118,6 @@ class BatchBeamPlane:
             count = len(self.session.draft.beams.channels)
             self.enabled.disabled |= (enabled and count == 1) or (not enabled and count == 2)
             self.delete.disabled |= enabled and count == 1
-            self.overlap.layout.display = "none"
         finally:
             self.syncing = False
         if redraw:
@@ -199,8 +182,8 @@ class BatchBeamPlane:
         self._commit([*items, (channel, len(self.session.draft.beams.channels) < 2)], select=name)
 
     def _change_mode(self, change):
-        self.overlap_choice = None
         self.tilt_error = ""
+        self.draw()
 
     def draw(self):
         if self.session.disposed:
@@ -278,31 +261,19 @@ class BatchBeamPlane:
             return
         request = self.session.draft
         index = refractive_index(self.session.route, request)
-        hits = []
-        for channel, enabled in self._objects():
-            target = (channel.x0_um, channel.y0_um)
-            if self.mode.value == "Tilt":
-                if not enabled:
-                    continue
-                try:
-                    target = ray_endpoint(channel, request, index)
-                except ValueError:
-                    continue
-            px, py = self.ax.transData.transform(target)
-            if math.hypot(event.x - px, event.y - py) <= 12:
-                hits.append((channel.name, enabled, target))
-        if not hits:
-            return
-        selected = next((hit for hit in hits if hit[0] == self.beam.value), None)
-        if len(hits) > 1 and (selected is None or self.overlap_choice != selected[0]):
-            self.overlap.options = [("Choose a beam", None)] + [(name, name) for name, _, _ in hits]
-            self.overlap.value = None
-            self.overlap.layout.display = ""
-            return
-        name, enabled, target = selected or hits[0]
-        self.beam.value = name
-        if enabled or self.mode.value == "Move":
-            self.gesture = (self.generation, request, name, self.mode.value,
+        items = self._objects()
+        channel, enabled = items[self._current(items)]
+        target = (channel.x0_um, channel.y0_um)
+        if self.mode.value == "Tilt":
+            if not enabled:
+                return
+            try:
+                target = ray_endpoint(channel, request, index)
+            except ValueError:
+                return
+        px, py = self.ax.transData.transform(target)
+        if math.hypot(event.x - px, event.y - py) <= 12:
+            self.gesture = (self.generation, request, channel.name, self.mode.value,
                             target[0] - event.xdata, target[1] - event.ydata)
 
     def motion(self, event):
@@ -328,7 +299,6 @@ class BatchBeamPlane:
         if (generation != self.session.generation or request is not self.session.draft
                 or name != self.beam.value or mode != self.mode.value):
             return
-        self.overlap_choice = None
         x, y = point[0] + dx, point[1] + dy
         if mode == "Move":
             self._run(lambda: self._replace(x0_um=x, y0_um=y))

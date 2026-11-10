@@ -743,11 +743,10 @@ def test_beam_plane_canvas_gestures_and_stale_drag(monkeypatch, route):
         panel.duplicate.click()
         channel = app.session.draft.beams.channels[1]
         start = event(channel.x0_um, channel.y0_um)
+        panel.beam.value = first
         panel.press(start)
-        assert panel.overlap.layout.display == ""
-        panel.overlap.value = first
+        assert panel.gesture is not None
         assert panel.beam.value == first
-        panel.press(start)
         end = event(channel.x0_um + 12, channel.y0_um + 4)
         old = app.session.draft
         panel.motion(end)
@@ -755,19 +754,28 @@ def test_beam_plane_canvas_gestures_and_stale_drag(monkeypatch, route):
         panel.release(end)
         assert panel.fields["x0_um"].value == channel.x0_um + 12
         assert app.session.draft.beams.channels[1] == channel
+        assert panel.beam.value == first
+        # Pressing the separated inactive beam never selects it.
+        panel.press(event(channel.x0_um, channel.y0_um))
+        assert panel.gesture is None and panel.beam.value == first
         assert samples[-1] == app.session.draft.beams and panel.figure is figure
         np.testing.assert_equal(panel.ax.collections[0].get_array(),
                                 np.full((3, 4), channel.x0_um + 12))
 
+        # Re-overlap both centers, then tilt only the dropdown-selected beam.
+        panel.fields["x0_um"].value = channel.x0_um
+        panel.fields["y0_um"].value = channel.y0_um
         panel.mode.value = "Tilt"
         assert panel.extent.value == "Full aperture"
         panel.extent.value = "Fit"
         channel = app.session.draft.beams.channels[0]
+        inactive = app.session.draft.beams.channels[1]
         x, y = channel.x0_um, channel.y0_um
         panel.press(event(x, y))
         panel.release(event(x - 2, y))
         tilted = app.session.draft.beams.channels[0]
         assert tilted.theta_ext_rad < 0
+        assert app.session.draft.beams.channels[1] == inactive
         index = requests.refractive_index(route, app.session.draft)
         np.testing.assert_allclose(ray_endpoint(tilted, app.session.draft, index), (x - 2, y))
 
