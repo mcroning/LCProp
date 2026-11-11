@@ -917,17 +917,18 @@ def test_lc_completed_notebook_views_use_retained_volumes(monkeypatch):
         app.session.completed = record
         app._sync()
         assert app.source.value == "Completed" and app.field.value == "intensity_stack"
+        assert app.position.options == (("5 um", 0), ("15 um", 1))
         app.position.value = 1
         plane, _, ax = drawn[-1]
         np.testing.assert_array_equal(plane.values, values[1].T)
-        assert app.position.description == "z sample" and "z = 15" in ax.get_title()
+        assert app.position.description == "z cut" and "z = 15" in ax.get_title()
 
         app.cut.value = "x–z"
         app.position.value = 0
         plane, _, ax = drawn[-1]
         np.testing.assert_array_equal(plane.values, values[:, :, 0].T)
         np.testing.assert_array_equal(plane.coordinates[0], geometry.z)
-        assert "y = -3" in ax.get_title() and app.position.description == "y sample"
+        assert "y = -3" in ax.get_title() and app.position.description == "y cut"
 
         app.field.value = "delta_theta_stack"
         app.cut.value = "y–z"

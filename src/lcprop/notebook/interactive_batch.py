@@ -66,7 +66,9 @@ class InteractiveBatch:
         else:
             self.cut = W.Dropdown(description="Plane", options=list(PLANES))
         self.aspect = W.Dropdown(description="Aspect", options=["Physical", "Square"])
-        self.position = W.IntSlider(description="Cut sample", continuous_update=False)
+        self.position = (W.Dropdown(description="Cut")
+                         if self.fixed_route == "lc" else
+                         W.IntSlider(description="Cut sample", continuous_update=False))
         self.plot = W.Output()
         self.canvas_host = W.VBox()
         self.plot_message = W.HTML()
@@ -435,17 +437,25 @@ class InteractiveBatch:
             if field is not None and field.data.ndim == 3 and len(missing) == 1:
                 try:
                     axis = next(iter(missing))
-                    coordinate, _ = field_coordinates(field, geometry, axis)
+                    coordinate, unit = field_coordinates(field, geometry, axis)
                 except ValueError:
                     pass
-            if self.fixed_route == "lc":
-                self.position.description = f"{axis} sample" if coordinate is not None else "Cut sample"
-                self.position.layout.display = "" if coordinate is not None else "none"
-            self.position.disabled = coordinate is None
-            self.position.max = 0 if coordinate is None else len(coordinate) - 1
             key = (self.source.value, self.field.value, self.cut.value, id(record))
-            if key != self._view_key:
-                self.position.value = 0 if coordinate is None or self.cut.value == "x–y" else len(coordinate) // 2
+            index = 0 if coordinate is None or self.cut.value == "x–y" else len(coordinate) // 2
+            self.position.disabled = coordinate is None
+            if self.fixed_route == "lc":
+                previous = self.position.value
+                self.position.description = f"{axis} cut" if coordinate is not None else "Cut"
+                self.position.layout.display = "" if coordinate is not None else "none"
+                self.position.options = [] if coordinate is None else [
+                    (f"{value:.6g} {unit}", i) for i, value in enumerate(coordinate)
+                ]
+                if coordinate is not None:
+                    self.position.value = previous if key == self._view_key else index
+            else:
+                self.position.max = 0 if coordinate is None else len(coordinate) - 1
+                if key != self._view_key:
+                    self.position.value = index
             self._view_key = key
             self._show_identity(record)
         finally:

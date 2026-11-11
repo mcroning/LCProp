@@ -72,8 +72,8 @@ read-only behavior.
 
 In the LC notebook, select **Completed**, then choose **Intensity** or
 **Director response (Δθ)**. The **XY**, **XZ**, and **YZ** buttons choose the
-plane. The sample slider selects the remaining coordinate, whose physical
-location appears in the plot title. **Physical** preserves the axis scale.
+plane. The cut dropdown lists physical coordinates along the remaining axis.
+The selected coordinate appears in the plot title. **Physical** preserves the axis scale.
 Choose **Square** for a wider view of a long, narrow cell. The entrance preview
 contains XY data only.
 
