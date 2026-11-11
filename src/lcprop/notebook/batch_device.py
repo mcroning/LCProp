@@ -54,9 +54,9 @@ def probe_cupy(spec):
     except (ImportError, OSError) as error:
         raise DeviceUnavailable(f"CuPy is unavailable: {error}") from error
 
-    device_errors = (cp.cuda.runtime.CUDARuntimeError, cp.cuda.memory.OutOfMemoryError,
-                     MemoryError, OSError)
+    device_errors = (ImportError, OSError, MemoryError)
     try:
+        device_errors += (cp.cuda.runtime.CUDARuntimeError, cp.cuda.memory.OutOfMemoryError)
         fft_error = getattr(getattr(cp.cuda, "cufft", None), "CuFFTError", None)
         if fft_error is not None:
             device_errors += (fft_error,)
@@ -73,7 +73,7 @@ def probe_cupy(spec):
         raise DeviceUnavailable(f"GPU probe failed: {error}") from error
     except RuntimeError as error:
         # get_backend wraps its allocation failure for explicit CuPy requests.
-        if isinstance(error.__cause__, device_errors + (ImportError,)):
+        if isinstance(error.__cause__, device_errors):
             raise DeviceUnavailable(f"GPU probe failed: {error}") from error
         raise
     if isinstance(name, bytes):
@@ -102,4 +102,7 @@ def resolve_device(route, request, gpu_probe=None):
         if spec.backend == "cupy":
             raise
         return RunDevice("auto", "numpy", spec.precision, fallback_reason=str(error))
+    if (not isinstance(gpu, GPUDevice) or type(gpu.ordinal) is not int
+            or gpu.ordinal < 0 or not callable(gpu.bind)):
+        raise TypeError("GPU probe must return a GPUDevice with a valid ordinal and binder")
     return RunDevice(spec.backend, "cupy", spec.precision, gpu=gpu)

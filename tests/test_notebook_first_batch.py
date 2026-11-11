@@ -1248,3 +1248,61 @@ def test_public_pr_widget_shows_fallback_and_pre_admission_rejection(monkeypatch
             await app.dispose()
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("preference", ["auto", "cupy"])
+@pytest.mark.parametrize("stage", ["lookup", "fft"])
+def test_lazy_cufft_import_failure(monkeypatch, preference, stage):
+    def missing_library():
+        raise ImportError("mock cuFFT dependency unavailable")
+
+    class MockCuda:
+        runtime = SimpleNamespace(CUDARuntimeError=RuntimeError)
+        memory = SimpleNamespace(OutOfMemoryError=MemoryError)
+
+        @property
+        def cufft(self):
+            if stage == "lookup":
+                missing_library()
+            return SimpleNamespace()
+
+        def Device(self):
+            from contextlib import nullcontext
+            return nullcontext()
+
+    monkeypatch.setitem(sys.modules, "cupy", SimpleNamespace(
+        cuda=MockCuda(), arange=np.arange, zeros=np.zeros,
+        fft=SimpleNamespace(fft=lambda _: missing_library()),
+    ))
+    draft = requests.preset("pr")
+    request = replace(draft, backend=replace(draft.backend, backend=preference))
+    if preference == "auto":
+        device = resolve_device("pr", request, probe_cupy)
+        assert device.resolved == "numpy" and device.gpu is None
+        assert "mock cuFFT dependency unavailable" in device.fallback_reason
+    else:
+        with pytest.raises(DeviceUnavailable, match="mock cuFFT dependency unavailable"):
+            resolve_device("pr", request, probe_cupy)
+
+
+@pytest.mark.parametrize("preference", ["auto", "cupy"])
+@pytest.mark.parametrize("probe_result", [None, GPUDevice(-1, "Mock", lambda: None),
+                                          GPUDevice(0, "Mock", None)])
+def test_invalid_probe_result_never_admits_worker(preference, probe_result):
+    def forbidden(*args, **kwargs):
+        pytest.fail("Invalid probe output must never reach the worker")
+
+    async def exercise():
+        session = BatchSession(
+            runner=SimpleNamespace(run_operation=forbidden), validator=validate,
+            fixed_route="pr", gpu_probe=lambda _: probe_result,
+        )
+        draft = session.draft
+        request = replace(draft, backend=replace(draft.backend, backend=preference))
+        session.set_draft("pr", request, session.generation)
+        with pytest.raises(TypeError, match="GPU probe must return a GPUDevice"):
+            session.start(session.generation)
+        assert session.active_id is session.last_run_id is session.task is None
+        assert session.last_device is None and not session.busy
+
+    asyncio.run(exercise())
