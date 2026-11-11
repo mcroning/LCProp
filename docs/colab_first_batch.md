@@ -1,26 +1,29 @@
 # Bounded LC and PR notebook interface
 
-`InteractiveBatch` is a separate optional notebook frontend. The original
-`InteractiveLC` teaching controller retains its preset and file rules. The
-first batch uses the existing LC static and reduced nonlinear PR TD operations.
-This bounded preview defaults to CPU. Earlier candidate builds passed the two local
-preset comparisons and hosted checks for Stop with Refresh status, the PR
-preset, single-canvas redraws and native ZIP reopen. These checks cover the
-recorded presets and hosted environment. The [release notes](releases/0.5.0rc1.md) distinguish earlier preview checks from exact-wheel verification.
+The separate LC static and reduced nonlinear PR TD notebooks are optional
+frontends for the calculation engine. Both default to CPU. See the
+[release notes](releases/0.5.0rc1.md) for the qualification scope.
 
-## Start in a fresh CPU kernel
+## Start in a fresh Colab runtime
 
-Use the exact candidate wheel and its separately recorded SHA-256. Install its
-`colab` extra into the new kernel, restart after installation and check the
-installed version, wheel origin and dependencies. The companion
-[notebook](../notebooks/colab_first_batch.ipynb) provides these cells. For a
-local Jupyter kernel, use the same wheel and choose the widget backend before
-constructing the controller. Colab requires the custom widget manager.
+1. Open the [LC notebook](../notebooks/lcprop_lc_colab.ipynb) or
+   [PR notebook](../notebooks/lcprop_pr_colab.ipynb) and select a CPU runtime.
+2. Obtain the wheel and notebooks from the same release staging set (or
+   release assets when published). Compare all three SHA-256 values with the
+   supplied manifest before use.
+3. Upload the wheel using Colab's Files pane so it appears under `/content`.
+   Run the notebook's install cell, then restart the session. The cell
+   installs the pinned wheel and its `colab` extra, plus Jedi for Colab's
+   IPython dependency. The Colab T4 preview uses Colab's supplied CuPy.
+4. After restart, run **Verify installation** and then the interface cell.
+   Verification checks the installed wheel's origin, version and dependency
+   consistency. The interface enables Colab's custom widget manager.
 
-Rerun the display cell to show the existing controller. Export needed files
-before restarting the kernel. In an active kernel, call
-`await lcprop_batch.dispose()` before intentionally replacing the controller.
-Disposal waits for the worker to acknowledge cancellation.
+Rerun the interface cell to redisplay the existing controller. Export any
+needed files before restarting. To intentionally dispose of the controller,
+use `await lcprop_lc.dispose()` in the LC notebook or
+`await lcprop_pr.dispose()` in the PR notebook, then restart before creating
+another controller. Disposal waits for the worker to acknowledge cancellation.
 
 ## Configure and run
 
@@ -114,12 +117,11 @@ reported. Physical aspect uses matching physical scales and Square fits a
 square plot. Executed request and diagnostics show the admitted hash and
 provenance.
 
-In hosted Colab, run this in a separate code cell and select one experiment
-JSON or completed ZIP in Colab's native picker:
+In hosted Colab, run the command for your notebook in a separate code cell.
+Select one experiment JSON or completed ZIP in Colab's native picker:
 
-```python
-lcprop_batch.open_from_colab()
-```
+- LC notebook: `lcprop_lc.open_from_colab()`
+- PR notebook: `lcprop_pr.open_from_colab()`
 
 The picker waits for a selection in the cell. This is the supported hosted
 upload path for Colab. In local Jupyter, use Upload
@@ -160,6 +162,21 @@ verified completed package may reopen read-only even when its request falls
 outside the editor. Uploads are bounded at 128 MiB. Completed export remains
 bound to the admitted request after draft edits.
 
+Under **Save / load / export**, use **Download draft** for an experiment
+JSON or **Download completed** for the completed-result ZIP. If the draft
+download stalls, run this in a separate cell and download the JSON from
+Colab's Files pane:
+
+```python
+from pathlib import Path
+from uuid import uuid4
+
+app = lcprop_lc  # In the PR notebook, use app = lcprop_pr.
+draft_path = Path("/content") / f"lcprop-draft-{uuid4().hex[:8]}.lcprop.json"
+app.session.save_draft(draft_path)
+print(draft_path.name)
+```
+
 If **Download completed** does not start a browser download in Colab, create
 a ZIP in the runtime with this separate cell:
 
@@ -169,10 +186,15 @@ from uuid import uuid4
 from lcprop.notebook.batch_files import archive_completed
 
 folder = Path("/content") / f"lcprop-completed-{uuid4().hex[:8]}"
-zip_path = archive_completed(lcprop_batch.session.export_completed(folder))
+app = lcprop_lc  # In the PR notebook, use app = lcprop_pr.
+zip_path = archive_completed(app.session.export_completed(folder))
 print(zip_path.name)
 ```
 
 In Colab's Files pane, refresh the list and choose **Download** from the
 ZIP's file menu. To reopen it, use the native picker above. The Files-pane procedure is a workaround. Browser download has not been qualified. Local Jupyter reports the saved path. The interface does not
 offer continuation or checkpoint editing.
+
+On narrow Colab panes the plot colorbar can be clipped. Close the Files pane
+or widen the browser view. Desktop feature parity, saved LC result acceptance,
+and additional GPU workflows remain deferred.

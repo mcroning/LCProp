@@ -1,7 +1,8 @@
 # Portable LCProp notebooks
 
-The [bounded interactive LC/PR candidate](colab_first_batch.ipynb) uses the
-[separate notebook controller](../docs/colab_first_batch.md). See the guide for the hosted CPU preview scope and file transfer steps.
+Use the separate Colab entry points below for the 0.5.0rc1 preview.
+The [combined notebook](colab_first_batch.ipynb) is retained as an earlier
+candidate with its own wheel pin.
 
 `pr_reduced_cpu.ipynb` is a small NumPy float64 reduced nonlinear PR TD demonstration.
 It uses the Product preflight, Local runner, result adapters and persistence codecs.
@@ -21,7 +22,11 @@ total for that phase. Stop stays requested until the worker returns. The
 kernel sends progress automatically during the run. **Refresh status** can
 resend it if the browser missed an update.
 
-## Local Jupyter
+## Standalone PR demonstration
+
+The remaining instructions apply to `pr_reduced_cpu.ipynb`.
+
+### Local Jupyter
 
 Choose a new Python >=3.10 environment. Explicit setup commands (not notebook execution):
 
@@ -40,7 +45,7 @@ Matplotlib, notebook execution needs IPython/ipykernel and a Jupyter frontend.
 The notebook reports actual module path and versions. Save its manifest: pinning
 LCProp does not pin NumPy/SciPy or guarantee cross-version bitwise identity.
 
-## Colab
+### Colab
 
 Upload/open the notebook and explicitly select a CPU runtime. In a separate setup
 cell, if needed, run:
