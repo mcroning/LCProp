@@ -10,13 +10,13 @@ No Qt, LaunchPlane, GPU, notebook-specific scientific equations or automatic set
 ## Separate Colab entry points
 
 [LC static](lcprop_lc_colab.ipynb) and [PR reduced nonlinear TD](lcprop_pr_colab.ipynb)
-open independent controllers on CPU. Use a wheel that contains these entry
-points. See the [setup and file guide](../docs/colab_first_batch.md) for
+open independent controllers with CPU execution by default. Use the reviewed
+LCProp wheel. The PR notebook offers an explicit Colab T4 opt-in. See the [setup and file guide](../docs/colab_first_batch.md) for
 checksum verification, installation, restart and file interchange. Each
 controller accepts experiment and completed-result files for its own material.
 
 The progress panel reports the admitted run identity, elapsed time, stage and
-CPU device. An indicator without a count means the engine has no reliable
+resolved device. An indicator without a count means the engine has no reliable
 total for that phase. Stop stays requested until the worker returns. The
 kernel sends progress automatically during the run. **Refresh status** can
 resend it if the browser missed an update.

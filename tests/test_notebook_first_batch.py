@@ -382,12 +382,13 @@ def test_pr_worker_dispatch_freezes_admitted_request():
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize(("filename", "controller_name"), [
-    ("colab_first_batch.ipynb", "InteractiveBatch"),
-    ("lcprop_lc_colab.ipynb", "LCNotebook"),
-    ("lcprop_pr_colab.ipynb", "PRNotebook"),
+@pytest.mark.parametrize(("filename", "controller_name", "enable_t4"), [
+    ("colab_first_batch.ipynb", "InteractiveBatch", False),
+    ("lcprop_lc_colab.ipynb", "LCNotebook", False),
+    ("lcprop_pr_colab.ipynb", "PRNotebook", False),
+    ("lcprop_pr_colab.ipynb", "PRNotebook", True),
 ])
-def test_notebook_display_cell_reuses_controller(monkeypatch, filename, controller_name):
+def test_notebook_display_cell_reuses_controller(monkeypatch, filename, controller_name, enable_t4):
     import json
     from pathlib import Path
     import sys
@@ -396,11 +397,21 @@ def test_notebook_display_cell_reuses_controller(monkeypatch, filename, controll
     import IPython.display
     import lcprop.notebook
 
-    instances, views, setup = [], [], []
+    from lcprop.notebook import batch_device
 
-    def new_controller():
+    instances, views, setup, probes = [], [], [], []
+    device = GPUDevice(0, "Tesla T4", lambda: None)
+
+    def mock_probe(spec):
+        probes.append(spec)
+        return device
+
+    monkeypatch.setattr(batch_device, "probe_cupy", mock_probe)
+
+    def new_controller(*, gpu_probe=None):
         controller = SimpleNamespace(widget=object(), session=SimpleNamespace(disposed=False))
         controller.display_in_colab = lambda: views.append(controller.widget)
+        controller.gpu_probe = gpu_probe
         instances.append(controller)
         return controller
 
@@ -414,11 +425,27 @@ def test_notebook_display_cell_reuses_controller(monkeypatch, filename, controll
     notebook = Path(__file__).resolve().parents[1] / "notebooks" / filename
     cells = json.loads(notebook.read_text())["cells"]
     namespace = {}
+    source = "".join(cells[-1]["source"])
+    if enable_t4:
+        source = source.replace("ENABLE_COLAB_T4 = False", "ENABLE_COLAB_T4 = True")
     for _ in range(2):
-        exec("".join(cells[-1]["source"]), namespace)
+        exec(source, namespace)
     assert len(instances) == 1
     assert views == [instances[0].widget] * 2
     assert setup == ["widgets", ("matplotlib", "widget")]
+
+    assert probes == []
+    if enable_t4:
+        spec = requests.preset("pr").backend
+        assert instances[0].gpu_probe(spec) is device
+        assert probes == [spec]
+        device = replace(device, name="NVIDIA L4")
+        with pytest.raises(DeviceUnavailable, match="requires a T4"):
+            instances[0].gpu_probe(spec)
+        with pytest.raises(RuntimeError, match="restart the kernel"):
+            exec(source.replace("ENABLE_COLAB_T4 = True", "ENABLE_COLAB_T4 = False"), namespace)
+    else:
+        assert instances[0].gpu_probe is None
 
 
 def desktop_fixture(session, path, route, *, remote=False, backend="numpy"):

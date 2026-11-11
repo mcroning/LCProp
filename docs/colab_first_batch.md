@@ -3,7 +3,7 @@
 `InteractiveBatch` is a separate optional notebook frontend. The original
 `InteractiveLC` teaching controller retains its preset and file rules. The
 first batch uses the existing LC static and reduced nonlinear PR TD operations.
-This is a bounded CPU preview. Earlier candidate builds passed the two local
+This bounded preview defaults to CPU. Earlier candidate builds passed the two local
 preset comparisons and hosted checks for Stop with Refresh status, the PR
 preset, single-canvas redraws and native ZIP reopen. These checks cover the
 recorded presets and hosted environment. The [release notes](releases/0.5.0rc1.md) distinguish earlier preview checks from exact-wheel verification.
@@ -34,12 +34,12 @@ Both editors preserve signed external tilt and beam phase, and allow explicit
 coherence regrouping. Wavelength is fixed at 0.633 µm.
 
 The PR **Device** preference defaults to **Auto**. **CPU** selects NumPy
-float64 directly. The public preview still runs on CPU. Until hosted GPU
-qualification passes, **Auto** shows why it selected CPU and **GPU** rejects
-the request before it starts. LC stays CPU-only. Draft files preserve the
-requested preference. The executed request and completed package record the
-resolved backend and precision. An admitted run that fails keeps the previous
-completed result available. Each new attempt requires **Run**.
+float64 directly. With the default notebook setup, Auto uses CPU and shows
+why, and GPU requests are rejected before a run starts. LC stays CPU-only.
+Draft files preserve the requested preference. The executed request and
+completed package record the resolved backend and precision. An admitted run
+that fails keeps the previous completed result available. Each new attempt
+requires **Run**.
 
 The draft input preview samples the entrance plane. Only **Run** admits
 propagation. Finish submitting browser edits before Run. The kernel freezes
@@ -48,6 +48,29 @@ the validated request, disables draft edits and runs one background worker.
 busy until acknowledgement. If Colab misses a background status update,
 use **Refresh status** to request the current kernel state. The elapsed budgets are cooperative. A stopped
 attempt has its own view and leaves the previous completed result available.
+
+## Opt in to the Colab T4 PR preview
+
+Use the [PR notebook](../notebooks/lcprop_pr_colab.ipynb) in a fresh Colab
+T4 runtime. Verify and install the reviewed wheel with the Colab extra, then
+restart the kernel. Use the CuPy supplied by the Colab runtime. The qualified
+setup used a Tesla T4 with CUDA 13.0 and CuPy 14.0.1 (`cupy-cuda13x`).
+The wheel's optional CUDA 12 extra was outside this qualification. Avoid
+installing it alongside Colab's CUDA 13 CuPy.
+
+Set `ENABLE_COLAB_T4 = True` in the display cell before creating the
+controller. The **GPU** preference requires a successful T4 probe.
+**Auto** uses the T4 when the probe succeeds and shows the reason when
+it falls back to CPU. **CPU** bypasses the probe. An admitted GPU run
+executes on that device with float64/complex128 and has no automatic
+CPU retry. Export any needed files and restart before changing the opt-in
+setting on an existing controller.
+
+The bounded three-step PR fixtures at 20 µm and 1 mm agreed with CPU
+within the predeclared comparison tolerances. The 1 mm test also verified
+in-work Stop and CPU reopen of the GPU ZIP. Qualification covers those
+fixtures and the recorded T4 environment. The runs did not establish a
+performance advantage.
 
 ## Edit beams in BeamPlane
 
@@ -102,8 +125,9 @@ The picker waits for a selection in the cell. This is the supported hosted
 upload path for Colab. In local Jupyter, use Upload
 and then Load / reopen under Save / load / export.
 Batch-compatible desktop files can retain LaunchPlane schema-4 beam editor
-metadata and local NumPy float64 execution intent. The notebook uses only the
-headless LaunchPlane model and serializer. For editable desktop interchange only, after wheel verification, stage the
+metadata. Compatible local PR drafts also retain Auto, CPU, or GPU
+float64 execution intent. The notebook uses the headless LaunchPlane model
+and serializer. For editable desktop interchange only, after wheel verification, stage the
 pinned companion source in the fresh kernel's working directory:
 
 ```bash
