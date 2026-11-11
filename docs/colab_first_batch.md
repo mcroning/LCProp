@@ -70,6 +70,13 @@ read-only behavior.
 
 ## Browse and exchange files
 
+In the LC notebook, select **Completed**, then choose **Intensity** or
+**Director response (Δθ)**. The **XY**, **XZ**, and **YZ** buttons choose the
+plane. The sample slider selects the remaining coordinate, whose physical
+location appears in the plot title. **Physical** preserves the axis scale.
+Choose **Square** for a wider view of a long, narrow cell. The entrance preview
+contains XY data only.
+
 Select Draft preview, Completed or Stopped / partial. Select a retained
 field, XY/XZ/YZ plane and sample index when available. Missing cuts are
 reported. Physical aspect uses matching physical scales and Square fits a

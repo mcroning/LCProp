@@ -18,6 +18,8 @@ from lcprop.notebook.batch_requests import (
 from lcprop.notebook.batch_results import draw_plane, field_coordinates, retained_plane
 from lcprop.notebook.batch_session import BatchSession
 
+LC_VOLUME_FIELDS = {"intensity_stack": "Intensity", "delta_theta_stack": "Director response (Δθ)"}
+
 PLANES = {"x–y": ("x", "y"), "x–z": ("z", "x"), "y–z": ("z", "y")}
 
 
@@ -56,7 +58,13 @@ class InteractiveBatch:
         self.stop_button = W.Button(description="Stop", disabled=True)
         self.source = W.Dropdown(description="View", options=["Draft preview"])
         self.field = W.Dropdown(description="Field")
-        self.cut = W.Dropdown(description="Plane", options=list(PLANES))
+        if self.fixed_route == "lc":
+            self.cut = W.ToggleButtons(
+                description="Plane", options=[(plane.replace("–", "").upper(), plane)
+                                              for plane in PLANES],
+            )
+        else:
+            self.cut = W.Dropdown(description="Plane", options=list(PLANES))
         self.aspect = W.Dropdown(description="Aspect", options=["Physical", "Square"])
         self.position = W.IntSlider(description="Cut sample", continuous_update=False)
         self.plot = W.Output()
@@ -411,6 +419,11 @@ class InteractiveBatch:
             fields, geometry, record = self._products()
             options = [(field.display_name, key) for key, field in fields.items()
                        if getattr(field.data, "ndim", 0) in (2, 3)]
+            if self.fixed_route == "lc" and self.source.value == "Completed":
+                options = [(label if key in fields else f"{label} (unavailable)", key)
+                           for key, label in LC_VOLUME_FIELDS.items()] + [
+                    (label, key) for label, key in options if key not in LC_VOLUME_FIELDS
+                ]
             old = self.field.value
             self.field.options = options
             keys = [value for _, value in options]
@@ -418,14 +431,19 @@ class InteractiveBatch:
             field = fields.get(self.field.value)
             missing = set(field.axes) - set(PLANES[self.cut.value]) if field else set()
             coordinate = None
+            axis = None
             if field is not None and field.data.ndim == 3 and len(missing) == 1:
                 try:
-                    coordinate, _ = field_coordinates(field, geometry, next(iter(missing)))
+                    axis = next(iter(missing))
+                    coordinate, _ = field_coordinates(field, geometry, axis)
                 except ValueError:
                     pass
+            if self.fixed_route == "lc":
+                self.position.description = f"{axis} sample" if coordinate is not None else "Cut sample"
+                self.position.layout.display = "" if coordinate is not None else "none"
             self.position.disabled = coordinate is None
             self.position.max = 0 if coordinate is None else len(coordinate) - 1
-            key = (self.source.value, self.field.value, self.cut.value)
+            key = (self.source.value, self.field.value, self.cut.value, id(record))
             if key != self._view_key:
                 self.position.value = 0 if coordinate is None or self.cut.value == "x–y" else len(coordinate) // 2
             self._view_key = key
@@ -459,16 +477,20 @@ class InteractiveBatch:
         fields, geometry, _ = self._products()
         field = fields.get(self.field.value)
         try:
-            if field is None:
-                raise ValueError(self._preview_message or "No retained field")
             if self.source.value == "Draft preview" and self.cut.value != "x–y":
-                raise ValueError("Longitudinal intensity is awaiting propagation results")
+                raise ValueError("The entrance preview has XY data only. Select a completed result for longitudinal cuts.")
+            if field is None:
+                label = LC_VOLUME_FIELDS.get(self.field.value)
+                if label is not None:
+                    raise ValueError(f"The completed result has no retained {label} volume.")
+                raise ValueError(self._preview_message or "No retained field")
             plane = retained_plane(field, geometry, PLANES[self.cut.value],
                                    None if self.position.disabled else self.position.value)
             fig = self._figure
             if fig is None:
                 with plt.ioff():
-                    fig = plt.figure(figsize=(6, 4), layout="constrained")
+                    size = (8, 5) if self.fixed_route == "lc" else (6, 4)
+                    fig = plt.figure(figsize=size, layout="constrained")
                 if isinstance(fig.canvas, W.Widget):
                     self._figure = fig
                     self.canvas_host.children = (fig.canvas,)

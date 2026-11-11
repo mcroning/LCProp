@@ -883,3 +883,64 @@ def test_material_notebooks_and_progress_lifecycle(monkeypatch):
                 await pr.dispose()
 
     asyncio.run(exercise())
+
+
+def test_lc_completed_notebook_views_use_retained_volumes(monkeypatch):
+    from lcprop.notebook import LCNotebook, interactive_batch
+
+    geometry = Geometry(x=np.array([-4., 1., 6., 11.]),
+                        y=np.array([-3., 0., 3.]), z=np.array([5., 15.]))
+    values = np.arange(24.).reshape(2, 4, 3)
+    fields = FieldCollection([
+        ("input_intensity", preview()),
+        ("intensity_stack", make_field("intensity_stack", "Intensity", values,
+                                       ("z", "x", "y"), "intensity", value_unit="1/µm²")),
+        ("delta_theta_stack", make_field("delta_theta_stack", "Δθ", -values / 100,
+                                         ("z", "x", "y"), "theta_delta", value_unit="rad")),
+    ])
+    drawn = []
+
+    def observe_plane(ax, plane, square):
+        drawn.append((plane, square, ax))
+        return draw_plane(ax, plane, square)
+
+    monkeypatch.setattr(interactive_batch, "draw_plane", observe_plane)
+    monkeypatch.setattr(interactive_batch, "display", lambda _: None)
+    app = LCNotebook(validator=validate, preview_factory=preview)
+    try:
+        assert [label for label, _ in app.cut.options] == ["XY", "XZ", "YZ"]
+        app.cut.value = "x–z"
+        assert "entrance preview has XY data only" in app.plot_message.value
+        app.cut.value = "x–y"
+        record = Record("fixture", "lc", app.session.draft, "{}", "fixture", None,
+                        RunData("static", geometry, fields))
+        app.session.completed = record
+        app._sync()
+        assert app.source.value == "Completed" and app.field.value == "intensity_stack"
+        app.position.value = 1
+        plane, _, ax = drawn[-1]
+        np.testing.assert_array_equal(plane.values, values[1].T)
+        assert app.position.description == "z sample" and "z = 15" in ax.get_title()
+
+        app.cut.value = "x–z"
+        app.position.value = 0
+        plane, _, ax = drawn[-1]
+        np.testing.assert_array_equal(plane.values, values[:, :, 0].T)
+        np.testing.assert_array_equal(plane.coordinates[0], geometry.z)
+        assert "y = -3" in ax.get_title() and app.position.description == "y sample"
+
+        app.field.value = "delta_theta_stack"
+        app.cut.value = "y–z"
+        app.position.value = 3
+        app.aspect.value = "Square"
+        plane, square, ax = drawn[-1]
+        np.testing.assert_array_equal(plane.values, -values[:, 3, :].T / 100)
+        assert square and ax.get_box_aspect() == 1
+        assert "x = 11" in ax.get_title() and plane.value_unit == "rad"
+
+        app.session.completed = replace(record, products=RunData("static", geometry))
+        app._sync()
+        assert "no retained Director response" in app.plot_message.value
+        assert app.position.disabled and app.position.layout.display == "none"
+    finally:
+        asyncio.run(app.dispose())
