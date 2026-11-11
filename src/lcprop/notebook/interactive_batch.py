@@ -1,4 +1,4 @@
-"""Interactive CPU notebook for bounded LC static and reduced PR TD requests."""
+"""Interactive notebook for bounded LC static and reduced PR TD requests."""
 from dataclasses import replace
 from html import escape
 import json
@@ -45,11 +45,11 @@ class InteractiveBatch:
 
     fixed_route = None
 
-    def __init__(self, *, runner=None, validator=validate, preview_factory=preview):
+    def __init__(self, *, runner=None, validator=validate, preview_factory=preview, gpu_probe=None):
         self.preview_factory = preview_factory
         self.directory = Path(tempfile.mkdtemp(prefix="lcprop-notebook-"))
         self.session = BatchSession(runner=runner, validator=validator, notify=self._sync,
-                                    fixed_route=self.fixed_route)
+                                    fixed_route=self.fixed_route, gpu_probe=gpu_probe)
         self.editor = W.VBox()
         self.beam_plane = BatchBeamPlane(self)
         self.status = W.HTML()
@@ -142,12 +142,17 @@ class InteractiveBatch:
                         for name, label in PR_MATERIAL_CONTROLS.items()}
             steps = number("Material steps", request.solver.Nt, W.IntText)
             timestep = number("Normalized dt", request.solver.dt_normalized)
-            material_panel = W.VBox([*material.values(), steps, timestep])
+            device = W.Dropdown(description="Device", options=[
+                ("Auto", "auto"), ("CPU", "numpy"), ("GPU", "cupy"),
+            ], value=request.backend.backend)
+            inputs.append(device)
+            material_panel = W.VBox([*material.values(), steps, timestep, device])
         grid = request.grid
         grid_summary = W.HTML(
             f"Fixed grid: {grid.Nx} × {grid.Ny}, aperture "
             f"{grid.x_aperture_um:g} × {grid.y_aperture_um:g} µm, "
-            f"length {grid.z_length_um:g} µm, dz {grid.dz_um:g} µm. CPU only."
+            f"length {grid.z_length_um:g} µm, dz {grid.dz_um:g} µm."
+            + (" CPU only." if route == "lc" else "")
         )
 
         def update():
@@ -162,6 +167,7 @@ class InteractiveBatch:
                     material=replace(request.material, **{
                         name: widget.value for name, widget in material.items()}),
                     solver=replace(request.solver, Nt=steps.value, dt_normalized=timestep.value),
+                    backend=replace(draft.backend, backend=device.value),
                 )
             if session.set_draft(route, draft, generation):
                 self.notice.value = ""
@@ -353,7 +359,7 @@ class InteractiveBatch:
         session = self.session
         self.status.value = f"<b>{escape(session.status)}</b> {escape(session.message)}"
         if session.last_run_id is None:
-            self.progress_view.value = "CPU · No admitted run"
+            self.progress_view.value = "CPU · No admitted run" if session.route == "lc" else "No admitted run"
         else:
             done, total, stage = session.progress or (None, None, "")
             stage = stage or ("Preparing / executing" if session.busy else session.status)
@@ -364,9 +370,12 @@ class InteractiveBatch:
             elif session.busy:
                 meter = "<progress></progress>"
             stop = {"stopping": " · Stop requested", "stopped": " · Stop acknowledged"}
+            device = session.last_device
+            label = f"Auto → {device.label}" if device.requested == "auto" else device.label
+            fallback = f"<br>{escape(device.fallback_reason)}" if device.fallback_reason else ""
             self.progress_view.value = (
-                f"Run {session.last_run_id} · CPU · {session.elapsed:.1f} s"
-                f"{stop.get(session.status, '')}<br>{escape(stage)} {meter}"
+                f"Run {session.last_run_id} · {escape(label)} · {session.elapsed:.1f} s"
+                f"{stop.get(session.status, '')}<br>{escape(stage)} {meter}{fallback}"
             )
         changed = self._generation != session.generation
         if changed:
@@ -474,7 +483,10 @@ class InteractiveBatch:
                 for key, value in diagnostic.values.items()
                 if isinstance(value, (str, float, int, bool))
             )
-        provenance = json.dumps(record.provenance or {}, indent=2)
+        metadata = record.provenance or {}
+        if record.device is not None:
+            metadata = {**metadata, "device": record.device.metadata()}
+        provenance = json.dumps(metadata, indent=2)
         self.details.value = (
             f"<b>{escape(self.source.value)} · {record.run_id}</b>"
             f"<p>Request SHA-256: {record.digest}</p>"

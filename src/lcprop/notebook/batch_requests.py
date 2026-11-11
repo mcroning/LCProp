@@ -1,4 +1,4 @@
-"""Authoritative request adapters for the bounded CPU notebook routes."""
+"""Authoritative request adapters for the bounded notebook routes."""
 from dataclasses import replace
 import math
 
@@ -55,7 +55,7 @@ def preset(route):
                                         gain_length_product=0.1),
         solver=PRSolverOptions(Nt=3, dt_normalized=0.001,
                                integrator="semi_implicit_trapezoidal"),
-        backend=BackendSpec(backend="numpy", precision="float64", verbose=False),
+        backend=BackendSpec(backend="auto", precision="float64", verbose=False),
     )
 
 
@@ -106,11 +106,15 @@ def validate(route, request, *, sampling=qualify_launch_sampling,
             raise ValueError("Voltage must be finite")
         fixed = replace(fixed, bias=replace(request.bias, V_bias=reference.bias.V_bias))
     else:
+        request.backend.validate()
+        if request.backend.precision != "float64" or request.backend.verbose:
+            raise ValueError("The PR notebook requires float64 with backend verbosity disabled")
         solver = request.solver
         if type(solver.Nt) is not int or solver.Nt not in (1, 2, 3) or not 0 < solver.dt_normalized <= 0.001:
             raise ValueError("Use 1–3 material steps and 0 < normalized dt ≤ 0.001")
         fixed = replace(
             fixed,
+            backend=reference.backend,
             solver=replace(solver, Nt=reference.solver.Nt,
                            dt_normalized=reference.solver.dt_normalized),
             material=replace(request.material, **{

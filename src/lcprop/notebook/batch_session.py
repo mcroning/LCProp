@@ -15,8 +15,10 @@ import warnings as runtime_warnings
 from lcprop.core.execution import CancellationToken
 from lcprop.notebook.batch_beams import DISABLED_BEAMS, edited_stack, objects, validate_objects
 from lcprop.notebook.batch_desktop import desktop_metadata, update_presentation
+from lcprop.notebook.batch_device import RunDevice, resolve_device
 from lcprop.notebook.batch_files import MAX_UPLOAD_BYTES, PACKAGE_FILES
 from lcprop.notebook.batch_requests import ROUTES, preset, validate
+from lcprop.persistence.execution_intent import ExecutionIntent
 from lcprop.persistence.experiments import (
     ExperimentCodecRegistry, read_experiment_file, write_experiment_file,
 )
@@ -38,6 +40,7 @@ class Record:
     products: object
     provenance: dict | None = None
     package_files: tuple | None = None
+    device: RunDevice | None = None
 
 
 def identity(payload):
@@ -56,9 +59,12 @@ def environment_identity():
 
 
 class BatchSession:
-    def __init__(self, *, runner=None, validator=validate, notify=None, fixed_route=None):
+    def __init__(self, *, runner=None, validator=validate, notify=None, fixed_route=None,
+                 gpu_probe=None):
         self.runner = LocalRunner() if runner is None else runner
         self.validator = validator
+        self.gpu_probe = gpu_probe
+        self.last_device = None
         self.notify = notify or (lambda: None)
         self.fixed_route = fixed_route
         self.route = fixed_route or "lc"
@@ -109,6 +115,8 @@ class BatchSession:
             request = replace(request, beams=beams)
             if beams != self.draft.beams:
                 presentation = update_presentation(presentation, beams)
+        if intent is not None and route == "pr":
+            intent = replace(intent, requested_backend=request.backend.backend)
         self.route, self.draft = route, deepcopy(request)
         self.presentation, self.execution_intent = presentation, intent
         return True
@@ -128,20 +136,25 @@ class BatchSession:
         loop = asyncio.get_running_loop()
         route, request = self.route, deepcopy(self.draft)
         payload, warnings = self.validator(route, request)
+        device = resolve_device(route, request, self.gpu_probe)
+        if route == "pr":
+            request = replace(request, backend=replace(request.backend, backend=device.resolved))
+            payload = ROUTES[route][1].encode_request(request)
         encoded, digest = identity(payload)
         run_id = uuid4().hex
         self.token = CancellationToken()
         self.active_id = self.last_run_id = run_id
+        self.last_device = device
         self.elapsed = 0.0
         self.generation += 1
         self.status, self.message = "running", "\n".join(warnings)
         self.progress = self.partial = None
         self.task = loop.create_task(self._execute(
-            route, request, run_id, encoded, digest, self.token))
+            route, request, run_id, encoded, digest, self.token, device))
         self._notify()
         return True
 
-    async def _execute(self, route, request, run_id, encoded, digest, token):
+    async def _execute(self, route, request, run_id, encoded, digest, token, device):
         mailbox = Queue(maxsize=1)
         limit = 120 if route == "lc" else 60
         started = monotonic()
@@ -163,9 +176,15 @@ class BatchSession:
                 pass
 
         operation = ROUTES[route][0]
-        worker = asyncio.create_task(asyncio.to_thread(
-            self.runner.run_operation, operation, deepcopy(request),
-            cancellation_token=token, progress_callback=progress))
+
+        def run_on_device():
+            with device.context():
+                return self.runner.run_operation(
+                    operation, deepcopy(request), cancellation_token=token,
+                    progress_callback=progress,
+                )
+
+        worker = asyncio.create_task(asyncio.to_thread(run_on_device))
         try:
             while not worker.done():
                 await asyncio.sleep(0.2)
@@ -196,9 +215,16 @@ class BatchSession:
             result = output.result
             status = getattr(result, "status", "completed")
             if status in {"completed", "stopped", "cancelled"}:
+                if route == "pr":
+                    backend = getattr(result, "diagnostics", {}).get("backend", {})
+                    expected = device.metadata()
+                    if (backend.get("backend"), backend.get("real_dtype"), backend.get("complex_dtype")) != (
+                        device.resolved, expected["real_dtype"], expected["complex_dtype"],
+                    ):
+                        raise RuntimeError("Result backend or precision differs from the admitted device")
                 owned_result, products = deepcopy((result, output.run_data))
                 record = Record(run_id, route, request, encoded, digest, owned_result, products,
-                                provenance=environment_identity())
+                                provenance=environment_identity(), device=device)
                 if status == "completed" and not token.is_cancelled():
                     self.completed = record
                     self.status = "completed"
@@ -243,10 +269,14 @@ class BatchSession:
         self._editable()
         self.validator(self.route, self.draft)
         operation = ROUTES[self.route][0]
+        intent = self.execution_intent
+        if self.route == "pr" and intent is None:
+            backend = self.draft.backend
+            intent = ExecutionIntent("local", None, None, backend.backend, backend.precision, "fast")
         return write_experiment_file(path, self.draft, material_id=operation.material_id,
                                      workflow_id=operation.workflow_id, registry=self.experiments,
                                      presentation_payload=self.presentation,
-                                     execution_intent=self.execution_intent)
+                                     execution_intent=intent)
 
     def load_draft(self, path):
         self._editable()
@@ -275,11 +305,14 @@ class BatchSession:
                 target.write_bytes(contents)
             return path
         operation, _, codec = ROUTES[record.route]
+        provenance = {"notebook_request_sha256": record.digest,
+                      "environment": record.provenance or {}}
+        if record.device is not None:
+            provenance["device"] = record.device.metadata()
         write_request_package(path, registry=self.transport, material_id=operation.material_id,
                               workflow_id=operation.workflow_id, request=record.request,
                               run_id=record.run_id, execution_target="local",
-                              provenance={"notebook_request_sha256": record.digest,
-                                          "environment": record.provenance or {}})
+                              provenance=provenance)
         request = read_request_package(path, registry=self.transport)
         write_result_package(path, codec=codec, result=record.result,
                              request_envelope=request.envelope)

@@ -33,6 +33,14 @@ normalized dt up to 0.001. The integrator is semi-implicit trapezoidal.
 Both editors preserve signed external tilt and beam phase, and allow explicit
 coherence regrouping. Wavelength is fixed at 0.633 µm.
 
+The PR **Device** preference defaults to **Auto**. **CPU** selects NumPy
+float64 directly. The public preview still runs on CPU. Until hosted GPU
+qualification passes, **Auto** shows why it selected CPU and **GPU** rejects
+the request before it starts. LC stays CPU-only. Draft files preserve the
+requested preference. The executed request and completed package record the
+resolved backend and precision. An admitted run that fails keeps the previous
+completed result available. Each new attempt requires **Run**.
+
 The draft input preview samples the entrance plane. Only **Run** admits
 propagation. Finish submitting browser edits before Run. The kernel freezes
 the validated request, disables draft edits and runs one background worker.

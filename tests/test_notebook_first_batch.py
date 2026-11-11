@@ -1,5 +1,8 @@
 """Synthetic data and fake runners only. No propagation or launch sampling."""
 import asyncio
+from contextlib import contextmanager
+import json
+import sys
 from dataclasses import replace
 from threading import Event, get_ident
 from types import SimpleNamespace
@@ -10,6 +13,7 @@ import pytest
 
 from lcprop.notebook import InteractiveBatch
 from lcprop.notebook import batch_requests as requests
+from lcprop.notebook.batch_device import DeviceUnavailable, GPUDevice, RunDevice, probe_cupy, resolve_device
 from lcprop.notebook.batch_files import archive_completed, unpack_completed
 from lcprop.notebook.batch_results import draw_plane, retained_plane
 from lcprop.notebook.batch_session import BatchSession, Record, identity
@@ -43,6 +47,7 @@ def prohibit_science(monkeypatch):
         raise AssertionError("Real scientific execution is prohibited in these tests")
     monkeypatch.setattr("lcprop.runners.local.LocalRunner.run_operation", forbidden)
     monkeypatch.setattr(requests, "build_launch", forbidden)
+    monkeypatch.setitem(sys.modules, "cupy", None)
 
 
 @pytest.mark.parametrize("route", ["lc", "pr"])
@@ -230,7 +235,8 @@ def test_retained_cuts_and_aspect():
         retained_plane(preview(), None, ("z", "x"))
 
 
-def test_completed_codec_export_reopen_survives_draft_edit(tmp_path):
+@pytest.mark.parametrize("backend", ["numpy", "cupy"])
+def test_completed_codec_export_reopen_survives_draft_edit(tmp_path, backend):
     session = BatchSession(validator=validate)
     route = "pr"
     request = requests.preset(route)
@@ -238,7 +244,7 @@ def test_completed_codec_export_reopen_survives_draft_edit(tmp_path):
     from lcprop.pr.checkpoint import PRTimeDependentCheckpoint
 
     result = _synthetic_pr_result()
-    request = replace(request,
+    request = replace(request, backend=replace(request.backend, backend=backend),
                       material=requests.PRMaterialSpec(),
                       grid=replace(request.grid, Nx=4, Ny=3, x_aperture_um=8.,
                                    y_aperture_um=12., dz_um=5., z_length_um=10.),
@@ -250,10 +256,16 @@ def test_completed_codec_export_reopen_survives_draft_edit(tmp_path):
         request, result.E_initial, result.E_final, result.A_initial, 3, 3, .003,
         result.grid_summary, "float64", "complex128")
     result = replace(result, completed_steps=3, requested_steps=3,
-                     time_normalized=.003, checkpoint=checkpoint)
+                     time_normalized=.003, checkpoint=checkpoint,
+                     diagnostics={**result.diagnostics, **pr_backend_diagnostics(request)})
     encoded, digest = identity(experiment.encode_request(request))
+    def forbidden_probe(*args):
+        pytest.fail("Reopening a portable package must not probe the device")
+
+    device = RunDevice("auto", backend, "float64",
+                       GPUDevice(3, "Synthetic GPU", forbidden_probe) if backend == "cupy" else None)
     session.completed = Record("synthetic-pr", route, request, encoded, digest,
-                               result, operation.to_run_data(result))
+                               result, operation.to_run_data(result), device=device)
     first = session.export_completed(tmp_path / "first")
     editable = requests.preset("pr")
     session.set_draft("pr", replace(editable, solver=replace(editable.solver, Nt=1)),
@@ -264,10 +276,16 @@ def test_completed_codec_export_reopen_survives_draft_edit(tmp_path):
             assert path.read_bytes() == (second / path.relative_to(first)).read_bytes()
     zipped = archive_completed(first)
     restored = unpack_completed(zipped.read_bytes(), tmp_path)
+    session.gpu_probe = forbidden_probe
     session.reopen(restored)
     assert session.completed.digest == digest
+    assert session.completed.request.backend.backend == backend
+    assert session.completed.provenance["device"] == device.metadata()
     np.testing.assert_equal(session.completed.result.E_final, result.E_final)
     assert session.draft.solver.Nt == 1
+    reexport = session.export_completed(tmp_path / "reexport")
+    assert {f.relative_to(reexport): f.read_bytes() for f in reexport.rglob("*") if f.is_file()} == {
+        f.relative_to(first): f.read_bytes() for f in first.rglob("*") if f.is_file()}
 
 
 def test_reject_traversal_in_completed_upload(tmp_path):
@@ -328,6 +346,11 @@ def test_widget_displays_synthetic_preview_without_run(monkeypatch):
     asyncio.run(app.dispose())
 
 
+def pr_backend_diagnostics(request):
+    return {"backend": {"backend": request.backend.backend, "real_dtype": "float64",
+                        "complex_dtype": "complex128"}}
+
+
 def test_pr_worker_dispatch_freezes_admitted_request():
     from lcprop.pr.operations import PR_TIMEDEPENDENT_OPERATION
 
@@ -336,7 +359,7 @@ def test_pr_worker_dispatch_freezes_admitted_request():
     class Fake:
         def run_operation(self, operation, request, *, cancellation_token, progress_callback):
             calls.append((operation, request))
-            return SimpleNamespace(result=SimpleNamespace(status="completed"),
+            return SimpleNamespace(result=SimpleNamespace(status="completed", diagnostics=pr_backend_diagnostics(request)),
                                    run_data=products(), message="done")
 
     async def exercise():
@@ -345,13 +368,16 @@ def test_pr_worker_dispatch_freezes_admitted_request():
         session.set_draft("pr", draft, session.generation)
         session.start(session.generation)
         await session.task
-        assert calls == [(PR_TIMEDEPENDENT_OPERATION, draft)]
+        executed = replace(draft, backend=replace(draft.backend, backend="numpy"))
+        assert calls == [(PR_TIMEDEPENDENT_OPERATION, executed)]
         admitted = session.completed
-        assert admitted.request == draft
+        assert admitted.request == executed
+        assert admitted.device.requested == "auto"
+        assert "qualification is pending" in admitted.device.fallback_reason
         session.set_draft("pr", replace(draft, solver=replace(draft.solver, Nt=1)),
                           session.generation)
         assert admitted.request.solver.Nt == 3
-        assert admitted.digest == identity(validate("pr", draft)[0])[1]
+        assert admitted.digest == identity(validate("pr", executed)[0])[1]
 
     asyncio.run(exercise())
 
@@ -395,7 +421,7 @@ def test_notebook_display_cell_reuses_controller(monkeypatch, filename, controll
     assert setup == ["widgets", ("matplotlib", "widget")]
 
 
-def desktop_fixture(session, path, route, *, remote=False):
+def desktop_fixture(session, path, route, *, remote=False, backend="numpy"):
     pytest.importorskip("launchplane.serialization")
     from lcprop.adapters.launchplane import beam_stack_definition_to_lcprop, beam_stack_to_launchplane
     from lcprop.persistence import write_experiment_file
@@ -416,10 +442,12 @@ def desktop_fixture(session, path, route, *, remote=False):
                                    "beam_stack": beam_stack_to_dict(stack)}}
     intent = None
     if route == "pr":
+        request = replace(request, backend=replace(request.backend, backend=backend),
+                          grid=replace(request.grid, z_length_um=20.))
         intent = ExecutionIntent("slurm" if remote else "local",
                                  "cluster" if remote else None,
                                  "profile" if remote else None,
-                                 "numpy", "float64", "fast")
+                                 backend, "float64", "fast" if backend == "numpy" else "full")
     operation = requests.ROUTES[route][0]
     write_experiment_file(path, request, material_id=operation.material_id,
                           workflow_id=operation.workflow_id, registry=session.experiments,
@@ -807,15 +835,34 @@ def test_beam_plane_canvas_gestures_and_stale_drag(monkeypatch, route):
         assert panel.gesture is None
 
 
-def test_material_notebooks_and_progress_lifecycle(monkeypatch):
+@pytest.mark.parametrize("intent", ["auto", "cupy"])
+def test_material_notebooks_and_progress_lifecycle(monkeypatch, intent):
     from lcprop.notebook import LCNotebook, PRNotebook
 
     monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
     advance, finish = Event(), Event()
     callbacks = []
+    bound = []
+
+    @contextmanager
+    def bind():
+        assert get_ident() != caller
+        bound.append(3)
+        try:
+            yield
+        finally:
+            bound.pop()
+
+    caller = get_ident()
+
+    def probe(spec):
+        assert (spec.backend, spec.precision) == ("cupy", "float64")
+        return GPUDevice(3, "Test device", bind)
 
     class Fake:
         def run_operation(self, operation, request, *, cancellation_token, progress_callback):
+            assert bound == [3]
+            assert (request.backend.backend, request.backend.precision) == ("cupy", "float64")
             callbacks.append(progress_callback)
             if len(callbacks) == 1:
                 progress_callback(SimpleNamespace(completed_units=None, total_units=None,
@@ -824,14 +871,14 @@ def test_material_notebooks_and_progress_lifecycle(monkeypatch):
                 progress_callback(SimpleNamespace(completed_units=1, total_units=3,
                                                    message="Material step"))
                 assert finish.wait(3)
-                return SimpleNamespace(result=SimpleNamespace(status="completed"),
+                return SimpleNamespace(result=SimpleNamespace(status="completed", diagnostics=pr_backend_diagnostics(request)),
                                        run_data=products(), message="done")
             for _ in range(600):
                 if cancellation_token.is_cancelled():
                     break
                 Event().wait(.005)
             assert cancellation_token.is_cancelled()
-            return SimpleNamespace(result=SimpleNamespace(status="stopped"),
+            return SimpleNamespace(result=SimpleNamespace(status="stopped", diagnostics=pr_backend_diagnostics(request)),
                                    run_data=products(), message="stopped")
 
     async def wait_until(predicate):
@@ -844,24 +891,36 @@ def test_material_notebooks_and_progress_lifecycle(monkeypatch):
     async def exercise():
         runner = Fake()
         lc = LCNotebook(runner=runner, preview_factory=preview)
-        pr = PRNotebook(runner=runner, preview_factory=preview)
+        pr = PRNotebook(runner=runner, preview_factory=preview, gpu_probe=probe)
         try:
             assert (lc.session.route, pr.session.route) == ("lc", "pr")
             with pytest.raises(ValueError, match="only accepts LC"):
                 lc.session.set_draft("pr", requests.preset("pr"), lc.session.generation)
+            selector = pr.editor.children[2].children[-1]
+            assert selector.value == "auto"
+            selector.value = intent
+            label = "Auto → GPU 3 (Test device)" if intent == "auto" else "GPU 3 (Test device)"
             pr.run_button.click()
+            assert pr.editor.children[2].children[-1].disabled
             await wait_until(lambda: "Preparing <progress>" in pr.progress_view.value)
             elapsed = pr.session.elapsed
             await wait_until(lambda: pr.session.elapsed > elapsed)
             assert lc.progress_view.value == "CPU · No admitted run"
+            assert not any(getattr(control, "description", "") == "Device"
+                           for control in lc.editor.children[2].children)
             advance.set()
             await wait_until(lambda: "Material step" in pr.progress_view.value)
             assert "1/3" in pr.progress_view.value
+            assert label in pr.progress_view.value
             assert pr.session.active_id in pr.progress_view.value
             finish.set()
             await asyncio.wait_for(pr.session.task, 3)
             first = pr.session.completed
-            assert first is not None
+            assert first.device.metadata()["device_ordinal"] == 3
+            assert first.request.backend.backend == "cupy"
+            assert pr.session.draft.backend.backend == first.device.requested == intent
+            assert first.digest == identity(validate("pr", first.request)[0])[1]
+            assert label in pr.progress_view.value
             pr.run_button.click()
             await wait_until(lambda: len(callbacks) == 2)
             callbacks[0](SimpleNamespace(completed_units=2, total_units=3, message="Stale"))
@@ -871,6 +930,8 @@ def test_material_notebooks_and_progress_lifecycle(monkeypatch):
             assert "Stop acknowledged" in pr.progress_view.value
             assert "Stale" not in pr.progress_view.value
             assert pr.session.completed is first
+            assert pr.session.partial.run_id != first.run_id
+            assert pr.session.partial.device == pr.session.last_device
             pr.run_button.click()
             await wait_until(lambda: len(callbacks) == 3)
             await asyncio.wait_for(pr.dispose(), 3)
@@ -945,3 +1006,245 @@ def test_lc_completed_notebook_views_use_retained_volumes(monkeypatch):
         assert app.position.disabled and app.position.layout.display == "none"
     finally:
         asyncio.run(app.dispose())
+
+
+def test_pr_device_admission_rejections_and_cpu_bypass():
+    draft = requests.preset("pr")
+    assert draft.backend.backend == "auto"
+    probes = []
+
+    def unavailable(spec):
+        probes.append(spec)
+        raise DeviceUnavailable("GPU driver unavailable")
+
+    def request(backend, precision="float64"):
+        return replace(draft, backend=replace(draft.backend, backend=backend, precision=precision))
+
+    assert resolve_device("pr", request("numpy"), unavailable).resolved == "numpy"
+    assert resolve_device("lc", requests.preset("lc"), unavailable).resolved == "numpy"
+    assert probes == []
+    fallback = resolve_device("pr", draft, unavailable)
+    assert (fallback.requested, fallback.resolved, fallback.fallback_reason) == (
+        "auto", "numpy", "GPU driver unavailable")
+    with pytest.raises(ValueError, match="Unsupported notebook workflow"):
+        resolve_device("other", draft, unavailable)
+    with pytest.raises(ValueError, match="float64"):
+        resolve_device("pr", request("cupy", "float32"), unavailable)
+    assert len(probes) == 1
+
+    async def exercise():
+        session = BatchSession(validator=validate, fixed_route="pr", gpu_probe=unavailable)
+        session.set_draft("pr", request("cupy"), session.generation)
+        with pytest.raises(DeviceUnavailable, match="GPU driver unavailable"):
+            session.start(session.generation)
+        assert session.active_id is session.last_run_id is session.task is None
+        assert not session.busy and session.draft.backend.backend == "cupy"
+        probe_count = len(probes)
+        unsupported = replace(session.draft, solver=replace(session.draft.solver, Nt=4))
+        session.set_draft("pr", unsupported, session.generation)
+        with pytest.raises(ValueError, match="1–3"):
+            session.start(session.generation)
+        assert len(probes) == probe_count and session.last_run_id is None
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("failure", ["allocation", "sync", "unexpected", None])
+def test_cupy_probe_with_mock_array_module(monkeypatch, failure):
+    from lcprop.core.backend import BackendSpec
+
+    class CUDARuntimeError(RuntimeError):
+        pass
+
+    class OutOfMemoryError(MemoryError):
+        pass
+
+    calls = []
+
+    class MockDevice:
+        def __init__(self, ordinal=3):
+            self.id = ordinal
+
+        def __enter__(self):
+            calls.append(("bind", self.id))
+            return self
+
+        def __exit__(self, *_):
+            calls.append(("unbind", self.id))
+
+    def allocate(_):
+        if failure == "allocation":
+            raise OutOfMemoryError("mock allocation")
+        if failure == "unexpected":
+            raise TypeError("mock programming error")
+        return np.arange(1)
+
+    def synchronize():
+        calls.append("sync")
+        if failure == "sync":
+            raise CUDARuntimeError("mock deferred fault")
+
+    def zeros(size, dtype):
+        calls.append(np.dtype(dtype).name)
+        return np.zeros(size, dtype=dtype)
+
+    def fft(data):
+        calls.append(data.dtype.name)
+        return np.fft.fft(data)
+
+    mock_cuda = SimpleNamespace(
+        Device=MockDevice,
+        runtime=SimpleNamespace(CUDARuntimeError=CUDARuntimeError,
+                                getDeviceProperties=lambda _: {"name": b"Mock device"}),
+        memory=SimpleNamespace(OutOfMemoryError=OutOfMemoryError),
+        get_current_stream=lambda: SimpleNamespace(synchronize=synchronize),
+    )
+    monkeypatch.setitem(sys.modules, "cupy", SimpleNamespace(
+        cuda=mock_cuda, arange=allocate, zeros=zeros, fft=SimpleNamespace(fft=fft)))
+    spec = BackendSpec("cupy", "float64", verbose=False)
+    if failure in {"allocation", "sync"}:
+        with pytest.raises(DeviceUnavailable, match="GPU probe failed"):
+            probe_cupy(spec)
+    elif failure == "unexpected":
+        with pytest.raises(RuntimeError) as error:
+            probe_cupy(spec)
+        assert isinstance(error.value.__cause__, TypeError)
+    else:
+        device = probe_cupy(spec)
+        assert (device.ordinal, device.name) == (3, "Mock device")
+        with device.bind():
+            assert calls[-1] == ("bind", 3)
+        assert calls == [("bind", 3), "float64", "complex128", "sync",
+                         ("unbind", 3), ("bind", 3), ("unbind", 3)]
+
+
+def test_probe_import_failure_has_fallback_reason():
+    draft = requests.preset("pr")
+    device = resolve_device("pr", draft, probe_cupy)
+    assert device.resolved == "numpy"
+    assert "CuPy is unavailable" in device.fallback_reason
+
+
+@pytest.mark.parametrize("failure", ["bind", "worker", "mismatch", "dtype"])
+def test_admitted_gpu_failure_preserves_completed_without_retry(failure):
+    calls = []
+
+    @contextmanager
+    def bind():
+        calls.append("bind")
+        if failure == "bind":
+            raise RuntimeError("mock driver loss")
+        yield
+
+    class Fake:
+        def run_operation(self, operation, request, **kwargs):
+            calls.append(request.backend.backend)
+            if request.backend.backend == "cupy" and failure == "worker":
+                raise MemoryError("mock GPU allocation failure")
+            diagnostics = pr_backend_diagnostics(request)
+            if request.backend.backend == "cupy" and failure == "mismatch":
+                diagnostics["backend"]["backend"] = "numpy"
+            if request.backend.backend == "cupy" and failure == "dtype":
+                diagnostics["backend"]["complex_dtype"] = "complex64"
+            return SimpleNamespace(
+                result=SimpleNamespace(status="completed", diagnostics=diagnostics),
+                run_data=products(), message="done")
+
+    async def exercise():
+        session = BatchSession(validator=validate, fixed_route="pr", runner=Fake(),
+                               gpu_probe=lambda _: GPUDevice(3, "Test device", bind))
+        draft = session.draft
+        cpu = replace(draft, backend=replace(draft.backend, backend="numpy"))
+        assert session.set_draft("pr", cpu, session.generation)
+        assert session.start(session.generation)
+        await session.task
+        first = session.completed
+        assert first.device.label == "CPU"
+        gpu = replace(draft, backend=replace(draft.backend, backend="cupy"))
+        assert session.set_draft("pr", gpu, session.generation)
+        assert session.start(session.generation)
+        await session.task
+        assert session.status == "failed"
+        assert session.completed is first and session.partial is None
+        assert session.last_run_id != first.run_id
+        assert session.last_device.requested == session.last_device.resolved == "cupy"
+        assert calls == ["numpy", "bind"] + ([] if failure == "bind" else ["cupy"])
+
+    asyncio.run(exercise())
+
+
+def test_desktop_gpu_intent_remains_editable_and_atomic(tmp_path):
+    from lcprop.persistence import read_experiment_file, write_experiment_file
+
+    def forbidden_probe(*args):
+        pytest.fail("Draft interchange must not probe the device")
+
+    session = BatchSession(validator=validate, fixed_route="pr", gpu_probe=forbidden_probe)
+    source = tmp_path / "source.json"
+    request, presentation, intent = desktop_fixture(session, source, "pr", backend="cupy")
+    session.load_draft(source)
+    assert session.draft == request and session.draft.grid.z_length_um == 20
+    assert session.execution_intent == intent and session.presentation == presentation
+    saved = tmp_path / "saved.json"
+    session.save_draft(saved)
+    assert saved.read_bytes() == source.read_bytes()
+    assert session.set_draft("pr", replace(request, backend=replace(request.backend, backend="auto")),
+                             session.generation)
+    session.save_draft(saved)
+    loaded = read_experiment_file(saved, registry=session.experiments)
+    assert loaded.execution_intent == replace(intent, requested_backend="auto")
+    assert loaded.presentation_payload == presentation
+
+    def assert_atomic_rejection(path, message):
+        draft, metadata, execution, generation = (
+            session.draft, session.presentation, session.execution_intent, session.generation)
+        with pytest.raises(ValueError, match=message):
+            session.load_draft(path)
+        assert session.draft is draft and session.presentation is metadata
+        assert session.execution_intent is execution and session.generation == generation
+
+    inconsistent = json.loads(source.read_text())
+    inconsistent["execution_intent"]["requested_backend"] = "numpy"
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text(json.dumps(inconsistent))
+    assert_atomic_rejection(invalid, "differs from scientific request")
+    single = replace(request, backend=replace(request.backend, precision="float32"))
+    workflow = requests.ROUTES["pr"][0].workflow_id
+    write_experiment_file(invalid, single, material_id="pr", workflow_id=workflow,
+                          registry=session.experiments, presentation_payload=presentation,
+                          execution_intent=replace(intent, precision="float32"))
+    assert_atomic_rejection(invalid, "float64")
+
+
+def test_public_pr_widget_shows_fallback_and_pre_admission_rejection(monkeypatch):
+    from lcprop.notebook import PRNotebook
+
+    monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
+    attempts = []
+
+    class Fake:
+        def run_operation(self, operation, request, **kwargs):
+            attempts.append(request.backend.backend)
+            return SimpleNamespace(
+                result=SimpleNamespace(status="completed", diagnostics=pr_backend_diagnostics(request)),
+                run_data=products(), message="done")
+
+    async def exercise():
+        app = PRNotebook(runner=Fake(), validator=validate, preview_factory=preview)
+        try:
+            app.run_button.click()
+            await app.session.task
+            assert "Auto → CPU" in app.progress_view.value
+            assert "GPU qualification is pending" in app.progress_view.value
+            previous = app.session.completed
+            app.editor.children[2].children[-1].value = "cupy"
+            app.run_button.click()
+            assert "GPU qualification is pending" in app.notice.value
+            assert not app.session.busy
+            assert app.session.last_run_id == previous.run_id
+            assert app.session.completed is previous
+            assert attempts == ["numpy"]
+        finally:
+            await app.dispose()
+
+    asyncio.run(exercise())

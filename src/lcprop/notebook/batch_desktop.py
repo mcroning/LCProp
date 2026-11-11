@@ -19,9 +19,11 @@ def desktop_metadata(loaded):
     intent = loaded.execution_intent
     if intent is not None:
         if intent.target != "local":
-            raise ValueError("Saved Slurm execution intent is outside the local CPU editor.")
-        if (intent.requested_backend, intent.precision) != ("numpy", "float64"):
-            raise ValueError("Saved execution intent must use NumPy float64.")
+            raise ValueError("Saved Slurm execution intent is outside the local notebook editor.")
+        if intent.precision != "float64":
+            raise ValueError("Saved execution intent requires float64 precision.")
+        if loaded.material_id != "pr" and intent.requested_backend != "numpy":
+            raise ValueError("Saved LC execution intent must use NumPy.")
         if normalize_result_policy(intent.retrieval_policy) not in ("fast", "full"):
             raise ValueError("Saved retrieval policy is outside the bounded local TD editor.")
     return deepcopy(presentation), intent
