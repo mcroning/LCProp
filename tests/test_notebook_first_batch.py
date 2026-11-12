@@ -236,8 +236,10 @@ def test_retained_cuts_and_aspect():
 
 
 @pytest.mark.parametrize("backend", ["numpy", "cupy"])
-def test_completed_codec_export_reopen_survives_draft_edit(tmp_path, backend):
-    session = BatchSession(validator=validate)
+def test_completed_codec_export_reopen_survives_draft_edit(tmp_path, backend, monkeypatch):
+    monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
+    app = InteractiveBatch(validator=validate, preview_factory=preview)
+    session = app.session
     route = "pr"
     request = requests.preset(route)
     operation, experiment, _ = requests.ROUTES[route]
@@ -275,9 +277,22 @@ def test_completed_codec_export_reopen_survives_draft_edit(tmp_path, backend):
         if path.is_file():
             assert path.read_bytes() == (second / path.relative_to(first)).read_bytes()
     zipped = archive_completed(first)
-    restored = unpack_completed(zipped.read_bytes(), tmp_path)
     session.gpu_probe = forbidden_probe
-    session.reopen(restored)
+    for _ in range(2):
+        app._open_uploaded(zipped.name, zipped.read_bytes())
+        assert not list(app.directory.glob("reopen-*"))
+    good = session.completed
+    for member, payload, error in (
+        ("output/result_arrays.npz", b"invalid NPZ", zipfile.BadZipFile),
+        ("request/request.json", b"{}", (ValueError, FileNotFoundError)),
+    ):
+        invalid = tmp_path / "invalid.zip"
+        with zipfile.ZipFile(invalid, "w") as archive:
+            archive.writestr(member, payload)
+        with pytest.raises(error):
+            app._open_uploaded(invalid.name, invalid.read_bytes())
+        assert session.completed is good
+        assert not list(app.directory.glob("reopen-*"))
     assert session.completed.digest == digest
     assert session.completed.request.backend.backend == backend
     assert session.completed.provenance["device"] == device.metadata()
@@ -286,6 +301,8 @@ def test_completed_codec_export_reopen_survives_draft_edit(tmp_path, backend):
     reexport = session.export_completed(tmp_path / "reexport")
     assert {f.relative_to(reexport): f.read_bytes() for f in reexport.rglob("*") if f.is_file()} == {
         f.relative_to(first): f.read_bytes() for f in first.rglob("*") if f.is_file()}
+    asyncio.run(app.dispose())
+    assert not list(app.directory.glob("reopen-*"))
 
 
 def test_reject_traversal_in_completed_upload(tmp_path):
@@ -653,7 +670,8 @@ def test_zip_selection_survives_status_refresh(monkeypatch):
     assert app.upload is upload and app.files.children[0] is upload
     assert "completed.zip" in app.upload_receipt.value
     app.load_button.click()
-    assert calls == [app.directory / "decoded"]
+    assert len(calls) == 1 and calls[0].parent.parent == app.directory
+    assert not calls[0].parent.exists()
     assert "Reopened" in app.notice.value
     asyncio.run(app.dispose())
 
@@ -681,7 +699,8 @@ def test_native_colab_picker_reuses_validated_reopen(monkeypatch):
     monkeypatch.setattr(interactive_batch, "unpack_completed", unpack)
     monkeypatch.setattr(app.session, "reopen", received.append)
     app.open_from_colab()
-    assert received == [app.directory / "decoded"]
+    assert len(received) == 1 and received[0].parent.parent == app.directory
+    assert not received[0].parent.exists()
     assert app.notice.value == "Reopened <b>completed.zip</b>."
     asyncio.run(app.dispose())
 

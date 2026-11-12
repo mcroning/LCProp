@@ -271,7 +271,8 @@ class InteractiveBatch:
     def _open_uploaded(self, name, data):
         self.session._editable()
         if name.lower().endswith(".zip"):
-            self.session.reopen(unpack_completed(data, self.directory))
+            with tempfile.TemporaryDirectory(prefix="reopen-", dir=self.directory) as staging:
+                self.session.reopen(unpack_completed(data, Path(staging)))
             self.notice.value = f"Reopened <b>{escape(name)}</b>."
             return
         if not name.lower().endswith(".json"):
