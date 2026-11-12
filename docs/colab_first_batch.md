@@ -2,7 +2,7 @@
 
 The separate LC static and reduced nonlinear PR TD notebooks are optional
 frontends for the calculation engine. Both default to CPU. See the
-[release notes](releases/0.5.0rc1.md) for the qualification scope.
+[release notes](releases/0.5.0rc2.md) for the qualification scope.
 
 ## Start in a fresh Colab runtime
 
