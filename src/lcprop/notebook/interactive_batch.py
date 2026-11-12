@@ -535,8 +535,15 @@ class InteractiveBatch:
             try:
                 fig.clear()
                 ax = fig.add_subplot()
-                artist = draw_plane(ax, plane, self.aspect.value == "Square")
-                fig.colorbar(artist, ax=ax, label=plane.value_unit)
+                square = self.aspect.value == "Square"
+                artist = draw_plane(ax, plane, square)
+                # Use the displayed physical ratio, including axis unit conversion.
+                wide_pr_plot = (
+                    self.session.route == "pr" and not square
+                    and ax.get_aspect() * ax.get_data_ratio() <= 1 / 3
+                )
+                fig.colorbar(artist, ax=ax, label=plane.value_unit,
+                             location="bottom" if wide_pr_plot else "right")
                 self.plot_message.value = ""
                 self.canvas_host.layout.display = ""
                 if self._figure is not None:
