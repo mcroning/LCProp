@@ -112,7 +112,9 @@ Choose **Square** for a wider view of a long, narrow cell. The entrance preview
 contains XY data only.
 
 Select Draft preview, Completed or Stopped / partial. Select a retained
-field, XY/XZ/YZ plane and sample index when available. Missing cuts are
+field, XY/XZ/YZ plane and a physical coordinate from the cut dropdown when
+available. If the PR results plot is wider than the output pane, scroll the
+plot horizontally to reach the colorbar. Missing cuts are
 reported. Physical aspect uses matching physical scales and Square fits a
 square plot. Executed request and diagnostics show the admitted hash and
 provenance.

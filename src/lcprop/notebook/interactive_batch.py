@@ -20,6 +20,13 @@ from lcprop.notebook.batch_session import BatchSession
 
 LC_VOLUME_FIELDS = {"intensity_stack": "Intensity", "delta_theta_stack": "Director response (Δθ)"}
 
+PR_SPACE_CHARGE_SUFFIXES = {
+    "initial_E": "XY slice",
+    "final_E": "XY slice",
+    "initial_E_stack": "Volume",
+    "final_E_stack": "Volume",
+}
+
 PLANES = {"x–y": ("x", "y"), "x–z": ("z", "x"), "y–z": ("z", "y")}
 
 
@@ -66,11 +73,15 @@ class InteractiveBatch:
         else:
             self.cut = W.Dropdown(description="Plane", options=list(PLANES))
         self.aspect = W.Dropdown(description="Aspect", options=["Physical", "Square"])
-        self.position = (W.Dropdown(description="Cut")
-                         if self.fixed_route == "lc" else
-                         W.IntSlider(description="Cut sample", continuous_update=False))
+        self.position = W.Dropdown(description="Cut")
         self.plot = W.Output()
         self.canvas_host = W.VBox()
+        if self.fixed_route != "lc":
+            self.canvas_host.layout.width = "100%"
+            self.canvas_host.layout.min_width = "0"
+            self.canvas_host.layout.overflow = "auto"
+            self.canvas_host.layout.align_items = "flex-start"
+            self.plot.layout.overflow = "auto"
         self.plot_message = W.HTML()
         self._figure = None
         self.details = W.HTML()
@@ -431,6 +442,12 @@ class InteractiveBatch:
             fields, geometry, record = self._products()
             options = [(field.display_name, key) for key, field in fields.items()
                        if getattr(field.data, "ndim", 0) in (2, 3)]
+            if record is not None and record.route == "pr":
+                options = [
+                    (f"{label} ({PR_SPACE_CHARGE_SUFFIXES[key]})"
+                     if key in PR_SPACE_CHARGE_SUFFIXES else label, key)
+                    for label, key in options
+                ]
             if self.fixed_route == "lc" and self.source.value == "Completed":
                 options = [(label if key in fields else f"{label} (unavailable)", key)
                            for key, label in LC_VOLUME_FIELDS.items()] + [
@@ -453,19 +470,14 @@ class InteractiveBatch:
             key = (self.source.value, self.field.value, self.cut.value, id(record))
             index = 0 if coordinate is None or self.cut.value == "x–y" else len(coordinate) // 2
             self.position.disabled = coordinate is None
-            if self.fixed_route == "lc":
-                previous = self.position.value
-                self.position.description = f"{axis} cut" if coordinate is not None else "Cut"
-                self.position.layout.display = "" if coordinate is not None else "none"
-                self.position.options = [] if coordinate is None else [
-                    (f"{value:.6g} {unit}", i) for i, value in enumerate(coordinate)
-                ]
-                if coordinate is not None:
-                    self.position.value = previous if key == self._view_key else index
-            else:
-                self.position.max = 0 if coordinate is None else len(coordinate) - 1
-                if key != self._view_key:
-                    self.position.value = index
+            previous = self.position.value
+            self.position.description = f"{axis} cut" if coordinate is not None else "Cut"
+            self.position.layout.display = "" if coordinate is not None else "none"
+            self.position.options = [] if coordinate is None else [
+                (f"{value:.6g} {unit}", i) for i, value in enumerate(coordinate)
+            ]
+            if coordinate is not None:
+                self.position.value = previous if key == self._view_key else index
             self._view_key = key
             self._show_identity(record)
         finally:
@@ -516,12 +528,22 @@ class InteractiveBatch:
                     fig = plt.figure(figsize=size, layout="constrained")
                 if isinstance(fig.canvas, W.Widget):
                     self._figure = fig
+                    if self.fixed_route != "lc":
+                        # Keep the full canvas reachable when Colab narrows the output pane.
+                        fig.canvas.layout.min_width = f"{fig.bbox.width:g}px"
                     self.canvas_host.children = (fig.canvas,)
             try:
                 fig.clear()
                 ax = fig.add_subplot()
-                artist = draw_plane(ax, plane, self.aspect.value == "Square")
-                fig.colorbar(artist, ax=ax, label=plane.value_unit)
+                square = self.aspect.value == "Square"
+                artist = draw_plane(ax, plane, square)
+                # Use the displayed physical ratio, including axis unit conversion.
+                wide_pr_plot = (
+                    self.session.route == "pr" and not square
+                    and ax.get_aspect() * ax.get_data_ratio() <= 1 / 3
+                )
+                fig.colorbar(artist, ax=ax, label=plane.value_unit,
+                             location="bottom" if wide_pr_plot else "right")
                 self.plot_message.value = ""
                 self.canvas_host.layout.display = ""
                 if self._figure is not None:
