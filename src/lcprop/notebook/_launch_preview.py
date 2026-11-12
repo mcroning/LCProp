@@ -1,15 +1,16 @@
 """Shared launch artists; no widget backend or independent scientific model."""
 
-def ray_endpoint(channel, request):
+def ray_endpoint(channel, request, n_internal=None):
     """Same physical internal-ray endpoint used by the desktop LC host."""
     from lcprop.optics.physical_launch import resolve_beam_geometry
-    geometry = resolve_beam_geometry(channel, float(request.material.no))
+    index = request.material.no if n_internal is None else n_internal
+    geometry = resolve_beam_geometry(channel, float(index))
     length = float(request.grid.z_length_um)
     return (channel.x0_um + length * geometry.kx / geometry.kz_internal,
             channel.y0_um + length * geometry.ky / geometry.kz_internal)
 
 
-def update_decorations(self, request, active_beam):
+def update_decorations(self, request, active_beam, n_internal=None, *, labels=None):
     for artist in self.markers + self.labels + self.arrows + self.tips:
         artist.remove()
     self.markers, self.labels, self.arrows, self.tips = [], [], [], []
@@ -21,10 +22,11 @@ def update_decorations(self, request, active_beam):
             markerfacecolor='none', markeredgecolor=color, markersize=10,
             markeredgewidth=2, scalex=False, scaley=False)
         self.markers.append(marker)
-        self.labels.append(self.ax.annotate(f'Beam {i+1}', (x, y), xytext=(7, 7),
+        label = f'Beam {i+1}' if labels is None else labels[i]
+        self.labels.append(self.ax.annotate(label, (x, y), xytext=(7, 7),
                                            textcoords='offset points', color=color))
         try:
-            tip = ray_endpoint(channel, request)
+            tip = ray_endpoint(channel, request, n_internal)
         except ValueError:
             tip = None
         arrow = self.ax.annotate('', xy=tip or (x, y), xytext=(x, y),
