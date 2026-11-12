@@ -7,14 +7,15 @@ from lcprop.products.data_model import CurveData, FieldData, Geometry, RunData
 
 def mean_intensity_over_y(field: FieldData, geometry: Geometry) -> CurveData:
     """Average samples over y while retaining x and the intensity units."""
-    if field.quantity != "intensity" or field.axes not in (("y", "x"), ("x", "y")):
+    is_intensity = field.quantity in {"intensity", "normalized_intensity"}
+    if not is_intensity or field.axes not in (("y", "x"), ("x", "y")):
         raise ValueError("Expected an XY intensity field")
 
     intensity = np.asarray(field.data)
     x_axis = field.axes.index("x")
-    x = np.asarray(field.coordinates.get("x", geometry.coord("x")))
+    x = np.asarray(field.coordinates["x"] if "x" in field.coordinates else geometry.coord("x"))
     if intensity.ndim != 2 or x.ndim != 1 or x.size != intensity.shape[x_axis]:
-        raise ValueError("Expected one x coordinate per intensity column along x")
+        raise ValueError("Expected one x coordinate per sample along the x axis")
 
     x_unit = field.units.get("x", geometry.units)
     return CurveData(

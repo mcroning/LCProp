@@ -33,6 +33,19 @@ it, keep original results intact, and identify derived products separately. A
 custom plot outside the application is simpler than promising automatic viewer
 plugin discovery. New native viewer types need separately scoped integration.
 
+After installing the engine with the [developer quickstart](developer_quickstart.md),
+run the [transverse intensity profile example](../examples/transverse_intensity_profile.py)
+from the checkout root:
+
+```bash
+.engine-env/bin/python examples/transverse_intensity_profile.py
+```
+
+The example uses synthetic XY intensity data and prints the x coordinates and
+mean intensity over y as `[(-2, 2.0), (0, 3.0), (2, 4.0)]`. It returns a separate
+`CurveData` and leaves the input intact. It averages samples with equal weight
+and requires only the core installation.
+
 ## Modify or replace a frontend
 
 Desktop applications are composed under `lcprop.lc.gui`, `lcprop.pr.gui` and shared
