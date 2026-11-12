@@ -12,7 +12,7 @@
 4. Test the affected behavior and state the limits. Numerical changes need
    physical units, normalization, assumptions and appropriate reference/convergence
    checks. A passing import or GUI startup is not scientific validation.
-5. Open a pull request against `main` once it is established as the public entry.
+5. Open a pull request against `main`, the public entry branch.
    State your base commit, problem, changes, checks, warnings and numerical scope.
    Do not include private cluster paths, credentials or bulk research outputs.
    Opening a pull request starts review; it does not authorize merging it.

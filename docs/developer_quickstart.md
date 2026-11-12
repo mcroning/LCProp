@@ -4,6 +4,10 @@ Use a new checkout and a clean Python 3.12 environment. Python 3.12 on macOS
 arm64 was used for the bounded engine wheel checks. The package declares
 Python >=3.10, and support for other configurations requires separate checks.
 
+Before starting, run `python3.12 --version`. If the command is unavailable,
+install Python 3.12 or use the full path to an existing Python 3.12
+interpreter in both virtual-environment commands below.
+
 ```bash
 git clone https://github.com/mcroning/LCProp.git LCProp-public-start
 cd LCProp-public-start
