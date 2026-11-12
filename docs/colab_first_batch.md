@@ -8,16 +8,16 @@ frontends for the calculation engine. Both default to CPU. See the
 
 1. Open the [LC notebook](../notebooks/lcprop_lc_colab.ipynb) or
    [PR notebook](../notebooks/lcprop_pr_colab.ipynb) and select a CPU runtime.
-2. Obtain the wheel and notebooks from the same release staging set (or
-   release assets when published). Compare all three SHA-256 values with the
-   supplied manifest before use.
-3. Upload the wheel using Colab's Files pane so it appears under `/content`.
-   Run the notebook's install cell, then restart the session. The cell
-   installs the pinned wheel and its `colab` extra, plus Jedi for Colab's
-   IPython dependency. The Colab T4 preview uses Colab's supplied CuPy.
-4. After restart, run **Verify installation** and then the interface cell.
-   Verification checks the installed wheel's origin, version and dependency
-   consistency. The interface enables Colab's custom widget manager.
+2. Run the install cell. The notebooks on main download the pinned wheel from
+   GitHub Releases, verify its SHA-256, and install it with the `colab` extra
+   and Jedi. The Colab T4 preview uses Colab's supplied CuPy.
+3. Restart the session, run **Verify installation**, then run the interface
+   cell. Verification checks the installed wheel's origin, version and
+   dependency consistency. The interface enables Colab's custom widget manager.
+
+The pinned rc2 notebook downloads retain their original manual setup. For
+those copies, verify the wheel and notebooks against the release's
+`SHA256SUMS`, then upload the wheel to `/content` before running the install cell.
 
 Rerun the interface cell to redisplay the existing controller. Export any
 needed files before restarting. To intentionally dispose of the controller,
