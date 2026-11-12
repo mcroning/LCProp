@@ -46,6 +46,53 @@ mean intensity over y as `[(-2, 2.0), (0, 3.0), (2, 4.0)]`. It returns a separat
 `CurveData` and leaves the input intact. It averages samples with equal weight
 and requires only the core installation.
 
+### Process a completed PR ZIP
+
+Use a compatible completed PR ZIP exported by LCProp, such as one saved
+with **Download completed** in the PR notebook. See the
+[Colab file guide](colab_first_batch.md) for export instructions. From the
+checkout root, start `.engine-env/bin/python` and run the following, replacing
+`completed-pr.zip` with the path to your archive.
+
+```python
+from pathlib import Path
+from runpy import run_path
+from tempfile import TemporaryDirectory
+
+from lcprop.notebook.batch_files import unpack_completed
+from lcprop.transport.defaults import default_transport_operations, default_transport_registry
+from lcprop.transport.io import runner_result_from_package
+
+archive = Path("completed-pr.zip")
+mean_intensity_over_y = run_path(
+    "examples/transverse_intensity_profile.py"
+)["mean_intensity_over_y"]
+
+with TemporaryDirectory() as staging:
+    package = unpack_completed(archive.read_bytes(), Path(staging))
+    opened = runner_result_from_package(
+        package,
+        registry=default_transport_registry(),
+        operations=default_transport_operations(),
+    )
+    if opened.material_id != "pr" or opened.run_data is None:
+        raise ValueError("Expected a completed PR result with retained products")
+    run = opened.run_data
+    field = run.fields.get("input_intensity")
+    if field is None:
+        raise ValueError("This PR result does not retain the input intensity plane")
+    profile = mean_intensity_over_y(field, run.geometry)
+    print(f"{len(profile.y)} samples", profile.units)
+```
+
+The loader validates the package and reconstructs its retained products.
+This example selects the normalized XY input intensity plane and averages
+its samples over y. The number of samples depends on the saved x grid.
+The ZIP stays intact and the temporary extraction is removed on exit.
+These imports work with the core install. The archive helper lives in the
+notebook namespace and the recipe requires neither a running notebook
+nor a GPU.
+
 ## Modify or replace a frontend
 
 Desktop applications are composed under `lcprop.lc.gui`, `lcprop.pr.gui` and shared
