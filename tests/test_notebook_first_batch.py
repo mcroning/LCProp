@@ -712,6 +712,40 @@ def test_zip_selection_clears_only_after_successful_reopen(monkeypatch, retry):
     asyncio.run(app.dispose())
 
 
+def test_upload_refresh_keeps_run_disabled_for_invalid_solver_text(monkeypatch):
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
+    app = InteractiveBatch(validator=validate, preview_factory=preview)
+    try:
+        tolerance = app.solver_inputs["static_residual_rms_tol"]
+        original = tolerance.value
+        assert not app.run_button.disabled
+        tolerance.value = "invalid"
+        assert app.run_button.disabled
+
+        upload = app.upload
+        data = b"invalid ZIP"
+        if hasattr(upload, "_counter"):
+            upload.metadata = [{"name": "result.zip"}]
+            upload.data = [data]
+            upload._counter = 1
+        else:
+            upload.value = ({
+                "name": "result.zip", "type": "application/zip", "size": len(data),
+                "content": memoryview(data), "last_modified": datetime.now(timezone.utc),
+            },)
+        assert app.session.selected_upload_bytes == len(data)
+        assert app.run_button.disabled
+        app.clear_upload_button.click()
+        assert app.session.selected_upload_bytes == 0
+        assert app.run_button.disabled
+        tolerance.value = original
+        assert not app.run_button.disabled
+    finally:
+        asyncio.run(app.dispose())
+
+
 def test_native_colab_picker_reuses_validated_reopen(monkeypatch):
     import sys
     from pathlib import Path

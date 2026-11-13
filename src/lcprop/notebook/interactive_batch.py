@@ -230,8 +230,17 @@ class InteractiveBatch:
         def values(controls):
             return {key: widget.value for key, widget in controls.items()}
 
+        def parsed_solver_values():
+            solver_values = values(solver_inputs)
+            for key in optional_tolerances & solver_values.keys():
+                text = solver_values[key].strip()
+                solver_values[key] = float(text) if text else None
+            return solver_values
+
         def update_summary():
             try:
+                # Upload events refresh admission while edits may still be invalid.
+                parsed_solver_values()
                 draft = session.draft
                 payload, warnings = session.validator(route, draft)
                 meta = grid_metadata(draft.grid)
@@ -276,10 +285,7 @@ class InteractiveBatch:
             if session.busy:
                 return
             try:
-                solver_values = values(solver_inputs)
-                for key in optional_tolerances & solver_values.keys():
-                    text = solver_values[key].strip()
-                    solver_values[key] = float(text) if text else None
+                solver_values = parsed_solver_values()
                 draft = replace(session.draft, grid=replace(session.draft.grid, **values(grid_inputs)),
                                 solver=replace(session.draft.solver, **solver_values))
                 if lc:
