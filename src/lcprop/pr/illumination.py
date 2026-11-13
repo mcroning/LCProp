@@ -137,26 +137,35 @@ def result_source_inverse(result):
     checkpoint = getattr(result, "checkpoint", None)
     if checkpoint is not None:
         material = asdict(checkpoint.request.material)
-    identity = diagnostics.get("normalization_identity", LEGACY_NORMALIZATION)
+    response = getattr(result, "material_response_summary", {})
+    identity = diagnostics.get("normalization_identity",
+                               response.get("normalization_identity", LEGACY_NORMALIZATION))
     if material is not None:
         identity = material.get("normalization_identity", LEGACY_NORMALIZATION)
-    if identity not in (LEGACY_NORMALIZATION, INTEGRAL_NORMALIZATION):
-        raise ValueError("unknown result normalization identity")
     record = diagnostics.get("source_normalization")
     if record is None:
-        record = profile.get("source_normalization")
-    if record is None:
-        if identity == INTEGRAL_NORMALIZATION:
-            raise ValueError("physical TD result requires illumination provenance")
+        record = profile.get("source_normalization", response.get("source_normalization"))
+    ref = validate_source_normalization(identity, record)
+    if ref is None:
         return None
-    if identity != INTEGRAL_NORMALIZATION:
-        raise ValueError("physical reference conflicts with legacy result identity")
-    ref = reference_from_metadata(record)
     if material is not None and (material.get("dark_irradiance_W_cm2") != ref.dark_irradiance_W_cm2
             or material.get("uniform_irradiance_W_cm2") != ref.uniform_irradiance_W_cm2):
         raise ValueError("physical TD reference conflicts with material input")
     # Exact zero physical optical power has identically zero optical products.
     return (0.0 if ref.optical_scale_W_cm2 == 0 else float(ref)), ref.background_fraction
+
+
+def validate_source_normalization(identity, record):
+    """Validate the normalization identity and its required reference."""
+    if identity == INTEGRAL_NORMALIZATION:
+        if record is None:
+            raise ValueError("physical PR result requires illumination provenance")
+        return reference_from_metadata(record)
+    if identity != LEGACY_NORMALIZATION:
+        raise ValueError("unknown result normalization identity")
+    if record is not None:
+        raise ValueError("physical reference conflicts with legacy result identity")
+    return None
 
 
 def reference_from_metadata(record):

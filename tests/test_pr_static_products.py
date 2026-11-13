@@ -206,3 +206,45 @@ def test_static_product_rejects_wrong_type_and_inconsistent_prefix_shape():
     )
     with pytest.raises(ValueError, match="residual_stack"):
         pr_static_result_to_run_data(malformed)
+
+
+@pytest.mark.parametrize("policy", ["full", "fast"])
+def test_static_transport_validates_physical_illumination(policy):
+    from lcprop.pr.illumination import PhysicalIlluminationReference
+    from lcprop.pr.static_transport_codec import (
+        decode_pr_static_transport_result, encode_pr_static_transport_result,
+    )
+    from lcprop.transport.envelopes import TransportCodecError
+
+    legacy = _synthetic_static_result()
+    encoded = encode_pr_static_transport_result(legacy, policy).payload
+    restored = decode_pr_static_transport_result(encoded.metadata, encoded.arrays)
+    assert restored.material_response_summary == legacy.material_response_summary
+    old_metadata = dict(encoded.metadata)
+    old_metadata.pop("material_response_summary")
+    decode_pr_static_transport_result(old_metadata, encoded.arrays)
+
+    ref = PhysicalIlluminationReference(100., 1., 1., 1., 0., 2., 2.)
+    valid = {
+        "normalization_identity": ref.identity,
+        "source_normalization": ref.metadata(),
+        "background_intensity": ref.background_fraction,
+    }
+    result = replace(legacy, material_response_summary=valid)
+    encoded = encode_pr_static_transport_result(result, policy).payload
+    assert decode_pr_static_transport_result(
+        encoded.metadata, encoded.arrays).material_response_summary == valid
+
+    invalid = [
+        {**valid, "source_normalization": None},
+        {**valid, "source_normalization": {**ref.metadata(), "dark_fraction": 0.0}},
+        {**valid, "background_intensity": 0.0},
+        {**valid, "normalization_identity": "pr_channel_peak_reference_v1"},
+        {**valid, "normalization_identity": "unknown"},
+    ]
+    for summary in invalid:
+        with pytest.raises(TransportCodecError, match="illumination metadata"):
+            encode_pr_static_transport_result(replace(result, material_response_summary=summary), policy)
+        with pytest.raises(TransportCodecError, match="illumination metadata"):
+            decode_pr_static_transport_result(
+                {**encoded.metadata, "material_response_summary": summary}, encoded.arrays)

@@ -718,3 +718,41 @@ def test_static_and_td_dispatch_use_identical_canonical_planes(monkeypatch):
     assert static_planes.keys() == td_planes.keys() == {0, 1}
     for index in static_planes:
         np.testing.assert_array_equal(static_planes[index], td_planes[index])
+
+
+def test_physical_static_resolves_accepted_launch_and_preserves_products():
+    from lcprop.notebook.batch_requests import preset
+    from lcprop.pr.illumination import reference_from_metadata
+    from lcprop.pr.products import pr_static_result_to_run_data
+    from lcprop.pr.static_transport_codec import (
+        decode_pr_static_transport_result, encode_pr_static_transport_result,
+    )
+
+    request = preset("pr_static")
+    request = replace(request, grid=replace(
+        request.grid, Nx=48, Ny=36, z_length_um=20.0, dz_um=1.0))
+    result = run_pr_static(request)
+    assert result.converged and result.completed_slices == 20
+    summary = result.material_response_summary
+    ref = reference_from_metadata(summary["source_normalization"])
+    pixel_area = (80.0 / 48) * (60.0 / 36)
+    expected_power = np.sum(np.abs(result.A_initial) ** 2) * pixel_area * 1e-3
+    assert ref.optical_power_W == pytest.approx(expected_power)
+    assert ref.dark_irradiance_W_cm2 == request.material.dark_irradiance_W_cm2
+    assert summary["background_intensity"] == ref.background_fraction
+
+    full = pr_static_result_to_run_data(result).fields["optical_intensity_stack"].data
+    np.testing.assert_allclose(full, (result.source_intensity_stack - ref.background_fraction)
+                               * float(ref), rtol=0, atol=0)
+    for policy in ("full", "fast"):
+        encoded = encode_pr_static_transport_result(result, policy)
+        restored = decode_pr_static_transport_result(encoded.payload.metadata, encoded.payload.arrays)
+        assert restored.material_response_summary == summary
+        if policy == "full":
+            np.testing.assert_array_equal(
+                pr_static_result_to_run_data(restored).fields["optical_intensity_stack"].data,
+                full,
+            )
+        else:
+            np.testing.assert_array_equal(restored.longitudinal_intensity_xz, full[:, :, 17])
+            np.testing.assert_array_equal(restored.longitudinal_intensity_yz, full[:, 23, :])
