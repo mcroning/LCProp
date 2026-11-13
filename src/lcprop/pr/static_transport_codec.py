@@ -28,7 +28,12 @@ from lcprop.pr.longitudinal_cuts import (
     retained_longitudinal_intensity_cuts,
     validate_longitudinal_cut_coordinates,
 )
-from lcprop.pr.illumination import result_source_inverse
+from lcprop.pr.illumination import (
+    LEGACY_NORMALIZATION,
+    nonnegative,
+    result_source_inverse,
+    validate_source_normalization,
+)
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.pr.workflow import _validate_canonical_scattering_for_grid
 from lcprop.pr.visualization import (
@@ -177,6 +182,22 @@ def decode_pr_static_transport_request(
 _FAST_OMITTED_FIELDS = PR_STATIC_FAST_OMITTED_FIELDS
 
 
+def _validate_illumination_summary(summary):
+    if not isinstance(summary, Mapping):
+        raise TransportCodecError("PR static material_response_summary must be a mapping")
+    try:
+        reference = validate_source_normalization(
+            summary.get("normalization_identity", LEGACY_NORMALIZATION),
+            summary.get("source_normalization"),
+        )
+        if reference is not None:
+            background = nonnegative(summary.get("background_intensity"), "background intensity")
+            if background != reference.background_fraction:
+                raise ValueError("background intensity disagrees with the physical reference")
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise TransportCodecError(f"invalid PR static illumination metadata: {exc}") from exc
+
+
 def encode_pr_static_transport_result(
     result: PRStaticRunResult,
     result_policy: str = FULL_RESULT_POLICY,
@@ -186,6 +207,7 @@ def encode_pr_static_transport_result(
     if not isinstance(result, PRStaticRunResult):
         raise TypeError("result must be a PRStaticRunResult")
     policy = normalize_result_policy(result_policy)
+    _validate_illumination_summary(result.material_response_summary)
     if result.selected_products is not None:
         from lcprop.transport.result_policy import static_product_selection
         kind, selection = static_product_selection(policy)
@@ -417,14 +439,7 @@ def _validate_result(values: Mapping[str, Any]) -> None:
         raise TransportCodecError(
             "PR static convergence flag disagrees with result status"
         )
-    material_response = values.get(
-        "material_response_summary",
-        {"model": "nonlinear", "validation_status": "validated"},
-    )
-    if not isinstance(material_response, Mapping):
-        raise TransportCodecError(
-            "PR static material_response_summary must be a mapping"
-        )
+    _validate_illumination_summary(values.get("material_response_summary", {}))
 
 
 def decode_pr_static_transport_result(
