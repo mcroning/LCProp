@@ -57,9 +57,41 @@ def unpack_completed(upload, directory):
 def archive_completed(directory):
     directory = Path(directory)
     destination = directory.with_suffix(".zip")
+    members = [directory / name for name in sorted(PACKAGE_FILES)
+               if (directory / name).is_file()]
+    if sum(path.stat().st_size for path in members) > MAX_UPLOAD_BYTES:
+        raise ValueError("Expanded ZIP members exceed 128 MiB")
+    for path in members:
+        if path.suffix == ".npz":
+            with zipfile.ZipFile(path) as arrays:
+                if sum(item.file_size for item in arrays.infolist()) > MAX_UPLOAD_BYTES:
+                    raise ValueError("Expanded array payload exceeds 128 MiB")
     with zipfile.ZipFile(destination, "x", compression=zipfile.ZIP_DEFLATED) as archive:
-        for name in sorted(PACKAGE_FILES):
-            path = directory / name
-            if path.is_file():
-                archive.write(path, name)
+        for path in members:
+            archive.write(path, path.relative_to(directory))
+    if destination.stat().st_size > MAX_UPLOAD_BYTES:
+        destination.unlink()
+        raise ValueError("Completed ZIP exceeds 128 MiB")
+    return destination
+
+
+def save_verified_copy(source, folder):
+    """Copy a staged artifact without overwriting any existing destination."""
+    from lcprop.transport.artifacts import sha256_file
+
+    source, folder = Path(source), Path(folder)
+    destination = folder / source.name
+    if shutil.disk_usage(folder).free < source.stat().st_size:
+        raise OSError("Destination has insufficient available storage")
+    with source.open("rb") as input_stream:
+        expected = sha256_file(source)
+        output = destination.open("xb")
+        try:
+            with output:
+                shutil.copyfileobj(input_stream, output)
+            if sha256_file(destination) != expected:
+                raise OSError("Drive copy checksum mismatch")
+        except BaseException:
+            destination.unlink(missing_ok=True)
+            raise
     return destination

@@ -200,3 +200,27 @@ offer continuation or checkpoint editing.
 On narrow Colab panes the plot colorbar can be clipped. Close the Files pane
 or widen the browser view. Desktop feature parity, saved LC result acceptance,
 and additional GPU workflows remain deferred.
+
+## Local development of the four-route interface
+
+These controls apply to a development build of the notebook runtime. The
+public notebooks pinned to the rc2 wheel retain their released interface.
+
+Both controllers have a workflow selector and a Grid panel. LC offers static
+and time-dependent propagation. PR offers reduced x-only static and
+time-dependent propagation. Each workflow keeps its own draft and results.
+Use **Copy grid** to transfer only the grid between modes of the same material.
+Inspect the exact request, derived geometry, resource estimates, and warnings
+before Run. Release results explicitly if you need to free the session budget.
+
+LC time-dependent starts from dark bias. Its results can be viewed in memory
+and its experiment can be saved as JSON. The completed ZIP option is disabled
+for this workflow. Full-transverse PR and checkpoint continuation are future
+workflows.
+
+**Save / load / export** includes optional Google Drive storage. Use
+**Connect Google Drive** to mount it, select an existing folder under the
+mount (for example `MyDrive/LCProp`), then save a draft or eligible completed
+ZIP. The copy is verified by SHA-256 and reports its destination. The
+download workflow is available independently. Drive storage does not increase
+the working-memory budget or the 128 MiB ZIP limits.

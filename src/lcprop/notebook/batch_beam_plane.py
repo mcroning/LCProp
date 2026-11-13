@@ -126,6 +126,7 @@ class BatchBeamPlane:
     def _commit(self, items, coherence=None, select=None):
         if self.session.edit_beams(items, self.generation, coherence):
             self.owner.notice.value = ""
+            self.owner._update_editor_summary()
             self.owner._refresh_preview()
             if self.owner.source.value == "Draft preview":
                 self.owner._update_selection()
@@ -197,6 +198,12 @@ class BatchBeamPlane:
         ax.clear()
         request = self.session.draft
         grid = request.grid
+        try:
+            grid.validate()
+        except ValueError:
+            self.markers, self.labels, self.arrows, self.tips = [], [], [], []
+            self.canvas.draw_idle()
+            return
         index = refractive_index(self.session.route, request)
         x_half, y_half = grid.x_aperture_um / 2, grid.y_aperture_um / 2
         if self.owner._preview is not None:

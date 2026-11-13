@@ -1,7 +1,7 @@
 """Resolve notebook execution intent before admitting a bounded run."""
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from lcprop.core.backend import BackendSpec, get_backend
 
@@ -83,10 +83,10 @@ def probe_cupy(spec):
 
 
 def resolve_device(route, request, gpu_probe=None):
-    if route == "lc":
+    if route in {"lc", "lc_td"}:
         return RunDevice("numpy", "numpy", request.runtime.precision)
 
-    if route != "pr":
+    if route not in {"pr", "pr_static"}:
         raise ValueError(f"Unsupported notebook workflow: {route}")
     spec = request.backend
     spec.validate()
@@ -94,14 +94,18 @@ def resolve_device(route, request, gpu_probe=None):
         raise ValueError("The PR notebook requires float64 precision")
     if spec.backend == "numpy":
         return RunDevice("numpy", "numpy", spec.precision)
-    try:
-        if gpu_probe is None:
-            raise DeviceUnavailable("GPU qualification is pending for this notebook")
-        gpu = gpu_probe(BackendSpec("cupy", spec.precision, verbose=False))
-    except DeviceUnavailable as error:
-        if spec.backend == "cupy":
-            raise
-        return RunDevice("auto", "numpy", spec.precision, fallback_reason=str(error))
+    if spec.backend == "auto":
+        return RunDevice("auto", "numpy", spec.precision)
+    from lcprop.notebook.batch_requests import preset
+    reference = preset("pr")
+    if (route != "pr" or request.grid not in (reference.grid, replace(reference.grid, z_length_um=20.))
+            or request.solver.integrator != reference.solver.integrator
+            or request.solver.optical_substeps != reference.solver.optical_substeps
+            or request.solver.Nt not in (1, 2, 3) or request.solver.dt_normalized > 0.001):
+        raise DeviceUnavailable("GPU is restricted to the qualified reduced PR TD envelope")
+    if gpu_probe is None:
+        raise DeviceUnavailable("GPU qualification is pending for this notebook")
+    gpu = gpu_probe(BackendSpec("cupy", spec.precision, verbose=False))
     if (not isinstance(gpu, GPUDevice) or type(gpu.ordinal) is not int
             or gpu.ordinal < 0 or not callable(gpu.bind)):
         raise TypeError("GPU probe must return a GPUDevice with a valid ordinal and binder")
