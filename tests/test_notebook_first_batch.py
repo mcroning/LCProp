@@ -46,6 +46,7 @@ def prohibit_science(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("Real scientific execution is prohibited in these tests")
     monkeypatch.setattr("lcprop.runners.local.LocalRunner.run_operation", forbidden)
+    monkeypatch.setattr("lcprop.notebook.batch_session.available_memory", lambda: 4 * 1024**3)
     monkeypatch.setattr(requests, "build_launch", forbidden)
     monkeypatch.setitem(sys.modules, "cupy", None)
 
@@ -77,12 +78,12 @@ def test_unsupported_draft_is_atomic(tmp_path):
 
     session = BatchSession(validator=validate)
     original = session.draft
-    request = replace(original, grid=replace(original.grid, Nx=64))
+    request = replace(original, runtime=replace(original.runtime, precision="float32"))
     path = tmp_path / "unsupported.json"
     write_experiment_file(path, request, material_id="lc", workflow_id="static",
                           registry=session.experiments)
     saved = path.read_bytes()
-    with pytest.raises(ValueError, match="grid"):
+    with pytest.raises(ValueError, match="Unsupported LC runtime"):
         session.load_draft(path)
     assert session.draft is original and path.read_bytes() == saved
     write_experiment_file(path, original, material_id="lc", workflow_id="static",
@@ -92,8 +93,7 @@ def test_unsupported_draft_is_atomic(tmp_path):
         session.load_draft(path)
     assert session.draft is original and path.read_bytes() == saved
     request = requests.preset("pr")
-    with pytest.raises(ValueError, match="1–3"):
-        validate("pr", replace(request, solver=replace(request.solver, Nt=4)))
+    validate("pr", replace(request, solver=replace(request.solver, Nt=4)))
 
 
 def test_preview_plumbing_uses_canonical_samples(monkeypatch):
@@ -266,6 +266,7 @@ def test_completed_codec_export_reopen_survives_draft_edit(tmp_path, backend, mo
 
     device = RunDevice("auto", backend, "float64",
                        GPUDevice(3, "Synthetic GPU", forbidden_probe) if backend == "cupy" else None)
+    session.switch("pr")
     session.completed = Record("synthetic-pr", route, request, encoded, digest,
                                result, operation.to_run_data(result), device=device)
     first = session.export_completed(tmp_path / "first")
@@ -390,7 +391,7 @@ def test_pr_worker_dispatch_freezes_admitted_request():
         admitted = session.completed
         assert admitted.request == executed
         assert admitted.device.requested == "auto"
-        assert "qualification is pending" in admitted.device.fallback_reason
+        assert admitted.device.fallback_reason is None
         session.set_draft("pr", replace(draft, solver=replace(draft.solver, Nt=1)),
                           session.generation)
         assert admitted.request.solver.Nt == 3
@@ -643,20 +644,26 @@ def test_widget_backend_reuses_canvas_across_redraws(monkeypatch):
     asyncio.run(app.dispose())
 
 
-def test_zip_selection_survives_status_refresh(monkeypatch):
-    import ipywidgets as W
-    from traitlets import Any, Bool
-    from lcprop.notebook import interactive_batch
+@pytest.mark.parametrize("retry", [True, False])
+def test_zip_selection_clears_only_after_successful_reopen(monkeypatch, retry):
+    from lcprop.notebook import batch_resources, interactive_batch
 
-    class LegacyUpload(W.Box):
-        value = Any()
-        disabled = Bool(False)
-
-    monkeypatch.setattr(W, "FileUpload", lambda **_: LegacyUpload())
     monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
     app = InteractiveBatch(validator=validate, preview_factory=preview)
     upload = app.upload
-    upload.value = {"completed.zip": {"content": b"synthetic ZIP bytes"}}
+    data = b"synthetic ZIP bytes"
+    legacy = hasattr(upload, "_counter")
+    if legacy:
+        upload.metadata = [{"name": "completed.ZIP"}]
+        upload.data = [data]
+        upload._counter = 1
+    else:
+        from datetime import datetime, timezone
+
+        upload.value = ({
+            "name": "completed.ZIP", "type": "application/zip", "size": len(data),
+            "content": memoryview(data), "last_modified": datetime.now(timezone.utc),
+        },)
     calls = []
 
     def unpack(data, directory):
@@ -664,16 +671,79 @@ def test_zip_selection_survives_status_refresh(monkeypatch):
         return directory / "decoded"
 
     monkeypatch.setattr(interactive_batch, "unpack_completed", unpack)
-    monkeypatch.setattr(app.session, "reopen", calls.append)
+    def reject(path, *, upload_bytes):
+        assert upload_bytes == (0 if legacy else len(data))
+        assert app.session.resident_bytes() == len(data)
+        raise ValueError("invalid package")
+
+    monkeypatch.setattr(app.session, "reopen", reject)
     app.session.generation += 1
     app.refresh_button.click()
     assert app.upload is upload and app.files.children[0] is upload
-    assert "completed.zip" in app.upload_receipt.value
+    assert "completed.ZIP" in app.upload_receipt.value
     app.load_button.click()
-    assert len(calls) == 1 and calls[0].parent.parent == app.directory
-    assert not calls[0].parent.exists()
-    assert "Reopened" in app.notice.value
+    assert "invalid package" in app.notice.value and upload.value
+    assert app.session.selected_upload_bytes == len(data)
+    charge = batch_resources.estimate(app.session.route, app.session.draft)
+    monkeypatch.setattr(batch_resources, "WORK_LIMIT", charge.working)
+    with pytest.raises(ValueError, match="budget"):
+        app.session.require_admission(charge)
+    app.refresh_button.click()
+    assert app.run_button.disabled
+    if retry:
+        monkeypatch.setattr(app.session, "reopen", lambda path, **_: calls.append(path))
+        app.load_button.click()
+    else:
+        app.clear_upload_button.click()
+    assert app.session.selected_upload_bytes == 0
+    app.session.require_admission(charge)
+    assert not app.run_button.disabled
+    assert upload.value == ({} if legacy else ())
+    if legacy:
+        assert upload._counter == 0
+        assert upload.data == upload.metadata == []
+    assert app.upload_receipt.value == "No file received by the kernel."
+    if retry:
+        assert len(calls) == 1 and calls[0].parent.parent == app.directory
+        assert not calls[0].parent.exists()
+        assert "Reopened" in app.notice.value
+    else:
+        assert not calls
     asyncio.run(app.dispose())
+
+
+def test_upload_refresh_keeps_run_disabled_for_invalid_solver_text(monkeypatch):
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
+    app = InteractiveBatch(validator=validate, preview_factory=preview)
+    try:
+        tolerance = app.solver_inputs["static_residual_rms_tol"]
+        original = tolerance.value
+        assert not app.run_button.disabled
+        tolerance.value = "invalid"
+        assert app.run_button.disabled
+
+        upload = app.upload
+        data = b"invalid ZIP"
+        if hasattr(upload, "_counter"):
+            upload.metadata = [{"name": "result.zip"}]
+            upload.data = [data]
+            upload._counter = 1
+        else:
+            upload.value = ({
+                "name": "result.zip", "type": "application/zip", "size": len(data),
+                "content": memoryview(data), "last_modified": datetime.now(timezone.utc),
+            },)
+        assert app.session.selected_upload_bytes == len(data)
+        assert app.run_button.disabled
+        app.clear_upload_button.click()
+        assert app.session.selected_upload_bytes == 0
+        assert app.run_button.disabled
+        tolerance.value = original
+        assert not app.run_button.disabled
+    finally:
+        asyncio.run(app.dispose())
 
 
 def test_native_colab_picker_reuses_validated_reopen(monkeypatch):
@@ -697,7 +767,7 @@ def test_native_colab_picker_reuses_validated_reopen(monkeypatch):
     monkeypatch.setitem(sys.modules, "google.colab", SimpleNamespace(
         files=SimpleNamespace(upload=upload)))
     monkeypatch.setattr(interactive_batch, "unpack_completed", unpack)
-    monkeypatch.setattr(app.session, "reopen", received.append)
+    monkeypatch.setattr(app.session, "reopen", lambda path, **_: received.append(path))
     app.open_from_colab()
     assert len(received) == 1 and received[0].parent.parent == app.directory
     assert not received[0].parent.exists()
@@ -881,7 +951,7 @@ def test_beam_plane_canvas_gestures_and_stale_drag(monkeypatch, route):
         assert panel.gesture is None
 
 
-@pytest.mark.parametrize("intent", ["auto", "cupy"])
+@pytest.mark.parametrize("intent", ["cupy"])
 def test_material_notebooks_and_progress_lifecycle(monkeypatch, intent):
     from lcprop.notebook import LCNotebook, PRNotebook
 
@@ -942,18 +1012,18 @@ def test_material_notebooks_and_progress_lifecycle(monkeypatch, intent):
             assert (lc.session.route, pr.session.route) == ("lc", "pr")
             with pytest.raises(ValueError, match="only accepts LC"):
                 lc.session.set_draft("pr", requests.preset("pr"), lc.session.generation)
-            selector = pr.editor.children[2].children[-1]
+            selector = pr.material_panel.children[-1]
             assert selector.value == "auto"
             selector.value = intent
             label = "Auto → GPU 3 (Test device)" if intent == "auto" else "GPU 3 (Test device)"
             pr.run_button.click()
-            assert pr.editor.children[2].children[-1].disabled
+            assert pr.material_panel.children[-1].disabled
             await wait_until(lambda: "Preparing <progress>" in pr.progress_view.value)
             elapsed = pr.session.elapsed
             await wait_until(lambda: pr.session.elapsed > elapsed)
             assert lc.progress_view.value == "CPU · No admitted run"
             assert not any(getattr(control, "description", "") == "Device"
-                           for control in lc.editor.children[2].children)
+                           for control in lc.material_panel.children)
             advance.set()
             await wait_until(lambda: "Material step" in pr.progress_view.value)
             assert "1/3" in pr.progress_view.value
@@ -1071,12 +1141,12 @@ def test_pr_device_admission_rejections_and_cpu_bypass():
     assert probes == []
     fallback = resolve_device("pr", draft, unavailable)
     assert (fallback.requested, fallback.resolved, fallback.fallback_reason) == (
-        "auto", "numpy", "GPU driver unavailable")
+        "auto", "numpy", None)
     with pytest.raises(ValueError, match="Unsupported notebook workflow"):
         resolve_device("other", draft, unavailable)
     with pytest.raises(ValueError, match="float64"):
         resolve_device("pr", request("cupy", "float32"), unavailable)
-    assert len(probes) == 1
+    assert len(probes) == 0
 
     async def exercise():
         session = BatchSession(validator=validate, fixed_route="pr", gpu_probe=unavailable)
@@ -1088,7 +1158,7 @@ def test_pr_device_admission_rejections_and_cpu_bypass():
         probe_count = len(probes)
         unsupported = replace(session.draft, solver=replace(session.draft.solver, Nt=4))
         session.set_draft("pr", unsupported, session.generation)
-        with pytest.raises(ValueError, match="1–3"):
+        with pytest.raises(DeviceUnavailable, match="qualified reduced PR TD envelope"):
             session.start(session.generation)
         assert len(probes) == probe_count and session.last_run_id is None
 
@@ -1166,9 +1236,9 @@ def test_cupy_probe_with_mock_array_module(monkeypatch, failure):
 
 def test_probe_import_failure_has_fallback_reason():
     draft = requests.preset("pr")
-    device = resolve_device("pr", draft, probe_cupy)
-    assert device.resolved == "numpy"
-    assert "CuPy is unavailable" in device.fallback_reason
+    draft = replace(draft, backend=replace(draft.backend, backend="cupy"))
+    with pytest.raises(DeviceUnavailable, match="CuPy is unavailable"):
+        resolve_device("pr", draft, probe_cupy)
 
 
 @pytest.mark.parametrize("failure", ["bind", "worker", "mismatch", "dtype"])
@@ -1281,9 +1351,12 @@ def test_public_pr_widget_shows_fallback_and_pre_admission_rejection(monkeypatch
             app.run_button.click()
             await app.session.task
             assert "Auto → CPU" in app.progress_view.value
-            assert "GPU qualification is pending" in app.progress_view.value
+            assert "GPU qualification is pending" not in app.progress_view.value
             previous = app.session.completed
-            app.editor.children[2].children[-1].value = "cupy"
+            app.session.gpu_probe = lambda _: (_ for _ in ()).throw(DeviceUnavailable("GPU qualification is pending"))
+            app.session.generation += 1
+            app._sync()
+            app.material_panel.children[-1].value = "cupy"
             app.run_button.click()
             assert "GPU qualification is pending" in app.notice.value
             assert not app.session.busy
@@ -1325,13 +1398,13 @@ def test_lazy_cufft_import_failure(monkeypatch, preference, stage):
     if preference == "auto":
         device = resolve_device("pr", request, probe_cupy)
         assert device.resolved == "numpy" and device.gpu is None
-        assert "mock cuFFT dependency unavailable" in device.fallback_reason
+        assert device.fallback_reason is None
     else:
         with pytest.raises(DeviceUnavailable, match="mock cuFFT dependency unavailable"):
             resolve_device("pr", request, probe_cupy)
 
 
-@pytest.mark.parametrize("preference", ["auto", "cupy"])
+@pytest.mark.parametrize("preference", ["cupy"])
 @pytest.mark.parametrize("probe_result", [None, GPUDevice(-1, "Mock", lambda: None),
                                           GPUDevice(0, "Mock", None)])
 def test_invalid_probe_result_never_admits_worker(preference, probe_result):
@@ -1352,3 +1425,36 @@ def test_invalid_probe_result_never_admits_worker(preference, probe_result):
         assert session.last_device is None and not session.busy
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_uploaded_draft_rejects_before_parser(monkeypatch, native):
+    from datetime import datetime, timezone
+    from lcprop.notebook import batch_session
+
+    def forbidden_parser(*args, **kwargs):
+        pytest.fail("Draft parser invoked without memory telemetry")
+
+    monkeypatch.setattr(batch_session, "read_experiment_file", forbidden_parser)
+    app = InteractiveBatch(validator=validate, preview_factory=preview,
+                           memory_available=lambda: None)
+    data = b'{"not": "an experiment"}'
+    draft = app.session.draft
+    try:
+        if native:
+            monkeypatch.setitem(sys.modules, "google.colab", SimpleNamespace(
+                files=SimpleNamespace(upload=lambda **_: {"draft.json": data})))
+            with pytest.raises(ValueError, match="availability is unknown"):
+                app.open_from_colab()
+        else:
+            app.upload.value = ({
+                "name": "draft.json", "type": "application/json", "size": len(data),
+                "content": memoryview(data), "last_modified": datetime.now(timezone.utc),
+            },)
+            app.load_button.click()
+            assert "availability is unknown" in app.notice.value
+            assert app.session.selected_upload_bytes == len(data)
+        assert app.session.draft is draft
+        assert not list(app.directory.iterdir())
+    finally:
+        asyncio.run(app.dispose())

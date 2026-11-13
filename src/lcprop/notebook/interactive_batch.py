@@ -1,8 +1,10 @@
-"""Interactive notebook for bounded LC static and reduced PR TD requests."""
+"""Interactive notebooks for LC and reduced PR workflows."""
+from collections.abc import Mapping
 from dataclasses import replace
 from html import escape
 import json
 from pathlib import Path
+import shutil
 import tempfile
 from uuid import uuid4
 
@@ -11,10 +13,15 @@ from IPython.display import display
 from matplotlib import pyplot as plt
 
 from lcprop.notebook.batch_beam_plane import BatchBeamPlane
-from lcprop.notebook.batch_files import archive_completed, selected_upload, unpack_completed
-from lcprop.notebook.batch_requests import (
-    PR_MATERIAL_CONTROLS, preset, preview, validate,
+from lcprop.notebook.batch_files import (
+    archive_completed, save_verified_copy, selected_upload, unpack_completed, upload_content,
 )
+from lcprop.notebook.batch_requests import (
+    PR_MATERIAL_CONTROLS, material_for, preset, preview, validate,
+)
+from lcprop.core.grid import grid_metadata
+from lcprop.pr.static_workflow import _resolve_static_tolerances
+from lcprop.notebook.batch_resources import MIB, estimate, require_work
 from lcprop.notebook.batch_results import draw_plane, field_coordinates, retained_plane
 from lcprop.notebook.batch_session import BatchSession
 
@@ -52,11 +59,12 @@ class InteractiveBatch:
 
     fixed_route = None
 
-    def __init__(self, *, runner=None, validator=validate, preview_factory=preview, gpu_probe=None):
+    def __init__(self, *, runner=None, validator=validate, preview_factory=preview, gpu_probe=None, **session_options):
         self.preview_factory = preview_factory
         self.directory = Path(tempfile.mkdtemp(prefix="lcprop-notebook-"))
         self.session = BatchSession(runner=runner, validator=validator, notify=self._sync,
-                                    fixed_route=self.fixed_route, gpu_probe=gpu_probe)
+                                    fixed_route=self.fixed_route, gpu_probe=gpu_probe,
+                                    **session_options)
         self.editor = W.VBox()
         self.beam_plane = BatchBeamPlane(self)
         self.status = W.HTML()
@@ -76,12 +84,11 @@ class InteractiveBatch:
         self.position = W.Dropdown(description="Cut")
         self.plot = W.Output()
         self.canvas_host = W.VBox()
-        if self.fixed_route != "lc":
-            self.canvas_host.layout.width = "100%"
-            self.canvas_host.layout.min_width = "0"
-            self.canvas_host.layout.overflow = "auto"
-            self.canvas_host.layout.align_items = "flex-start"
-            self.plot.layout.overflow = "auto"
+        self.canvas_host.layout.width = "100%"
+        self.canvas_host.layout.min_width = "0"
+        self.canvas_host.layout.overflow = "auto"
+        self.canvas_host.layout.align_items = "flex-start"
+        self.plot.layout.overflow = "auto"
         self.plot_message = W.HTML()
         self._figure = None
         self.details = W.HTML()
@@ -105,6 +112,8 @@ class InteractiveBatch:
         self._preview = None
         self._preview_message = ""
         self._view_key = None
+        self._route_views = {}
+        self._view_route = self.session.route
         for control in (self.source, self.field, self.cut):
             control.observe(self._update_selection, names="value")
         for control in (self.aspect, self.position):
@@ -123,6 +132,8 @@ class InteractiveBatch:
 
     def _refresh_preview(self):
         try:
+            self.session.validator(self.session.route, self.session.draft)
+            self.session.draft.grid.validate()
             self._preview = self.preview_factory(self.session.route, self.session.draft)
             self._preview_message = ""
         except (TypeError, ValueError) as error:
@@ -134,9 +145,23 @@ class InteractiveBatch:
         generation = session.generation
         request = session.draft
         route = session.route
+        labels = {
+            "lc": "LC static", "lc_td": "LC time dependent",
+            "pr_static": "PR static — reduced x-only",
+            "pr": "PR time dependent — reduced x-only",
+        }
+        lc = material_for(route) == "lc"
         route_control = W.Dropdown(description="Workflow", options=[
-            ("LC static", "lc"), ("PR reduced nonlinear TD", "pr")
+            (label, key) for key, label in labels.items()
+            if self.fixed_route is None or material_for(key) == self.fixed_route
         ], value=route)
+        unavailable = {
+            "PR static — full transverse (unavailable)": "The 2D static solver requires separate notebook qualification.",
+            "PR time dependent — full transverse (unavailable)": "The 2D evolution solver requires separate notebook qualification.",
+        }
+        if self.fixed_route != "lc":
+            route_control.options = (*route_control.options, *((label, label) for label in unavailable))
+            route_control.value = route
         inputs = []
 
         def number(label, value, cls=W.FloatText):
@@ -145,62 +170,174 @@ class InteractiveBatch:
             inputs.append(widget)
             return widget
 
-        if route == "lc":
+        grid_labels = {
+            "Nx": "Nx", "Ny": "Ny", "x_aperture_um": "X aperture (µm)",
+            "y_aperture_um": "Y aperture (µm)", "z_length_um": "Optical length (µm)",
+            "dz_um": "Optical dz (µm)",
+        }
+        grid_inputs = {key: number(label, getattr(request.grid, key),
+                                   W.IntText if key in ("Nx", "Ny") else W.FloatText)
+                       for key, label in grid_labels.items()}
+        solver_labels = {
+            "lc": {"static_max_relax_iterations": "Relaxation iterations per pass",
+                   "static_max_coupled_passes": "Coupled passes",
+                   "static_residual_rms_tol": "Residual RMS tolerance",
+                   "static_residual_max_tol": "Residual max tolerance"},
+            "lc_td": {"Nt": "Material steps", "dt": "Normalized dt", "gamma_z": "Gamma z",
+                      "max_picard_iter": "Picard iterations", "tolerance_update": "Update tolerance"},
+            "pr_static": {"max_coupled_passes": "Coupled passes", "optical_substeps": "Optical substeps",
+                          "residual_rms_tolerance": "Coupled RMS override",
+                          "residual_max_tolerance": "Coupled max override"},
+            "pr": {"Nt": "Material steps", "dt_normalized": "Normalized dt",
+                   "optical_substeps": "Optical substeps"},
+        }[route]
+        solver_inputs = {}
+        optional_tolerances = {"residual_rms_tolerance", "residual_max_tolerance",
+                               "static_residual_rms_tol", "static_residual_max_tol"}
+        for key, label in solver_labels.items():
+            value = getattr(request.solver, key)
+            if key in optional_tolerances:
+                widget = W.Text(description=label, value="" if value is None else str(value),
+                                placeholder="Engine default", style={"description_width": "initial"})
+                inputs.append(widget)
+            else:
+                widget = number(label, value, W.IntText if isinstance(value, int) else W.FloatText)
+            solver_inputs[key] = widget
+        if route == "pr":
+            integrator = W.Dropdown(description="Integrator", options=[
+                ("Semi-implicit trapezoidal", "semi_implicit_trapezoidal"),
+                ("Explicit Euler (reference)", "euler"),
+            ], value=request.solver.integrator)
+            solver_inputs["integrator"] = integrator
+            inputs.append(integrator)
+        if lc:
             voltage = number("Applied voltage (V)", request.bias.V_bias)
             material_panel = W.VBox([voltage])
         else:
             material = {name: number(label, getattr(request.material, name))
                         for name, label in PR_MATERIAL_CONTROLS.items()}
-            steps = number("Material steps", request.solver.Nt, W.IntText)
-            timestep = number("Normalized dt", request.solver.dt_normalized)
-            device = W.Dropdown(description="Device", options=[
-                ("Auto", "auto"), ("CPU", "numpy"), ("GPU", "cupy"),
-            ], value=request.backend.backend)
+            options = [("CPU", "numpy"), ("Auto (CPU)", "auto")]
+            if route == "pr" and (session.gpu_probe is not None or request.backend.backend == "cupy"):
+                options.append(("Qualified T4 opt-in", "cupy"))
+            if request.backend.backend not in dict(options).values():
+                options.append(("Unsupported GPU intent", request.backend.backend))
+            device = W.Dropdown(description="Device", options=options, value=request.backend.backend)
             inputs.append(device)
-            material_panel = W.VBox([*material.values(), steps, timestep, device])
-        grid = request.grid
-        grid_summary = W.HTML(
-            f"Fixed grid: {grid.Nx} × {grid.Ny}, aperture "
-            f"{grid.x_aperture_um:g} × {grid.y_aperture_um:g} µm, "
-            f"length {grid.z_length_um:g} µm, dz {grid.dz_um:g} µm."
-            + (" CPU only." if route == "lc" else "")
-        )
+            material_panel = W.VBox([*material.values(), device])
+        grid_summary = W.HTML()
+        inspect = W.HTML()
+        inspect_panel = disclosure("Inspect request", inspect)
+        button = W.Button(description="Run", button_style="primary")
+        reset = W.Button(description="Restore preset")
+        copy_from = W.Dropdown(description="Copy grid from", options=[
+            (label, key) for key, label in labels.items()
+            if key != route and material_for(key) == material_for(route)])
+        copy_grid = W.Button(description="Copy grid")
+        release = W.Button(description="Release results in this workflow")
+
+        def values(controls):
+            return {key: widget.value for key, widget in controls.items()}
+
+        def parsed_solver_values():
+            solver_values = values(solver_inputs)
+            for key in optional_tolerances & solver_values.keys():
+                text = solver_values[key].strip()
+                solver_values[key] = float(text) if text else None
+            return solver_values
+
+        def update_summary():
+            try:
+                # Upload events refresh admission while edits may still be invalid.
+                parsed_solver_values()
+                draft = session.draft
+                payload, warnings = session.validator(route, draft)
+                meta = grid_metadata(draft.grid)
+                charge = estimate(route, draft)
+                grid = draft.grid
+                packed = ("Unavailable" if charge.export is None else
+                          f"{charge.export / MIB:.1f} MiB" +
+                          (" (exceeds ZIP limit)" if charge.export > 128 * MIB else
+                           " (large export)" if charge.export >= 64 * MIB else ""))
+                warning = (" · High memory estimate" if charge.retained >= 192 * MIB
+                           or charge.working + session.resident_bytes() >= 1024 * MIB else "")
+                available = session.memory_available()
+                available_text = "unknown" if available is None else f"{available / MIB:.1f} MiB"
+                resident_results, resident_archives = session.resident_storage()
+                retention = ("Full result in memory; completed ZIP unavailable" if route == "lc_td"
+                             else "Full result in memory; completed ZIP subject to export limits")
+                resolved = ""
+                if route == "pr_static":
+                    limits = _resolve_static_tolerances(draft.solver, real_dtype=draft.backend.precision)
+                    inner = limits.material_solver
+                    resolved = (
+                        f"<br>PR Static inner material solve · RMS/max residual tolerances "
+                        f"{inner.residual_rms_tolerance:g} / {inner.residual_max_tolerance:g} (dimensionless) · "
+                        f"{inner.max_iterations} Newton iterations · {inner.max_backtracks} backtracks · "
+                        f"Minimum step scale {inner.minimum_step_scale:g} · Armijo fraction {inner.armijo_fraction:g}"
+                        f"<br>Coupled RMS/max residual tolerances "
+                        f"{limits.residual_rms_tolerance:g} / {limits.residual_max_tolerance:g} (dimensionless)"
+                    )
+                grid_summary.value = (
+                    f"dx {meta.dx_um:g}, dy {meta.dy_um:g} µm · Nz {meta.Nz} · "
+                    f"Requested length {grid.z_length_um:g} µm · Marched {meta.Nz * grid.dz_um:g} µm · "
+                    f"Preview at most {min(meta.Nx, 128)} × {min(meta.Ny, 128)} · "
+                    f"Working {charge.working / MIB:.1f} MiB · Retained {charge.retained / MIB:.1f} MiB · "
+                    f"Existing results {resident_results / MIB:.1f} MiB · "
+                    f"Re-export archive bytes {resident_archives / MIB:.1f} MiB · "
+                    f"Selected upload {session.selected_upload_bytes / MIB:.1f} MiB · ZIP {packed}{warning} · "
+                    f"Runtime available {available_text} · Elapsed budget {120 if lc else 60} s (cooperative) · Runtime estimate unavailable"
+                    + f"<br>Retention: {retention}" + resolved
+                    + ("<br>" + escape("; ".join(warnings)) if warnings else "")
+                )
+                inspect.value = f"<pre>{escape(json.dumps(payload, indent=2))}</pre>"
+                try:
+                    session.require_admission(charge)
+                except ValueError as error:
+                    grid_summary.value += f"<br>{escape(str(error))}"
+                    button.disabled = True
+                else:
+                    button.disabled = session.busy
+                return True
+            except (TypeError, ValueError, OverflowError) as error:
+                grid_summary.value = escape(str(error))
+                inspect.value = ""
+                button.disabled = True
+                return False
 
         def update():
             if session.busy:
                 return
-            draft = session.draft
-            if route == "lc":
-                draft = replace(draft, bias=replace(request.bias, V_bias=voltage.value))
-            else:
-                draft = replace(
-                    draft,
-                    material=replace(request.material, **{
-                        name: widget.value for name, widget in material.items()}),
-                    solver=replace(request.solver, Nt=steps.value, dt_normalized=timestep.value),
-                    backend=replace(draft.backend, backend=device.value),
-                )
+            try:
+                solver_values = parsed_solver_values()
+                draft = replace(session.draft, grid=replace(session.draft.grid, **values(grid_inputs)),
+                                solver=replace(session.draft.solver, **solver_values))
+                if lc:
+                    draft = replace(draft, bias=replace(draft.bias, V_bias=voltage.value))
+                else:
+                    draft = replace(draft, material=replace(draft.material, **values(material)),
+                                    backend=replace(draft.backend, backend=device.value))
+            except ValueError as error:
+                button.disabled = True
+                grid_summary.value = escape(str(error))
+                self._preview = None
+                self._preview_message = str(error)
+                self._update_selection()
+                return
             if session.set_draft(route, draft, generation):
                 self.notice.value = ""
-                self._refresh_preview()
+                if update_summary():
+                    self._refresh_preview()
+                else:
+                    self._preview = None
+                    self._preview_message = grid_summary.value
+                self.beam_plane.draw()
                 self._update_selection()
+                return not button.disabled
 
-        def changed(_):
-            self._guard(generation, update)
-
-        def select_route(_):
-            if session.set_draft(route_control.value, preset(route_control.value), generation):
-                session.generation += 1
-                self._refresh_preview()
-                self._sync()
-
-        def run():
-            update()
-            session.start(generation)
-
-        button = W.Button(description="Run", button_style="primary")
-        button.on_click(lambda _: self._guard(generation, run))
-        reset = W.Button(description="Restore preset")
+        def transition(action):
+            action()
+            self._refresh_preview()
+            self._sync()
 
         def restore():
             if session.set_draft(route, preset(route), generation, reset_presentation=True):
@@ -208,21 +345,40 @@ class InteractiveBatch:
                 self._refresh_preview()
                 self._sync()
 
-        reset.on_click(lambda _: self._guard(generation, restore))
-        controls = (route_control, *inputs, button, reset)
-        for control in controls:
+        for control in (route_control, *inputs, button, reset, copy_from, copy_grid, release):
             control.disabled = session.busy
         for control in inputs:
-            control.observe(changed, names="value")
+            control.observe(lambda _: self._guard(generation, update), names="value")
+        def select_route(change):
+            selected = change["new"]
+            if selected in unavailable:
+                route_control.value = route
+                self.notice.value = escape(unavailable[selected])
+            elif selected != route:
+                self._guard(generation, lambda: transition(lambda: session.switch(selected)))
+
         route_control.observe(select_route, names="value")
+        button.on_click(lambda _: self._guard(generation, lambda: update() and session.start(generation)))
+        reset.on_click(lambda _: self._guard(generation, restore))
+        copy_grid.on_click(lambda _: self._guard(generation, lambda: transition(
+            lambda: session.copy_grid(copy_from.value))))
+        release.on_click(lambda _: self._guard(generation, lambda: transition(session.release_result)))
         self.run_button = button
+        self.workflow_control = route_control
+        self.grid_inputs = grid_inputs
+        self.solver_inputs = solver_inputs
+        self.material_panel = material_panel
         old_controls = self.editor.children
-        if self.fixed_route is None:
-            workflow = route_control
-        else:
-            workflow = W.HTML(f"<b>{escape(route_control.label)}</b>")
-            route_control.close()
-        self.editor.children = (workflow, grid_summary, material_panel, W.HBox([button, reset]))
+        guidance = ("LC time dependent starts from dark bias; Continue is unavailable."
+                    if lc else "Full-transverse PR static and time dependent are unavailable in this batch.")
+        self.editor.children = (
+            route_control, W.HTML(guidance), disclosure("Grid", W.VBox([
+                *grid_inputs.values(), W.HBox([copy_from, copy_grid])])), grid_summary,
+            material_panel, disclosure("Solver", W.VBox(list(solver_inputs.values()))),
+            inspect_panel, W.HBox([button, reset, release]),
+        )
+        self._update_editor_summary = update_summary
+        update_summary()
         for control in old_controls:
             close_widgets(control)
 
@@ -234,16 +390,29 @@ class InteractiveBatch:
         export = W.Button(description="Download completed")
         self.upload = upload
         self.load_button = load
+        self.clear_upload_button = W.Button(description="Clear upload", disabled=True)
         self.save_button = save
         self.export_button = export
+        self.export_notice = W.HTML()
+        drive_folder = W.Text(description="Drive folder", value="MyDrive")
+        mount = W.Button(description="Connect Google Drive")
+        drive_draft = W.Button(description="Save draft to Drive")
+        drive_zip = W.Button(description="Save completed ZIP to Drive")
+        self.drive_buttons = (drive_folder, mount, drive_draft, drive_zip)
+        drive_root = Path("/content/drive")
         self.upload_receipt = W.HTML(value="No file received by the kernel.")
 
         def receipt(change):
-            if not change["new"]:
+            value = change["new"]
+            entries = value.values() if isinstance(value, Mapping) else value
+            session.selected_upload_bytes = sum(len(entry["content"]) for entry in entries)
+            self.clear_upload_button.disabled = session.busy or not value
+            self._update_editor_summary()
+            if not value:
                 self.upload_receipt.value = "No file received by the kernel."
                 return
             try:
-                name, data = selected_upload(change["new"])
+                name, data = upload_content(value)
             except ValueError as error:
                 self.upload_receipt.value = escape(str(error))
             else:
@@ -256,9 +425,23 @@ class InteractiveBatch:
                 return
             self._guard(session.generation, action)
 
+        def clear_upload():
+            if isinstance(upload.value, Mapping):
+                with upload.hold_sync():
+                    upload.data = []
+                    upload.metadata = []
+                    upload._counter = 0
+                    upload.set_trait("value", {})
+            else:
+                upload.value = ()
+
         def read():
-            name, data = selected_upload(upload.value)
-            self._open_uploaded(name, data)
+            name, data = upload_content(upload.value)
+            # BytesIO can reuse bytes, but copies a widget memoryview.
+            extra = len(data) if name.lower().endswith(".zip") and not isinstance(data, bytes) else 0
+            self._open_uploaded(name, data, upload_bytes=extra)
+            if name.lower().endswith(".zip"):
+                clear_upload()
 
         def download(path):
             # Colab transport is imported only on explicit download.
@@ -269,28 +452,66 @@ class InteractiveBatch:
             else:
                 files.download(str(path))
 
-        def download_completed():
-            path = session.export_completed(self.directory / f"completed-{uuid4().hex}")
-            download(archive_completed(path))
+        def draft_artifact():
+            return session.save_draft(self.directory / f"draft-{uuid4().hex}.lcprop.json")
+
+        def zip_artifact():
+            reason = session.export_unavailable()
+            if reason:
+                raise ValueError(reason)
+            if shutil.disk_usage(self.directory).free < 2 * session.export_size(session.completed):
+                raise OSError("Insufficient local storage for staging the ZIP")
+            name = f"completed-{uuid4().hex}"
+            with tempfile.TemporaryDirectory(dir=self.directory) as staging:
+                path = session.export_completed(Path(staging) / name)
+                archive = archive_completed(path)
+                return archive.rename(self.directory / archive.name)
+
+        def mount_drive():
+            from google.colab import drive
+            drive.mount(str(drive_root))
+
+        def save_drive(artifact):
+            if not (drive_root / "MyDrive").is_dir():
+                raise ValueError("Connect Google Drive first")
+            folder = (drive_root / drive_folder.value.strip()).resolve()
+            if folder == drive_root or not folder.is_relative_to(drive_root.resolve()):
+                raise ValueError("Choose a folder inside mounted Google Drive")
+            if not folder.is_dir():
+                raise ValueError("Choose an existing Google Drive folder")
+            path = save_verified_copy(artifact(), folder)
+            self.notice.value = f"Verified Drive copy: <code>{escape(str(path))}</code>"
+
+        mount.on_click(lambda _: editable(mount_drive))
+        drive_draft.on_click(lambda _: editable(lambda: save_drive(draft_artifact)))
+        drive_zip.on_click(lambda _: editable(lambda: save_drive(zip_artifact)))
 
         load.on_click(lambda _: editable(read))
-        save.on_click(lambda _: editable(lambda: download(
-            session.save_draft(self.directory / f"draft-{uuid4().hex}.lcprop.json"))))
-        export.on_click(lambda _: self._guard(session.generation, download_completed))
-        self.files.children = (upload, self.upload_receipt, W.HBox([load, save, export]))
+        self.clear_upload_button.on_click(lambda _: editable(clear_upload))
+        save.on_click(lambda _: editable(lambda: download(draft_artifact())))
+        export.on_click(lambda _: editable(lambda: download(zip_artifact())))
+        self.files.children = (
+            upload, self.upload_receipt, W.HBox([load, self.clear_upload_button, save, export]), self.export_notice,
+            disclosure("Google Drive (optional)", W.VBox(list(self.drive_buttons))),
+        )
 
-    def _open_uploaded(self, name, data):
+    def _open_uploaded(self, name, data, *, upload_bytes=None):
         self.session._editable()
         if name.lower().endswith(".zip"):
+            extra = len(data) if upload_bytes is None else upload_bytes
+            require_work(extra + 128 * MIB, self.session.resident_bytes(),
+                         self.session.memory_available())
             with tempfile.TemporaryDirectory(prefix="reopen-", dir=self.directory) as staging:
-                self.session.reopen(unpack_completed(data, Path(staging)))
+                self.session.reopen(unpack_completed(data, Path(staging)), upload_bytes=extra)
+            self._update_editor_summary()
             self.notice.value = f"Reopened <b>{escape(name)}</b>."
             return
         if not name.lower().endswith(".json"):
             raise ValueError("Select an experiment JSON or completed ZIP")
-        path = self.directory / f"upload-{uuid4().hex}.lcprop.json"
-        path.write_bytes(data)
-        self.session.load_draft(path)
+        with tempfile.TemporaryDirectory(prefix="draft-", dir=self.directory) as staging:
+            path = Path(staging) / "draft.lcprop.json"
+            path.write_bytes(data)
+            self.session.load_draft(path, upload_bytes=len(data) if upload_bytes is None else upload_bytes)
         self._refresh_preview()
         self._sync()
         self.notice.value = f"Loaded <b>{escape(name)}</b>."
@@ -371,7 +592,7 @@ class InteractiveBatch:
         session = self.session
         self.status.value = f"<b>{escape(session.status)}</b> {escape(session.message)}"
         if session.last_run_id is None:
-            self.progress_view.value = "CPU · No admitted run" if session.route == "lc" else "No admitted run"
+            self.progress_view.value = "CPU · No admitted run" if material_for(session.route) == "lc" else "No admitted run"
         else:
             done, total, stage = session.progress or (None, None, "")
             stage = stage or ("Preparing / executing" if session.busy else session.status)
@@ -389,6 +610,14 @@ class InteractiveBatch:
                 f"Run {session.last_run_id} · {escape(label)} · {session.elapsed:.1f} s"
                 f"{stop.get(session.status, '')}<br>{escape(stage)} {meter}{fallback}"
             )
+        route_changed = self._view_route != session.route
+        if route_changed:
+            self._route_views[self._view_route] = (
+                self.source.value, self.field.value, self.cut.value,
+                self.aspect.value, self.position.value,
+            )
+            self._view_route = session.route
+            self._refresh_preview()
         changed = self._generation != session.generation
         if changed:
             self._generation = session.generation
@@ -402,8 +631,14 @@ class InteractiveBatch:
         self.stop_button.disabled = session.status != "running"
         self.upload.disabled = session.busy
         self.load_button.disabled = session.busy
+        self.clear_upload_button.disabled = session.busy or not self.upload.value
         self.save_button.disabled = session.busy
-        self.export_button.disabled = session.completed is None
+        self.export_button.disabled = session.busy or bool(session.export_unavailable())
+        self.export_button.tooltip = session.export_unavailable()
+        self.export_notice.value = escape(session.export_unavailable())
+        for control in self.drive_buttons:
+            control.disabled = session.busy
+        self.drive_buttons[-1].disabled = self.export_button.disabled
         records = (session.completed, session.partial)
         if changed or self._record != tuple(id(record) for record in records):
             completed_changed = session.completed is not None and (
@@ -416,13 +651,22 @@ class InteractiveBatch:
                 options.append("Stopped / partial")
             self._updating_results = True
             try:
-                old = self.source.value
+                saved_view = self._route_views.get(session.route) if route_changed else None
+                old = saved_view[0] if saved_view else self.source.value
                 self.source.options = options
-                self.source.value = "Completed" if completed_changed else (
+                self.source.value = "Completed" if completed_changed and not saved_view else (
                     old if old in options else options[0])
             finally:
                 self._updating_results = False
             self._update_selection()
+            if saved_view:
+                _, field, cut, aspect, position = saved_view
+                if field in dict(self.field.options).values():
+                    self.field.value = field
+                self.cut.value = cut
+                self.aspect.value = aspect
+                if position in dict(self.position.options).values():
+                    self.position.value = position
 
     def _products(self):
         if self.source.value == "Draft preview":
@@ -442,13 +686,13 @@ class InteractiveBatch:
             fields, geometry, record = self._products()
             options = [(field.display_name, key) for key, field in fields.items()
                        if getattr(field.data, "ndim", 0) in (2, 3)]
-            if record is not None and record.route == "pr":
+            if record is not None and material_for(record.route) == "pr":
                 options = [
                     (f"{label} ({PR_SPACE_CHARGE_SUFFIXES[key]})"
                      if key in PR_SPACE_CHARGE_SUFFIXES else label, key)
                     for label, key in options
                 ]
-            if self.fixed_route == "lc" and self.source.value == "Completed":
+            if self.session.route == "lc" and self.source.value == "Completed":
                 options = [(label if key in fields else f"{label} (unavailable)", key)
                            for key, label in LC_VOLUME_FIELDS.items()] + [
                     (label, key) for label, key in options if key not in LC_VOLUME_FIELDS
@@ -458,6 +702,7 @@ class InteractiveBatch:
             keys = [value for _, value in options]
             self.field.value = old if old in keys else (keys[0] if keys else None)
             field = fields.get(self.field.value)
+            self.cut.disabled = bool(field is not None and set(field.axes) == {"s_x", "s_y"})
             missing = set(field.axes) - set(PLANES[self.cut.value]) if field else set()
             coordinate = None
             axis = None
@@ -519,7 +764,8 @@ class InteractiveBatch:
                 if label is not None:
                     raise ValueError(f"The completed result has no retained {label} volume.")
                 raise ValueError(self._preview_message or "No retained field")
-            plane = retained_plane(field, geometry, PLANES[self.cut.value],
+            axes = ("s_x", "s_y") if set(field.axes) == {"s_x", "s_y"} else PLANES[self.cut.value]
+            plane = retained_plane(field, geometry, axes,
                                    None if self.position.disabled else self.position.value)
             fig = self._figure
             if fig is None:
@@ -528,9 +774,7 @@ class InteractiveBatch:
                     fig = plt.figure(figsize=size, layout="constrained")
                 if isinstance(fig.canvas, W.Widget):
                     self._figure = fig
-                    if self.fixed_route != "lc":
-                        # Keep the full canvas reachable when Colab narrows the output pane.
-                        fig.canvas.layout.min_width = f"{fig.bbox.width:g}px"
+                    fig.canvas.layout.min_width = f"{fig.bbox.width:g}px"
                     self.canvas_host.children = (fig.canvas,)
             try:
                 fig.clear()
@@ -538,12 +782,9 @@ class InteractiveBatch:
                 square = self.aspect.value == "Square"
                 artist = draw_plane(ax, plane, square)
                 # Use the displayed physical ratio, including axis unit conversion.
-                wide_pr_plot = (
-                    self.session.route == "pr" and not square
-                    and ax.get_aspect() * ax.get_data_ratio() <= 1 / 3
-                )
+                wide_plot = not square and ax.get_aspect() * ax.get_data_ratio() <= 1 / 3
                 fig.colorbar(artist, ax=ax, label=plane.value_unit,
-                             location="bottom" if wide_pr_plot else "right")
+                             location="bottom" if wide_plot else "right")
                 self.plot_message.value = ""
                 self.canvas_host.layout.display = ""
                 if self._figure is not None:
@@ -575,12 +816,12 @@ class InteractiveBatch:
 
 
 class LCNotebook(InteractiveBatch):
-    """LC static Colab entry controller."""
+    """LC static and time-dependent entry controller."""
 
     fixed_route = "lc"
 
 
 class PRNotebook(InteractiveBatch):
-    """PR reduced nonlinear TD Colab entry controller."""
+    """Reduced PR static and time-dependent entry controller."""
 
     fixed_route = "pr"

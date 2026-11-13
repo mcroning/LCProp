@@ -13,11 +13,15 @@ from uuid import uuid4
 import warnings as runtime_warnings
 
 from lcprop.core.execution import CancellationToken
+from lcprop.core.grid import grid_metadata
 from lcprop.notebook.batch_beams import DISABLED_BEAMS, edited_stack, objects, validate_objects
 from lcprop.notebook.batch_desktop import desktop_metadata, update_presentation
 from lcprop.notebook.batch_device import RunDevice, resolve_device
-from lcprop.notebook.batch_files import MAX_UPLOAD_BYTES, PACKAGE_FILES
-from lcprop.notebook.batch_requests import ROUTES, preset, validate
+from lcprop.notebook.batch_files import MAX_UPLOAD_BYTES, PACKAGE_FILES, package_sizes
+from lcprop.notebook.batch_requests import ROUTES, material_for, preset, validate
+from lcprop.notebook.batch_resources import (
+    RESULT_LIMIT, available_memory, estimate, require_work,
+)
 from lcprop.persistence.execution_intent import ExecutionIntent
 from lcprop.persistence.experiments import (
     ExperimentCodecRegistry, read_experiment_file, write_experiment_file,
@@ -41,6 +45,9 @@ class Record:
     provenance: dict | None = None
     package_files: tuple | None = None
     device: RunDevice | None = None
+    retained_bytes: int = 0
+    export_bytes: int | None = None
+    archive_bytes: int = 0
 
 
 def identity(payload):
@@ -60,9 +67,12 @@ def environment_identity():
 
 class BatchSession:
     def __init__(self, *, runner=None, validator=validate, notify=None, fixed_route=None,
-                 gpu_probe=None):
+                 gpu_probe=None, memory_available=None):
         self.runner = LocalRunner() if runner is None else runner
         self.validator = validator
+        self.memory_available = memory_available or available_memory
+        self.route_state = {}
+        self.selected_upload_bytes = 0
         self.gpu_probe = gpu_probe
         self.last_device = None
         self.notify = notify or (lambda: None)
@@ -84,7 +94,8 @@ class BatchSession:
         self.transport = TransportCodecRegistry()
         for _, experiment, transport in ROUTES.values():
             self.experiments.register(experiment)
-            self.transport.register(transport)
+            if transport is not None:
+                self.transport.register(transport)
 
     def _notify(self):
         try:
@@ -100,12 +111,88 @@ class BatchSession:
         if self.busy or self.disposed:
             raise RuntimeError("Draft controls are unavailable while running or disposed")
 
+    def _check_material(self, route):
+        if self.fixed_route is not None and material_for(route) != self.fixed_route:
+            raise ValueError(f"This notebook only accepts {self.fixed_route.upper()} workflows")
+
+    def switch(self, route):
+        self._editable()
+        self._check_material(route)
+        if route == self.route:
+            return
+        self.route_state[self.route] = (self.draft, self.presentation, self.execution_intent,
+                                        self.completed, self.partial)
+        self.route = route
+        saved = self.route_state.pop(route, None)
+        self.draft, self.presentation, self.execution_intent, self.completed, self.partial = (
+            saved if saved is not None else (preset(route), {}, None, None, None)
+        )
+        self.last_run_id = None
+        self.last_device = None
+        self.status, self.message, self.progress, self.elapsed = "idle", "", None, 0.0
+        self.generation += 1
+
+    def copy_grid(self, source):
+        self._editable()
+        if source == self.route or material_for(source) != material_for(self.route):
+            raise ValueError("Choose another workflow for the same material")
+        saved = self.route_state.get(source)
+        grid = (saved[0] if saved else preset(source)).grid
+        draft = replace(self.draft, grid=grid)
+        self.validator(self.route, draft)
+        self.draft = draft
+        self.generation += 1
+
+    def release_result(self):
+        self._editable()
+        self.completed = self.partial = None
+        self.generation += 1
+
+    def resident_storage(self):
+        records = [self.completed, self.partial]
+        for state in self.route_state.values():
+            records.extend(state[3:])
+        present = [record for record in records if record is not None]
+        return (sum(record.retained_bytes for record in present),
+                sum(record.archive_bytes for record in present))
+
+    def resident_bytes(self):
+        return sum(self.resident_storage()) + self.selected_upload_bytes
+
+    def export_unavailable(self):
+        if self.route == "lc_td":
+            return "LC time-dependent completed ZIP export is unavailable in this notebook."
+        if self.completed is None:
+            return "No completed result"
+        size = self.export_size(self.completed)
+        if size is None or size > MAX_UPLOAD_BYTES:
+            return "Completed ZIP export estimate is unavailable or exceeds 128 MiB"
+        return ""
+
+    @staticmethod
+    def export_size(record):
+        if record.export_bytes is not None:
+            return record.export_bytes
+        return estimate(record.route, record.request).export
+
+    def preflight(self, route, request):
+        payload, warnings = self.validator(route, request)
+        charge = estimate(route, request)
+        self.require_admission(charge)
+        return payload, warnings, charge
+
+    def require_admission(self, charge):
+        if charge.retained > RESULT_LIMIT:
+            raise ValueError("Retained result estimate exceeds 256 MiB")
+        require_work(charge.working, self.resident_bytes(), self.memory_available())
+
     def set_draft(self, route, request, generation, *, reset_presentation=False):
         if generation != self.generation or self.busy or self.disposed:
             return False
-        if self.fixed_route is not None and route != self.fixed_route:
-            raise ValueError(f"This notebook only accepts {self.fixed_route.upper()} drafts")
+        self._check_material(route)
         preserve = route == self.route and not reset_presentation
+        if route != self.route:
+            self.switch(route)
         presentation = self.presentation if preserve else {}
         intent = self.execution_intent if preserve else None
         if "beam_editor" in presentation:
@@ -115,7 +202,7 @@ class BatchSession:
             request = replace(request, beams=beams)
             if beams != self.draft.beams:
                 presentation = update_presentation(presentation, beams)
-        if intent is not None and route == "pr":
+        if intent is not None and material_for(route) == "pr":
             intent = replace(intent, requested_backend=request.backend.backend)
         self.route, self.draft = route, deepcopy(request)
         self.presentation, self.execution_intent = presentation, intent
@@ -135,9 +222,10 @@ class BatchSession:
             return False
         loop = asyncio.get_running_loop()
         route, request = self.route, deepcopy(self.draft)
-        payload, warnings = self.validator(route, request)
+        payload, warnings, charge = self.preflight(route, request)
+        _, requested_digest = identity(payload)
         device = resolve_device(route, request, self.gpu_probe)
-        if route == "pr":
+        if material_for(route) == "pr":
             request = replace(request, backend=replace(request.backend, backend=device.resolved))
             payload = ROUTES[route][1].encode_request(request)
         encoded, digest = identity(payload)
@@ -150,13 +238,13 @@ class BatchSession:
         self.status, self.message = "running", "\n".join(warnings)
         self.progress = self.partial = None
         self.task = loop.create_task(self._execute(
-            route, request, run_id, encoded, digest, self.token, device))
+            route, request, run_id, encoded, digest, self.token, device, charge, requested_digest))
         self._notify()
         return True
 
-    async def _execute(self, route, request, run_id, encoded, digest, token, device):
+    async def _execute(self, route, request, run_id, encoded, digest, token, device, charge, requested_digest):
         mailbox = Queue(maxsize=1)
-        limit = 120 if route == "lc" else 60
+        limit = 120 if material_for(route) == "lc" else 60
         started = monotonic()
 
         def progress(event):
@@ -164,7 +252,7 @@ class BatchSession:
                 token.cancel()
             stage = getattr(event, "stage", None) or event.message
             if not stage:
-                stage = "LC optical propagation" if route == "lc" else "PR material evolution"
+                stage = "LC optical propagation" if material_for(route) == "lc" else "PR material evolution"
             item = (run_id, event.completed_units, event.total_units, stage)
             try:
                 mailbox.get_nowait()
@@ -214,9 +302,14 @@ class BatchSession:
                     self.progress = item[1:]
             result = output.result
             status = getattr(result, "status", "completed")
-            if status in {"completed", "stopped", "cancelled"}:
-                if route == "pr":
-                    backend = getattr(result, "diagnostics", {}).get("backend", {})
+            complete = status == "completed" or (
+                route == "pr_static" and status in {"converged", "not_converged"}
+                and getattr(result, "completed_slices", 0) == grid_metadata(request.grid).Nz
+            )
+            if complete or status in {"stopped", "cancelled", "not_converged"}:
+                if material_for(route) == "pr":
+                    backend = (result.backend_summary if route == "pr_static" else
+                               getattr(result, "diagnostics", {}).get("backend", {}))
                     expected = device.metadata()
                     if (backend.get("backend"), backend.get("real_dtype"), backend.get("complex_dtype")) != (
                         device.resolved, expected["real_dtype"], expected["complex_dtype"],
@@ -224,16 +317,20 @@ class BatchSession:
                         raise RuntimeError("Result backend or precision differs from the admitted device")
                 owned_result, products = deepcopy((result, output.run_data))
                 record = Record(run_id, route, request, encoded, digest, owned_result, products,
-                                provenance=environment_identity(), device=device)
-                if status == "completed" and not token.is_cancelled():
+                                provenance={**environment_identity(), "requested_digest": requested_digest},
+                                device=device,
+                                retained_bytes=charge.retained, export_bytes=charge.export)
+                if complete and not token.is_cancelled():
                     self.completed = record
                     self.status = "completed"
                 else:
                     self.partial = record
-                    self.status = "stopped"
+                    self.status = "stopped" if token.is_cancelled() or status != "not_converged" else "failed"
                 self.message = (
                     "Stop was requested before result admission. Kept as a separate attempt."
-                    if status == "completed" and token.is_cancelled() else output.message
+                    if complete and token.is_cancelled() else
+                    "All slices completed, but the static solve did not converge."
+                    if complete and status == "not_converged" else output.message
                 )
             else:
                 self.status, self.message = "failed", f"Workflow returned {status}"
@@ -270,7 +367,7 @@ class BatchSession:
         self.validator(self.route, self.draft)
         operation = ROUTES[self.route][0]
         intent = self.execution_intent
-        if self.route == "pr" and intent is None:
+        if material_for(self.route) == "pr" and intent is None:
             backend = self.draft.backend
             intent = ExecutionIntent("local", None, None, backend.backend, backend.precision, "fast")
         return write_experiment_file(path, self.draft, material_id=operation.material_id,
@@ -278,8 +375,15 @@ class BatchSession:
                                      presentation_payload=self.presentation,
                                      execution_intent=intent)
 
-    def load_draft(self, path):
+    def load_draft(self, path, *, upload_bytes=0):
         self._editable()
+        path = Path(path)
+        size = path.stat().st_size
+        if size > MAX_UPLOAD_BYTES:
+            raise ValueError("Draft JSON exceeds 128 MiB")
+        # Allow for file staging, decoded text, parsed objects and codec copies.
+        require_work(32 * size + upload_bytes, self.resident_bytes(),
+                     self.memory_available())
         loaded = read_experiment_file(path, registry=self.experiments)
         if self.fixed_route is not None and loaded.material_id != self.fixed_route:
             raise ValueError(f"This notebook only accepts {self.fixed_route.upper()} drafts")
@@ -287,15 +391,27 @@ class BatchSession:
         if DISABLED_BEAMS in presentation and "beam_editor" in presentation:
             raise ValueError("Conflicting beam editor metadata")
         validate_objects(objects(loaded.request.beams, presentation))
-        self.validator(loaded.material_id, loaded.request)
-        self.route, self.draft = loaded.material_id, loaded.request
+        route = self.route_for(loaded.material_id, loaded.workflow_id)
+        self.validator(route, loaded.request)
+        self.switch(route)
+        self.draft = loaded.request
         self.presentation, self.execution_intent = presentation, intent
         self.generation += 1
 
+    @staticmethod
+    def route_for(material, workflow):
+        for key, (operation, _, _) in ROUTES.items():
+            if operation.key == (material, workflow):
+                return key
+        raise ValueError(f"Unsupported notebook workflow: {material}/{workflow}")
+
     def export_completed(self, path):
+        self._editable()
+        reason = self.export_unavailable()
+        if reason:
+            raise ValueError(reason)
         record = self.completed
-        if record is None:
-            raise ValueError("No completed result")
+        require_work(2 * self.export_size(record), self.resident_bytes(), self.memory_available())
         path = Path(path)
         path.mkdir()
         if record.package_files is not None:
@@ -318,15 +434,31 @@ class BatchSession:
                              request_envelope=request.envelope)
         return path
 
-    def reopen(self, path):
+    def reopen(self, path, *, upload_bytes=0):
         self._editable()
+        path = Path(path)
+        files = [(name, path / name) for name in sorted(PACKAGE_FILES)
+                 if (path / name).is_file()]
+        packed_bytes, expanded_bytes = package_sizes([file for _, file in files])
+        # Verification and codec decoding can overlap independent copies.
+        decode_bytes = 2 * expanded_bytes + 2 * packed_bytes
+        resident = self.resident_bytes() + upload_bytes
+        require_work(decode_bytes, resident, self.memory_available())
         request = read_request_package(path, registry=self.transport)
+        route = self.route_for(request.envelope.material_id, request.envelope.workflow_id)
+        self._check_material(route)
+        charge = estimate(route, request.request)
+        if charge.retained > RESULT_LIMIT:
+            raise ValueError("Retained result estimate exceeds 256 MiB")
+        require_work(decode_bytes + charge.retained, resident,
+                     self.memory_available())
         output = read_result_package(path, registry=self.transport)
-        if output.envelope.cancelled or output.envelope.scientific_status != "completed":
+        completed_status = output.envelope.scientific_status == "completed" or (
+            route == "pr_static" and output.envelope.scientific_status in {"converged", "not_converged"}
+            and output.result.completed_slices == grid_metadata(request.request.grid).Nz
+        )
+        if output.envelope.cancelled or not completed_status:
             raise ValueError("Only completed packages can replace the completed view")
-        route = request.envelope.material_id
-        if self.fixed_route is not None and route != self.fixed_route:
-            raise ValueError(f"This notebook only accepts {self.fixed_route.upper()} results")
         operation, experiment, _ = ROUTES[route]
         # Transport packages can contain requests outside the editable subset.
         # Use their verified envelope as identity if the draft codec rejects it.
@@ -339,15 +471,12 @@ class BatchSession:
         if declared is not None and declared != digest:
             raise ValueError("Saved notebook request hash does not match the decoded request")
         products = operation.to_run_data(output.result)
-        # Keep original manifests, policy and provenance when re-exporting.
-        path = Path(path)
-        files = [(name, path / name) for name in sorted(PACKAGE_FILES)
-                 if (path / name).is_file()]
-        if sum(file.stat().st_size for _, file in files) > MAX_UPLOAD_BYTES:
-            raise ValueError("Completed package exceeds 128 MiB")
+        # Keep original manifests, policy and provenance for exact re-export.
         package = tuple((name, file.read_bytes()) for name, file in files)
+        self.switch(route)
         self.completed = Record(request.envelope.run_id, route, request.request,
                                 encoded, digest, output.result, products,
                                 provenance=dict(request.envelope.provenance),
-                                package_files=package)
+                                package_files=package, retained_bytes=charge.retained,
+                                export_bytes=packed_bytes, archive_bytes=packed_bytes)
         self._notify()

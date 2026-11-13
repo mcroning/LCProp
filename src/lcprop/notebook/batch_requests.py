@@ -1,4 +1,4 @@
-"""Authoritative request adapters for the bounded notebook routes."""
+"""Request adapters for the four notebook routes."""
 from dataclasses import replace
 import math
 
@@ -9,19 +9,26 @@ from lcprop.core.beams import BeamChannel, BeamStack
 from lcprop.core.context import GridSpec
 from lcprop.core.grid import make_grid
 from lcprop.persistence import LC_STATIC_EXPERIMENT_CODEC, PR_TIMEDEPENDENT_EXPERIMENT_CODEC
-from lcprop.lc.operations import LC_STATIC_OPERATION
+from lcprop.lc.operations import LC_STATIC_OPERATION, LC_TIMEDEPENDENT_OPERATION
+from lcprop.lc.requests import TimeDependentRunRequest, TimeDependentSolverOptions, validate_single_wavelength_lc_beams
+from lcprop.lc.experiment_codec import LC_TIMEDEPENDENT_EXPERIMENT_CODEC
 from lcprop.lc.transport_codec import LC_STATIC_TRANSPORT_CODEC
 from lcprop.notebook.lc_static_demo import build_request
 from lcprop.optics.launch import OpticalLaunchContext, build_launch
 from lcprop.optics.sampling import qualify_launch_sampling
 from lcprop.optics.splitstep import total_intensity
-from lcprop.pr.gui.request_adapter import validate_pr_gui_request
-from lcprop.pr.operations import PR_TIMEDEPENDENT_OPERATION
+from lcprop.pr.gui.request_adapter import validate_pr_gui_request, validate_pr_static_gui_request
+from lcprop.pr.operations import PR_TIMEDEPENDENT_OPERATION, PR_STATIC_OPERATION
+from lcprop.pr.static_workflow import PRStaticRunRequest
+from lcprop.pr.static_transport_codec import PR_STATIC_TRANSPORT_CODEC
+from lcprop.pr.experiment_codec import PR_STATIC_EXPERIMENT_CODEC
 from lcprop.pr.specs import PRMaterialSpec, PRRunRequest, PRSolverOptions
 from lcprop.pr.timedependent_transport_codec import PR_TIMEDEPENDENT_TRANSPORT_CODEC
 from lcprop.products.data_model import make_field
 
 ROUTES = {
+    "lc_td": (LC_TIMEDEPENDENT_OPERATION, LC_TIMEDEPENDENT_EXPERIMENT_CODEC, None),
+    "pr_static": (PR_STATIC_OPERATION, PR_STATIC_EXPERIMENT_CODEC, PR_STATIC_TRANSPORT_CODEC),
     "lc": (LC_STATIC_OPERATION, LC_STATIC_EXPERIMENT_CODEC, LC_STATIC_TRANSPORT_CODEC),
     "pr": (PR_TIMEDEPENDENT_OPERATION, PR_TIMEDEPENDENT_EXPERIMENT_CODEC,
            PR_TIMEDEPENDENT_TRANSPORT_CODEC),
@@ -39,7 +46,22 @@ PR_MATERIAL_CONTROLS = {
 }
 
 
+def material_for(route):
+    return ROUTES[route][0].material_id
+
+
 def preset(route):
+    if route == "lc_td":
+        base = preset("lc")
+        return TimeDependentRunRequest(
+            base.grid, base.material, base.bias, base.beams, TimeDependentSolverOptions(),
+            base.output, base.runtime, optical_boundary=base.optical_boundary,
+        )
+    if route == "pr_static":
+        base = preset("pr")
+        return PRStaticRunRequest(base.grid, base.beams, base.material,
+                                  optical_boundary=base.optical_boundary)
+
     if route == "lc":
         request = build_request()
         return replace(request, bias=replace(request.bias, V_bias=0.9144))
@@ -72,7 +94,7 @@ def beam_stack(original, channels, coherence):
 
 
 def refractive_index(route, request):
-    return request.material.no if route == "lc" else request.material.refractive_index
+    return request.material.no if material_for(route) == "lc" else request.material.refractive_index
 
 
 def validate(route, request, *, sampling=qualify_launch_sampling,
@@ -81,59 +103,88 @@ def validate(route, request, *, sampling=qualify_launch_sampling,
     reference = preset(route)
     if type(request) is not type(reference):
         raise ValueError("Unsupported request type")
-    excluded = ("initial_A", "initial_theta") if route == "lc" else (
-        "initial_A", "initial_E", "scattering")
+    lc = material_for(route) == "lc"
+    excluded = ("initial_A", "initial_theta") if lc else ("initial_A", "initial_E", "scattering")
     for name in excluded:
         if getattr(request, name) is not None:
-            raise ValueError(f"{name} is outside this batch")
-    if route == "pr" and request.launch_elements:
-        raise ValueError("launch_elements are outside this batch")
+            raise ValueError(f"{name} is outside this notebook workflow")
+    if not lc and request.launch_elements:
+        raise ValueError("Launch elements are unavailable in this notebook")
+    request.grid.validate()
+    request.material.validate()
     request.beams.validate()
+    request.optical_boundary.validate()
+    if request.optical_boundary != reference.optical_boundary:
+        raise ValueError("Only the preset optical boundary is editable in this batch")
     channels = request.beams.channels
     if not 1 <= len(channels) <= 2:
         raise ValueError("Use one or two Gaussian beams")
     for channel in channels:
         channel.validate()
-        if channel.profile != "collimated_gaussian" or channel.wavelength_um != 0.633:
-            raise ValueError("Only 0.633 µm collimated Gaussian beams are supported")
-        if channel.n_ext != 1.0:
-            raise ValueError("The external refractive index is fixed at 1")
+        if (channel.profile != "collimated_gaussian" or channel.wavelength_um != 0.633
+                or channel.n_ext != 1.0):
+            raise ValueError("Use 0.633 µm collimated Gaussian beams in air")
     if sum(ch.power_mW for ch in channels) <= 0:
         raise ValueError("Total beam power must be positive")
-    fixed = replace(request, beams=reference.beams)
-    if route == "lc":
+
+    solver = request.solver
+    editable = {"lc": {"max_iterations", "static_max_relax_iterations", "static_max_coupled_passes", "static_residual_rms_tol", "static_residual_max_tol"},
+                "lc_td": {"Nt", "dt", "gamma_z", "max_picard_iter", "tolerance_update"},
+                "pr_static": {"max_coupled_passes", "optical_substeps", "residual_rms_tolerance", "residual_max_tolerance"},
+                "pr": {"Nt", "dt_normalized", "optical_substeps", "integrator"}}[route]
+    if any(getattr(solver, name) != getattr(reference.solver, name)
+           for name in solver.__dataclass_fields__ if name not in editable):
+        raise ValueError("Unsupported hidden solver setting")
+    integers = {
+        "lc": ("max_iterations", "static_max_relax_iterations", "static_max_coupled_passes"),
+        "lc_td": ("Nt", "max_picard_iter"),
+        "pr_static": ("max_coupled_passes", "optical_substeps"),
+        "pr": ("Nt", "optical_substeps"),
+    }[route]
+    for name in integers:
+        value = getattr(solver, name)
+        if type(value) is not int or value < 1:
+            raise ValueError(f"{name} must be a positive integer")
+    for name in ("dt", "dt_normalized", "tolerance_update", "static_residual_rms_tol",
+                 "static_residual_max_tol", "residual_rms_tolerance", "residual_max_tolerance"):
+        value = getattr(solver, name, None)
+        if value is not None and (not math.isfinite(value) or value <= 0):
+            raise ValueError(f"{name} must be finite and positive")
+
+    if lc:
+        validate_single_wavelength_lc_beams(request.beams)
+        if request.material != reference.material:
+            raise ValueError("Unsupported hidden LC material settings")
         if not math.isfinite(request.bias.V_bias):
-            raise ValueError("Voltage must be finite")
-        fixed = replace(fixed, bias=replace(request.bias, V_bias=reference.bias.V_bias))
+            raise ValueError("Applied voltage must be finite")
+        if replace(request.bias, V_bias=reference.bias.V_bias) != reference.bias:
+            raise ValueError("Unsupported hidden LC bias settings")
+        request.bias.validate()
+        request.runtime.validate()
+        if request.runtime != reference.runtime or request.output != reference.output:
+            raise ValueError("Unsupported LC runtime or output settings")
+        if solver.workflow != reference.solver.workflow:
+            raise ValueError("Unsupported LC solver strategy")
+        if route == "lc_td" and (not math.isfinite(solver.gamma_z) or solver.gamma_z < 0):
+            raise ValueError("gamma_z must be finite and nonnegative")
+        check = sampling(request.beams, request.grid, refractive_index(route, request),
+                         boundary=request.optical_boundary)
+        check.require_valid()
+        warnings = check.warnings
     else:
         request.backend.validate()
         if request.backend.precision != "float64" or request.backend.verbose:
-            raise ValueError("The PR notebook requires float64 with backend verbosity disabled")
-        solver = request.solver
-        if type(solver.Nt) is not int or solver.Nt not in (1, 2, 3) or not 0 < solver.dt_normalized <= 0.001:
-            raise ValueError("Use 1–3 material steps and 0 < normalized dt ≤ 0.001")
-        fixed = replace(
-            fixed,
-            backend=reference.backend,
-            solver=replace(solver, Nt=reference.solver.Nt,
-                           dt_normalized=reference.solver.dt_normalized),
-            material=replace(request.material, **{
-                name: getattr(reference.material, name) for name in PR_MATERIAL_CONTROLS
-            }),
-        )
-    if route == "pr" and request.grid == replace(reference.grid, z_length_um=20.):
-        # Previously saved short-preset drafts keep their original grid.
-        fixed = replace(fixed, grid=reference.grid)
-    for name in reference.__dataclass_fields__:
-        if getattr(fixed, name) != getattr(reference, name):
-            raise ValueError(f"{name} differs from the bounded {route.upper()} preset")
-    encoded = ROUTES[route][1].encode_request(request)
-    if route == "pr":
-        return encoded, tuple(pr_preflight(request).aperture.warnings)
-    check = sampling(request.beams, request.grid, refractive_index(route, request),
-                     boundary=request.optical_boundary)
-    check.require_valid()
-    return encoded, tuple(check.warnings)
+            raise ValueError("The notebook requires float64 without backend verbosity")
+        if request.material_response != reference.material_response:
+            raise ValueError("Only the reduced nonlinear response is available")
+        if route == "pr_static":
+            warnings = validate_pr_static_gui_request(request).aperture.warnings
+        else:
+            report = pr_preflight(request)
+            warnings = report.aperture.warnings
+            if getattr(report, "timestep_assessment", None) == "pending":
+                warnings = (*warnings, "Timestep assessment is pending until engine validation")
+    return ROUTES[route][1].encode_request(request), tuple(warnings)
 
 
 def preview(route, request):
