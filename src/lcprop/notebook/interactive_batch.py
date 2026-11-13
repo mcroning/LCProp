@@ -242,12 +242,14 @@ class InteractiveBatch:
                            or charge.working + session.resident_bytes() >= 1024 * MIB else "")
                 available = session.memory_available()
                 available_text = "unknown" if available is None else f"{available / MIB:.1f} MiB"
+                resident_results, resident_archives = session.resident_storage()
                 grid_summary.value = (
                     f"dx {meta.dx_um:g}, dy {meta.dy_um:g} µm · Nz {meta.Nz} · "
                     f"Requested length {grid.z_length_um:g} µm · Marched {meta.Nz * grid.dz_um:g} µm · "
                     f"Preview at most {min(meta.Nx, 128)} × {min(meta.Ny, 128)} · "
                     f"Working {charge.working / MIB:.1f} MiB · Retained {charge.retained / MIB:.1f} MiB · "
-                    f"Existing results {session.resident_bytes() / MIB:.1f} MiB · ZIP {packed}{warning} · "
+                    f"Existing results {resident_results / MIB:.1f} MiB · "
+                    f"Re-export archive bytes {resident_archives / MIB:.1f} MiB · ZIP {packed}{warning} · "
                     f"Runtime available {available_text} · Elapsed budget {120 if lc else 60} s (cooperative) · Runtime estimate unavailable"
                     + ("<br>" + escape("; ".join(warnings)) if warnings else "")
                 )
@@ -438,7 +440,8 @@ class InteractiveBatch:
             require_work(len(data) + 128 * MIB, self.session.resident_bytes(),
                          self.session.memory_available())
             with tempfile.TemporaryDirectory(prefix="reopen-", dir=self.directory) as staging:
-                self.session.reopen(unpack_completed(data, Path(staging)))
+                self.session.reopen(unpack_completed(data, Path(staging)), upload_bytes=len(data))
+            self._update_editor_summary()
             self.notice.value = f"Reopened <b>{escape(name)}</b>."
             return
         if not name.lower().endswith(".json"):

@@ -1,7 +1,10 @@
 """Bounded upload/download of existing LCProp file formats."""
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
+import errno
+import os
 import shutil
+import sys
 import tempfile
 import zipfile
 
@@ -29,6 +32,21 @@ def selected_upload(value):
     return name, bytes(content)
 
 
+def package_sizes(members):
+    """Check serialized and aggregate expanded array bytes before decoding."""
+    packed = sum(path.stat().st_size for path in members)
+    if packed > MAX_UPLOAD_BYTES:
+        raise ValueError("Expanded ZIP members exceed 128 MiB")
+    expanded = 0
+    for path in members:
+        if path.suffix == ".npz":
+            with zipfile.ZipFile(path) as arrays:
+                expanded += sum(item.file_size for item in arrays.infolist())
+    if expanded > MAX_UPLOAD_BYTES:
+        raise ValueError("Combined expanded array payload exceeds 128 MiB")
+    return packed, expanded
+
+
 def unpack_completed(upload, directory):
     """Allow only the transport package files, into a fresh directory."""
     from io import BytesIO
@@ -42,15 +60,18 @@ def unpack_completed(upload, directory):
                 or sum(entry.file_size for entry in members) > MAX_UPLOAD_BYTES):
             raise ValueError("Unexpected, duplicate or oversized package members")
         directory = Path(tempfile.mkdtemp(prefix="reopen-", dir=directory))
-        for entry in members:
-            path = directory.joinpath(*PurePosixPath(entry.filename).parts)
-            path.parent.mkdir(exist_ok=True)
-            with archive.open(entry) as source, path.open("xb") as output:
-                shutil.copyfileobj(source, output)
-            if path.suffix == ".npz":
-                with zipfile.ZipFile(path) as arrays:
-                    if sum(item.file_size for item in arrays.infolist()) > MAX_UPLOAD_BYTES:
-                        raise ValueError("Array payload exceeds 128 MiB")
+        try:
+            paths = []
+            for entry in members:
+                path = directory.joinpath(*PurePosixPath(entry.filename).parts)
+                path.parent.mkdir(exist_ok=True)
+                with archive.open(entry) as source, path.open("xb") as output:
+                    shutil.copyfileobj(source, output)
+                paths.append(path)
+            package_sizes(paths)
+        except BaseException:
+            shutil.rmtree(directory)
+            raise
     return directory
 
 
@@ -59,13 +80,7 @@ def archive_completed(directory):
     destination = directory.with_suffix(".zip")
     members = [directory / name for name in sorted(PACKAGE_FILES)
                if (directory / name).is_file()]
-    if sum(path.stat().st_size for path in members) > MAX_UPLOAD_BYTES:
-        raise ValueError("Expanded ZIP members exceed 128 MiB")
-    for path in members:
-        if path.suffix == ".npz":
-            with zipfile.ZipFile(path) as arrays:
-                if sum(item.file_size for item in arrays.infolist()) > MAX_UPLOAD_BYTES:
-                    raise ValueError("Expanded array payload exceeds 128 MiB")
+    package_sizes(members)
     with zipfile.ZipFile(destination, "x", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in members:
             archive.write(path, path.relative_to(directory))
@@ -83,15 +98,42 @@ def save_verified_copy(source, folder):
     destination = folder / source.name
     if shutil.disk_usage(folder).free < source.stat().st_size:
         raise OSError("Destination has insufficient available storage")
-    with source.open("rb") as input_stream:
-        expected = sha256_file(source)
-        output = destination.open("xb")
-        try:
-            with output:
-                shutil.copyfileobj(input_stream, output)
-            if sha256_file(destination) != expected:
-                raise OSError("Drive copy checksum mismatch")
-        except BaseException:
-            destination.unlink(missing_ok=True)
-            raise
+    expected = sha256_file(source)
+    with tempfile.TemporaryDirectory(prefix=".lcprop-copy-", dir=folder) as staging:
+        staged = Path(staging) / source.name
+        with source.open("rb") as input_stream, staged.open("xb") as output:
+            shutil.copyfileobj(input_stream, output)
+        if sha256_file(staged) != expected:
+            raise OSError("Drive copy checksum mismatch")
+        _promote_verified_copy(staged, destination)
     return destination
+
+
+def _promote_verified_copy(staged, destination):
+    """Publish complete bytes atomically without replacing an existing name."""
+    unsupported = (errno.EOPNOTSUPP, errno.ENOSYS, errno.EPERM, errno.EACCES)
+    try:
+        os.link(staged, destination)
+        return
+    except OSError as error:
+        if error.errno not in unsupported:
+            raise
+        if sys.platform != "linux":
+            raise OSError("Destination does not support atomic no-overwrite promotion") from error
+
+    # Some Linux mounts support exclusive rename but do not support hard links.
+    import ctypes
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    rename = getattr(libc, "renameat2", None)
+    if rename is None:
+        raise OSError("Destination does not support atomic no-overwrite promotion")
+    rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+    rename.restype = ctypes.c_int
+    at_fdcwd, rename_noreplace = -100, 1
+    if rename(at_fdcwd, os.fsencode(staged), at_fdcwd,
+              os.fsencode(destination), rename_noreplace) != 0:
+        code = ctypes.get_errno()
+        if code in (*unsupported, errno.EINVAL):
+            raise OSError("Destination does not support atomic no-overwrite promotion")
+        raise OSError(code, os.strerror(code), destination)

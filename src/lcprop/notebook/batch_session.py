@@ -17,7 +17,7 @@ from lcprop.core.grid import grid_metadata
 from lcprop.notebook.batch_beams import DISABLED_BEAMS, edited_stack, objects, validate_objects
 from lcprop.notebook.batch_desktop import desktop_metadata, update_presentation
 from lcprop.notebook.batch_device import RunDevice, resolve_device
-from lcprop.notebook.batch_files import MAX_UPLOAD_BYTES, PACKAGE_FILES
+from lcprop.notebook.batch_files import MAX_UPLOAD_BYTES, PACKAGE_FILES, package_sizes
 from lcprop.notebook.batch_requests import ROUTES, material_for, preset, validate
 from lcprop.notebook.batch_resources import (
     RESULT_LIMIT, available_memory, estimate, require_work,
@@ -47,6 +47,7 @@ class Record:
     device: RunDevice | None = None
     retained_bytes: int = 0
     export_bytes: int | None = None
+    archive_bytes: int = 0
 
 
 def identity(payload):
@@ -145,11 +146,16 @@ class BatchSession:
         self.completed = self.partial = None
         self.generation += 1
 
-    def resident_bytes(self):
+    def resident_storage(self):
         records = [self.completed, self.partial]
         for state in self.route_state.values():
             records.extend(state[3:])
-        return sum(record.retained_bytes for record in records if record is not None)
+        present = [record for record in records if record is not None]
+        return (sum(record.retained_bytes for record in present),
+                sum(record.archive_bytes for record in present))
+
+    def resident_bytes(self):
+        return sum(self.resident_storage())
 
     def export_unavailable(self):
         if self.route == "lc_td":
@@ -419,22 +425,23 @@ class BatchSession:
                              request_envelope=request.envelope)
         return path
 
-    def reopen(self, path):
+    def reopen(self, path, *, upload_bytes=0):
         self._editable()
         path = Path(path)
         files = [(name, path / name) for name in sorted(PACKAGE_FILES)
                  if (path / name).is_file()]
-        packed_bytes = sum(file.stat().st_size for _, file in files)
-        if packed_bytes > MAX_UPLOAD_BYTES:
-            raise ValueError("Completed package exceeds 128 MiB")
-        require_work(4 * packed_bytes, self.resident_bytes(), self.memory_available())
+        packed_bytes, expanded_bytes = package_sizes([file for _, file in files])
+        # Verification and codec decoding can overlap independent copies.
+        decode_bytes = 2 * expanded_bytes + 2 * packed_bytes
+        resident = self.resident_bytes() + upload_bytes
+        require_work(decode_bytes, resident, self.memory_available())
         request = read_request_package(path, registry=self.transport)
         route = self.route_for(request.envelope.material_id, request.envelope.workflow_id)
         self._check_material(route)
         charge = estimate(route, request.request)
         if charge.retained > RESULT_LIMIT:
             raise ValueError("Retained result estimate exceeds 256 MiB")
-        require_work(charge.working + 2 * packed_bytes, self.resident_bytes(),
+        require_work(decode_bytes + charge.retained, resident,
                      self.memory_available())
         output = read_result_package(path, registry=self.transport)
         completed_status = output.envelope.scientific_status == "completed" or (
@@ -461,6 +468,6 @@ class BatchSession:
         self.completed = Record(request.envelope.run_id, route, request.request,
                                 encoded, digest, output.result, products,
                                 provenance=dict(request.envelope.provenance),
-                                package_files=package, retained_bytes=charge.retained + packed_bytes,
-                                export_bytes=packed_bytes)
+                                package_files=package, retained_bytes=charge.retained,
+                                export_bytes=packed_bytes, archive_bytes=packed_bytes)
         self._notify()

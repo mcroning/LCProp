@@ -194,7 +194,18 @@ def test_legacy_pr_zip(tmp_path, session):
     source = Path(fixture).read_bytes()
     expected = json.loads(Path(receipt).read_text())
     assert hashlib.sha256(source).hexdigest() == expected["source_zip_sha256"]
-    session.reopen(unpack_completed(source, tmp_path))
+    directory = unpack_completed(source, tmp_path)
+    session.memory_available = lambda: 1300 * MIB
+    session.reopen(directory, upload_bytes=len(source))
+    result_bytes, archive_bytes = session.resident_storage()
+    assert result_bytes <= RESULT_LIMIT < result_bytes + archive_bytes
+    assert archive_bytes == sum(len(data) for _, data in session.completed.package_files)
+    accepted = session.completed
+    session.memory_available = lambda: 800 * MIB
+    with pytest.raises(ValueError, match="Working-memory budget"):
+        session.reopen(directory)
+    assert session.completed is accepted
+    session.memory_available = lambda: 4096 * MIB
     assert session.route == "pr" and session.completed.result.completed_steps == 3
     result = archive_completed(session.export_completed(tmp_path / "export"))
     with ZipFile(result) as archive:
@@ -297,3 +308,58 @@ def test_gpu_admission_does_not_probe_other_routes():
                         backend=replace(draft.backend, backend="cupy"))
         with pytest.raises(DeviceUnavailable, match="qualified reduced PR TD envelope"):
             resolve_device(route, draft, forbidden)
+
+
+def test_aggregate_nested_limit_before_decode(tmp_path, monkeypatch, session):
+    from zipfile import ZIP_DEFLATED
+    from lcprop.notebook import batch_files
+
+    package = tmp_path / "package"
+    with ZipFile(tmp_path / "input.zip", "w") as outer:
+        for group, name in (("request", "request_arrays"), ("output", "result_arrays")):
+            folder = package / group
+            folder.mkdir(parents=True)
+            path = folder / f"{name}.npz"
+            with ZipFile(path, "w", ZIP_DEFLATED) as inner:
+                inner.writestr("data.npy", b"x" * 6000)
+            outer.write(path, path.relative_to(package))
+    monkeypatch.setattr(batch_files, "MAX_UPLOAD_BYTES", 10000)
+    monkeypatch.setattr(batch_session, "read_request_package", forbidden)
+    for action in (lambda: archive_completed(package),
+                   lambda: unpack_completed((tmp_path / "input.zip").read_bytes(), tmp_path),
+                   lambda: session.reopen(package)):
+        with pytest.raises(ValueError, match="Combined expanded"):
+            action()
+    assert not list(tmp_path.glob("reopen-*"))
+
+
+def test_drive_interruption_and_promotion_collision(tmp_path, monkeypatch):
+    from lcprop.notebook import batch_files
+
+    source = tmp_path / "result.zip"
+    source.write_bytes(b"complete artifact")
+    drive = tmp_path / "drive"
+    drive.mkdir()
+    target = drive / source.name
+    original_copy = batch_files.shutil.copyfileobj
+
+    def interrupt(inp, out):
+        out.write(b"partial")
+        assert not target.exists()
+        raise OSError("mock interrupted transfer")
+
+    monkeypatch.setattr(batch_files.shutil, "copyfileobj", interrupt)
+    with pytest.raises(OSError, match="interrupted"):
+        save_verified_copy(source, drive)
+    assert not list(drive.iterdir())
+
+    def collide(inp, out):
+        original_copy(inp, out)
+        target.write_bytes(b"another writer")
+
+    monkeypatch.setattr(batch_files.shutil, "copyfileobj", collide)
+    with pytest.raises(FileExistsError):
+        save_verified_copy(source, drive)
+    assert list(drive.iterdir()) == [target]
+    assert target.read_bytes() == b"another writer"
+    assert source.read_bytes() == b"complete artifact"

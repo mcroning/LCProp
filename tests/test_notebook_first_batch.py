@@ -665,7 +665,7 @@ def test_zip_selection_survives_status_refresh(monkeypatch):
         return directory / "decoded"
 
     monkeypatch.setattr(interactive_batch, "unpack_completed", unpack)
-    monkeypatch.setattr(app.session, "reopen", calls.append)
+    monkeypatch.setattr(app.session, "reopen", lambda path, **_: calls.append(path))
     app.session.generation += 1
     app.refresh_button.click()
     assert app.upload is upload and app.files.children[0] is upload
@@ -698,7 +698,7 @@ def test_native_colab_picker_reuses_validated_reopen(monkeypatch):
     monkeypatch.setitem(sys.modules, "google.colab", SimpleNamespace(
         files=SimpleNamespace(upload=upload)))
     monkeypatch.setattr(interactive_batch, "unpack_completed", unpack)
-    monkeypatch.setattr(app.session, "reopen", received.append)
+    monkeypatch.setattr(app.session, "reopen", lambda path, **_: received.append(path))
     app.open_from_colab()
     assert len(received) == 1 and received[0].parent.parent == app.directory
     assert not received[0].parent.exists()
