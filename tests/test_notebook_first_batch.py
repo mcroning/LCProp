@@ -644,24 +644,17 @@ def test_widget_backend_reuses_canvas_across_redraws(monkeypatch):
     asyncio.run(app.dispose())
 
 
-@pytest.mark.parametrize("legacy", [False, True])
-def test_zip_selection_clears_only_after_successful_reopen(monkeypatch, legacy):
-    import ipywidgets as W
-    from traitlets import Any, Bool
+def test_zip_selection_clears_only_after_successful_reopen(monkeypatch):
     from lcprop.notebook import interactive_batch
 
-    class LegacyUpload(W.Box):
-        value = Any()
-        disabled = Bool(False)
-
-    if legacy:
-        monkeypatch.setattr(W, "FileUpload", lambda **_: LegacyUpload())
     monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
     app = InteractiveBatch(validator=validate, preview_factory=preview)
     upload = app.upload
     data = b"synthetic ZIP bytes"
+    legacy = hasattr(upload, "_counter")
     if legacy:
-        upload.value = {"completed.ZIP": {"content": data}}
+        upload.metadata = [{"name": "completed.ZIP"}]
+        upload.data = [data]
         upload._counter = 1
     else:
         from datetime import datetime, timezone
@@ -692,6 +685,7 @@ def test_zip_selection_clears_only_after_successful_reopen(monkeypatch, legacy):
     assert upload.value == ({} if legacy else ())
     if legacy:
         assert upload._counter == 0
+        assert upload.data == upload.metadata == []
     assert app.upload_receipt.value == "No file received by the kernel."
     assert len(calls) == 1 and calls[0].parent.parent == app.directory
     assert not calls[0].parent.exists()

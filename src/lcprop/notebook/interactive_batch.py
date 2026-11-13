@@ -385,9 +385,14 @@ class InteractiveBatch:
             self._open_uploaded(name, data)
             if name.lower().endswith(".zip"):
                 # ipywidgets 7 uses a mapping and a change counter; 8 uses a tuple.
-                upload.value = {} if isinstance(upload.value, Mapping) else ()
-                if hasattr(upload, "_counter"):
-                    upload._counter = 0
+                if isinstance(upload.value, Mapping):
+                    with upload.hold_sync():
+                        upload.data = []
+                        upload.metadata = []
+                        upload._counter = 0
+                        upload.set_trait("value", {})
+                else:
+                    upload.value = ()
 
         def download(path):
             # Colab transport is imported only on explicit download.
