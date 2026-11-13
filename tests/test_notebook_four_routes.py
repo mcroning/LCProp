@@ -363,3 +363,46 @@ def test_drive_interruption_and_promotion_collision(tmp_path, monkeypatch):
     assert list(drive.iterdir()) == [target]
     assert target.read_bytes() == b"another writer"
     assert source.read_bytes() == b"complete artifact"
+
+
+@pytest.mark.parametrize("outcome", ["success", "collision", "interrupted", "corrupt"])
+def test_drive_exclusive_create_fallback(tmp_path, monkeypatch, outcome):
+    from lcprop.notebook import batch_files
+
+    source = tmp_path / "result.zip"
+    source.write_bytes(b"verified artifact")
+    drive = tmp_path / "drive"
+    drive.mkdir()
+    target = drive / source.name
+    original_copy = batch_files.shutil.copyfileobj
+
+    def unsupported(staged, destination):
+        if outcome == "collision":
+            destination.write_bytes(b"another writer")
+        raise batch_files._AtomicPromotionUnsupported()
+
+    def copy(inp, out):
+        if Path(out.name) == target:
+            if outcome == "interrupted":
+                out.write(b"partial")
+                raise OSError("interrupted")
+            if outcome == "corrupt":
+                out.write(b"bad bytes")
+                return
+        original_copy(inp, out)
+
+    monkeypatch.setattr(batch_files, "_promote_verified_copy", unsupported)
+    monkeypatch.setattr(batch_files.shutil, "copyfileobj", copy)
+    if outcome == "success":
+        assert save_verified_copy(source, drive) == target
+        assert target.read_bytes() == source.read_bytes()
+    elif outcome == "collision":
+        with pytest.raises(FileExistsError):
+            save_verified_copy(source, drive)
+        assert target.read_bytes() == b"another writer"
+    else:
+        with pytest.raises(OSError, match="interrupted|checksum"):
+            save_verified_copy(source, drive)
+        assert not target.exists()
+    assert not list(drive.glob(".lcprop-copy-*"))
+    assert source.read_bytes() == b"verified artifact"

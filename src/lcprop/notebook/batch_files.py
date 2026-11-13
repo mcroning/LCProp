@@ -90,6 +90,10 @@ def archive_completed(directory):
     return destination
 
 
+class _AtomicPromotionUnsupported(OSError):
+    pass
+
+
 def save_verified_copy(source, folder):
     """Copy a staged artifact without overwriting any existing destination."""
     from lcprop.transport.artifacts import sha256_file
@@ -105,7 +109,22 @@ def save_verified_copy(source, folder):
             shutil.copyfileobj(input_stream, output)
         if sha256_file(staged) != expected:
             raise OSError("Drive copy checksum mismatch")
-        _promote_verified_copy(staged, destination)
+        try:
+            _promote_verified_copy(staged, destination)
+        except _AtomicPromotionUnsupported:
+            # Drive mounts can reject links and exclusive rename. Exclusive
+            # creation reserves the final name without replacing another file.
+            # The file is visible during copying, so verify it after close.
+            with staged.open("rb") as input_stream:
+                output = destination.open("xb")
+                try:
+                    with output:
+                        shutil.copyfileobj(input_stream, output)
+                    if sha256_file(destination) != expected:
+                        raise OSError("Drive copy checksum mismatch")
+                except BaseException:
+                    destination.unlink(missing_ok=True)
+                    raise
     return destination
 
 
@@ -119,7 +138,7 @@ def _promote_verified_copy(staged, destination):
         if error.errno not in unsupported:
             raise
         if sys.platform != "linux":
-            raise OSError("Destination does not support atomic no-overwrite promotion") from error
+            raise _AtomicPromotionUnsupported("Destination does not support atomic no-overwrite promotion") from error
 
     # Some Linux mounts support exclusive rename but do not support hard links.
     import ctypes
@@ -127,7 +146,7 @@ def _promote_verified_copy(staged, destination):
     libc = ctypes.CDLL(None, use_errno=True)
     rename = getattr(libc, "renameat2", None)
     if rename is None:
-        raise OSError("Destination does not support atomic no-overwrite promotion")
+        raise _AtomicPromotionUnsupported("Destination does not support atomic no-overwrite promotion")
     rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
     rename.restype = ctypes.c_int
     at_fdcwd, rename_noreplace = -100, 1
@@ -135,5 +154,5 @@ def _promote_verified_copy(staged, destination):
               os.fsencode(destination), rename_noreplace) != 0:
         code = ctypes.get_errno()
         if code in (*unsupported, errno.EINVAL):
-            raise OSError("Destination does not support atomic no-overwrite promotion")
+            raise _AtomicPromotionUnsupported("Destination does not support atomic no-overwrite promotion")
         raise OSError(code, os.strerror(code), destination)
