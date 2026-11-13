@@ -13,7 +13,9 @@ from IPython.display import display
 from matplotlib import pyplot as plt
 
 from lcprop.notebook.batch_beam_plane import BatchBeamPlane
-from lcprop.notebook.batch_files import archive_completed, save_verified_copy, selected_upload, unpack_completed
+from lcprop.notebook.batch_files import (
+    archive_completed, save_verified_copy, selected_upload, unpack_completed, upload_content,
+)
 from lcprop.notebook.batch_requests import (
     PR_MATERIAL_CONTROLS, material_for, preset, preview, validate,
 )
@@ -250,7 +252,8 @@ class InteractiveBatch:
                     f"Preview at most {min(meta.Nx, 128)} × {min(meta.Ny, 128)} · "
                     f"Working {charge.working / MIB:.1f} MiB · Retained {charge.retained / MIB:.1f} MiB · "
                     f"Existing results {resident_results / MIB:.1f} MiB · "
-                    f"Re-export archive bytes {resident_archives / MIB:.1f} MiB · ZIP {packed}{warning} · "
+                    f"Re-export archive bytes {resident_archives / MIB:.1f} MiB · "
+                    f"Selected upload {session.selected_upload_bytes / MIB:.1f} MiB · ZIP {packed}{warning} · "
                     f"Runtime available {available_text} · Elapsed budget {120 if lc else 60} s (cooperative) · Runtime estimate unavailable"
                     + ("<br>" + escape("; ".join(warnings)) if warnings else "")
                 )
@@ -351,6 +354,7 @@ class InteractiveBatch:
         export = W.Button(description="Download completed")
         self.upload = upload
         self.load_button = load
+        self.clear_upload_button = W.Button(description="Clear upload", disabled=True)
         self.save_button = save
         self.export_button = export
         self.export_notice = W.HTML()
@@ -363,11 +367,16 @@ class InteractiveBatch:
         self.upload_receipt = W.HTML(value="No file received by the kernel.")
 
         def receipt(change):
-            if not change["new"]:
+            value = change["new"]
+            entries = value.values() if isinstance(value, Mapping) else value
+            session.selected_upload_bytes = sum(len(entry["content"]) for entry in entries)
+            self.clear_upload_button.disabled = session.busy or not value
+            self._update_editor_summary()
+            if not value:
                 self.upload_receipt.value = "No file received by the kernel."
                 return
             try:
-                name, data = selected_upload(change["new"])
+                name, data = upload_content(value)
             except ValueError as error:
                 self.upload_receipt.value = escape(str(error))
             else:
@@ -380,19 +389,23 @@ class InteractiveBatch:
                 return
             self._guard(session.generation, action)
 
+        def clear_upload():
+            if isinstance(upload.value, Mapping):
+                with upload.hold_sync():
+                    upload.data = []
+                    upload.metadata = []
+                    upload._counter = 0
+                    upload.set_trait("value", {})
+            else:
+                upload.value = ()
+
         def read():
-            name, data = selected_upload(upload.value)
-            self._open_uploaded(name, data)
+            name, data = upload_content(upload.value)
+            # BytesIO can reuse bytes, but copies a widget memoryview.
+            extra = len(data) if name.lower().endswith(".zip") and not isinstance(data, bytes) else 0
+            self._open_uploaded(name, data, upload_bytes=extra)
             if name.lower().endswith(".zip"):
-                # ipywidgets 7 uses a mapping and a change counter; 8 uses a tuple.
-                if isinstance(upload.value, Mapping):
-                    with upload.hold_sync():
-                        upload.data = []
-                        upload.metadata = []
-                        upload._counter = 0
-                        upload.set_trait("value", {})
-                else:
-                    upload.value = ()
+                clear_upload()
 
         def download(path):
             # Colab transport is imported only on explicit download.
@@ -438,20 +451,22 @@ class InteractiveBatch:
         drive_zip.on_click(lambda _: editable(lambda: save_drive(zip_artifact)))
 
         load.on_click(lambda _: editable(read))
+        self.clear_upload_button.on_click(lambda _: editable(clear_upload))
         save.on_click(lambda _: editable(lambda: download(draft_artifact())))
         export.on_click(lambda _: editable(lambda: download(zip_artifact())))
         self.files.children = (
-            upload, self.upload_receipt, W.HBox([load, save, export]), self.export_notice,
+            upload, self.upload_receipt, W.HBox([load, self.clear_upload_button, save, export]), self.export_notice,
             disclosure("Google Drive (optional)", W.VBox(list(self.drive_buttons))),
         )
 
-    def _open_uploaded(self, name, data):
+    def _open_uploaded(self, name, data, *, upload_bytes=None):
         self.session._editable()
         if name.lower().endswith(".zip"):
-            require_work(len(data) + 128 * MIB, self.session.resident_bytes(),
+            extra = len(data) if upload_bytes is None else upload_bytes
+            require_work(extra + 128 * MIB, self.session.resident_bytes(),
                          self.session.memory_available())
             with tempfile.TemporaryDirectory(prefix="reopen-", dir=self.directory) as staging:
-                self.session.reopen(unpack_completed(data, Path(staging)), upload_bytes=len(data))
+                self.session.reopen(unpack_completed(data, Path(staging)), upload_bytes=extra)
             self._update_editor_summary()
             self.notice.value = f"Reopened <b>{escape(name)}</b>."
             return
@@ -579,6 +594,7 @@ class InteractiveBatch:
         self.stop_button.disabled = session.status != "running"
         self.upload.disabled = session.busy
         self.load_button.disabled = session.busy
+        self.clear_upload_button.disabled = session.busy or not self.upload.value
         self.save_button.disabled = session.busy
         self.export_button.disabled = session.busy or bool(session.export_unavailable())
         self.export_button.tooltip = session.export_unavailable()

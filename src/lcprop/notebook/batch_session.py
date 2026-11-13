@@ -72,6 +72,7 @@ class BatchSession:
         self.validator = validator
         self.memory_available = memory_available or available_memory
         self.route_state = {}
+        self.selected_upload_bytes = 0
         self.gpu_probe = gpu_probe
         self.last_device = None
         self.notify = notify or (lambda: None)
@@ -126,7 +127,8 @@ class BatchSession:
         self.draft, self.presentation, self.execution_intent, self.completed, self.partial = (
             saved if saved is not None else (preset(route), {}, None, None, None)
         )
-        self.last_device = self.completed.device if self.completed else None
+        self.last_run_id = None
+        self.last_device = None
         self.status, self.message, self.progress, self.elapsed = "idle", "", None, 0.0
         self.generation += 1
 
@@ -155,7 +157,7 @@ class BatchSession:
                 sum(record.archive_bytes for record in present))
 
     def resident_bytes(self):
-        return sum(self.resident_storage())
+        return sum(self.resident_storage()) + self.selected_upload_bytes
 
     def export_unavailable(self):
         if self.route == "lc_td":

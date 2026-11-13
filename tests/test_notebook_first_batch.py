@@ -644,8 +644,9 @@ def test_widget_backend_reuses_canvas_across_redraws(monkeypatch):
     asyncio.run(app.dispose())
 
 
-def test_zip_selection_clears_only_after_successful_reopen(monkeypatch):
-    from lcprop.notebook import interactive_batch
+@pytest.mark.parametrize("retry", [True, False])
+def test_zip_selection_clears_only_after_successful_reopen(monkeypatch, retry):
+    from lcprop.notebook import batch_resources, interactive_batch
 
     monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
     app = InteractiveBatch(validator=validate, preview_factory=preview)
@@ -670,7 +671,9 @@ def test_zip_selection_clears_only_after_successful_reopen(monkeypatch):
         return directory / "decoded"
 
     monkeypatch.setattr(interactive_batch, "unpack_completed", unpack)
-    def reject(path, **kwargs):
+    def reject(path, *, upload_bytes):
+        assert upload_bytes == (0 if legacy else len(data))
+        assert app.session.resident_bytes() == len(data)
         raise ValueError("invalid package")
 
     monkeypatch.setattr(app.session, "reopen", reject)
@@ -680,16 +683,32 @@ def test_zip_selection_clears_only_after_successful_reopen(monkeypatch):
     assert "completed.ZIP" in app.upload_receipt.value
     app.load_button.click()
     assert "invalid package" in app.notice.value and upload.value
-    monkeypatch.setattr(app.session, "reopen", lambda path, **_: calls.append(path))
-    app.load_button.click()
+    assert app.session.selected_upload_bytes == len(data)
+    charge = batch_resources.estimate(app.session.route, app.session.draft)
+    monkeypatch.setattr(batch_resources, "WORK_LIMIT", charge.working)
+    with pytest.raises(ValueError, match="budget"):
+        app.session.require_admission(charge)
+    app.refresh_button.click()
+    assert app.run_button.disabled
+    if retry:
+        monkeypatch.setattr(app.session, "reopen", lambda path, **_: calls.append(path))
+        app.load_button.click()
+    else:
+        app.clear_upload_button.click()
+    assert app.session.selected_upload_bytes == 0
+    app.session.require_admission(charge)
+    assert not app.run_button.disabled
     assert upload.value == ({} if legacy else ())
     if legacy:
         assert upload._counter == 0
         assert upload.data == upload.metadata == []
     assert app.upload_receipt.value == "No file received by the kernel."
-    assert len(calls) == 1 and calls[0].parent.parent == app.directory
-    assert not calls[0].parent.exists()
-    assert "Reopened" in app.notice.value
+    if retry:
+        assert len(calls) == 1 and calls[0].parent.parent == app.directory
+        assert not calls[0].parent.exists()
+        assert "Reopened" in app.notice.value
+    else:
+        assert not calls
     asyncio.run(app.dispose())
 
 

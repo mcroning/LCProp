@@ -17,8 +17,8 @@ PACKAGE_FILES = {
 }
 
 
-def selected_upload(value):
-    """Normalize ipywidgets 7 filename mappings and 8 upload records."""
+def upload_content(value):
+    """Read a widget selection without copying its payload."""
     if not value or len(value) != 1:
         raise ValueError("Select one experiment JSON or completed ZIP")
     if isinstance(value, Mapping):
@@ -29,6 +29,12 @@ def selected_upload(value):
     content = entry["content"]
     if len(content) > MAX_UPLOAD_BYTES:
         raise ValueError("Upload exceeds 128 MiB")
+    return name, content
+
+
+def selected_upload(value):
+    """Normalize ipywidgets 7 filename mappings and 8 upload records."""
+    name, content = upload_content(value)
     return name, bytes(content)
 
 

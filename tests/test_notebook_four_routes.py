@@ -406,3 +406,43 @@ def test_drive_exclusive_create_fallback(tmp_path, monkeypatch, outcome):
         assert not target.exists()
     assert not list(drive.glob(".lcprop-copy-*"))
     assert source.read_bytes() == b"verified artifact"
+
+
+@pytest.mark.parametrize("material,alternate,key,field", [
+    ("lc", "lc_td", ("lc", "static"), "max_picard_iter"),
+    ("pr", "pr_static", ("pr", "pr_timedependent"), "max_coupled_passes"),
+])
+def test_switch_after_completion_rebuilds_editor(monkeypatch, material, alternate, key, field):
+    from lcprop.notebook.interactive_batch import LCNotebook, PRNotebook
+
+    cls = LCNotebook if material == "lc" else PRNotebook
+    monkeypatch.setattr(cls, "_draw", lambda self, *_: None)
+    backend = {"backend": "numpy", "real_dtype": "float64", "complex_dtype": "complex128"}
+
+    def dispatch(operation, request, **kwargs):
+        assert operation.key == key
+        return SimpleNamespace(result=SimpleNamespace(
+            status="completed", diagnostics={"backend": backend}),
+            run_data=None, message="fake complete")
+
+    async def exercise():
+        app = cls(runner=SimpleNamespace(run_operation=dispatch),
+                  preview_factory=lambda *_: None, memory_available=lambda: 4096 * MIB)
+        try:
+            assert app.session.start(app.session.generation)
+            await app.session.task
+            record = app.session.completed
+            assert record is not None
+            assert record.run_id in app.progress_view.value
+            app.workflow_control.value = alternate
+            assert app.session.route == alternate and field in app.solver_inputs
+            assert app.session.last_run_id is app.session.last_device is None
+            assert record.run_id not in app.progress_view.value
+            assert "Error" not in app.notice.value
+            app.workflow_control.value = material
+            assert app.session.completed is record and "Completed" in app.source.options
+            assert field not in app.solver_inputs
+        finally:
+            await app.dispose()
+
+    asyncio.run(exercise())
