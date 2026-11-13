@@ -1,6 +1,7 @@
 """Conservative CPU admission charges for the notebook's supported routes."""
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import re
 
 from lcprop.core.grid import grid_metadata
 
@@ -45,6 +46,40 @@ def estimate(route, request):
     )
 
 
+def _memory_cgroup_paths(group, version, mountinfo):
+    """Map a process cgroup to its visible mount and visible ancestors."""
+    group = PurePosixPath(group)
+    if not group.is_absolute():
+        raise ValueError("Cgroup membership must be absolute")
+    for line in mountinfo.splitlines():
+        mount, filesystem = line.split(" - ", 1)
+        kind, _, options = filesystem.split()
+        if version == 1:
+            if kind != "cgroup" or "memory" not in options.split(","):
+                continue
+        elif kind != "cgroup2":
+            continue
+
+        # Mountinfo escapes whitespace and backslashes in path fields.
+        root, mountpoint = (
+            PurePosixPath(re.sub(r"\\([0-7]{3})", lambda m: chr(int(m[1], 8)), field))
+            for field in mount.split()[3:5]
+        )
+        if not group.is_relative_to(root):
+            continue
+        relative = group.relative_to(root)
+        # Colab can report namespace-relative ".." in both the group and mount
+        # root. Match those prefixes, but never traverse above a mountpoint.
+        if ".." in relative.parts or not mountpoint.is_absolute() or ".." in mountpoint.parts:
+            continue
+        folder = Path(mountpoint) / relative
+        while True:
+            yield folder
+            if folder == mountpoint:
+                break
+            folder = folder.parent
+
+
 def available_memory():
     """Return available Linux memory constrained by the process's memory cgroup."""
     try:
@@ -56,21 +91,26 @@ def available_memory():
         v1 = next((name for _, controllers, name in groups
                    if "memory" in controllers.split(",")), None)
         if v1 is not None:
-            root = Path("/sys/fs/cgroup/memory")
-            group, ceiling, usage = v1, "memory.limit_in_bytes", "memory.usage_in_bytes"
+            group, version = v1, 1
+            ceiling, usage = "memory.limit_in_bytes", "memory.usage_in_bytes"
         elif v2 is not None:
-            root = Path("/sys/fs/cgroup")
-            group, ceiling, usage = v2, "memory.max", "memory.current"
+            group, version = v2, 2
+            ceiling, usage = "memory.max", "memory.current"
         else:
             return None
-        folder = root / group.lstrip("/")
-        for candidate in (folder, *folder.parents):
-            if not candidate.is_relative_to(root):
-                break
-            limit = (candidate / ceiling).read_text().strip()
-            if limit != "max":
-                used = int((candidate / usage).read_text())
-                available = min(available, int(limit) - used)
+        mountinfo = Path("/proc/self/mountinfo").read_text()
+        folders = set(_memory_cgroup_paths(group, version, mountinfo))
+        if not folders or available < 0:
+            return None
+        for folder in folders:
+            limit = (folder / ceiling).read_text().strip()
+            if version == 2 and limit == "max":
+                continue
+            maximum = int(limit)
+            used = int((folder / usage).read_text())
+            if maximum < 0 or used < 0:
+                return None
+            available = min(available, maximum - used)
         return max(0, available)
     except (OSError, ValueError, StopIteration, IndexError):
         return None
