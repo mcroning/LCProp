@@ -6,10 +6,10 @@ sit alongside the engine; core calculations do not require a GUI or LaunchPlane.
 
 ## Start here
 
-For the 0.5.0rc2 engine prerelease, see the [release notes and wheel install instructions](https://github.com/mcroning/LCProp/blob/v0.5.0rc2/docs/releases/0.5.0rc2.md). The optional Colab preview has separate [LC](https://github.com/mcroning/LCProp/releases/download/v0.5.0rc2/lcprop_lc_colab.ipynb) and [PR](https://github.com/mcroning/LCProp/releases/download/v0.5.0rc2/lcprop_pr_colab.ipynb) notebooks. Both default to CPU. The PR notebook offers an explicit Colab T4 opt-in.
+For the CPU-first prerelease, see [LCProp 0.5.0rc3](https://github.com/mcroning/LCProp/releases/tag/v0.5.0rc3) and the [wheel install instructions](https://github.com/mcroning/LCProp/blob/v0.5.0rc3/docs/releases/0.5.0rc3.md). The optional Colab notebooks download and verify the exact rc3 wheel automatically in a fresh CPU runtime.
 
-- **LC notebook:** [![Open LC notebook in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mcroning/LCProp/blob/main/notebooks/lcprop_lc_colab.ipynb)
-- **PR notebook:** [![Open PR notebook in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mcroning/LCProp/blob/main/notebooks/lcprop_pr_colab.ipynb)
+- **LC notebook:** [![Open LC notebook in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mcroning/LCProp/blob/v0.5.0rc3/notebooks/releases/0.5.0rc3/lcprop_lc_colab.ipynb) · [Download notebook](https://github.com/mcroning/LCProp/releases/download/v0.5.0rc3/lcprop_lc_colab.ipynb)
+- **PR notebook:** [![Open PR notebook in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mcroning/LCProp/blob/v0.5.0rc3/notebooks/releases/0.5.0rc3/lcprop_pr_colab.ipynb) · [Download notebook](https://github.com/mcroning/LCProp/releases/download/v0.5.0rc3/lcprop_pr_colab.ipynb)
 
 - **Try a notebook:** [historical CPU demonstration](https://colab.research.google.com/github/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/notebooks/lc_static_interactive_cpu.ipynb).
   This demonstration pins its own historical engine/helper versions; it does not
