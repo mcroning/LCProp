@@ -1,4 +1,5 @@
 """Interactive notebooks for LC and reduced PR workflows."""
+from collections.abc import Mapping
 from dataclasses import replace
 from html import escape
 import json
@@ -382,6 +383,11 @@ class InteractiveBatch:
         def read():
             name, data = selected_upload(upload.value)
             self._open_uploaded(name, data)
+            if name.lower().endswith(".zip"):
+                # ipywidgets 7 uses a mapping and a change counter; 8 uses a tuple.
+                upload.value = {} if isinstance(upload.value, Mapping) else ()
+                if hasattr(upload, "_counter"):
+                    upload._counter = 0
 
         def download(path):
             # Colab transport is imported only on explicit download.

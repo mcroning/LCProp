@@ -644,7 +644,8 @@ def test_widget_backend_reuses_canvas_across_redraws(monkeypatch):
     asyncio.run(app.dispose())
 
 
-def test_zip_selection_survives_status_refresh(monkeypatch):
+@pytest.mark.parametrize("legacy", [False, True])
+def test_zip_selection_clears_only_after_successful_reopen(monkeypatch, legacy):
     import ipywidgets as W
     from traitlets import Any, Bool
     from lcprop.notebook import interactive_batch
@@ -653,11 +654,22 @@ def test_zip_selection_survives_status_refresh(monkeypatch):
         value = Any()
         disabled = Bool(False)
 
-    monkeypatch.setattr(W, "FileUpload", lambda **_: LegacyUpload())
+    if legacy:
+        monkeypatch.setattr(W, "FileUpload", lambda **_: LegacyUpload())
     monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
     app = InteractiveBatch(validator=validate, preview_factory=preview)
     upload = app.upload
-    upload.value = {"completed.zip": {"content": b"synthetic ZIP bytes"}}
+    data = b"synthetic ZIP bytes"
+    if legacy:
+        upload.value = {"completed.ZIP": {"content": data}}
+        upload._counter = 1
+    else:
+        from datetime import datetime, timezone
+
+        upload.value = ({
+            "name": "completed.ZIP", "type": "application/zip", "size": len(data),
+            "content": memoryview(data), "last_modified": datetime.now(timezone.utc),
+        },)
     calls = []
 
     def unpack(data, directory):
@@ -665,12 +677,22 @@ def test_zip_selection_survives_status_refresh(monkeypatch):
         return directory / "decoded"
 
     monkeypatch.setattr(interactive_batch, "unpack_completed", unpack)
-    monkeypatch.setattr(app.session, "reopen", lambda path, **_: calls.append(path))
+    def reject(path, **kwargs):
+        raise ValueError("invalid package")
+
+    monkeypatch.setattr(app.session, "reopen", reject)
     app.session.generation += 1
     app.refresh_button.click()
     assert app.upload is upload and app.files.children[0] is upload
-    assert "completed.zip" in app.upload_receipt.value
+    assert "completed.ZIP" in app.upload_receipt.value
     app.load_button.click()
+    assert "invalid package" in app.notice.value and upload.value
+    monkeypatch.setattr(app.session, "reopen", lambda path, **_: calls.append(path))
+    app.load_button.click()
+    assert upload.value == ({} if legacy else ())
+    if legacy:
+        assert upload._counter == 0
+    assert app.upload_receipt.value == "No file received by the kernel."
     assert len(calls) == 1 and calls[0].parent.parent == app.directory
     assert not calls[0].parent.exists()
     assert "Reopened" in app.notice.value
