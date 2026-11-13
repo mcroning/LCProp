@@ -1425,3 +1425,36 @@ def test_invalid_probe_result_never_admits_worker(preference, probe_result):
         assert session.last_device is None and not session.busy
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_uploaded_draft_rejects_before_parser(monkeypatch, native):
+    from datetime import datetime, timezone
+    from lcprop.notebook import batch_session
+
+    def forbidden_parser(*args, **kwargs):
+        pytest.fail("Draft parser invoked without memory telemetry")
+
+    monkeypatch.setattr(batch_session, "read_experiment_file", forbidden_parser)
+    app = InteractiveBatch(validator=validate, preview_factory=preview,
+                           memory_available=lambda: None)
+    data = b'{"not": "an experiment"}'
+    draft = app.session.draft
+    try:
+        if native:
+            monkeypatch.setitem(sys.modules, "google.colab", SimpleNamespace(
+                files=SimpleNamespace(upload=lambda **_: {"draft.json": data})))
+            with pytest.raises(ValueError, match="availability is unknown"):
+                app.open_from_colab()
+        else:
+            app.upload.value = ({
+                "name": "draft.json", "type": "application/json", "size": len(data),
+                "content": memoryview(data), "last_modified": datetime.now(timezone.utc),
+            },)
+            app.load_button.click()
+            assert "availability is unknown" in app.notice.value
+            assert app.session.selected_upload_bytes == len(data)
+        assert app.session.draft is draft
+        assert not list(app.directory.iterdir())
+    finally:
+        asyncio.run(app.dispose())

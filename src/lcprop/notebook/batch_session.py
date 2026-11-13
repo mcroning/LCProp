@@ -375,8 +375,15 @@ class BatchSession:
                                      presentation_payload=self.presentation,
                                      execution_intent=intent)
 
-    def load_draft(self, path):
+    def load_draft(self, path, *, upload_bytes=0):
         self._editable()
+        path = Path(path)
+        size = path.stat().st_size
+        if size > MAX_UPLOAD_BYTES:
+            raise ValueError("Draft JSON exceeds 128 MiB")
+        # Allow for file staging, decoded text, parsed objects and codec copies.
+        require_work(32 * size + upload_bytes, self.resident_bytes(),
+                     self.memory_available())
         loaded = read_experiment_file(path, registry=self.experiments)
         if self.fixed_route is not None and loaded.material_id != self.fixed_route:
             raise ValueError(f"This notebook only accepts {self.fixed_route.upper()} drafts")

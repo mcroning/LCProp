@@ -128,7 +128,7 @@ def validate(route, request, *, sampling=qualify_launch_sampling,
         raise ValueError("Total beam power must be positive")
 
     solver = request.solver
-    editable = {"lc": {"max_iterations", "static_max_coupled_passes", "static_residual_rms_tol", "static_residual_max_tol"},
+    editable = {"lc": {"max_iterations", "static_max_relax_iterations", "static_max_coupled_passes", "static_residual_rms_tol", "static_residual_max_tol"},
                 "lc_td": {"Nt", "dt", "gamma_z", "max_picard_iter", "tolerance_update"},
                 "pr_static": {"max_coupled_passes", "optical_substeps", "residual_rms_tolerance", "residual_max_tolerance"},
                 "pr": {"Nt", "dt_normalized", "optical_substeps", "integrator"}}[route]
@@ -136,7 +136,7 @@ def validate(route, request, *, sampling=qualify_launch_sampling,
            for name in solver.__dataclass_fields__ if name not in editable):
         raise ValueError("Unsupported hidden solver setting")
     integers = {
-        "lc": ("max_iterations", "static_max_coupled_passes"),
+        "lc": ("max_iterations", "static_max_relax_iterations", "static_max_coupled_passes"),
         "lc_td": ("Nt", "max_picard_iter"),
         "pr_static": ("max_coupled_passes", "optical_substeps"),
         "pr": ("Nt", "optical_substeps"),

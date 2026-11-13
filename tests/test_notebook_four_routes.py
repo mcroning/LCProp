@@ -446,3 +446,69 @@ def test_switch_after_completion_rebuilds_editor(monkeypatch, material, alternat
             await app.dispose()
 
     asyncio.run(exercise())
+
+
+def test_lc_static_active_relaxation_control_and_legacy_roundtrip(tmp_path, monkeypatch):
+    from lcprop.notebook.interactive_batch import LCNotebook
+
+    monkeypatch.setattr(LCNotebook, "_draw", lambda self, *_: None)
+    app = LCNotebook(preview_factory=lambda *_: None, memory_available=lambda: 4096 * MIB)
+    try:
+        session = app.session
+        original = session.draft
+        legacy = replace(original, solver=replace(original.solver, max_iterations=17))
+        session.set_draft("lc", legacy, session.generation)
+        path = session.save_draft(tmp_path / "legacy.json")
+        session.load_draft(path)
+        app._sync()
+        assert session.draft == legacy
+        assert "max_iterations" not in app.solver_inputs
+        assert app.solver_inputs["static_max_relax_iterations"].value == original.solver.static_max_relax_iterations
+        app.solver_inputs["static_max_relax_iterations"].value = 201
+        app.solver_inputs["static_max_coupled_passes"].value = 4
+        payload, _, charge = session.preflight("lc", session.draft)
+        decoded = batch_requests.ROUTES["lc"][1].decode_request(payload)
+        assert decoded.solver.static_max_relax_iterations == 201
+        assert decoded.solver.resolved_static_max_coupled_passes == 4
+        assert decoded.solver.max_iterations == 17
+        assert charge.working > estimate("lc", original).working
+    finally:
+        asyncio.run(app.dispose())
+
+
+@pytest.mark.parametrize("available", [None, RESERVE])
+def test_draft_admission_precedes_parser(tmp_path, monkeypatch, session, available):
+    path = session.save_draft(tmp_path / "draft.json")
+    completed = session.completed = object()
+    draft = session.draft
+    generation = session.generation
+    session.memory_available = lambda: available
+    monkeypatch.setattr(session, "resident_bytes", lambda: 0)
+    monkeypatch.setattr(batch_session, "read_experiment_file", forbidden)
+    with pytest.raises(ValueError, match="unknown|budget"):
+        session.load_draft(path)
+    assert session.draft is draft and session.completed is completed
+    assert session.generation == generation
+
+
+def test_pr_static_readouts_and_unavailable_choices(monkeypatch):
+    from lcprop.notebook.interactive_batch import PRNotebook
+
+    monkeypatch.setattr(PRNotebook, "_draw", lambda self, *_: None)
+    app = PRNotebook(preview_factory=lambda *_: None, memory_available=lambda: 4096 * MIB)
+    try:
+        app.workflow_control.value = "pr_static"
+        summary = app.editor.children[3].value
+        assert "Retention: Full result in memory" in summary
+        assert "1e-10 / 1e-09 (dimensionless)" in summary
+        assert "1e-08 / 1e-07 (dimensionless)" in summary
+        assert "40 Newton iterations" in summary and "20 backtracks" in summary
+        generation = app.session.generation
+        draft = app.session.draft
+        for label in ("PR static", "PR time dependent"):
+            app.workflow_control.value = f"{label} — full transverse (unavailable)"
+            assert app.workflow_control.value == app.session.route == "pr_static"
+            assert app.session.draft is draft and app.session.generation == generation
+            assert "requires separate notebook qualification" in app.notice.value
+    finally:
+        asyncio.run(app.dispose())

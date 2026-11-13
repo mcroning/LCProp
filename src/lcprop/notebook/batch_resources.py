@@ -34,7 +34,7 @@ def estimate(route, request):
     retained, work, packed, retained_misc, work_misc = CHARGES[route]
     steps = getattr(request.solver, "Nt", 1)
     passes = getattr(request.solver, "max_coupled_passes",
-                     getattr(request.solver, "static_max_coupled_passes", 1))
+                     getattr(request.solver, "resolved_static_max_coupled_passes", 1))
     iterations = getattr(request.solver, "static_max_relax_iterations", 1)
     history = 512 * (steps + grid.Nz * passes * iterations)
     retained_extra = max(retained_misc * MIB, history)

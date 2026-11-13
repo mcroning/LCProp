@@ -20,6 +20,7 @@ from lcprop.notebook.batch_requests import (
     PR_MATERIAL_CONTROLS, material_for, preset, preview, validate,
 )
 from lcprop.core.grid import grid_metadata
+from lcprop.pr.static_workflow import _resolve_static_tolerances
 from lcprop.notebook.batch_resources import MIB, estimate, require_work
 from lcprop.notebook.batch_results import draw_plane, field_coordinates, retained_plane
 from lcprop.notebook.batch_session import BatchSession
@@ -154,6 +155,13 @@ class InteractiveBatch:
             (label, key) for key, label in labels.items()
             if self.fixed_route is None or material_for(key) == self.fixed_route
         ], value=route)
+        unavailable = {
+            "PR static — full transverse (unavailable)": "The 2D static solver requires separate notebook qualification.",
+            "PR time dependent — full transverse (unavailable)": "The 2D evolution solver requires separate notebook qualification.",
+        }
+        if self.fixed_route != "lc":
+            route_control.options = (*route_control.options, *((label, label) for label in unavailable))
+            route_control.value = route
         inputs = []
 
         def number(label, value, cls=W.FloatText):
@@ -171,7 +179,7 @@ class InteractiveBatch:
                                    W.IntText if key in ("Nx", "Ny") else W.FloatText)
                        for key, label in grid_labels.items()}
         solver_labels = {
-            "lc": {"max_iterations": "Iteration limit",
+            "lc": {"static_max_relax_iterations": "Relaxation iterations per pass",
                    "static_max_coupled_passes": "Coupled passes",
                    "static_residual_rms_tol": "Residual RMS tolerance",
                    "static_residual_max_tol": "Residual max tolerance"},
@@ -255,6 +263,20 @@ class InteractiveBatch:
                 available = session.memory_available()
                 available_text = "unknown" if available is None else f"{available / MIB:.1f} MiB"
                 resident_results, resident_archives = session.resident_storage()
+                retention = ("Full result in memory; completed ZIP unavailable" if route == "lc_td"
+                             else "Full result in memory; completed ZIP subject to export limits")
+                resolved = ""
+                if route == "pr_static":
+                    limits = _resolve_static_tolerances(draft.solver, real_dtype=draft.backend.precision)
+                    inner = limits.material_solver
+                    resolved = (
+                        f"<br>PR Static inner material solve · RMS/max residual tolerances "
+                        f"{inner.residual_rms_tolerance:g} / {inner.residual_max_tolerance:g} (dimensionless) · "
+                        f"{inner.max_iterations} Newton iterations · {inner.max_backtracks} backtracks · "
+                        f"Minimum step scale {inner.minimum_step_scale:g} · Armijo fraction {inner.armijo_fraction:g}"
+                        f"<br>Coupled RMS/max residual tolerances "
+                        f"{limits.residual_rms_tolerance:g} / {limits.residual_max_tolerance:g} (dimensionless)"
+                    )
                 grid_summary.value = (
                     f"dx {meta.dx_um:g}, dy {meta.dy_um:g} µm · Nz {meta.Nz} · "
                     f"Requested length {grid.z_length_um:g} µm · Marched {meta.Nz * grid.dz_um:g} µm · "
@@ -264,6 +286,7 @@ class InteractiveBatch:
                     f"Re-export archive bytes {resident_archives / MIB:.1f} MiB · "
                     f"Selected upload {session.selected_upload_bytes / MIB:.1f} MiB · ZIP {packed}{warning} · "
                     f"Runtime available {available_text} · Elapsed budget {120 if lc else 60} s (cooperative) · Runtime estimate unavailable"
+                    + f"<br>Retention: {retention}" + resolved
                     + ("<br>" + escape("; ".join(warnings)) if warnings else "")
                 )
                 inspect.value = f"<pre>{escape(json.dumps(payload, indent=2))}</pre>"
@@ -326,8 +349,15 @@ class InteractiveBatch:
             control.disabled = session.busy
         for control in inputs:
             control.observe(lambda _: self._guard(generation, update), names="value")
-        route_control.observe(lambda _: self._guard(generation, lambda: transition(
-            lambda: session.switch(route_control.value))), names="value")
+        def select_route(change):
+            selected = change["new"]
+            if selected in unavailable:
+                route_control.value = route
+                self.notice.value = escape(unavailable[selected])
+            elif selected != route:
+                self._guard(generation, lambda: transition(lambda: session.switch(selected)))
+
+        route_control.observe(select_route, names="value")
         button.on_click(lambda _: self._guard(generation, lambda: update() and session.start(generation)))
         reset.on_click(lambda _: self._guard(generation, restore))
         copy_grid.on_click(lambda _: self._guard(generation, lambda: transition(
@@ -478,9 +508,10 @@ class InteractiveBatch:
             return
         if not name.lower().endswith(".json"):
             raise ValueError("Select an experiment JSON or completed ZIP")
-        path = self.directory / f"upload-{uuid4().hex}.lcprop.json"
-        path.write_bytes(data)
-        self.session.load_draft(path)
+        with tempfile.TemporaryDirectory(prefix="draft-", dir=self.directory) as staging:
+            path = Path(staging) / "draft.lcprop.json"
+            path.write_bytes(data)
+            self.session.load_draft(path, upload_bytes=len(data) if upload_bytes is None else upload_bytes)
         self._refresh_preview()
         self._sync()
         self.notice.value = f"Loaded <b>{escape(name)}</b>."
