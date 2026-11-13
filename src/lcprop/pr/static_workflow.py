@@ -30,7 +30,11 @@ from lcprop.pr.reduced_field_linear import (
     reduced_field_linear_residual,
     solve_pr_reduced_field_linear_intensity,
 )
-from lcprop.pr.source import channel_peak_intensity_reference
+from lcprop.pr.illumination import (
+    LEGACY_NORMALIZATION,
+    PhysicalIlluminationReference,
+    resolve_material_illumination,
+)
 from lcprop.pr.specs import PRMaterialSpec
 from lcprop.pr.static import (
     PRStaticSolverOptions,
@@ -539,6 +543,8 @@ def run_pr_static(
     request.grid.validate()
     request.beams.validate()
     request.material.validate()
+    if request.material.normalization_identity != LEGACY_NORMALIZATION and request.initial_A is not None:
+        raise ValueError("physical PR Static prepared initial_A requires an explicit physical scale; use the physical launch configuration")
     request.material_response.validate_reduced_static()
     request.solver.validate()
     request.backend.validate()
@@ -579,14 +585,6 @@ def run_pr_static(
     dx_normalized = (
         request.material.characteristic_wavenumber_per_um * grid.dx_um
     )
-    linearized_spec = None
-    if linearized:
-        linearized_spec = PRReducedFieldLinearSpec(
-            applied_field=float(request.material.applied_field),
-            background_intensity=float(request.material.background_intensity),
-            dx_normalized=dx_normalized,
-        )
-        linearized_spec.validate()
     accepted_host_presentation_reference = None
     if request.initial_A is None:
         A0 = launch.A0.copy()
@@ -611,6 +609,22 @@ def run_pr_static(
                 f"initial_A shape {A0.shape} does not match {launch.A0.shape}"
             )
 
+    groups = request.beams.coherence_groups
+    peak_reference, material = resolve_material_illumination(
+        request.material, A0, grid=grid,
+        optical_scale_W_cm2=launch.physical_total_power_mW * 1e5,
+        coherence_groups=groups, xp=xp,
+    )
+    physical_reference = (peak_reference
+                          if isinstance(peak_reference, PhysicalIlluminationReference) else None)
+    linearized_spec = None
+    if linearized:
+        linearized_spec = PRReducedFieldLinearSpec(
+            applied_field=float(material.applied_field),
+            background_intensity=float(material.background_intensity),
+            dx_normalized=dx_normalized,
+        )
+        linearized_spec.validate()
     E_shape = (grid.Nz, grid.Nx, grid.Ny)
     if request.initial_E is None:
         E_initial = xp.zeros(E_shape, dtype=backend.real_dtype)
@@ -635,8 +649,6 @@ def run_pr_static(
         xp=xp,
         complex_dtype=backend.complex_dtype,
     )
-    peak_reference = channel_peak_intensity_reference(A0, xp=xp)
-    groups = request.beams.coherence_groups
     E_stack = xp.empty(E_shape, dtype=backend.real_dtype)
     source_stack = xp.empty(E_shape, dtype=backend.real_dtype)
     residual_stack = xp.empty(E_shape, dtype=backend.real_dtype)
@@ -671,7 +683,7 @@ def run_pr_static(
             interaction_length_um=request.grid.z_length_um,
             gain_length_product=request.material.gain_length_product,
             peak_intensity_reference=peak_reference,
-            background_intensity=request.material.background_intensity,
+            background_intensity=material.background_intensity,
             coherence_groups=groups,
             xp=xp,
             optical_boundary=request.optical_boundary,
@@ -698,7 +710,7 @@ def run_pr_static(
             state,
             intensity,
             applied_field=request.material.applied_field,
-            background_intensity=request.material.background_intensity,
+            background_intensity=material.background_intensity,
             dx_normalized=dx_normalized,
             xp=xp,
         )
@@ -769,7 +781,7 @@ def run_pr_static(
                 material_result = solve_pr_static_intensity_batched(
                     intensity,
                     applied_field=request.material.applied_field,
-                    background_intensity=request.material.background_intensity,
+                    background_intensity=material.background_intensity,
                     dx_normalized=dx_normalized,
                     initial_E=state,
                     options=tolerances.material_solver,
@@ -1075,7 +1087,10 @@ def run_pr_static(
         # Presentation deliberately reproduces the historical NumPy convention.
         # Do not reuse the scientific GPU peak_reference: it can differ by 1 ULP.
         reference = accepted_host_presentation_reference
-        if completed_slices and reference is None:
+        if physical_reference is not None:
+            reference = (float(physical_reference)
+                         if physical_reference.optical_scale_W_cm2 else 0.0)
+        elif completed_slices and reference is None:
             reference = presentation_peak_intensity_reference(
                 host_initial if host_initial is not None else A0, asnumpy=asnumpy,
             )
@@ -1084,8 +1099,9 @@ def run_pr_static(
             product_options = dict(
                 grid_summary=grid.summary(),
                 peak_intensity_reference=reference,
-                background_intensity=float(request.material.background_intensity),
+                background_intensity=float(material.background_intensity),
                 asnumpy=asnumpy,
+                allow_zero_reference=physical_reference is not None and reference == 0,
             )
             cuts = extract_backend_longitudinal_optical_intensity_cuts(
                 replay_source, **product_options,
@@ -1109,6 +1125,13 @@ def run_pr_static(
         retention["retained_fields"].append("selected_products")
         retention["policy"] = product_kind
         retention["omitted_fields"] += [name for name, value in (("A_initial", host_initial), ("A_final", host_final)) if value is None]
+
+    normalization_metadata = {}
+    if physical_reference is not None:
+        normalization_metadata = {
+            "normalization_identity": request.material.normalization_identity,
+            "source_normalization": physical_reference.metadata(),
+        }
 
     return PRStaticRunResult(
         selected_products=selected_products,
@@ -1171,12 +1194,13 @@ def run_pr_static(
         ),
         material_response_summary=(
             {
+                **normalization_metadata,
                 "model": PR_MATERIAL_RESPONSE_FIELD_LINEAR,
                 "validation_status": "experimental",
                 "operator": PR_REDUCED_FIELD_LINEAR_RESPONSE_V1,
                 "intensity_denominator": "local_total_transport_intensity",
                 "background_intensity": float(
-                    request.material.background_intensity
+                    material.background_intensity
                 ),
                 "applied_field": float(request.material.applied_field),
                 "material_response_calls": int(material_response_calls),
@@ -1184,10 +1208,11 @@ def run_pr_static(
             }
             if linearized
             else {
+                **normalization_metadata,
                 "model": PR_MATERIAL_RESPONSE_NONLINEAR,
                 "validation_status": "validated",
                 "background_intensity": float(
-                    request.material.background_intensity
+                    material.background_intensity
                 ),
             }
         ),

@@ -28,6 +28,7 @@ from lcprop.pr.longitudinal_cuts import (
     retained_longitudinal_intensity_cuts,
     validate_longitudinal_cut_coordinates,
 )
+from lcprop.pr.illumination import result_source_inverse
 from lcprop.pr.scattering import PRCanonicalScatteringSpec
 from lcprop.pr.workflow import _validate_canonical_scattering_for_grid
 from lcprop.pr.visualization import (
@@ -210,16 +211,18 @@ def encode_pr_static_transport_result(
             elif np.asarray(result.source_intensity_stack).shape[0] == 0:
                 cuts = None
             else:
-                presentation_reference = presentation_peak_intensity_reference(result.A_initial)
+                inverse = result_source_inverse(result)
+                if inverse is None:
+                    reference = presentation_peak_intensity_reference(result.A_initial)
+                    background = float(result.material_response_summary.get("background_intensity", 0.0))
+                else:
+                    reference, background = inverse
+                options = dict(peak_intensity_reference=reference, background_intensity=background,
+                               allow_zero_reference=inverse is not None and reference == 0)
                 cuts = extract_longitudinal_optical_intensity_cuts(
                     result.source_intensity_stack,
                     grid_summary=result.grid_summary,
-                    peak_intensity_reference=presentation_reference,
-                    background_intensity=float(
-                        result.material_response_summary.get(
-                            "background_intensity", 0.0
-                        )
-                    ),
+                    **options,
                 )
             preview_data = result.intensity_preview
             preview_metadata = result.intensity_preview_metadata
@@ -230,12 +233,7 @@ def encode_pr_static_transport_result(
                 preview = make_fast_intensity_preview(
                     result.source_intensity_stack,
                     grid_summary=result.grid_summary,
-                    peak_intensity_reference=presentation_reference,
-                    background_intensity=float(
-                        result.material_response_summary.get(
-                            "background_intensity", 0.0
-                        )
-                    ),
+                    **options,
                 )
                 preview_data = preview.intensity
                 preview_metadata = preview.metadata

@@ -137,17 +137,19 @@ def result_source_inverse(result):
     checkpoint = getattr(result, "checkpoint", None)
     if checkpoint is not None:
         material = asdict(checkpoint.request.material)
-    identity = diagnostics.get("normalization_identity", LEGACY_NORMALIZATION)
+    response = getattr(result, "material_response_summary", {})
+    identity = diagnostics.get("normalization_identity",
+                               response.get("normalization_identity", LEGACY_NORMALIZATION))
     if material is not None:
         identity = material.get("normalization_identity", LEGACY_NORMALIZATION)
     if identity not in (LEGACY_NORMALIZATION, INTEGRAL_NORMALIZATION):
         raise ValueError("unknown result normalization identity")
     record = diagnostics.get("source_normalization")
     if record is None:
-        record = profile.get("source_normalization")
+        record = profile.get("source_normalization", response.get("source_normalization"))
     if record is None:
         if identity == INTEGRAL_NORMALIZATION:
-            raise ValueError("physical TD result requires illumination provenance")
+            raise ValueError("physical PR result requires illumination provenance")
         return None
     if identity != INTEGRAL_NORMALIZATION:
         raise ValueError("physical reference conflicts with legacy result identity")
