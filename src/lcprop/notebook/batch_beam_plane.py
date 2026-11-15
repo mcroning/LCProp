@@ -126,7 +126,7 @@ class BatchBeamPlane:
     def _commit(self, items, coherence=None, select=None):
         if self.session.edit_beams(items, self.generation, coherence):
             self.owner.notice.value = ""
-            self.owner._update_editor_summary()
+            self.owner._update_editor_summary(draft_changed=True)
             self.owner._refresh_preview()
             if self.owner.source.value == "Draft preview":
                 self.owner._update_selection()

@@ -1,6 +1,6 @@
 """Synthetic data and fake runners only. No propagation or launch sampling."""
 import asyncio
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import json
 import sys
 from dataclasses import replace
@@ -19,6 +19,13 @@ from lcprop.notebook.batch_results import draw_plane, retained_plane
 from lcprop.notebook.batch_session import BatchSession, Record, identity
 from lcprop.products.data_model import FieldCollection, Geometry, RunData, make_field
 from tests.test_pr_products import _synthetic_pr_result
+
+
+def mock_t4(ordinal, bind):
+    from time import monotonic
+    from lcprop.notebook.batch_device import GPU_PROFILE, GPUReadiness
+    return GPUDevice(ordinal, "Tesla T4", bind, lambda _: GPUReadiness(
+        GPU_PROFILE, ordinal, 8 * 1024**3, 16 * 1024**3, monotonic()))
 
 
 def validate(route, request):
@@ -390,7 +397,7 @@ def test_pr_worker_dispatch_freezes_admitted_request():
         assert calls == [(PR_TIMEDEPENDENT_OPERATION, executed)]
         admitted = session.completed
         assert admitted.request == executed
-        assert admitted.device.requested == "auto"
+        assert admitted.device.requested == "numpy"
         assert admitted.device.fallback_reason is None
         session.set_draft("pr", replace(draft, solver=replace(draft.solver, Nt=1)),
                           session.generation)
@@ -951,7 +958,7 @@ def test_beam_plane_canvas_gestures_and_stale_drag(monkeypatch, route):
         assert panel.gesture is None
 
 
-@pytest.mark.parametrize("intent", ["cupy"])
+@pytest.mark.parametrize("intent", ["auto", "cupy"])
 def test_material_notebooks_and_progress_lifecycle(monkeypatch, intent):
     from lcprop.notebook import LCNotebook, PRNotebook
 
@@ -962,7 +969,6 @@ def test_material_notebooks_and_progress_lifecycle(monkeypatch, intent):
 
     @contextmanager
     def bind():
-        assert get_ident() != caller
         bound.append(3)
         try:
             yield
@@ -973,11 +979,11 @@ def test_material_notebooks_and_progress_lifecycle(monkeypatch, intent):
 
     def probe(spec):
         assert (spec.backend, spec.precision) == ("cupy", "float64")
-        return GPUDevice(3, "Test device", bind)
+        return mock_t4(3, bind)
 
     class Fake:
         def run_operation(self, operation, request, *, cancellation_token, progress_callback):
-            assert bound == [3]
+            assert bound == [3] and get_ident() != caller
             assert (request.backend.backend, request.backend.precision) == ("cupy", "float64")
             callbacks.append(progress_callback)
             if len(callbacks) == 1:
@@ -1013,9 +1019,12 @@ def test_material_notebooks_and_progress_lifecycle(monkeypatch, intent):
             with pytest.raises(ValueError, match="only accepts LC"):
                 lc.session.set_draft("pr", requests.preset("pr"), lc.session.generation)
             selector = pr.material_panel.children[-1]
-            assert selector.value == "auto"
+            assert selector.value == "numpy"
             selector.value = intent
-            label = "Auto → GPU 3 (Test device)" if intent == "auto" else "GPU 3 (Test device)"
+            label = "Auto → GPU 3 (Tesla T4)" if intent == "auto" else "GPU 3 (Tesla T4)"
+            if intent == "auto":
+                pr.run_button.click()
+                assert "Press Run again" in pr.notice.value
             pr.run_button.click()
             assert pr.material_panel.children[-1].disabled
             await wait_until(lambda: "Preparing <progress>" in pr.progress_view.value)
@@ -1037,6 +1046,9 @@ def test_material_notebooks_and_progress_lifecycle(monkeypatch, intent):
             assert pr.session.draft.backend.backend == first.device.requested == intent
             assert first.digest == identity(validate("pr", first.request)[0])[1]
             assert label in pr.progress_view.value
+            if intent == "auto":
+                pr.run_button.click()
+                assert "Press Run again" in pr.notice.value
             pr.run_button.click()
             await wait_until(lambda: len(callbacks) == 2)
             callbacks[0](SimpleNamespace(completed_units=2, total_units=3, message="Stale"))
@@ -1048,6 +1060,9 @@ def test_material_notebooks_and_progress_lifecycle(monkeypatch, intent):
             assert pr.session.completed is first
             assert pr.session.partial.run_id != first.run_id
             assert pr.session.partial.device == pr.session.last_device
+            if intent == "auto":
+                pr.run_button.click()
+                assert "Press Run again" in pr.notice.value
             pr.run_button.click()
             await wait_until(lambda: len(callbacks) == 3)
             await asyncio.wait_for(pr.dispose(), 3)
@@ -1126,7 +1141,7 @@ def test_lc_completed_notebook_views_use_retained_volumes(monkeypatch):
 
 def test_pr_device_admission_rejections_and_cpu_bypass():
     draft = requests.preset("pr")
-    assert draft.backend.backend == "auto"
+    assert draft.backend.backend == "numpy"
     probes = []
 
     def unavailable(spec):
@@ -1139,14 +1154,14 @@ def test_pr_device_admission_rejections_and_cpu_bypass():
     assert resolve_device("pr", request("numpy"), unavailable).resolved == "numpy"
     assert resolve_device("lc", requests.preset("lc"), unavailable).resolved == "numpy"
     assert probes == []
-    fallback = resolve_device("pr", draft, unavailable)
+    fallback = resolve_device("pr", request("auto"), unavailable)
     assert (fallback.requested, fallback.resolved, fallback.fallback_reason) == (
-        "auto", "numpy", None)
+        "auto", "numpy", "GPU driver unavailable")
     with pytest.raises(ValueError, match="Unsupported notebook workflow"):
         resolve_device("other", draft, unavailable)
     with pytest.raises(ValueError, match="float64"):
         resolve_device("pr", request("cupy", "float32"), unavailable)
-    assert len(probes) == 0
+    assert len(probes) == 1
 
     async def exercise():
         session = BatchSession(validator=validate, fixed_route="pr", gpu_probe=unavailable)
@@ -1234,21 +1249,22 @@ def test_cupy_probe_with_mock_array_module(monkeypatch, failure):
                          ("unbind", 3), ("bind", 3), ("unbind", 3)]
 
 
-def test_probe_import_failure_has_fallback_reason():
+def test_probe_import_failure_has_fallback_reason(monkeypatch):
+    monkeypatch.setitem(sys.modules, "cupy", None)
     draft = requests.preset("pr")
     draft = replace(draft, backend=replace(draft.backend, backend="cupy"))
     with pytest.raises(DeviceUnavailable, match="CuPy is unavailable"):
         resolve_device("pr", draft, probe_cupy)
 
 
-@pytest.mark.parametrize("failure", ["bind", "worker", "mismatch", "dtype"])
+@pytest.mark.parametrize("failure", ["bind", "worker", "mismatch", "dtype", "worker_memory"])
 def test_admitted_gpu_failure_preserves_completed_without_retry(failure):
     calls = []
 
     @contextmanager
     def bind():
         calls.append("bind")
-        if failure == "bind":
+        if failure == "bind" and calls.count("bind") == 2:
             raise RuntimeError("mock driver loss")
         yield
 
@@ -1267,8 +1283,15 @@ def test_admitted_gpu_failure_preserves_completed_without_retry(failure):
                 run_data=products(), message="done")
 
     async def exercise():
+        device = mock_t4(3, bind)
+
+        def readiness(shape):
+            if failure == "worker_memory" and calls.count("bind") == 2:
+                raise DeviceUnavailable("Mock worker memory lost")
+            return device.readiness(shape)
+
         session = BatchSession(validator=validate, fixed_route="pr", runner=Fake(),
-                               gpu_probe=lambda _: GPUDevice(3, "Test device", bind))
+                               gpu_probe=lambda _: replace(device, readiness=readiness))
         draft = session.draft
         cpu = replace(draft, backend=replace(draft.backend, backend="numpy"))
         assert session.set_draft("pr", cpu, session.generation)
@@ -1284,7 +1307,7 @@ def test_admitted_gpu_failure_preserves_completed_without_retry(failure):
         assert session.completed is first and session.partial is None
         assert session.last_run_id != first.run_id
         assert session.last_device.requested == session.last_device.resolved == "cupy"
-        assert calls == ["numpy", "bind"] + ([] if failure == "bind" else ["cupy"])
+        assert calls == ["numpy", "bind", "bind"] + ([] if failure in {"bind", "worker_memory"} else ["cupy"])
 
     asyncio.run(exercise())
 
@@ -1348,10 +1371,13 @@ def test_public_pr_widget_shows_fallback_and_pre_admission_rejection(monkeypatch
     async def exercise():
         app = PRNotebook(runner=Fake(), validator=validate, preview_factory=preview)
         try:
+            app.material_panel.children[-1].value = "auto"
+            app.run_button.click()
+            assert "Auto → CPU" in app.notice.value and app.session.task is None
             app.run_button.click()
             await app.session.task
             assert "Auto → CPU" in app.progress_view.value
-            assert "GPU qualification is pending" not in app.progress_view.value
+            assert "GPU qualification is pending" in app.progress_view.value
             previous = app.session.completed
             app.session.gpu_probe = lambda _: (_ for _ in ()).throw(DeviceUnavailable("GPU qualification is pending"))
             app.session.generation += 1
@@ -1386,7 +1412,6 @@ def test_lazy_cufft_import_failure(monkeypatch, preference, stage):
             return SimpleNamespace()
 
         def Device(self):
-            from contextlib import nullcontext
             return nullcontext()
 
     monkeypatch.setitem(sys.modules, "cupy", SimpleNamespace(
@@ -1398,7 +1423,7 @@ def test_lazy_cufft_import_failure(monkeypatch, preference, stage):
     if preference == "auto":
         device = resolve_device("pr", request, probe_cupy)
         assert device.resolved == "numpy" and device.gpu is None
-        assert device.fallback_reason is None
+        assert "mock cuFFT dependency unavailable" in device.fallback_reason
     else:
         with pytest.raises(DeviceUnavailable, match="mock cuFFT dependency unavailable"):
             resolve_device("pr", request, probe_cupy)
@@ -1458,3 +1483,315 @@ def test_uploaded_draft_rejects_before_parser(monkeypatch, native):
         assert not list(app.directory.iterdir())
     finally:
         asyncio.run(app.dispose())
+
+
+@pytest.mark.parametrize("length", [20., 1000.])
+def test_gpu_fixture_identity_checks_full_request(length):
+    draft = requests.preset("pr")
+    draft = replace(draft, grid=replace(draft.grid, z_length_um=length),
+                    backend=replace(draft.backend, backend="cupy"))
+    mock = mock_t4(0, nullcontext)
+    admitted = resolve_device("pr", draft, lambda _: mock)
+    assert admitted.gpu is mock and admitted.precision == "float64"
+
+    def forbidden(_):
+        pytest.fail("An edited fixture must be rejected before device probing")
+
+    channel, = draft.beams.channels
+    edits = [
+        replace(draft, grid=replace(draft.grid, Nx=66)),
+        replace(draft, solver=replace(draft.solver, Nt=2)),
+        replace(draft, material=replace(draft.material, gain_length_product=0.2)),
+        replace(draft, beams=replace(draft.beams, channels=(replace(channel, phase_rad=0.1),))),
+    ]
+    for edited in edits:
+        with pytest.raises(DeviceUnavailable, match="restore a frozen fixture"):
+            resolve_device("pr", edited, forbidden)
+        auto = replace(edited, backend=replace(edited.backend, backend="auto"))
+        fallback = resolve_device("pr", auto, forbidden)
+        assert fallback.resolved == "numpy"
+        assert "restore a frozen fixture" in fallback.fallback_reason
+
+    with pytest.raises(DeviceUnavailable, match="requires a T4"):
+        resolve_device("pr", draft, lambda _: replace(mock, name="NVIDIA L4"))
+
+
+def test_auto_decision_change_requires_review_before_dispatch(monkeypatch):
+    from lcprop.notebook import PRNotebook
+
+    monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
+    ready = True
+    calls = []
+
+    def probe(_):
+        if not ready:
+            raise DeviceUnavailable("Mock driver unavailable")
+        return mock_t4(0, nullcontext)
+
+    def dispatch(operation, request, **kwargs):
+        calls.append(request.backend.backend)
+        return SimpleNamespace(
+            result=SimpleNamespace(status="completed", diagnostics=pr_backend_diagnostics(request)),
+            run_data=products(), message="done",
+        )
+
+    async def exercise():
+        nonlocal ready
+        app = PRNotebook(runner=SimpleNamespace(run_operation=dispatch), validator=validate,
+                         preview_factory=preview, gpu_probe=probe)
+        try:
+            app.material_panel.children[-1].value = "auto"
+            app.run_button.click()
+            assert "Auto → GPU 0 (Tesla T4)" in app.notice.value
+            assert app.session.task is None and not calls
+
+            ready = False
+            app.run_button.click()
+            assert "Device decision changed" in app.notice.value
+            assert "Auto → CPU" in app.notice.value and "Mock driver unavailable" in app.notice.value
+            assert app.session.task is None and not calls
+
+            app.run_button.click()
+            await app.session.task
+            assert calls == ["numpy"]
+            assert app.session.completed.device.fallback_reason == "Mock driver unavailable"
+        finally:
+            await app.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_auto_review_invalidated_by_beam_edit_and_revert(monkeypatch):
+    from lcprop.notebook import PRNotebook
+
+    monkeypatch.setattr(InteractiveBatch, "_draw", lambda self, *_: None)
+    calls = []
+
+    def probe(_):
+        raise DeviceUnavailable("Mock driver unavailable")
+
+    def dispatch(operation, request, **kwargs):
+        calls.append(request.backend.backend)
+        return SimpleNamespace(
+            result=SimpleNamespace(status="completed", diagnostics=pr_backend_diagnostics(request)),
+            run_data=products(), message="done",
+        )
+
+    async def exercise():
+        app = PRNotebook(runner=SimpleNamespace(run_operation=dispatch), validator=validate,
+                         preview_factory=preview, gpu_probe=probe)
+        try:
+            app.material_panel.children[-1].value = "auto"
+            original = app.session.draft
+            app.run_button.click()
+            assert "Auto → CPU" in app.notice.value and app.session.task is None
+
+            phase = original.beams.channels[0].phase_rad
+            app.beam_plane._replace(phase_rad=phase + 0.1)
+            assert app.session.draft.beams.channels[0].phase_rad == phase + 0.1
+            app.beam_plane._replace(phase_rad=phase)
+            assert app.session.draft == original
+            assert not app.notice.value
+
+            app.run_button.click()
+            assert "Auto → CPU" in app.notice.value and "Press Run again" in app.notice.value
+            assert app.session.task is None and not calls
+
+            app.run_button.click()
+            await app.session.task
+            assert calls == ["numpy"]
+        finally:
+            await app.dispose()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("length,nz", [(20., 20), (1000., 1000)])
+def test_gpu_memory_admission_boundaries(monkeypatch, length, nz):
+    from lcprop.notebook import batch_device as device
+
+    monkeypatch.setattr(device, "monotonic", lambda: 100.)
+    draft = requests.preset("pr")
+    draft = replace(draft, grid=replace(draft.grid, z_length_um=length),
+                    backend=replace(draft.backend, backend="cupy"))
+    expected = (32 * nz + 128) * 8 * 64 * 48 + 256 * device.MIB
+    free = expected + device.GPU_RESERVE
+    sample = device.GPUReadiness(device.GPU_PROFILE, 0, free, 16 * 1024**3, 100.)
+
+    def readiness(shape):
+        assert shape == (64, 48)
+        return sample
+
+    mock = GPUDevice(0, "Tesla T4", nullcontext, readiness)
+    assert resolve_device("pr", draft, lambda _: mock).gpu_work_bytes == expected
+    auto = replace(draft, backend=replace(draft.backend, backend="auto"))
+    for invalid, reason in [
+        (replace(sample, free_bytes=free - 1), "budget"),
+        (replace(sample, sampled_at=94.), "stale"),
+        (replace(sample, ordinal=1), "identity"),
+        (replace(sample, profile="unknown"), "profile"),
+        (replace(sample, free_bytes=-1), "invalid"),
+        (None, "identity"),
+    ]:
+        sample = invalid
+        with pytest.raises(DeviceUnavailable, match=reason):
+            resolve_device("pr", draft, lambda _: mock)
+        fallback = resolve_device("pr", auto, lambda _: mock)
+        assert fallback.resolved == "numpy" and reason in fallback.fallback_reason
+    with pytest.raises(DeviceUnavailable, match="readiness is unavailable"):
+        resolve_device("pr", draft, lambda _: replace(mock, readiness=None))
+
+
+@pytest.mark.parametrize("stage,message", [
+    ("bind", "GPU device binding failed"),
+    ("telemetry", "GPU memory telemetry check failed"),
+])
+def test_gpu_readiness_operational_errors(stage, message):
+    failure = OSError("mock device failure")
+
+    def fail(*args):
+        raise failure
+
+    @contextmanager
+    def bind():
+        fail()
+        yield
+
+    mock = mock_t4(0, nullcontext)
+    mock = replace(mock, bind=bind) if stage == "bind" else replace(mock, readiness=fail)
+    draft = requests.preset("pr")
+    explicit = replace(draft, backend=replace(draft.backend, backend="cupy"))
+    with pytest.raises(DeviceUnavailable, match=message) as caught:
+        resolve_device("pr", explicit, lambda _: mock)
+    assert caught.value.__cause__ is failure
+    assert "select CPU" in str(caught.value)
+
+    auto = replace(draft, backend=replace(draft.backend, backend="auto"))
+    decision = resolve_device("pr", auto, lambda _: mock)
+    assert decision.resolved == "numpy"
+    assert decision.fallback_reason == str(caught.value)
+
+    def broken_provider(_):
+        raise TypeError("mock programming error")
+
+    with pytest.raises(TypeError, match="mock programming error"):
+        resolve_device("pr", auto, lambda _: replace(
+            mock, bind=nullcontext, readiness=broken_provider))
+
+
+@pytest.mark.parametrize("failure", [
+    None, "discovery", "bind", "allocation", "fft", "sync", "telemetry", "cleanup",
+    "runner_and_cleanup", "session_runner_and_cleanup",
+])
+def test_gate2_colab_adapter_cuda_errors(monkeypatch, failure):
+    from lcprop.notebook import gate2_colab
+
+    class DriverError(RuntimeError):
+        pass
+
+    class AllocationError(RuntimeError):
+        pass
+
+    class FFTError(RuntimeError):
+        pass
+
+    events = []
+
+    def step(stage, value=None):
+        events.append(stage)
+        combined_cleanup = stage == "cleanup" and (
+            failure == "runner_and_cleanup"
+            or (failure == "session_runner_and_cleanup" and events.count("cleanup") == 2)
+        )
+        if stage == failure or combined_cleanup:
+            raise {"allocation": AllocationError, "fft": FFTError}.get(stage, DriverError)(stage)
+        return value
+
+    @contextmanager
+    def bind(ordinal):
+        assert ordinal == 0
+        step("bind")
+        try:
+            yield
+        finally:
+            step("cleanup")
+
+    runtime = SimpleNamespace(
+        CUDARuntimeError=DriverError,
+        getDeviceCount=lambda: step("discovery", 1),
+        runtimeGetVersion=lambda: 13000,
+        getDevice=lambda: 0,
+        getDeviceProperties=lambda ordinal: {"name": b"Tesla T4"},
+        memGetInfo=lambda: step("telemetry", (8 * 1024**3, 16 * 1024**3)),
+    )
+    cuda = SimpleNamespace(
+        runtime=runtime, Device=bind, memory=SimpleNamespace(OutOfMemoryError=AllocationError),
+        cufft=SimpleNamespace(CuFFTError=FFTError),
+        get_current_stream=lambda: SimpleNamespace(synchronize=lambda: step("sync")),
+    )
+
+    def fft(data):
+        assert data.shape == (64, 48) and data.dtype == np.complex128
+        return step("fft", data)
+
+    monkeypatch.setattr(gate2_colab, "_verify_host", lambda: None)
+    monkeypatch.setitem(sys.modules, "cupy", SimpleNamespace(
+        cuda=cuda, float64=np.float64, complex128=np.complex128,
+        zeros=lambda shape, dtype: step("allocation", np.zeros(shape, dtype=dtype)),
+        fft=SimpleNamespace(fft2=fft),
+    ))
+    monkeypatch.setitem(sys.modules, "cupy.cuda", cuda)
+    draft = requests.preset("pr")
+    explicit = replace(draft, backend=replace(draft.backend, backend="cupy"))
+    if failure == "session_runner_and_cleanup":
+        dispatched = []
+
+        def dispatch(operation, request, **kwargs):
+            dispatched.append(request.backend.backend)
+            raise TypeError("mock runner failure")
+
+        async def exercise():
+            session = BatchSession(
+                fixed_route="pr", runner=SimpleNamespace(run_operation=dispatch),
+                validator=validate, gpu_probe=gate2_colab.probe_gate2_t4,
+            )
+            assert session.set_draft("pr", explicit, session.generation)
+            assert session.start(session.generation)
+            await session.task
+            assert session.status == "failed"
+            assert session.message == (
+                "Execution: TypeError: mock runner failure · CUDA context cleanup "
+                "also failed (DriverError: cleanup). Reconnect the runtime."
+            )
+            assert dispatched == ["cupy"]
+            assert session.completed is None and session.partial is None
+            assert events.count("cleanup") == 2
+
+        asyncio.run(exercise())
+        return
+    if failure == "runner_and_cleanup":
+        device = gate2_colab.probe_gate2_t4(explicit.backend)
+        original_cause = ValueError("runner cause")
+        runner_error = TypeError("mock runner failure")
+        with pytest.raises(TypeError, match="mock runner failure") as caught:
+            with device.bind():
+                raise runner_error from original_cause
+        assert caught.value is runner_error
+        assert caught.value.__cause__ is original_cause
+        assert isinstance(caught.value.cuda_cleanup_error, DriverError)
+        assert str(caught.value.cuda_cleanup_error) == "cleanup"
+        if hasattr(runner_error, "add_note"):
+            assert "CUDA context cleanup failed" in runner_error.__notes__[0]
+        assert events == ["discovery", "bind", "cleanup"]
+        return
+    if failure is None:
+        assert resolve_device("pr", explicit, gate2_colab.probe_gate2_t4).resolved == "cupy"
+        assert events == ["discovery", "bind", "allocation", "fft", "sync", "telemetry", "cleanup"]
+        return
+
+    with pytest.raises(DeviceUnavailable, match="select CPU|Reconnect") as caught:
+        resolve_device("pr", explicit, gate2_colab.probe_gate2_t4)
+    assert isinstance(caught.value.__cause__, (DriverError, AllocationError, FFTError))
+    auto = replace(draft, backend=replace(draft.backend, backend="auto"))
+    decision = resolve_device("pr", auto, gate2_colab.probe_gate2_t4)
+    assert decision.resolved == "numpy" and decision.fallback_reason == str(caught.value)

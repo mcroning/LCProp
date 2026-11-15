@@ -77,7 +77,7 @@ def preset(route):
                                         gain_length_product=0.1),
         solver=PRSolverOptions(Nt=3, dt_normalized=0.001,
                                integrator="semi_implicit_trapezoidal"),
-        backend=BackendSpec(backend="auto", precision="float64", verbose=False),
+        backend=BackendSpec(backend="numpy", precision="float64", verbose=False),
     )
 
 
