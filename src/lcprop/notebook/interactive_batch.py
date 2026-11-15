@@ -12,6 +12,7 @@ import ipywidgets as W
 from IPython.display import display
 from matplotlib import pyplot as plt
 
+from lcprop.notebook.batch_device import gpu_scope_reason
 from lcprop.notebook.batch_beam_plane import BatchBeamPlane
 from lcprop.notebook.batch_files import (
     archive_completed, save_verified_copy, selected_upload, unpack_completed, upload_content,
@@ -216,11 +217,7 @@ class InteractiveBatch:
         else:
             material = {name: number(label, getattr(request.material, name))
                         for name, label in PR_MATERIAL_CONTROLS.items()}
-            options = [("CPU", "numpy"), ("Auto (CPU)", "auto")]
-            if route == "pr" and (session.gpu_probe is not None or request.backend.backend == "cupy"):
-                options.append(("Qualified T4 opt-in", "cupy"))
-            if request.backend.backend not in dict(options).values():
-                options.append(("Unsupported GPU intent", request.backend.backend))
+            options = [("CPU", "numpy"), ("Auto", "auto"), ("GPU", "cupy")]
             device = W.Dropdown(description="Device", options=options, value=request.backend.backend)
             inputs.append(device)
             material_panel = W.VBox([*material.values(), device])
@@ -245,7 +242,12 @@ class InteractiveBatch:
                 solver_values[key] = float(text) if text else None
             return solver_values
 
-        def update_summary():
+        reviewed_auto = None
+
+        def update_summary(*, draft_changed=False):
+            nonlocal reviewed_auto
+            if draft_changed:
+                reviewed_auto = None
             try:
                 # Upload events refresh admission while edits may still be invalid.
                 parsed_solver_values()
@@ -289,6 +291,22 @@ class InteractiveBatch:
                     + f"<br>Retention: {retention}" + resolved
                     + ("<br>" + escape("; ".join(warnings)) if warnings else "")
                 )
+                device_blocked = False
+                if not lc:
+                    intent = draft.backend.backend
+                    if intent == "numpy":
+                        device_status = "CPU requested → CPU · float64"
+                    else:
+                        reason = gpu_scope_reason(route, draft, session.gpu_probe)
+                        if reason and intent == "auto":
+                            device_status = f"Auto requested → CPU · float64 · {reason}"
+                        elif reason:
+                            device_status = f"GPU requested · Unavailable · {reason}"
+                            device_blocked = True
+                        else:
+                            label = "Auto" if intent == "auto" else "GPU"
+                            device_status = f"{label} requested · float64 · Device checked on Run"
+                    grid_summary.value += f"<br>{escape(device_status)}"
                 inspect.value = f"<pre>{escape(json.dumps(payload, indent=2))}</pre>"
                 try:
                     session.require_admission(charge)
@@ -296,7 +314,7 @@ class InteractiveBatch:
                     grid_summary.value += f"<br>{escape(str(error))}"
                     button.disabled = True
                 else:
-                    button.disabled = session.busy
+                    button.disabled = session.busy or device_blocked
                 return True
             except (TypeError, ValueError, OverflowError) as error:
                 grid_summary.value = escape(str(error))
@@ -347,8 +365,14 @@ class InteractiveBatch:
 
         for control in (route_control, *inputs, button, reset, copy_from, copy_grid, release):
             control.disabled = session.busy
+
+        def edit():
+            nonlocal reviewed_auto
+            reviewed_auto = None
+            update()
+
         for control in inputs:
-            control.observe(lambda _: self._guard(generation, update), names="value")
+            control.observe(lambda _: self._guard(generation, edit), names="value")
         def select_route(change):
             selected = change["new"]
             if selected in unavailable:
@@ -358,7 +382,29 @@ class InteractiveBatch:
                 self._guard(generation, lambda: transition(lambda: session.switch(selected)))
 
         route_control.observe(select_route, names="value")
-        button.on_click(lambda _: self._guard(generation, lambda: update() and session.start(generation)))
+        def review_auto(digest, decision):
+            nonlocal reviewed_auto
+            current = (digest, decision.metadata())
+            if reviewed_auto == current:
+                return True
+            changed = reviewed_auto is not None
+            reviewed_auto = current
+            reason = f" · {decision.fallback_reason}" if decision.fallback_reason else ""
+            prefix = "Device decision changed. " if changed else ""
+            self.notice.value = escape(
+                f"{prefix}Auto → {decision.label} · {decision.precision}{reason}. "
+                "Press Run again to accept this decision."
+            )
+            return False
+
+        def run():
+            nonlocal reviewed_auto
+            if update():
+                session.start(generation, review_auto=review_auto)
+            else:
+                reviewed_auto = None
+
+        button.on_click(lambda _: self._guard(generation, run))
         reset.on_click(lambda _: self._guard(generation, restore))
         copy_grid.on_click(lambda _: self._guard(generation, lambda: transition(
             lambda: session.copy_grid(copy_from.value))))
@@ -607,7 +653,7 @@ class InteractiveBatch:
             label = f"Auto → {device.label}" if device.requested == "auto" else device.label
             fallback = f"<br>{escape(device.fallback_reason)}" if device.fallback_reason else ""
             self.progress_view.value = (
-                f"Run {session.last_run_id} · {escape(label)} · {session.elapsed:.1f} s"
+                f"Run {session.last_run_id} · {escape(label)} · {escape(device.precision)} · {session.elapsed:.1f} s"
                 f"{stop.get(session.status, '')}<br>{escape(stage)} {meter}{fallback}"
             )
         route_changed = self._view_route != session.route

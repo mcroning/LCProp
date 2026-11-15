@@ -217,7 +217,7 @@ class BatchSession:
         self.presentation = presentation
         return True
 
-    def start(self, generation):
+    def start(self, generation, *, review_auto=None):
         if self.busy or self.disposed or generation != self.generation:
             return False
         loop = asyncio.get_running_loop()
@@ -225,6 +225,9 @@ class BatchSession:
         payload, warnings, charge = self.preflight(route, request)
         _, requested_digest = identity(payload)
         device = resolve_device(route, request, self.gpu_probe)
+        if device.requested == "auto" and review_auto is not None:
+            if not review_auto(requested_digest, device):
+                return False
         if material_for(route) == "pr":
             request = replace(request, backend=replace(request.backend, backend=device.resolved))
             payload = ROUTES[route][1].encode_request(request)
@@ -235,7 +238,8 @@ class BatchSession:
         self.last_device = device
         self.elapsed = 0.0
         self.generation += 1
-        self.status, self.message = "running", "\n".join(warnings)
+        self.status, self.message = "running", "\n".join(
+            (*warnings, device.fallback_reason) if device.fallback_reason else warnings)
         self.progress = self.partial = None
         self.task = loop.create_task(self._execute(
             route, request, run_id, encoded, digest, self.token, device, charge, requested_digest))
@@ -267,6 +271,8 @@ class BatchSession:
 
         def run_on_device():
             with device.context():
+                if device.gpu is not None:
+                    device.verify_gpu_memory((request.grid.Nx, request.grid.Ny))
                 return self.runner.run_operation(
                     operation, deepcopy(request), cancellation_token=token,
                     progress_callback=progress,
@@ -342,6 +348,12 @@ class BatchSession:
             if not self.disposed and self.active_id == run_id:
                 self.elapsed = monotonic() - started
                 self.status, self.message = "failed", f"Execution: {type(error).__name__}: {error}"
+                cleanup = getattr(error, "cuda_cleanup_error", None)
+                if cleanup is not None:
+                    self.message += (
+                        f" · CUDA context cleanup also failed ({type(cleanup).__name__}: {cleanup}). "
+                        "Reconnect the runtime."
+                    )
         finally:
             if self.active_id == run_id:
                 self.active_id = None

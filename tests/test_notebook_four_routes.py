@@ -4,6 +4,7 @@ from dataclasses import replace
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
@@ -46,6 +47,7 @@ def session():
 ])
 def test_defaults_codec_and_fake_dispatch(tmp_path, session, route, key, shape):
     session.switch(route)
+    session.gpu_probe = forbidden
     request = session.draft
     grid = request.grid
     assert (grid.Nx, grid.Ny, round(grid.z_length_um / grid.dz_um)) == shape
@@ -186,7 +188,8 @@ def test_verified_drive_copy(tmp_path, monkeypatch):
     assert not target.exists() and source.read_bytes() == b"saved request"
 
 
-def test_legacy_pr_zip(tmp_path, session):
+def test_legacy_pr_zip(tmp_path, session, monkeypatch):
+    monkeypatch.setitem(sys.modules, "cupy", None)
     fixture = os.environ.get("LCPROP_NOTEBOOK_PR_ZIP")
     receipt = os.environ.get("LCPROP_NOTEBOOK_PR_RECEIPT")
     if not fixture or not receipt:
