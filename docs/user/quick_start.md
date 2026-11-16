@@ -1,75 +1,85 @@
-# LCProp Quick Start
+# LCProp Desktop Quick Start
 
-This guide is the shortest path from a fresh checkout to a small, inspectable
-LC or photorefractive (PR) calculation. The examples are smoke-sized starting
-points, not convergence evidence for a scientific conclusion.
+Use this guide to install and open the LC and photorefractive (PR) desktop
+applications. For headless Python use, see the [engine quick start](../developer_quickstart.md).
+The [Colab notebooks](../../README.md#optional-colab-notebooks) are an optional
+browser interface with their own published release and qualification.
 
-## Install and launch
+## Desktop source reference
 
-LCProp's headless core requires Python 3.10 or newer and does not require
-LaunchPlane or Qt. Start with the [tested engine quick start](../developer_quickstart.md)
-for that route. Desktop use with [LaunchPlane](https://github.com/mcroning/LaunchPlane)
-requires Python 3.11 or newer and **exactly schema 4**, including the host-resolved
-preview interface. Schema numbers are serialization/API contracts, not package
-version numbers; “schema 3 or newer” is not sufficient. The
-[adapter](../../src/lcprop/adapters/launchplane.py) rejects any other schema.
+The native LC and PR startup check used these sources on Apple silicon
+with CPython 3.12.13 and Qt's macOS Cocoa backend.
 
-Use new unused directories and a new environment. `main` is the evolving public
-entry, not a qualification label. The example checks out LCProp's tested source
-reference `4299ec618810f63ed39431ad1cb374f8f7e6cb93` after cloning `main`.
-LaunchPlane is independently pinned to schema-4 source
-`f96715e443cec17c82e23658d82a359052764194` ([serialization](https://github.com/mcroning/LaunchPlane/blob/f96715e443cec17c82e23658d82a359052764194/src/launchplane/serialization.py)).
-That schema check is not a fresh qualification of this desktop pair; no package
-version or current companion branch alone guarantees compatibility. A separate
-fresh desktop installation/acceptance pass remains required.
+| Component | Source revision | Distribution label |
+| --- | --- | --- |
+| LCProp | [`9d3fa6abe074a298843a800cbc4ece1226bb4ba6`](https://github.com/mcroning/LCProp/commit/9d3fa6abe074a298843a800cbc4ece1226bb4ba6) | `0.4.0` |
+| LaunchPlane | [`b71d125eb08074b0992dc849a5f4fc39e45eabc2`](https://github.com/mcroning/LaunchPlane/commit/b71d125eb08074b0992dc849a5f4fc39e45eabc2) | `0.1.0.dev0` |
+
+LaunchPlane supplies the beam editor. LCProp requires exactly schema 4 and the
+matching preview API. Use the companion revision in the table. Package version
+labels alone do not identify either checkout.
+
+The maintainer visually checked the startup input-intensity preview and the
+waiting state for longitudinal cuts in both applications. Both exited cleanly.
+Minimum window size remains a layout follow-up. The check used staged LCProp
+source, LaunchPlane files from the pinned companion build, and hash-verified
+dependency wheels. A subsequent fresh install following the commands below
+also passed on macOS 26.6.2 arm64 with Python 3.12.13. The maintainer opened and
+closed both installed apps at defaults. Use the source installation below for
+this pairing. Other operating systems, production solves, GPU use, and Slurm
+are outside these startup checks.
+
+## Install from source in a clean environment
+
+These commands target macOS 14 or later on Apple silicon, as required by the
+recorded dependency wheels. Use an arm64 Python 3.12.13 interpreter and run
+the commands from a new, unused directory on local storage. Save the
+[desktop runtime requirements](desktop-macos-arm64-requirements.txt) from this
+guide alongside the two checkouts as `desktop-macos-arm64-requirements.txt`.
+Pip checks each runtime wheel against the recorded SHA-256 and stops if a
+matching wheel is unavailable. Stop if any command fails. The build tools used by pip are resolved
+separately, so the resulting local builds may differ byte-for-byte from
+other builds of the same source.
 
 ```bash
-mkdir lcprop-work
-cd lcprop-work
 python3.12 -m venv .venv
 source .venv/bin/activate
+python -c 'import platform, sys; assert (sys.platform, platform.machine(), sys.version_info[:3]) == ("darwin", "arm64", (3, 12, 13))'
+
 git clone --no-checkout https://github.com/mcroning/LaunchPlane.git
-git -C LaunchPlane checkout --detach f96715e443cec17c82e23658d82a359052764194
-git clone --branch main https://github.com/mcroning/LCProp.git
-git -C LCProp checkout --detach 4299ec618810f63ed39431ad1cb374f8f7e6cb93
-python -m pip install ./LaunchPlane
-cd LCProp
-python -m pip install '.[gui]'
+git -C LaunchPlane checkout --detach b71d125eb08074b0992dc849a5f4fc39e45eabc2
+git clone --no-checkout https://github.com/mcroning/LCProp.git
+git -C LCProp checkout --detach 9d3fa6abe074a298843a800cbc4ece1226bb4ba6
+
+python -m pip install --index-url https://pypi.org/simple --require-hashes --only-binary=:all: -r desktop-macos-arm64-requirements.txt
+python -m pip install --no-deps ./LaunchPlane './LCProp[gui]'
+python -m pip check
 python -c 'from launchplane.serialization import SCHEMA_VERSION; assert SCHEMA_VERSION == 4, SCHEMA_VERSION'
+git -C LCProp rev-parse HEAD
+git -C LaunchPlane rev-parse HEAD
+python -m pip freeze
 ```
 
-Record both `git rev-parse HEAD` values and installed dependency versions. These
-commands install dependencies only when you run them; do not use a preserved
-working environment. The existing historical notebook links keep their own
-pinned identities and do not qualify this desktop setup.
+### Launch the applications
 
-For **developer editable installation**, create a feature branch in your fork
-from your stated baseline, then use the new environment and companion checkout:
-
-```bash
-python -m pip install -e ../LaunchPlane
-python -m pip install -e '.[gui,test]'
-```
-
-See the [test tiers](../developer_testing.md) before selecting tests. Editable
-installation is not required for ordinary Local execution. Slurm can deploy
-supported verified installed distributions or clean source checkouts; see
-[deployment prerequisites and limitations](user_guide.md#package-deployment-and-remote-environment-prerequisites).
-A successful Local installation does not establish remote environment readiness.
-
-Launch the LC application:
+From a Terminal in your macOS desktop session, activate the environment and
+launch LC or PR from the working directory.
 
 ```bash
 python -m lcprop.lc.gui.app
 ```
 
-Launch the PR application:
-
 ```bash
-lcprop-pr
+python -m lcprop.pr.gui.app
 ```
 
-The equivalent module command is `python -m lcprop.pr.gui.app`.
+The PR installation also provides the `lcprop-pr` command. For editable
+development, follow the [developer quick start](../developer_quickstart.md)
+and the [test tiers](../developer_testing.md) in a separate environment.
+
+The exercises below are small starting points. Use the [User Guide](user_guide.md)
+for workflow details. The online guide follows public main, so individual
+controls may differ in the pinned desktop revision.
 
 ## First LC calculation
 
@@ -162,7 +172,7 @@ does not expose the PR Fast/Full retrieval selector.
 Use **Save Experiment** before expensive runs. Experiment files preserve the
 user-visible scientific request and migrate supported older schema versions.
 Use checkpoints for continuation state; an experiment file is not a checkpoint.
-Record the Product commit, experiment file, backend/precision, and result
+Record the LCProp commit, experiment file, backend/precision, and result
 retention policy with any scientific result.
 
 Continue with the [LCProp User Guide](user_guide.md) before a large or
