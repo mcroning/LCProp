@@ -23,9 +23,11 @@ The maintainer visually checked the startup input-intensity preview and the
 waiting state for longitudinal cuts in both applications. Both exited cleanly.
 Minimum window size remains a layout follow-up. The check used staged LCProp
 source, LaunchPlane files from the pinned companion build, and hash-verified
-dependency wheels. A public desktop wheel for that exact setup and a fresh
-end-to-end check of the install commands below are both pending. Other operating
-systems, production solves, GPU use, and Slurm are outside this startup check.
+dependency wheels. A subsequent fresh install following the commands below
+also passed on macOS 26.6.2 arm64 with Python 3.12.13. The maintainer opened and
+closed both installed apps at defaults. Use the source installation below for
+this pairing. Other operating systems, production solves, GPU use, and Slurm
+are outside these startup checks.
 
 ## Install from source in a clean environment
 
@@ -60,7 +62,8 @@ python -m pip freeze
 
 ### Launch the applications
 
-With the environment active, launch LC or PR from the working directory.
+From a Terminal in your macOS desktop session, activate the environment and
+launch LC or PR from the working directory.
 
 ```bash
 python -m lcprop.lc.gui.app
