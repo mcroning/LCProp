@@ -91,7 +91,7 @@ def test_after_restart_exact_install_opens_without_installing(opening, tmp_path,
     marker.write_text(json.dumps({"wheel_sha256": opening["WHEEL_SHA256"], "installed_pid": -1}))
     seen = []
     opening["_display_workbench"] = lambda ns: seen.append(ns)
-    monkeypatch.setattr(opening["importlib"].metadata, "version", lambda name: "0.10.0")
+    monkeypatch.setattr(opening["importlib"].metadata, "version", lambda name: "0.10.0" if name == "ipympl" else opening["RENDERER_VERSION"])
     namespace = {}
     opening["_open_pr_notebook"](namespace)
     assert seen == [namespace]
@@ -111,3 +111,16 @@ def test_interrupted_wheel_only_install_resumes_rendering_extra(opening, tmp_pat
     assert len(calls) == 1 and calls[0][-1].endswith("[colab]")
     assert "--force-reinstall" not in calls[0]
     assert "Restart session once" in capsys.readouterr().out
+
+
+def test_stock_renderer_is_upgraded_without_replacing_exact_engine(opening, tmp_path, monkeypatch):
+    kit(opening, tmp_path)
+    opening["_installed_matches"] = lambda _: True
+    opening["sys"] = SimpleNamespace(modules={}, executable="fake-python")
+    monkeypatch.setattr(opening["importlib"].metadata, "version",
+                        lambda name: "3.10.0" if name == "matplotlib" else "0.10.0")
+    calls = []
+    opening["subprocess"] = SimpleNamespace(run=lambda args, **kw: calls.append(args))
+    opening["_open_pr_notebook"]({})
+    assert len(calls) == 1
+    assert "matplotlib==3.11.2" in calls[0] and "--force-reinstall" not in calls[0]

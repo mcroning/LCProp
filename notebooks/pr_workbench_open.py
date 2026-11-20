@@ -10,6 +10,7 @@ import subprocess
 import sys
 import zipfile
 
+RENDERER_VERSION = "3.11.2"
 SETUP_NAME = "LCProp-PR-workbench-setup.zip"
 SETUP_SHA256 = "0c5866e044e50b142581c44f981efd601e741617bc94825103fd2ffd1706045d"
 WHEEL_NAME = "lcprop-0.5.0rc3-py3-none-any.whl"
@@ -83,7 +84,7 @@ def _open_pr_notebook(namespace):
     installed = _installed_matches(wheel_bytes)
     try:
         importlib.metadata.version("ipympl")
-        rendering_ready = True
+        rendering_ready = importlib.metadata.version("matplotlib") == RENDERER_VERSION
     except importlib.metadata.PackageNotFoundError:
         rendering_ready = False
     if not installed or not rendering_ready:
@@ -98,7 +99,7 @@ def _open_pr_notebook(namespace):
         # reinstalls of Colab's scientific dependencies.
         if not installed:
             subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", str(wheel_path)], check=True)
-        subprocess.run([sys.executable, "-m", "pip", "install", str(wheel_path) + "[colab]"], check=True)
+        subprocess.run([sys.executable, "-m", "pip", "install", "matplotlib==" + RENDERER_VERSION, str(wheel_path) + "[colab]"], check=True)
         if not _installed_matches(wheel_bytes):
             raise RuntimeError("Installation did not match the verified wheel. Stop here; no workbench or solver was started.")
         marker.write_text(json.dumps({"wheel_sha256": WHEEL_SHA256, "installed_pid": os.getpid()}))
