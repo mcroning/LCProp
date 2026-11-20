@@ -29,3 +29,8 @@ include docs/development/constant_gauge_integration.json
 
 # Deliberately small synthetic UI example; no research results.
 include src/lcprop/notebook/assets/synthetic_pr.zip
+
+# One clean source-preview entry point and its local staging helper.
+include notebooks/pr_workbench_source.ipynb
+include notebooks/pr_workbench_open.py
+include tools/stage_pr_workbench.py

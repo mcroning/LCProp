@@ -4,6 +4,7 @@ from importlib import resources
 from pathlib import Path
 
 import ipywidgets as W
+import matplotlib.pyplot as plt
 
 from .batch_beam_plane import BatchBeamPlane
 from .batch_files import MAX_UPLOAD_BYTES
@@ -159,6 +160,11 @@ class PRWorkbench(PRNotebook):
         super()._update_selection(_)
         self._show_scientific_status()
 
+    def _new_result_figure(self):
+        # Fit the normal narrow Colab panel without changing physical aspect.
+        with plt.ioff():
+            return plt.figure(figsize=(3.6, 3.2), layout="constrained")
+
     def _draw(self, _=None):
         # Clear only this output model: clear_output inside a Colab callback may
         # otherwise erase the parent cell, including the workbench itself.
@@ -167,6 +173,12 @@ class PRWorkbench(PRNotebook):
         output.clear_output = lambda *a, **k: setattr(output, "outputs", ())
         try:
             super()._draw(_)
+            if self._figure is not None:
+                self._figure.canvas.layout.min_width = "0"
+                self._figure.canvas.layout.max_width = "100%"
+                for axis in self._figure.axes:
+                    axis.title.set_wrap(True)
+                self._figure.canvas.draw_idle()
         finally:
             output.clear_output = original
 

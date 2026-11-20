@@ -6,21 +6,26 @@ LC has a separate interface. Full-transverse PR transport is outside this previe
 
 ## Open
 
-1. In a clean environment, install this isolated checkout with `python -m pip install '.[colab]'`.
-   Select that environment as your notebook kernel. In Colab use a disposable CPU
-   runtime and install a separately reviewed build of this revision; the published
-   rc3 wheel does not provide `PRWorkbench`. No private setup kit is required.
-2. Open `notebooks/pr_workbench_source.ipynb` and run **Open PR workbench**.
-3. Use **Beams**, **Results**, or **Files**. **Open synthetic example** displays a
-   small demonstration without propagation. Only **Run** executes the solver.
+1. Connect a disposable Colab CPU runtime.
+2. For this unpublished preview, upload **LCProp-PR-workbench-setup.zip** through
+   the Files sidebar. Keep it zipped; no result ZIP or separate wheel is needed.
+3. Open the supplied notebook and run **Open PR workbench**. If asked, choose
+   **Runtime → Restart session** once and run that same cell again. Then use the
+   workbench; **Files → Open synthetic example** needs no propagation.
 
-The opening cell performs no installation or automatic restart. After installing
-or changing package versions, save needed files, restart the kernel, and rerun
-Open PR workbench. Rerunning it in the same live kernel redisplays the existing
-controller, drafts, and results. A disconnected browser can reconnect and rerun
-it; a deleted or replaced runtime cannot recover unsaved state. Save before ending
-one. An incompatible/disposed controller requires an explicit restart rather
-than silently replacing unsaved work.
+The single cell verifies the setup ZIP and exact wheel automatically. Installation
+is confined to that disposable runtime. It asks for a restart rather than clearing
+live state itself. Re-running with an existing workbench redisplays the same
+controller before considering installation, preserving committed drafts/results.
+After a browser disconnect, rerun Open. Deleted/replaced runtimes cannot recover
+unsaved arrays: save before ending one. The opening help is included directly in
+the notebook, without a relative web link. Drive is never required for setup.
+
+Developers can instead install this isolated checkout with
+`python -m pip install '.[colab]'` in a clean environment and call
+`open_pr_workbench(globals(), hosted=False)` after selecting the widget backend.
+The published rc3 wheel does not contain this source-preview interface. The setup
+ZIP is staged locally with `tools/stage_pr_workbench.py`; it is not published.
 
 ## Controls and interpretation
 
@@ -41,7 +46,7 @@ A finished Static solve is labeled converged only when its result says so. A
 partial result is identified separately. TD completion is not presented as global
 convergence. The included example is synthetic, not a scientific calculation.
 
-Results reuse existing field choices and XY/XZ/YZ views when the selected product
+Results use a compact canvas that fits a narrow Colab panel, and reuse existing field choices and XY/XZ/YZ views when the selected product
 contains those axes. Physical and Square aspects reuse existing plotting behavior.
 An unavailable longitudinal product is explained rather than fabricated.
 

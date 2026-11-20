@@ -299,6 +299,19 @@ def test_source_notebook_is_clean_and_has_one_noninstalling_open_cell():
     assert len(cells) == 1 and cells[0]["outputs"] == []
     code = "".join(cells[0]["source"])
     ast.parse(code)
-    assert "open_pr_workbench(globals()" in code
-    assert "pip install" not in code and "drive.mount" not in code
+    assert "_open_pr_notebook(globals())" in code
+    assert "drive.mount" not in code
+    assert "PIN_SETUP_SHA256" not in code and "PIN_WHEEL_SHA256" not in code
     assert "run_operation" not in code
+
+
+def test_workbench_figure_fits_narrow_panel_and_default_pr_size_unchanged(app):
+    import matplotlib.pyplot as plt
+    small = app._new_result_figure()
+    regular = PRNotebook._new_result_figure(app)
+    try:
+        assert tuple(small.get_size_inches()) == (3.6, 3.2)
+        assert tuple(regular.get_size_inches()) == (6., 4.)
+    finally:
+        plt.close(small)
+        plt.close(regular)

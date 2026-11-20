@@ -808,6 +808,11 @@ class InteractiveBatch:
             f"<pre>{escape(provenance)}\n{escape(diagnostics)}\n{escape(record.request_json)}</pre>"
         )
 
+    def _new_result_figure(self):
+        with plt.ioff():
+            size = (8, 5) if self.fixed_route == "lc" else (6, 4)
+            return plt.figure(figsize=size, layout="constrained")
+
     def _draw(self, _=None):
         if self._updating_results or self.session.disposed:
             return
@@ -826,9 +831,7 @@ class InteractiveBatch:
                                    None if self.position.disabled else self.position.value)
             fig = self._figure
             if fig is None:
-                with plt.ioff():
-                    size = (8, 5) if self.fixed_route == "lc" else (6, 4)
-                    fig = plt.figure(figsize=size, layout="constrained")
+                fig = self._new_result_figure()
                 if isinstance(fig.canvas, W.Widget):
                     self._figure = fig
                     fig.canvas.layout.min_width = f"{fig.bbox.width:g}px"
