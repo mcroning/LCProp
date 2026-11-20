@@ -56,3 +56,14 @@ def test_invalid_wheel_name_rejected_before_output_or_pin_changes(staging, name)
     assert opener.read_bytes() == before
     assert old_kit.read_bytes() == b'previous kit retained'
     assert not (destination / 'LCProp-PR-workbench.ipynb').exists()
+
+
+def test_unpublished_kit_never_offers_wrong_published_download(staging):
+    root, stage = staging
+    wheel = root / 'lcprop-0.5.0rc5-py3-none-any.whl'
+    wheel.write_bytes(b'synthetic wheel only')
+    stage(wheel, root / 'delivery')
+    scope = runpy.run_path(str(root / 'notebooks/pr_workbench_open.py'), run_name='test')
+    assert scope['SETUP_DOWNLOAD_URL'] == ''
+    text = (root / 'delivery/LCProp-PR-workbench.ipynb').read_text()
+    assert 'published rc4 ZIP does not contain' in text

@@ -30,7 +30,10 @@ def stage(wheel, destination):
               "wheel": hashlib.sha256(wheel_bytes).hexdigest()}
     opener = root / "notebooks/pr_workbench_open.py"
     code = opener.read_text()
-    for key, value in [("SETUP_SHA256", hashes["setup"]),
+    # A private/new setup kit must never link to a different published payload.
+    setup_url = ("https://github.com/mcroning/LCProp/releases/download/v0.5.0rc4/LCProp-PR-workbench-setup.zip" if
+                 hashes["setup"] == "0e2b3997b5cee7d59603eabe230416dc009de682dff5ee73cb2ea1fe7840ce29" else "")
+    for key, value in [("SETUP_DOWNLOAD_URL", setup_url), ("SETUP_SHA256", hashes["setup"]),
                        ("WHEEL_NAME", wheel.name), ("WHEEL_SHA256", hashes["wheel"])]:
         code, count = re.subn(r'^' + key + r' = "[^"]+"',
                               lambda _: key + " = " + json.dumps(value), code, flags=re.M)
@@ -46,8 +49,15 @@ def stage(wheel, destination):
 
 **Using the workbench:** Evolution selects reduced x-only Static or time dependent; CPU is default. Advanced settings hold grid, material and solver controls. Only Run starts propagation. Stop is cooperative. Results show saved fields and XY/XZ/YZ when available, with Physical or Square aspect. In Files, upload your experiment/result through the sidebar, refresh the list, and select Open. Drive is optional.
 
-**Limits:** 256 MiB per result; 2.5 GiB working plus resident results; 512 MiB runtime reserve; 60-second cooperative PR limit; 128 MiB ZIP import/export. Existing GPU restrictions remain; this CPU setup installs no GPU software. Full x–y transport and private large-result backups are outside this preview. This is an unpublished source build, not the released rc3 wheel.
+**Limits:** 256 MiB per result; 2.5 GiB working plus resident results; 512 MiB runtime reserve; 60-second cooperative PR limit; 128 MiB ZIP import/export. Existing GPU restrictions remain; this CPU setup installs no GPU software. Full x–y transport and private large-result backups are outside this preview. This development source build is separate from published release assets.
 '''
+    prerequisite = (f"[Download the matching setup ZIP]({setup_url})" if setup_url else
+                    "Use the matching development setup ZIP supplied beside this notebook; "
+                    "the published rc4 ZIP does not contain these development changes.")
+    markdown += "\n**Setup ZIP source:** " + prerequisite + "\n"
+    markdown = markdown.replace("through the sidebar, refresh the list, and select Open",
+                                "through Colab’s sidebar, click **Refresh workbench files** here "
+                                "(not the sidebar refresh), choose **Saved file**, then **Open selected file**")
     notebook = {"nbformat": 4, "nbformat_minor": 5, "metadata": {
         "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
         "language_info": {"name": "python"}, "colab": {"name": "LCProp-PR-workbench.ipynb"}},

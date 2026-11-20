@@ -7,7 +7,7 @@ LC has a separate interface. Full-transverse PR transport is outside this previe
 ## Open
 
 1. Connect a disposable Colab CPU runtime.
-2. For this unpublished preview, upload **LCProp-PR-workbench-setup.zip** through
+2. For this unpublished preview, upload the matching **LCProp-PR-workbench-setup.zip** through
    the Files sidebar. Keep it zipped; no result ZIP or separate wheel is needed.
 3. Open the supplied notebook and run **Open PR workbench**. If asked, choose
    **Runtime → Restart session** once and run that same cell again. Then use the
@@ -58,7 +58,9 @@ An unavailable longitudinal product is explained rather than fabricated.
 ## Files and unchanged limits
 
 In Colab upload an experiment JSON or completed ZIP with the **Files sidebar**,
-then **Files → Refresh file list → Open selected file**. The list shows files in
+then **Files → Refresh workbench files → Saved file → Open selected file**.
+The workbench refresh is distinct from Colab’s sidebar refresh. Opening Files
+automatically rescans; incomplete uploads require a later refresh. The list shows files in
 the current working directory; no picker opens automatically. Download draft and
 completed-result actions reuse existing codecs. An optional Drive panel is
 available but never mounted simply to open the workbench.
@@ -77,3 +79,21 @@ They cover progress/Stop/error, route switching, draft preservation, redisplay,
 independent preview versus scientific admission, result labels, plots, file limits,
 and exact nine-member ZIP round trips. No new propagation, GPU or hosted acceptance
 is implied. A fresh Colab CPU UI check of a reviewed build remains separate.
+
+## Local frontend corrections after rc4
+
+The working source adds explicit CPU/Auto/GPU help without a device probe or policy
+change, responsive controls, and a complete selected-field caption. Space-charge
+products whose existing quantity is `normalized_space_charge_field` and unit is
+`1` are labelled **Normalized field**, with dimensionless/model-normalization help;
+array values and saved metadata are unchanged. Long plot titles use short explicit
+lines to avoid vertical-colorbar overlap. Beam numeric controls show six significant
+digits; full stored values remain in the request and tooltip. Redisplay does not
+round saved beam values. Invalid numeric edits retain the prior request and explain
+the error. Other frontends retain their default widgets/plots.
+
+The published rc4 setup download is linked when it matches the notebook’s pinned
+kit. A newly staged development kit explicitly requires the supplied matching ZIP,
+and never links a different published kit. These frontend fixes are local source
+changes, not a mutation of rc4 assets; testing them in Colab requires a separately
+built/reviewed development wheel and matching kit. No hosted acceptance is implied.

@@ -28,8 +28,7 @@ class BatchBeamPlane:
         ])
         self.preview_status = W.HTML()
         self.fields = {
-            name: W.FloatText(description=label, continuous_update=False,
-                              style={"description_width": "initial"})
+            name: self._field_widget(label)
             for name, label in BEAM_CONTROLS.items()
         }
         self.add = W.Button(description="Add beam")
@@ -73,6 +72,10 @@ class BatchBeamPlane:
         self.add.on_click(lambda _: self._run(lambda: self._add(False)))
         self.duplicate.on_click(lambda _: self._run(lambda: self._add(True)))
         self.delete.on_click(lambda _: self._run(self._delete))
+
+    def _field_widget(self, label):
+        return W.FloatText(description=label, continuous_update=False,
+                           style={"description_width": "initial"})
 
     @property
     def session(self):
