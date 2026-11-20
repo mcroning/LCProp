@@ -12,10 +12,10 @@ import zipfile
 
 RENDERER_VERSION = "3.11.2"
 SETUP_NAME = "LCProp-PR-workbench-setup.zip"
-SETUP_SHA256 = "0e2b3997b5cee7d59603eabe230416dc009de682dff5ee73cb2ea1fe7840ce29"
-SETUP_DOWNLOAD_URL = "https://github.com/mcroning/LCProp/releases/download/v0.5.0rc4/LCProp-PR-workbench-setup.zip"
-WHEEL_NAME = "lcprop-0.5.0rc4-py3-none-any.whl"
-WHEEL_SHA256 = "a7cfb56ed9d4ee92da1e39c0f4a2a5db3be779b2d669593a44ee6a6a5e64482f"
+SETUP_SHA256 = "c7d93313ec5c9f1679ba45fd6bb9dff00854b578cffc8f7af5676ee8c7549811"
+SETUP_DOWNLOAD_URL = ""
+WHEEL_NAME = "lcprop-0.5.0rc5-py3-none-any.whl"
+WHEEL_SHA256 = "5bdc6327a9418b12dab9f7f61f5e74bde108885b5d0c541df4547c980645a4e0"
 
 
 def _installed_matches(wheel_bytes):

@@ -35,7 +35,7 @@ def stage(wheel, destination):
                  hashes["setup"] == "0e2b3997b5cee7d59603eabe230416dc009de682dff5ee73cb2ea1fe7840ce29" else "")
     for key, value in [("SETUP_DOWNLOAD_URL", setup_url), ("SETUP_SHA256", hashes["setup"]),
                        ("WHEEL_NAME", wheel.name), ("WHEEL_SHA256", hashes["wheel"])]:
-        code, count = re.subn(r'^' + key + r' = "[^"]+"',
+        code, count = re.subn(r'^' + key + r' = "[^"]*"',
                               lambda _: key + " = " + json.dumps(value), code, flags=re.M)
         assert count == 1
     opener.write_text(code)

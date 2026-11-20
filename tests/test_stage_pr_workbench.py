@@ -19,7 +19,7 @@ def staging(tmp_path):
     return tmp_path, runpy.run_path(str(tmp_path / 'tools/stage_pr_workbench.py'))['stage']
 
 
-@pytest.mark.parametrize('version', ['0.5.0rc3', '0.5.0rc4'])
+@pytest.mark.parametrize('version', ['0.5.0rc3', '0.5.0rc4', '0.5.0rc5'])
 def test_generated_opener_verifies_supplied_wheel_name_and_bytes(staging, version):
     root, stage = staging
     wheel = root / f'lcprop-{version}-py3-none-any.whl'
@@ -67,3 +67,25 @@ def test_unpublished_kit_never_offers_wrong_published_download(staging):
     assert scope['SETUP_DOWNLOAD_URL'] == ''
     text = (root / 'delivery/LCProp-PR-workbench.ipynb').read_text()
     assert 'published rc4 ZIP does not contain' in text
+
+
+def test_repeated_stage_replaces_pins_with_empty_download_url(staging):
+    root, stage = staging
+    wheel = root / 'lcprop-0.5.0rc5-py3-none-any.whl'
+    wheel.write_bytes(b'first synthetic payload')
+    first = stage(wheel, root / 'first')
+    opener = root / 'notebooks/pr_workbench_open.py'
+    assert runpy.run_path(str(opener), run_name='test')['SETUP_DOWNLOAD_URL'] == ''
+    wheel.write_bytes(b'second synthetic payload')
+    second = stage(wheel, root / 'second')
+    assert first != second
+    scope = runpy.run_path(str(opener), run_name='test')
+    assert scope['SETUP_DOWNLOAD_URL'] == ''
+    assert scope['WHEEL_SHA256'] == second['wheel']
+    assert scope['SETUP_SHA256'] == second['setup']
+    assert scope['_verified_wheel'](root / 'second/LCProp-PR-workbench-setup.zip') == wheel.read_bytes()
+    # A deterministic third pass keeps the same pins and notebook bytes.
+    before = opener.read_bytes()
+    third = stage(wheel, root / 'third')
+    assert third == second and opener.read_bytes() == before
+    assert (root / 'second/LCProp-PR-workbench.ipynb').read_bytes() == (root / 'third/LCProp-PR-workbench.ipynb').read_bytes()
