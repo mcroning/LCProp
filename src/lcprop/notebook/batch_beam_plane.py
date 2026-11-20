@@ -55,6 +55,7 @@ class BatchBeamPlane:
                 ("figure_leave_event", self.cancel), ("key_press_event", self.key),
             ))
             canvas = self.canvas
+        self.canvas_widget = canvas
         self.widget = W.VBox([
             W.HTML("<b>BeamPlane · draft launch</b>"),
             self.beam, W.HBox([self.add, self.duplicate, self.delete]),

@@ -1,9 +1,15 @@
 """Optional notebook interfaces, loaded only when explicitly requested."""
 
-__all__ = ["InteractiveLC", "InteractiveBatch", "LCNotebook", "PRNotebook"]
+__all__ = ["InteractiveLC", "InteractiveBatch", "LCNotebook", "PRNotebook", "PRWorkbench", "open_pr_workbench"]
 
 
 def __getattr__(name):
+    if name in {"PRWorkbench", "open_pr_workbench"}:
+        from . import pr_workbench
+
+        value = getattr(pr_workbench, name)
+        globals()[name] = value
+        return value
     if name == "InteractiveLC":
         from .interactive_lc import InteractiveLC
 

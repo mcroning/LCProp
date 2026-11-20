@@ -25,3 +25,6 @@ include tests/data/pr_constant_gauge_reference.wls
 include docs/pr_transverse_constant_gauge.md
 include docs/pr_transverse_streaming.md
 include docs/development/constant_gauge_integration.json
+
+# Deliberately small synthetic UI example; no research results.
+include src/lcprop/notebook/assets/synthetic_pr.zip

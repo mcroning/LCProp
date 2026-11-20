@@ -1,3 +1,6 @@
+Source-preview addition: see [Reduced PR workbench](pr_workbench.md) for the
+optional reduced Static/TD interface. Published artifacts remain separate.
+
 # LCProp 0.4.0 notebook interface
 
 The historical 0.4.0 release documentation described the qualified 0.4.0rc1

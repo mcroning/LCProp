@@ -59,6 +59,8 @@ class InteractiveBatch:
     """One controller instance. Run requires an active notebook event loop."""
 
     fixed_route = None
+    beam_plane_type = BatchBeamPlane
+    show_unavailable_routes = True
 
     def __init__(self, *, runner=None, validator=validate, preview_factory=preview, gpu_probe=None, **session_options):
         self.preview_factory = preview_factory
@@ -67,7 +69,7 @@ class InteractiveBatch:
                                     fixed_route=self.fixed_route, gpu_probe=gpu_probe,
                                     **session_options)
         self.editor = W.VBox()
-        self.beam_plane = BatchBeamPlane(self)
+        self.beam_plane = self.beam_plane_type(self)
         self.status = W.HTML()
         self.progress_view = W.HTML()
         self.notice = W.HTML()
@@ -160,7 +162,7 @@ class InteractiveBatch:
             "PR static — full transverse (unavailable)": "The 2D static solver requires separate notebook qualification.",
             "PR time dependent — full transverse (unavailable)": "The 2D evolution solver requires separate notebook qualification.",
         }
-        if self.fixed_route != "lc":
+        if self.fixed_route != "lc" and self.show_unavailable_routes:
             route_control.options = (*route_control.options, *((label, label) for label in unavailable))
             route_control.value = route
         inputs = []
@@ -221,6 +223,7 @@ class InteractiveBatch:
             device = W.Dropdown(description="Device", options=options, value=request.backend.backend)
             inputs.append(device)
             material_panel = W.VBox([*material.values(), device])
+        self.device_control = None if lc else device
         grid_summary = W.HTML()
         inspect = W.HTML()
         inspect_panel = disclosure("Inspect request", inspect)
@@ -417,12 +420,19 @@ class InteractiveBatch:
         old_controls = self.editor.children
         guidance = ("LC time dependent starts from dark bias; Continue is unavailable."
                     if lc else "Full-transverse PR static and time dependent are unavailable in this batch.")
-        self.editor.children = (
-            route_control, W.HTML(guidance), disclosure("Grid", W.VBox([
-                *grid_inputs.values(), W.HBox([copy_from, copy_grid])])), grid_summary,
-            material_panel, disclosure("Solver", W.VBox(list(solver_inputs.values()))),
-            inspect_panel, W.HBox([button, reset, release]),
-        )
+        # Named composition points for optional views; default ordering is unchanged.
+        self.editor_sections = {
+            "workflow": route_control,
+            "guidance": W.HTML(guidance),
+            "grid": disclosure("Grid", W.VBox([
+                *grid_inputs.values(), W.HBox([copy_from, copy_grid])])),
+            "summary": grid_summary,
+            "material": material_panel,
+            "solver": disclosure("Solver", W.VBox(list(solver_inputs.values()))),
+            "inspect": inspect_panel,
+            "buttons": W.HBox([button, reset, release]),
+        }
+        self.editor.children = tuple(self.editor_sections.values())
         self._update_editor_summary = update_summary
         update_summary()
         for control in old_controls:
@@ -536,9 +546,10 @@ class InteractiveBatch:
         self.clear_upload_button.on_click(lambda _: editable(clear_upload))
         save.on_click(lambda _: editable(lambda: download(draft_artifact())))
         export.on_click(lambda _: editable(lambda: download(zip_artifact())))
+        self.drive_panel = disclosure("Google Drive (optional)", W.VBox(list(self.drive_buttons)))
         self.files.children = (
             upload, self.upload_receipt, W.HBox([load, self.clear_upload_button, save, export]), self.export_notice,
-            disclosure("Google Drive (optional)", W.VBox(list(self.drive_buttons))),
+            self.drive_panel,
         )
 
     def _open_uploaded(self, name, data, *, upload_bytes=None):
