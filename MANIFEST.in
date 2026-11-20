@@ -5,6 +5,7 @@ include tests/test_notebook_package.py
 include examples/lc_static_interactive.py
 include examples/lc_static_nonlinear_cpu.py
 include docs/notebook_package.md
+include docs/pr_workbench.md
 prune results
 prune reference
 prune .codex-work
