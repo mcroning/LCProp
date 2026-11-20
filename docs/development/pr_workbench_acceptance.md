@@ -16,7 +16,7 @@ published notebooks and release downloads are not changed by this branch.
 | Clean notebook, `notebooks/pr_workbench_source.ipynb` | `d4c2a841eefbfcc048389e0d5a744a45a61f310bea3416345280cc4fc4a242c3` |
 
 The development wheel retains the source version string; it is **not** the
-published rc3 wheel. Its runtime package matches this branch's runtime source.
+published rc3 wheel. Its runtime package matches the accepted runtime source at `1b7b30c`.
 Later opening-cell corrections changed only the notebook helper and tests, so
 those corrections do not change that wheel's identity. The setup ZIP contains
 that exact wheel and a short readme. It has not been published as a release asset.
@@ -90,3 +90,14 @@ release notebook pins or public README links changed. Public admission stays at
 60-second cooperative PR budget, and a 128 MiB ZIP ceiling. Full-transverse PR,
 private large-result recovery helpers and expanded GPU support are excluded.
 This record does not authorize propagation, merging or publication.
+
+## Run-availability explanation follow-up
+
+The shared notebook view now shows a concise blocker directly below Run and in
+its tooltip, instead of forcing workbench users to read the long resource summary.
+Mocked regressions reproduce the 265 MiB estimate against the unchanged 256 MiB
+limit, then verify recovery when admitted, invalid text, unknown memory, explicit
+GPU rejection on Static, and an active run. The updated combined suite passes
+99 checks with five existing optional skips. No guard or scientific setting is
+changed. This source follow-up is not included in the earlier tested development
+wheel above; that wheel has not been rebuilt or represented as current source.

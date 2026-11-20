@@ -227,6 +227,7 @@ def test_fake_stop_error_and_prior_result_preservation(app):
             await asyncio.sleep(.01)
             if s.progress:break
         assert s.busy and s.progress and app.workflow_control.disabled
+        assert 'Another run is active' in app.run_availability.value
         app.stop_button.click();await asyncio.wait_for(s.task,3)
         assert s.status=='stopped' and s.completed is prior and s.partial is not None
         class Failure:
@@ -315,3 +316,52 @@ def test_workbench_figure_fits_narrow_panel_and_default_pr_size_unchanged(app):
     finally:
         plt.close(small)
         plt.close(regular)
+
+
+def test_result_limit_explained_next_to_run_without_summary_dump(app):
+    app.workflow_control.value = 'pr_static'
+    app.beam_plane.duplicate.click()
+    for key, value in {'Nx':256, 'Ny':64, 'z_length_um':1000., 'dz_um':5.}.items():
+        app.grid_inputs[key].value = value
+    draft = deepcopy(app.session.draft)
+    assert app.run_button.disabled
+    assert '265.0 MiB exceeds the 256 MiB per-result limit' in app.run_availability.value
+    assert 'Review Grid settings' in app.run_button.tooltip
+    assert app.run_availability in app.editor_sections['buttons'].children
+    assert 'Working ' not in app.editor.children[2].value
+    assert app.session.draft == draft
+    app.grid_inputs['Nx'].value = 128
+    assert not app.run_button.disabled
+    assert 'Inputs admitted' in app.run_availability.value
+    assert '265.0' not in app.run_availability.value
+
+
+def test_invalid_text_unknown_memory_and_device_each_explain_run(app):
+    app.workflow_control.value = 'pr_static'
+    text = app.solver_inputs['residual_rms_tolerance']
+    text.value = 'invalid'
+    assert app.run_button.disabled and 'invalid' in app.run_availability.value
+    text.value = ''
+    app.session.memory_available = lambda: None
+    app._update_editor_summary()
+    assert app.run_button.disabled and 'memory availability is unknown' in app.run_availability.value
+    app.session.memory_available = lambda: 4 * 1024**3
+    app.device_control.value = 'cupy'
+    assert app.run_button.disabled and 'Select CPU for PR Static' in app.run_availability.value
+    app.device_control.value = 'numpy'
+    assert not app.run_button.disabled and 'Inputs admitted' in app.run_availability.value
+
+
+def test_busy_run_explanation_preserves_limits_and_result(app):
+    app.open_example()
+    result = app.session.completed
+    app.session.status = 'running'
+    app.session.active_id = 'fake-run'
+    app._update_editor_summary()
+    assert app.run_button.disabled and 'Another run is active' in app.run_availability.value
+    assert app.session.completed is result
+    app.session.status = 'idle'
+    app.session.active_id = None
+    app._update_editor_summary()
+    assert not app.run_button.disabled
+    assert (RESULT_LIMIT, WORK_LIMIT, RESERVE) == (256*MIB, 2560*MIB, 512*MIB)

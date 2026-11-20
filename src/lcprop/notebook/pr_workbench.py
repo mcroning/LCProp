@@ -106,12 +106,9 @@ class PRWorkbench(PRNotebook):
         compact = W.HTML()
 
         def summarize(_=None):
-            if self.run_button.disabled and not self.session.busy:
-                compact.value = parts["summary"].value
-            else:
-                grid = self.session.draft.grid
-                compact.value = (f"Grid {grid.Nx} × {grid.Ny} · length {grid.z_length_um:g} µm · "
-                                 "60-second cooperative PR limit. Advanced settings show admission limits.")
+            grid = self.session.draft.grid
+            compact.value = (f"Grid {grid.Nx} × {grid.Ny} · length {grid.z_length_um:g} µm · "
+                             "60-second cooperative PR limit. Advanced settings show admission limits.")
         parts["summary"].observe(summarize, names="value")
         self.run_button.observe(summarize, names="disabled")
         summarize()

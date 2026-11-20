@@ -22,7 +22,7 @@ from lcprop.notebook.batch_requests import (
 )
 from lcprop.core.grid import grid_metadata
 from lcprop.pr.static_workflow import _resolve_static_tolerances
-from lcprop.notebook.batch_resources import MIB, estimate, require_work
+from lcprop.notebook.batch_resources import MIB, RESULT_LIMIT, estimate, require_work
 from lcprop.notebook.batch_results import draw_plane, field_coordinates, retained_plane
 from lcprop.notebook.batch_session import BatchSession
 
@@ -246,6 +246,15 @@ class InteractiveBatch:
             return solver_values
 
         reviewed_auto = None
+        availability = self.run_availability = W.HTML()
+
+        def show_availability(reasons=()):
+            if session.busy:
+                reasons = ("Another run is active; wait for completion or Stop acknowledgement.",)
+            message = ("Run unavailable: " + " ".join(reasons) if reasons else
+                       "Inputs admitted. The selected device is checked on Run.")
+            availability.value = ("<b>" + escape(message) + "</b>" if reasons else escape(message))
+            button.tooltip = message
 
         def update_summary(*, draft_changed=False):
             nonlocal reviewed_auto
@@ -295,6 +304,7 @@ class InteractiveBatch:
                     + ("<br>" + escape("; ".join(warnings)) if warnings else "")
                 )
                 device_blocked = False
+                blockers = []
                 if not lc:
                     intent = draft.backend.backend
                     if intent == "numpy":
@@ -306,6 +316,7 @@ class InteractiveBatch:
                         elif reason:
                             device_status = f"GPU requested · Unavailable · {reason}"
                             device_blocked = True
+                            blockers.append(reason)
                         else:
                             label = "Auto" if intent == "auto" else "GPU"
                             device_status = f"{label} requested · float64 · Device checked on Run"
@@ -315,14 +326,22 @@ class InteractiveBatch:
                     session.require_admission(charge)
                 except ValueError as error:
                     grid_summary.value += f"<br>{escape(str(error))}"
+                    if charge.retained > RESULT_LIMIT:
+                        blockers.append(
+                            f"Estimated result {charge.retained / MIB:.1f} MiB exceeds the "
+                            f"{RESULT_LIMIT / MIB:g} MiB per-result limit. Review Grid settings.")
+                    else:
+                        blockers.append(str(error))
                     button.disabled = True
                 else:
                     button.disabled = session.busy or device_blocked
+                show_availability(blockers)
                 return True
             except (TypeError, ValueError, OverflowError) as error:
                 grid_summary.value = escape(str(error))
                 inspect.value = ""
                 button.disabled = True
+                show_availability((str(error),))
                 return False
 
         def update():
@@ -340,6 +359,7 @@ class InteractiveBatch:
             except ValueError as error:
                 button.disabled = True
                 grid_summary.value = escape(str(error))
+                show_availability((str(error),))
                 self._preview = None
                 self._preview_message = str(error)
                 self._update_selection()
@@ -430,7 +450,7 @@ class InteractiveBatch:
             "material": material_panel,
             "solver": disclosure("Solver", W.VBox(list(solver_inputs.values()))),
             "inspect": inspect_panel,
-            "buttons": W.HBox([button, reset, release]),
+            "buttons": W.VBox([W.HBox([button, reset, release]), availability]),
         }
         self.editor.children = tuple(self.editor_sections.values())
         self._update_editor_summary = update_summary

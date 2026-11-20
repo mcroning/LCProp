@@ -39,6 +39,9 @@ are editable; grid, material, solver, and resource information are under
 The beam-editing image uses an independently sampled, bounded entrance grid.
 It does not alter scientific sampling or make an invalid scientific grid runnable.
 Run continues to use the public validator, resource admission and device policy.
+If Run is unavailable, a short explanation appears directly below the buttons,
+including the estimated result size and limit when that is the blocker. Detailed
+estimates and advisory warnings remain under Advanced settings.
 CPU is the default. Auto may require fallback confirmation. GPU remains restricted
 to the existing frozen reduced TD requests and qualified runtime checks; Static
 requires CPU. This preview neither installs CuPy nor extends GPU qualification.
