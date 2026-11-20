@@ -127,5 +127,16 @@ def test_stock_renderer_is_upgraded_without_replacing_exact_engine(opening, tmp_
 
 
 def test_missing_published_setup_has_direct_verified_download(opening, capsys):
+    # Exercise the published branch explicitly; candidate pins may be unpublished.
+    url = 'https://github.com/mcroning/LCProp/releases/download/v0.5.0rc4/LCProp-PR-workbench-setup.zip'
+    opening['SETUP_DOWNLOAD_URL'] = url
     opening['_open_pr_notebook']({})
-    assert 'https://github.com/mcroning/LCProp/releases/download/v0.5.0rc4/LCProp-PR-workbench-setup.zip' in capsys.readouterr().out
+    assert url in capsys.readouterr().out
+
+
+def test_missing_unpublished_setup_does_not_offer_wrong_release(opening, capsys):
+    assert opening['SETUP_DOWNLOAD_URL'] == ''
+    opening['_open_pr_notebook']({})
+    message = capsys.readouterr().out
+    assert opening['SETUP_NAME'] in message and 'Files sidebar' in message
+    assert 'https://github.com/' not in message
