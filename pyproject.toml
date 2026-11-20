@@ -29,6 +29,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
+"lcprop.notebook.assets" = ["synthetic_pr.zip"]
 "lcprop.pr.assets" = ["runtime_estimator_calibration_v1.json"]
 "lcprop.pr.assets.images" = ["catalog.json", "*.png"]
 
