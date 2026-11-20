@@ -389,3 +389,85 @@ def test_uploaded_json_names_are_listed_and_open_without_result_loss(app, tmp_pa
         assert app.session.draft == draft
         assert app.session.completed is prior
         assert 'Loaded' in app.notice.value
+
+
+def test_beam_display_precision_never_rounds_request_on_sync(app):
+    value = 1.23456789012345
+    field = app.beam_plane.fields['x0_um']
+    field.value = str(value)
+    assert app.session.draft.beams.channels[0].x0_um == value
+    generation = app.session.generation
+    draft = app.session.draft
+    app.beam_plane.sync()
+    app._refresh_status()
+    assert field.value == '1.23457'
+    assert str(value) in field.tooltip
+    assert app.session.draft is draft and app.session.generation == generation
+    field.value = 'not a number'
+    assert app.session.draft is draft
+    assert 'ValueError' in app.notice.value
+    assert field.value == '1.23457'
+
+
+def test_files_tab_refreshes_new_upload_preserving_selection(app, tmp_path):
+    first = app.session.save_draft(tmp_path / 'first.json')
+    app.scan_files()
+    app.saved_file.value = str(first)
+    second = tmp_path / 'second.JSON'
+    second.write_bytes(first.read_bytes())
+    app.sections.selector.value = 2
+    assert str(second) in dict(app.saved_file.options).values()
+    assert app.saved_file.value == str(first)
+    assert 'sidebar' in app.file_status.value and 'Refresh workbench files' in app.file_status.value
+    assert app.scan_button.description == 'Refresh workbench files'
+    assert app.open_button.layout.min_width == '180px'
+
+
+def test_device_help_is_explicit_without_cuda_probe(app):
+    app.session.gpu_probe = lambda *a: pytest.fail('Do not probe CUDA to show help')
+    help_text = app.editor.children[3].value
+    assert all(word in help_text for word in ('CPU:', 'Auto:', 'GPU:', '20 µm', '1 mm', 'confirm', 'T4'))
+    before = app.session.draft
+    app._refresh_status()
+    assert app.device_control.value == 'numpy' and app.session.draft is before
+
+
+def test_narrow_result_title_and_normalized_label_preserve_data(app):
+    import matplotlib.pyplot as plt
+    from lcprop.notebook.batch_results import retained_plane, draw_plane
+    app.open_example()
+    fields, geometry, _ = app._products()
+    field = next(f for f in fields.values() if f.quantity == 'normalized_space_charge_field' and len(f.axes) == 3)
+    original = field.data.copy()
+    for square, axes in [(True, ('z', 'y')), (False, ('z', 'x'))]:
+        plane = retained_plane(field, geometry, axes)
+        fig = app._new_result_figure()
+        ax = fig.add_subplot()
+        artist = draw_plane(ax, plane, square)
+        cb = fig.colorbar(artist, ax=ax, label=plane.value_unit,
+                          location='right' if square else 'bottom')
+        app._decorate_result_figure(fig, ax, field, plane)
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        title = ax.title.get_window_extent(renderer)
+        bar = cb.ax.get_window_extent(renderer)
+        assert not title.overlaps(bar)
+        assert title.x0 >= 0 and title.x1 <= fig.bbox.width
+        label = cb.ax.yaxis.label if square else cb.ax.xaxis.label
+        assert label.get_text() == 'Normalized field'
+        assert field.value_unit == '1'
+        np.testing.assert_array_equal(field.data, original)
+        plt.close(fig)
+    key = next(k for k, f in fields.items() if f is field)
+    app.field.value = key
+    assert 'not V/m' in app.selected_field_help.value
+    assert field.display_name in app.field.tooltip
+
+
+def test_narrow_grid_source_has_full_wrapping_caption(app):
+    row = app.editor_sections['grid'].children[1].children[-1]
+    source, _, caption = row.children
+    assert source.description == 'Grid source'
+    assert row.layout.flex_flow == 'row wrap'
+    assert next(label for label, key in source.options if key == source.value) in caption.value
+    assert app.field.layout.width == '100%'

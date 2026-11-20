@@ -828,6 +828,9 @@ class InteractiveBatch:
             f"<pre>{escape(provenance)}\n{escape(diagnostics)}\n{escape(record.request_json)}</pre>"
         )
 
+    def _decorate_result_figure(self, fig, ax, field, plane):
+        """Optional view-only formatting hook; default frontends are unchanged."""
+
     def _new_result_figure(self):
         with plt.ioff():
             size = (8, 5) if self.fixed_route == "lc" else (6, 4)
@@ -865,6 +868,7 @@ class InteractiveBatch:
                 wide_plot = not square and ax.get_aspect() * ax.get_data_ratio() <= 1 / 3
                 fig.colorbar(artist, ax=ax, label=plane.value_unit,
                              location="bottom" if wide_plot else "right")
+                self._decorate_result_figure(fig, ax, field, plane)
                 self.plot_message.value = ""
                 self.canvas_host.layout.display = ""
                 if self._figure is not None:

@@ -124,3 +124,8 @@ def test_stock_renderer_is_upgraded_without_replacing_exact_engine(opening, tmp_
     opening["_open_pr_notebook"]({})
     assert len(calls) == 1
     assert "matplotlib==3.11.2" in calls[0] and "--force-reinstall" not in calls[0]
+
+
+def test_missing_published_setup_has_direct_verified_download(opening, capsys):
+    opening['_open_pr_notebook']({})
+    assert 'https://github.com/mcroning/LCProp/releases/download/v0.5.0rc4/LCProp-PR-workbench-setup.zip' in capsys.readouterr().out

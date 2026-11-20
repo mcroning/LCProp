@@ -13,6 +13,7 @@ import zipfile
 RENDERER_VERSION = "3.11.2"
 SETUP_NAME = "LCProp-PR-workbench-setup.zip"
 SETUP_SHA256 = "0e2b3997b5cee7d59603eabe230416dc009de682dff5ee73cb2ea1fe7840ce29"
+SETUP_DOWNLOAD_URL = "https://github.com/mcroning/LCProp/releases/download/v0.5.0rc4/LCProp-PR-workbench-setup.zip"
 WHEEL_NAME = "lcprop-0.5.0rc4-py3-none-any.whl"
 WHEEL_SHA256 = "a7cfb56ed9d4ee92da1e39c0f4a2a5db3be779b2d669593a44ee6a6a5e64482f"
 
@@ -68,6 +69,8 @@ def _open_pr_notebook(namespace):
         raise RuntimeError("This preview opens on CPU. Choose Runtime > Change runtime type > CPU, then reconnect.")
     kit = Path.cwd() / SETUP_NAME
     if not kit.is_file():
+        if SETUP_DOWNLOAD_URL:
+            print("Download the required setup ZIP: " + SETUP_DOWNLOAD_URL)
         print(f"One-time prerequisite: upload {SETUP_NAME} using Colab's Files sidebar (folder icon, Upload).")
         print("Choose that setup ZIP only — not a result ZIP or wheel. Then run this same Open cell again. No picker opens automatically.")
         return
