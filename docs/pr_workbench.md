@@ -14,7 +14,9 @@ LC has a separate interface. Full-transverse PR transport is outside this previe
    workbench; **Files → Open synthetic example** needs no propagation.
 
 The single cell verifies the setup ZIP and exact wheel automatically. Installation
-is confined to that disposable runtime. It asks for a restart rather than clearing
+is confined to that disposable runtime. The opening cell pins Matplotlib 3.11.2
+for compatibility with the widget backend; interrupted dependency setup resumes
+from the same cell. It asks for a restart rather than clearing
 live state itself. Re-running with an existing workbench redisplays the same
 controller before considering installation, preserving committed drafts/results.
 After a browser disconnect, rerun Open. Deleted/replaced runtimes cannot recover
