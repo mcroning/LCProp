@@ -95,3 +95,19 @@ def test_after_restart_exact_install_opens_without_installing(opening, tmp_path,
     namespace = {}
     opening["_open_pr_notebook"](namespace)
     assert seen == [namespace]
+
+
+def test_interrupted_wheel_only_install_resumes_rendering_extra(opening, tmp_path, monkeypatch, capsys):
+    kit(opening, tmp_path)
+    opening["_installed_matches"] = lambda _: True
+    opening["sys"] = SimpleNamespace(modules={}, executable="fake-python")
+    def missing(name):
+        raise opening["importlib"].metadata.PackageNotFoundError(name)
+    monkeypatch.setattr(opening["importlib"].metadata, "version", missing)
+    calls = []
+    opening["subprocess"] = SimpleNamespace(run=lambda args, **kw: calls.append(args))
+    opening["_display_workbench"] = lambda _: pytest.fail("Must restart after dependency install")
+    opening["_open_pr_notebook"]({})
+    assert len(calls) == 1 and calls[0][-1].endswith("[colab]")
+    assert "--force-reinstall" not in calls[0]
+    assert "Restart session once" in capsys.readouterr().out

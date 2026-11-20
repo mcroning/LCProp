@@ -80,7 +80,13 @@ def _open_pr_notebook(namespace):
     if receipt.get("wheel_sha256") == WHEEL_SHA256 and receipt.get("installed_pid") == os.getpid():
         print("Setup complete. Choose Runtime > Restart session once (not Disconnect and delete), then run this same Open cell again.")
         return
-    if not _installed_matches(wheel_bytes):
+    installed = _installed_matches(wheel_bytes)
+    try:
+        importlib.metadata.version("ipympl")
+        rendering_ready = True
+    except importlib.metadata.PackageNotFoundError:
+        rendering_ready = False
+    if not installed or not rendering_ready:
         if any(name == "lcprop" or name.startswith("lcprop.") for name in sys.modules):
             raise RuntimeError("A different LCProp is already loaded. Save your work, restart this session, then rerun Open. Nothing was replaced.")
         setup_dir.mkdir(exist_ok=True)
@@ -90,17 +96,14 @@ def _open_pr_notebook(namespace):
         # A previous development wheel can share the rc3 version string. Replace
         # only LCProp explicitly; resolve the extra separately without forcing
         # reinstalls of Colab's scientific dependencies.
-        subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", str(wheel_path)], check=True)
+        if not installed:
+            subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", str(wheel_path)], check=True)
         subprocess.run([sys.executable, "-m", "pip", "install", str(wheel_path) + "[colab]"], check=True)
         if not _installed_matches(wheel_bytes):
             raise RuntimeError("Installation did not match the verified wheel. Stop here; no workbench or solver was started.")
         marker.write_text(json.dumps({"wheel_sha256": WHEEL_SHA256, "installed_pid": os.getpid()}))
         print("Setup complete. Choose Runtime > Restart session once (not Disconnect and delete), then run this same Open cell again.")
         return
-    try:
-        importlib.metadata.version("ipympl")
-    except importlib.metadata.PackageNotFoundError:
-        raise RuntimeError("Notebook rendering dependencies are missing. Install this preview with its colab extra in a clean runtime, then restart and rerun Open.")
     _display_workbench(namespace)
 
 
