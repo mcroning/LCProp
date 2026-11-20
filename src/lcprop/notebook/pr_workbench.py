@@ -191,7 +191,7 @@ class PRWorkbench(PRNotebook):
     def scan_files(self):
         previous = self.saved_file.value
         paths = sorted(p for p in self.files_root.iterdir()
-                       if p.is_file() and (p.name.endswith(".lcprop.json") or p.suffix.lower() == ".zip"))
+                       if p.is_file() and p.suffix.lower() in {".json", ".zip"})
         self.saved_file.options = [("Choose a file", "")] + [(p.name, str(p)) for p in paths]
         if previous in {str(path) for path in paths}:
             self.saved_file.value = previous

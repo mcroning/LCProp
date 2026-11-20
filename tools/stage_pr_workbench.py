@@ -10,10 +10,13 @@ import zipfile
 
 def stage(wheel, destination):
     root = Path(__file__).resolve().parents[1]
+    if not re.fullmatch(r"lcprop-[A-Za-z0-9_.+-]+\.whl", wheel.name):
+        raise ValueError("Choose an LCProp .whl file; no setup files were changed")
+    wheel_bytes = wheel.read_bytes()
     destination.mkdir(parents=True, exist_ok=True)
     kit = destination / "LCProp-PR-workbench-setup.zip"
     with zipfile.ZipFile(kit, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for name, data in [(wheel.name, wheel.read_bytes()), ("READ-ME.txt", (
+        for name, data in [(wheel.name, wheel_bytes), ("READ-ME.txt", (
             "Unpublished reduced PR workbench setup. Keep this ZIP intact.\n"
             "In Colab CPU, upload this ZIP through the Files sidebar, then run\n"
             "the supplied notebook's Open PR workbench cell. If asked, restart\n"
@@ -24,11 +27,13 @@ def stage(wheel, destination):
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, data)
     hashes = {"setup": hashlib.sha256(kit.read_bytes()).hexdigest(),
-              "wheel": hashlib.sha256(wheel.read_bytes()).hexdigest()}
+              "wheel": hashlib.sha256(wheel_bytes).hexdigest()}
     opener = root / "notebooks/pr_workbench_open.py"
     code = opener.read_text()
-    for key, digest in [("SETUP_SHA256", hashes["setup"]), ("WHEEL_SHA256", hashes["wheel"])]:
-        code, count = re.subn(r'^' + key + r' = "[^"]+"', key + ' = "' + digest + '"', code, flags=re.M)
+    for key, value in [("SETUP_SHA256", hashes["setup"]),
+                       ("WHEEL_NAME", wheel.name), ("WHEEL_SHA256", hashes["wheel"])]:
+        code, count = re.subn(r'^' + key + r' = "[^"]+"',
+                              lambda _: key + " = " + json.dumps(value), code, flags=re.M)
         assert count == 1
     opener.write_text(code)
     markdown = '''# PR workbench — reduced Static / time dependent

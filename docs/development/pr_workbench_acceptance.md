@@ -101,3 +101,17 @@ GPU rejection on Static, and an active run. The updated combined suite passes
 99 checks with five existing optional skips. No guard or scientific setting is
 changed. This source follow-up is not included in the earlier tested development
 wheel above; that wheel has not been rebuilt or represented as current source.
+
+## PR review findings resolved
+
+The file list now includes every `.json` suffix the loader supports, including
+uppercase filenames. A regression selects and opens valid ordinary/uppercase JSON
+experiments through the UI, verifying that the existing completed result survives.
+
+The staging tool now carries the supplied LCProp wheel filename into the generated
+opener along with both digests. Synthetic rc3/rc4-named wheel tests verify the
+produced notebook and its verified inner-wheel read. Invalid filenames are rejected
+before existing artifacts or source pins are touched. These are local staging
+checks, not installations or new release builds. The updated combined suite passes
+104 checks with five existing optional skips; no hosted runs or scientific runs
+were required. The previously qualified wheel/kit and release assets are unchanged.

@@ -365,3 +365,27 @@ def test_busy_run_explanation_preserves_limits_and_result(app):
     app._update_editor_summary()
     assert not app.run_button.disabled
     assert (RESULT_LIMIT, WORK_LIMIT, RESERVE) == (256*MIB, 2560*MIB, 512*MIB)
+
+
+def test_uploaded_json_names_are_listed_and_open_without_result_loss(app, tmp_path):
+    app.open_example()
+    prior = app.session.completed
+    saved = app.session.save_draft(tmp_path / 'original.lcprop.json')
+    draft = deepcopy(app.session.draft)
+    names = ['beam-study.json', 'BEAMS.JSON', 'upper.LCPROP.JSON']
+    for name in names:
+        (tmp_path / name).write_bytes(saved.read_bytes())
+    (tmp_path / 'notes.txt').write_text('not an experiment')
+    app.scan_files()
+    options = dict(app.saved_file.options)
+    assert all(str(tmp_path / name) in options.values() for name in names)
+    assert str(tmp_path / 'notes.txt') not in options.values()
+    for name in names:
+        app.saved_file.value = str(tmp_path / name)
+        app.scan_files()
+        assert app.saved_file.value == str(tmp_path / name)
+        app.grid_inputs['Nx'].value = 80
+        app.open_button.click()
+        assert app.session.draft == draft
+        assert app.session.completed is prior
+        assert 'Loaded' in app.notice.value
