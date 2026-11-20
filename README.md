@@ -24,14 +24,14 @@ below do not qualify a different desktop installation.
 Colab provides an alternative browser-based interface with a narrower supported
 workflow set than the desktop applications. It does not replace the desktop GUI.
 
-For the CPU-first notebook prerelease, see [LCProp 0.5.0rc3](https://github.com/mcroning/LCProp/releases/tag/v0.5.0rc3) and the [wheel install instructions](https://github.com/mcroning/LCProp/blob/v0.5.0rc3/docs/releases/0.5.0rc3.md). The notebooks download and verify the exact rc3 wheel automatically in a fresh CPU runtime.
+The **PR workbench** is available in [LCProp 0.5.0rc4](https://github.com/mcroning/LCProp/releases/tag/v0.5.0rc4). It offers reduced x-only PR Static and time-dependent evolution on CPU, with beam editing, saved results and collapsed advanced controls. See the [rc4 opening and install instructions](https://github.com/mcroning/LCProp/blob/v0.5.0rc4/docs/releases/0.5.0rc4.md).
 
-- **LC notebook:** [![Open LC notebook in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mcroning/LCProp/blob/v0.5.0rc3/notebooks/releases/0.5.0rc3/lcprop_lc_colab.ipynb) · [Download notebook](https://github.com/mcroning/LCProp/releases/download/v0.5.0rc3/lcprop_lc_colab.ipynb)
-- **PR notebook:** [![Open PR notebook in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mcroning/LCProp/blob/v0.5.0rc3/notebooks/releases/0.5.0rc3/lcprop_pr_colab.ipynb) · [Download notebook](https://github.com/mcroning/LCProp/releases/download/v0.5.0rc3/lcprop_pr_colab.ipynb)
+- **Open PR workbench:** [![Open PR workbench in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mcroning/LCProp/blob/v0.5.0rc4/notebooks/pr_workbench_source.ipynb) · [Download notebook](https://github.com/mcroning/LCProp/releases/download/v0.5.0rc4/LCProp-PR-workbench-0.5.0rc4-candidate.ipynb)
+- **Required PR setup ZIP:** [LCProp-PR-workbench-setup.zip](https://github.com/mcroning/LCProp/releases/download/v0.5.0rc4/LCProp-PR-workbench-setup.zip). Upload it through Colab's Files sidebar, keep it zipped, then run **Open PR workbench**. If asked, restart the session once and rerun that same cell. The notebook verifies the setup ZIP and its exact wheel; no separate wheel upload or Drive mount is needed.
+- **Verify the rc4 downloads:** [SHA256SUMS](https://github.com/mcroning/LCProp/releases/download/v0.5.0rc4/SHA256SUMS). The release includes the wheel, notebook, setup ZIP, candidate notes and checksum manifest.
+- **LC notebook remains on rc3:** [![Open LC notebook in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mcroning/LCProp/blob/v0.5.0rc3/notebooks/releases/0.5.0rc3/lcprop_lc_colab.ipynb) · [Download notebook](https://github.com/mcroning/LCProp/releases/download/v0.5.0rc3/lcprop_lc_colab.ipynb) · [rc3 install instructions](https://github.com/mcroning/LCProp/blob/v0.5.0rc3/docs/releases/0.5.0rc3.md). This separate notebook downloads and verifies its pinned rc3 wheel automatically.
 
-The published rc3 notebooks expose LC static/TD and reduced x-only PR static/TD
-on CPU. Full-transverse PR and LC TD completed-result ZIP export are not included.
-Ongoing notebook and GPU development is separate from these published artifacts.
+The rc4 PR opening flow is CPU-only; full-transverse PR material transport and new GPU qualification are outside its scope. Existing library GPU guards remain unchanged. The LC rc3 notebook offers static/TD on CPU; LC TD completed-result ZIP export is not included. Prior releases remain available. Both the tagged PR source notebook and the downloadable candidate notebook use the exact same opening code and pins; their headings differ. The preserved rc4 notebook still uses preview/candidate wording.
 
 The [historical CPU demonstration](https://colab.research.google.com/github/mcroning/LCProp/blob/d5b4300e4ccf14d2e89292afcc8f6c8fd378b9e5/notebooks/lc_static_interactive_cpu.ipynb)
 pins its own historical engine/helper versions and has its own stated limits.
