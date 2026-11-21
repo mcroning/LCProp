@@ -12,3 +12,27 @@ outputs/
 src/lc_reference/
 docs/codex/instances/
 src/lc_reference/
+# Local capability deliveries contain the unchanged private integrated engine.
+/delivery/*.whl
+/delivery/LCProp-PR-capabilities-setup.zip
+/delivery-v2/
+/delivery-v3/*.whl
+/delivery-v3/*.zip
+# Complete local evidence stays preserved outside the source PR's file set.
+/records/hosted-acceptance-2026-11-21/
+/records/hosted-repair-acceptance-2026-11-21/
+/records/repair-2026-11-21/
+/records/pr-readiness-review-2026-11-21/
+/records/readiness-fixes-2026-11-21/
+
+/delivery-v4/*.whl
+/delivery-v4/*.zip
+/records/three-beam-preview-fix-2026-11-21/
+
+# Historical delivery/complete evidence remain on disk, outside the PR.
+/delivery/
+/delivery-v3/
+/records/*
+!/records/CAPABILITIES.md
+!/records/LIMITS.md
+!/records/qualification/

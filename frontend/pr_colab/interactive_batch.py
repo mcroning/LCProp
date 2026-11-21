@@ -1,0 +1,597 @@
+"""Interactive notebooks for LC and reduced PR workflows."""
+from collections.abc import Mapping
+from dataclasses import replace
+from html import escape
+import json
+from pathlib import Path
+import shutil
+import tempfile
+from uuid import uuid4
+
+import ipywidgets as W
+from IPython.display import display
+from matplotlib import pyplot as plt
+
+from lcprop.notebook.batch_device import gpu_scope_reason
+from pr_colab.batch_beam_plane import BatchBeamPlane
+from pr_colab.batch_files import (
+    archive_completed, save_verified_copy, selected_upload, unpack_completed, upload_content,
+)
+from .runtime_policy import CompatibleDevices as DevicePolicy
+from pr_colab.batch_requests import (
+    PR_MATERIAL_CONTROLS, material_for, preset, preview, validate,
+)
+from lcprop.core.grid import grid_metadata
+from lcprop.pr.static_workflow import _resolve_static_tolerances
+from pr_colab.batch_resources import MIB, estimate
+from lcprop.notebook.batch_results import draw_plane, field_coordinates, retained_plane
+from pr_colab.batch_session import BatchSession
+
+LC_VOLUME_FIELDS = {"intensity_stack": "Intensity", "delta_theta_stack": "Director response (Δθ)"}
+
+PR_SPACE_CHARGE_SUFFIXES = {
+    "initial_E": "XY slice",
+    "final_E": "XY slice",
+    "initial_E_stack": "Volume",
+    "final_E_stack": "Volume",
+}
+
+PLANES = {"x–y": ("x", "y"), "x–z": ("z", "x"), "y–z": ("z", "y")}
+
+
+def disclosure(label, content):
+    toggle = W.ToggleButton(description=label, layout=W.Layout(width="auto"))
+    content.layout.display = "none"
+
+    def show(change):
+        content.layout.display = "" if change["new"] else "none"
+
+    toggle.observe(show, names="value")
+    return W.VBox([toggle, content])
+
+
+def close_widgets(widget):
+    for child in getattr(widget, "children", ()):
+        close_widgets(child)
+    widget.close()
+
+
+class InteractiveBatch:
+    """One controller instance. Run requires an active notebook event loop."""
+
+    fixed_route = None
+    expanded_routes = True
+    session_type = BatchSession
+    beam_plane_type = BatchBeamPlane
+    device_options = (("CPU", "numpy"), ("Auto", "auto"), ("GPU", "cupy"))
+
+    def __init__(self, *, runner=None, validator=validate, preview_factory=preview, gpu_probe=None, **session_options):
+        if self.session_type is BatchSession:
+            session_options.setdefault("device_policy", DevicePolicy())
+        self.preview_factory = preview_factory
+        self.directory = Path(tempfile.mkdtemp(prefix="lcprop-notebook-"))
+        self.session = self.session_type(runner=runner, validator=validator, notify=self._sync,
+                                    fixed_route=self.fixed_route, gpu_probe=gpu_probe,
+                                    **session_options)
+        self.editor = W.VBox()
+        self.beam_plane = self.beam_plane_type(self)
+        self.status = W.HTML()
+        self.progress_view = W.HTML()
+        self.notice = W.HTML()
+        self.stop_button = W.Button(description="Stop", disabled=True)
+        self.source = W.Dropdown(description="View", options=["Draft preview"])
+        self.field = W.Dropdown(description="Field")
+        if self.fixed_route == "lc":
+            self.cut = W.ToggleButtons(
+                description="Plane", options=[(plane.replace("–", "").upper(), plane)
+                                              for plane in PLANES],
+            )
+        else:
+            self.cut = W.Dropdown(description="Plane", options=list(PLANES))
+        self.aspect = W.Dropdown(description="Aspect", options=["Physical", "Square"])
+        self.position = W.Dropdown(description="Cut")
+        self.plot = W.Output()
+        self.canvas_host = W.VBox()
+        self.canvas_host.layout.width = "100%"
+        self.canvas_host.layout.min_width = "0"
+        self.canvas_host.layout.overflow = "auto"
+        self.canvas_host.layout.align_items = "flex-start"
+        self.plot.layout.overflow = "auto"
+        self.plot_message = W.HTML()
+        self._figure = None
+        self.details = W.HTML()
+        self.files = W.VBox()
+        self.extra = W.VBox([
+            disclosure("Save / load / export", self.files),
+            disclosure("Executed request and diagnostics", self.details),
+        ])
+        self.refresh_button = W.Button(description="Refresh status")
+        self.refresh_button.on_click(self._refresh_status)
+        self.actions = W.HBox([self.stop_button, self.refresh_button])
+        self.widget = W.VBox([
+            self.editor, self.beam_plane.widget, self.actions, self.status, self.progress_view, self.notice,
+            W.HBox([self.source, self.field]), W.HBox([self.cut, self.aspect]),
+            self.position, self.plot_message, self.canvas_host, self.plot, self.extra,
+        ])
+        self._colab_callback = None
+        self._generation = None
+        self._record = None
+        self._updating_results = False
+        self._preview = None
+        self._preview_message = ""
+        self._view_key = None
+        self._route_views = {}
+        self._view_route = self.session.route
+        for control in (self.source, self.field, self.cut):
+            control.observe(self._update_selection, names="value")
+        for control in (self.aspect, self.position):
+            control.observe(self._draw, names="value")
+        self._make_files()
+        self._refresh_preview()
+        self._sync()
+
+    def _guard(self, generation, action):
+        if self.session.disposed or generation != self.session.generation:
+            return
+        try:
+            action()
+        except Exception as error:
+            self.notice.value = f"<b>{escape(type(error).__name__)}</b>: {escape(str(error))}"
+
+    def _refresh_preview(self):
+        try:
+            self.session.validator(self.session.route, self.session.draft)
+            self.session.draft.grid.validate()
+            self._preview = self.preview_factory(self.session.route, self.session.draft)
+            self._preview_message = ""
+        except (TypeError, ValueError) as error:
+            self._preview = None
+            self._preview_message = str(error)
+
+    def _make_editor(self):
+        raise NotImplementedError("Use the PR workbench editor")
+
+    def _make_files(self):
+        session = self.session
+        upload = W.FileUpload(accept=".json,.zip", multiple=False, disabled=session.busy)
+        load = W.Button(description="Load / reopen", disabled=session.busy)
+        save = W.Button(description="Download draft", disabled=session.busy)
+        export = W.Button(description="Download completed")
+        self.upload = upload
+        self.load_button = load
+        self.clear_upload_button = W.Button(description="Clear upload", disabled=True)
+        self.save_button = save
+        self.export_button = export
+        self.export_notice = W.HTML()
+        drive_folder = W.Text(description="Drive folder", value="MyDrive")
+        mount = W.Button(description="Connect Google Drive")
+        drive_draft = W.Button(description="Save draft to Drive")
+        drive_zip = W.Button(description="Save completed ZIP to Drive")
+        self.drive_buttons = (drive_folder, mount, drive_draft, drive_zip)
+        drive_root = Path("/content/drive")
+        self.upload_receipt = W.HTML(value="No file received by the kernel.")
+
+        def receipt(change):
+            value = change["new"]
+            entries = value.values() if isinstance(value, Mapping) else value
+            session.selected_upload_bytes = sum(len(entry["content"]) for entry in entries)
+            self.clear_upload_button.disabled = session.busy or not value
+            self._update_editor_summary()
+            if not value:
+                self.upload_receipt.value = "No file received by the kernel."
+                return
+            try:
+                name, data = upload_content(value)
+            except ValueError as error:
+                self.upload_receipt.value = escape(str(error))
+            else:
+                self.upload_receipt.value = f"Received <b>{escape(name)}</b> ({len(data):,} bytes)."
+
+        upload.observe(receipt, names="value")
+
+        def editable(action):
+            if session.busy:
+                return
+            self._guard(session.generation, action)
+
+        def clear_upload():
+            if isinstance(upload.value, Mapping):
+                with upload.hold_sync():
+                    upload.data = []
+                    upload.metadata = []
+                    upload._counter = 0
+                    upload.set_trait("value", {})
+            else:
+                upload.value = ()
+
+        def read():
+            name, data = upload_content(upload.value)
+            # BytesIO can reuse bytes, but copies a widget memoryview.
+            extra = len(data) if name.lower().endswith(".zip") and not isinstance(data, bytes) else 0
+            self._open_uploaded(name, data, upload_bytes=extra)
+            if name.lower().endswith(".zip"):
+                clear_upload()
+
+        def download(path):
+            # Colab transport is imported only on explicit download.
+            try:
+                from google.colab import files
+            except ImportError:
+                self.notice.value = f"Saved to <code>{escape(str(path))}</code>"
+            else:
+                files.download(str(path))
+
+        def draft_artifact():
+            return session.save_draft(self.directory / f"draft-{uuid4().hex}.lcprop.json")
+
+        def zip_artifact():
+            reason = session.export_unavailable()
+            if reason:
+                raise ValueError(reason)
+            session.runtime_policy.check(2 * session.export_size(session.completed),
+                shutil.disk_usage(self.directory).free,label="ZIP staging disk")
+            name = f"completed-{uuid4().hex}"
+            with tempfile.TemporaryDirectory(dir=self.directory) as staging:
+                path = session.export_completed(Path(staging) / name)
+                archive = archive_completed(path)
+                return archive.rename(self.directory / archive.name)
+
+        def mount_drive():
+            from google.colab import drive
+            drive.mount(str(drive_root))
+
+        def save_drive(artifact):
+            if not (drive_root / "MyDrive").is_dir():
+                raise ValueError("Connect Google Drive first")
+            folder = (drive_root / drive_folder.value.strip()).resolve()
+            if folder == drive_root or not folder.is_relative_to(drive_root.resolve()):
+                raise ValueError("Choose a folder inside mounted Google Drive")
+            if not folder.is_dir():
+                raise ValueError("Choose an existing Google Drive folder")
+            path = save_verified_copy(artifact(), folder)
+            self.notice.value = f"Verified Drive copy: <code>{escape(str(path))}</code>"
+
+        mount.on_click(lambda _: editable(mount_drive))
+        drive_draft.on_click(lambda _: editable(lambda: save_drive(draft_artifact)))
+        drive_zip.on_click(lambda _: editable(lambda: save_drive(zip_artifact)))
+
+        load.on_click(lambda _: editable(read))
+        self.clear_upload_button.on_click(lambda _: editable(clear_upload))
+        save.on_click(lambda _: editable(lambda: download(draft_artifact())))
+        export.on_click(lambda _: editable(lambda: download(zip_artifact())))
+        self.files.children = (
+            upload, self.upload_receipt, W.HBox([load, self.clear_upload_button, save, export]), self.export_notice,
+            disclosure("Google Drive (optional)", W.VBox(list(self.drive_buttons))),
+        )
+
+    def _open_uploaded(self, name, data, *, upload_bytes=None):
+        self.session._editable()
+        if name.lower().endswith(".zip"):
+            extra = len(data) if upload_bytes is None else upload_bytes
+            self.session.runtime_policy.check(extra * 3, self.session.memory_available(), label="ZIP staging")
+            with tempfile.TemporaryDirectory(prefix="reopen-", dir=self.directory) as staging:
+                self.session.reopen(unpack_completed(data, Path(staging), admission=lambda size: self.session.runtime_policy.check(size, self.session.memory_available(), label="ZIP expansion")), upload_bytes=extra)
+            self._update_editor_summary()
+            self.notice.value = f"Reopened <b>{escape(name)}</b>."
+            return
+        if not name.lower().endswith(".json"):
+            raise ValueError("Select an experiment JSON or completed ZIP")
+        with tempfile.TemporaryDirectory(prefix="draft-", dir=self.directory) as staging:
+            path = Path(staging) / "draft.lcprop.json"
+            path.write_bytes(data)
+            self.session.load_draft(path, upload_bytes=len(data) if upload_bytes is None else upload_bytes)
+        self._refresh_preview()
+        self._sync()
+        self.notice.value = f"Loaded <b>{escape(name)}</b>."
+
+    def open_from_colab(self):
+        """Run in a notebook cell to use Colab's native blocking picker."""
+        self.session._editable()
+        from google.colab import files
+
+        with tempfile.TemporaryDirectory(dir=self.directory) as staging:
+            uploaded = files.upload(target_dir=staging)
+            if not uploaded:
+                return
+            name, data = selected_upload({
+                path: {"content": content} for path, content in uploaded.items()
+            })
+            self._open_uploaded(Path(name).name, data)
+
+    def display_in_colab(self):
+        """Display the controller and pull updates through Colab's browser callback."""
+        from google.colab import output
+        from IPython.display import JSON, Javascript
+
+        if self._colab_callback is not None:
+            output.unregister_callback(self._colab_callback)
+        name = self._colab_callback = f"lcprop.status.{uuid4().hex}"
+
+        def poll(last_state):
+            session = self.session
+            state = [session.generation, session.status]
+            if state != last_state:
+                self._refresh_status(None)
+                self.stop_button.send_state("disabled")
+                for control in (*self.beam_plane.inputs, self.upload, self.load_button, self.save_button,
+                                self.export_button):
+                    control.send_state("disabled")
+            elif session.busy:
+                self.progress_view.send_state("value")
+            return JSON({"state": state, "busy": session.busy})
+
+        output.register_callback(name, poll)
+        display(self.widget)
+        display(Javascript("""
+(() => {
+  const mount = document.createElement('div');
+  element.appendChild(mount);
+  let state = null;
+  async function poll() {
+    if (!mount.isConnected) return;
+    try {
+      const response = await google.colab.kernel.invokeFunction(CALLBACK, [state], {});
+      const update = response.data['application/json'];
+      state = update.state;
+      setTimeout(poll, update.busy ? 500 : 1500);
+    } catch (error) {
+      if (mount.isConnected) {
+        mount.textContent = 'Automatic progress connection ended. Redisplay the notebook controls to reconnect.';
+      }
+    }
+  }
+  setTimeout(poll, 0);
+})();
+""".replace("CALLBACK", json.dumps(name))))
+
+
+    def _refresh_status(self, _):
+        """Resend state from a live frontend callback after a missed update."""
+        if self.session.disposed:
+            return
+        self._generation = None
+        self._sync()
+        self.status.send_state("value")
+        self.progress_view.send_state("value")
+        for control in (self.editor, self.actions, self.files, self.source):
+            control.send_state()
+
+    def _sync(self):
+        session = self.session
+        self.status.value = f"<b>{escape(session.status)}</b> {escape(session.message)}"
+        if session.last_run_id is None:
+            self.progress_view.value = "CPU · No admitted run" if material_for(session.route) == "lc" else "No admitted run"
+        else:
+            done, total, stage = session.progress or (None, None, "")
+            stage = stage or ("Preparing / executing" if session.busy else session.status)
+            known = done is not None and total is not None and 0 <= done <= total and total > 0
+            meter = ""
+            if known:
+                meter = f'<progress max="{total}" value="{done}"></progress> {done}/{total}'
+            elif session.busy:
+                meter = "<progress></progress>"
+            stop = {"stopping": " · Stop requested", "stopped": " · Stop acknowledged"}
+            device = session.last_device
+            label = f"Auto → {device.label}" if device.requested == "auto" else device.label
+            fallback = f"<br>{escape(device.fallback_reason)}" if device.fallback_reason else ""
+            self.progress_view.value = (
+                f"Run {session.last_run_id} · {escape(label)} · {escape(device.precision)} · {session.elapsed:.1f} s"
+                f"{stop.get(session.status, '')}<br>{escape(stage)} {meter}{fallback}"
+            )
+        route_changed = self._view_route != session.route
+        if route_changed:
+            self._route_views[self._view_route] = (
+                self.source.value, self.field.value, self.cut.value,
+                self.aspect.value, self.position.value,
+            )
+            self._view_route = session.route
+            self._refresh_preview()
+        changed = self._generation != session.generation
+        if changed:
+            self._generation = session.generation
+            self._make_editor()
+            self.beam_plane.sync()
+            self.stop_button.close()
+            self.stop_button = W.Button(description="Stop")
+            generation = session.generation
+            self.stop_button.on_click(lambda _: self._guard(generation, session.stop))
+            self.actions.children = (self.stop_button, self.refresh_button)
+        self.stop_button.disabled = session.status != "running"
+        self.upload.disabled = session.busy
+        self.load_button.disabled = session.busy
+        self.clear_upload_button.disabled = session.busy or not self.upload.value
+        self.save_button.disabled = session.busy
+        self.export_button.disabled = session.busy or bool(session.export_unavailable())
+        self.export_button.tooltip = session.export_unavailable()
+        self.export_notice.value = escape(session.export_unavailable())
+        for control in self.drive_buttons:
+            control.disabled = session.busy
+        self.drive_buttons[-1].disabled = self.export_button.disabled
+        records = (session.completed, session.partial)
+        if changed or self._record != tuple(id(record) for record in records):
+            completed_changed = session.completed is not None and (
+                self._record is None or self._record[0] != id(session.completed))
+            self._record = tuple(id(record) for record in records)
+            options = ["Draft preview"]
+            if session.completed is not None:
+                options.append("Completed")
+            if session.partial is not None:
+                options.append("Stopped / partial")
+            self._updating_results = True
+            try:
+                saved_view = self._route_views.get(session.route) if route_changed else None
+                old = saved_view[0] if saved_view else self.source.value
+                self.source.options = options
+                self.source.value = "Completed" if completed_changed and not saved_view else (
+                    old if old in options else options[0])
+            finally:
+                self._updating_results = False
+            self._update_selection()
+            if saved_view:
+                _, field, cut, aspect, position = saved_view
+                if field in dict(self.field.options).values():
+                    self.field.value = field
+                self.cut.value = cut
+                self.aspect.value = aspect
+                if position in dict(self.position.options).values():
+                    self.position.value = position
+
+    def _products(self):
+        if self.source.value == "Draft preview":
+            fields = {} if self._preview is None else {self._preview.key: self._preview}
+            return fields, None, None
+        record = (self.session.completed if self.source.value == "Completed"
+                  else self.session.partial)
+        if record is None or record.products is None:
+            return {}, None, record
+        return dict(record.products.fields.items()), record.products.geometry, record
+
+    def _update_selection(self, _=None):
+        if self._updating_results or self.session.disposed:
+            return
+        self._updating_results = True
+        try:
+            fields, geometry, record = self._products()
+            options = [(field.display_name, key) for key, field in fields.items()
+                       if getattr(field.data, "ndim", 0) in (2, 3)]
+            if record is not None and material_for(record.route) == "pr":
+                options = [
+                    (f"{label} ({PR_SPACE_CHARGE_SUFFIXES[key]})"
+                     if key in PR_SPACE_CHARGE_SUFFIXES else label, key)
+                    for label, key in options
+                ]
+            if self.session.route == "lc" and self.source.value == "Completed":
+                options = [(label if key in fields else f"{label} (unavailable)", key)
+                           for key, label in LC_VOLUME_FIELDS.items()] + [
+                    (label, key) for label, key in options if key not in LC_VOLUME_FIELDS
+                ]
+            old = self.field.value
+            self.field.options = options
+            keys = [value for _, value in options]
+            self.field.value = old if old in keys else (keys[0] if keys else None)
+            field = fields.get(self.field.value)
+            self.cut.disabled = bool(field is not None and set(field.axes) == {"s_x", "s_y"})
+            missing = set(field.axes) - set(PLANES[self.cut.value]) if field else set()
+            coordinate = None
+            axis = None
+            if field is not None and field.data.ndim == 3 and len(missing) == 1:
+                try:
+                    axis = next(iter(missing))
+                    coordinate, unit = field_coordinates(field, geometry, axis)
+                except ValueError:
+                    pass
+            key = (self.source.value, self.field.value, self.cut.value, id(record))
+            index = 0 if coordinate is None or self.cut.value == "x–y" else len(coordinate) // 2
+            self.position.disabled = coordinate is None
+            previous = self.position.value
+            self.position.description = f"{axis} cut" if coordinate is not None else "Cut"
+            self.position.layout.display = "" if coordinate is not None else "none"
+            self.position.options = [] if coordinate is None else [
+                (f"{value:.6g} {unit}", i) for i, value in enumerate(coordinate)
+            ]
+            if coordinate is not None:
+                self.position.value = previous if key == self._view_key else index
+            self._view_key = key
+            self._show_identity(record)
+        finally:
+            self._updating_results = False
+        self._draw()
+
+    def _show_identity(self, record):
+        if record is None:
+            self.details.value = "Draft preview. No executed request for this view."
+            return
+        diagnostics = ""
+        if record.products is not None:
+            diagnostics = "\n".join(
+                f"{name}.{key}: {value}"
+                for name, diagnostic in record.products.diagnostics.items()
+                for key, value in diagnostic.values.items()
+                if isinstance(value, (str, float, int, bool))
+            )
+        metadata = record.provenance or {}
+        if record.device is not None:
+            metadata = {**metadata, "device": record.device.metadata()}
+        provenance = json.dumps(metadata, indent=2)
+        self.details.value = (
+            f"<b>{escape(self.source.value)} · {record.run_id}</b>"
+            f"<p>Request SHA-256: {record.digest}</p>"
+            f"<pre>{escape(provenance)}\n{escape(diagnostics)}\n{escape(record.request_json)}</pre>"
+        )
+
+    def _draw(self, _=None):
+        if self._updating_results or self.session.disposed:
+            return
+        fields, geometry, _ = self._products()
+        field = fields.get(self.field.value)
+        try:
+            if self.source.value == "Draft preview" and self.cut.value != "x–y":
+                raise ValueError("The entrance preview has XY data only. Select a completed result for longitudinal cuts.")
+            if field is None:
+                label = LC_VOLUME_FIELDS.get(self.field.value)
+                if label is not None:
+                    raise ValueError(f"The completed result has no retained {label} volume.")
+                raise ValueError(self._preview_message or "No retained field")
+            axes = ("s_x", "s_y") if set(field.axes) == {"s_x", "s_y"} else PLANES[self.cut.value]
+            plane = retained_plane(field, geometry, axes,
+                                   None if self.position.disabled else self.position.value)
+            fig = self._figure
+            if fig is None:
+                with plt.ioff():
+                    size = (8, 5) if self.fixed_route == "lc" else (6, 4)
+                    fig = self._new_result_figure() if hasattr(self,"_new_result_figure") else plt.figure(figsize=size, layout="constrained")
+                if isinstance(fig.canvas, W.Widget):
+                    self._figure = fig
+                    fig.canvas.layout.min_width = f"{fig.bbox.width:g}px"
+                    self.canvas_host.children = (fig.canvas,)
+            try:
+                fig.clear()
+                ax = fig.add_subplot()
+                square = self.aspect.value == "Square"
+                artist = draw_plane(ax, plane, square)
+                # Use the displayed physical ratio, including axis unit conversion.
+                wide_plot = not square and ax.get_aspect() * ax.get_data_ratio() <= 1 / 3
+                fig.colorbar(artist, ax=ax, label=plane.value_unit,
+                             location="bottom" if wide_plot else "right")
+                if hasattr(self,"_decorate_result_figure"):
+                    self._decorate_result_figure(fig,ax,field,plane)
+                self.plot_message.value = ""
+                self.canvas_host.layout.display = ""
+                if self._figure is not None:
+                    fig.canvas.draw_idle()
+                else:
+                    with self.plot:
+                        self.plot.clear_output(wait=True)
+                        display(fig)
+            finally:
+                if self._figure is None:
+                    plt.close(fig)
+        except ValueError as error:
+            self.canvas_host.layout.display = "none"
+            self.plot.clear_output()
+            self.plot_message.value = f"Unavailable: {escape(str(error))}"
+
+    async def dispose(self):
+        if self._colab_callback is not None:
+            from google.colab import output
+
+            output.unregister_callback(self._colab_callback)
+            self._colab_callback = None
+        self.beam_plane.close()
+        close_widgets(self.widget)
+        self.session.notify = lambda: None
+        if getattr(self, "_figure", None) is not None:
+            plt.close(self._figure)
+        await self.session.dispose()
+
+
+class LCNotebook(InteractiveBatch):
+    """LC static and time-dependent entry controller."""
+
+    fixed_route = "lc"
+
+
+class PRNotebook(InteractiveBatch):
+    """Reduced and full-transverse PR static and TD entry controller."""
+
+    fixed_route = "pr"

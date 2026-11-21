@@ -1,0 +1,56 @@
+{
+  "artifacts": {
+    "LCProp-PR-capabilities.ipynb": "5623a06a892937986a29db07b2f10e80b6d56dc3a43dee0f787f1f472aa26e0f",
+    "lcprop-0.5.0rc3-py3-none-any.whl": "ce9153666272780d3eac63f2c56d2777ae821a260bca6619e26852049cb78edd",
+    "LCProp-PR-capabilities-setup.zip": "a29f9785324948b897a1b497758c5521c466358889d0fa0d86acf4da80850f85",
+    "SHA256SUMS": "d37823c078249f9e58f913d54f77a4995096e79367fe53210b7838f81d8f7080",
+    "PINS.json": "bc4f14df6f3741e1c88a04d412d937df8e1f6e82ff49e569a253fe8356fb56f2"
+  },
+  "member_count": 27,
+  "changed_kit_members": [
+    "PINS.json",
+    "frontend/pr_colab/batch_beam_plane.py",
+    "frontend/pr_colab/beam_decorations.py"
+  ],
+  "notebook_source_and_pins_match": true,
+  "renderer_only_color_lookup_changed": true,
+  "historical_files_verified": {
+    "hosted-acceptance-2026-11-21": 46,
+    "hosted-repair-acceptance-2026-11-21": 24,
+    "pr-readiness-review-2026-11-21": 12,
+    "readiness-fixes-2026-11-21": 67
+  },
+  "failed_hosted_and_local_fix_records_unchanged": true,
+  "engine_source_wheel_desktop_release_paths_unchanged": true,
+  "source_base": "c4ac281342fef5476834a308343bfb3478307f46",
+  "hosted_tests": false,
+  "propagation": false,
+  "gpu": false,
+  "review_findings": [],
+  "tests": {
+    "passed": 99,
+    "seconds": 22.77,
+    "saved_fixtures": 3,
+    "nine_hashes_each": true
+  },
+  "negative_control": {
+    "original_renderer_restored_only_in_test_process": true,
+    "expected_failures": 6,
+    "error": "IndexError: tuple index out of range",
+    "product_source_modified": false
+  },
+  "review_rebuild_byte_identical": true,
+  "new_hosted_acceptance": false,
+  "scope": "PR capability frontend only",
+  "base": "8c6b4d069db4ea05f2922ba4da9c382cc3286218",
+  "branch": "frontend/pr-capability-readiness-fixes-20261121",
+  "cpu_acceptance": "CPU-ACCEPTANCE-a29f9785.json",
+  "unverified_drag_and_scroll": true,
+  "clean_source_preparation": {
+    "passed": 96,
+    "optional_private_fixture_skips": 3,
+    "seconds": 17.66,
+    "exact_build_byte_identical": true,
+    "source_diff_files": 46
+  }
+}
