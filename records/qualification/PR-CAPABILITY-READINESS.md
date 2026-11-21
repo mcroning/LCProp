@@ -1,3 +1,5 @@
+Current local correction: [PR31 selector fix](PR31-SELECTOR-FIX.md), delivery-v5. The a29f9785 identities/acceptance below describe the previous exact PR head; the new kit has local verification only.
+
 # PR capability frontend — current review candidate
 
 Current pair: [delivery-v4](../../delivery-v4/README.md), setup ZIP a29f9785, notebook5623a06a and frontend2d92f421, with unchanged enginece915366. The public rc5 opening links and release remain unchanged. This source PR is a separately supplied local preview, not a new release.

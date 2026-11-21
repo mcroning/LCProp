@@ -198,9 +198,24 @@ def build_editor(app):
             s.generation+=1; app._refresh_preview(); app._sync()
         except Exception as error:app.notice.value=escape(str(error))
     apply_json.on_click(apply_complete)
+    def restore_workflow_selectors():
+        # Revert only navigation controls, never rebuild or discard invalid text.
+        was_loading = app._loading_form
+        app._loading_form = True
+        try:
+            active_pair = next((pair for pair, key in ROUTE_CHOICES.items()
+                                if key == s.route), ('reduced', 'static'))
+            if s.route == 'pr_unified':
+                active_pair = ('full' if s.draft.closure.dimension == 2 else 'reduced', 'static')
+            transport.value, evolution.value = active_pair
+            engine_workflow.value = s.route
+        finally:
+            app._loading_form = was_loading
+
     def switch(_):
         if s.busy or app._loading_form:return
         if app._form_invalid:
+            restore_workflow_selectors()
             app.notice.value='Correct invalid text or restore the preset before switching. Your text has not been discarded.'
             return
         target=ROUTE_CHOICES[(transport.value,evolution.value)]
@@ -208,8 +223,9 @@ def build_editor(app):
             s.switch(target);app._refresh_preview();app._sync()
     transport.observe(switch,names='value'); evolution.observe(switch,names='value')
     def select_engine(change):
-        if s.busy:return
+        if s.busy or app._loading_form:return
         if app._form_invalid:
+            restore_workflow_selectors()
             app.notice.value='Correct invalid text before changing workflow';return
         if change['new']!=s.route:
             s.switch(change['new']);app._refresh_preview();app._sync()

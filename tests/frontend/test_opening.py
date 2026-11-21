@@ -2,13 +2,13 @@ from pathlib import Path
 import json,types,os,sys,zipfile,hashlib
 import pytest
 ROOT=Path(__file__).resolve().parents[2]
-KIT=Path(os.environ.get('PR_CAPABILITY_KIT',str(ROOT/'delivery-v4/LCProp-PR-capabilities-setup.zip')))
+KIT=Path(os.environ.get('PR_CAPABILITY_KIT',str(ROOT/'delivery-v5/LCProp-PR-capabilities-setup.zip')))
 @pytest.fixture(autouse=True)
 def setup_kit_available():
     if not KIT.is_file():pytest.skip('Opening tests need the locally built exact kit: set PR_CAPABILITY_KIT. See frontend/README.md.')
 
 def opener():
-    notebook=json.loads((ROOT/'delivery-v4/LCProp-PR-capabilities.ipynb').read_text())
+    notebook=json.loads((ROOT/'delivery-v5/LCProp-PR-capabilities.ipynb').read_text())
     ns={'__name__':'opening_test'}
     exec(compile(''.join(notebook['cells'][1]['source']),'pinned notebook Open cell','exec'),ns)
     return ns
@@ -19,7 +19,7 @@ def test_kit_and_notebook_exact_pins():
     assert hashlib.sha256(members['lcprop-0.5.0rc3-py3-none-any.whl']).hexdigest()==m['ENGINE_SHA256']
     for path in (ROOT/'frontend/pr_colab').glob('*.py'):
         assert members['frontend/pr_colab/'+path.name]==path.read_bytes()
-    assert len(json.loads((ROOT/'delivery-v4/LCProp-PR-capabilities.ipynb').read_text())['cells'])==2
+    assert len(json.loads((ROOT/'delivery-v5/LCProp-PR-capabilities.ipynb').read_text())['cells'])==2
 
 
 def test_missing_kit_help_no_picker_no_install(tmp_path,monkeypatch,capsys):
@@ -72,14 +72,14 @@ def test_foreign_loaded_engine_is_rejected_without_replacing_modules(tmp_path):
 
 def test_headless_codec_subset_is_exact_and_has_no_gui_distribution():
     m=opener();contents=m['verify_kit'](KIT)
-    pins=json.loads((ROOT/'delivery-v4/PINS.json').read_text())
+    pins=json.loads((ROOT/'delivery-v5/PINS.json').read_text())
     provenance=json.loads((ROOT/'frontend/launchplane/PROVENANCE.json').read_text())
     assert provenance['source_wheel_sha256']==pins['headless_launchplane_source_sha256']
     assert not any(n.startswith('launchplane-') for n in contents)
     for name,digest in provenance['files'].items():
         assert hashlib.sha256(contents['frontend/launchplane/'+name]).hexdigest()==digest
     assert pins['notebook_dependencies']['ipywidgets']=='7.7.1'
-    assert 'PySide6' not in ''.join(json.loads((ROOT/'delivery-v4/LCProp-PR-capabilities.ipynb').read_text())['cells'][1]['source'])
+    assert 'PySide6' not in ''.join(json.loads((ROOT/'delivery-v5/LCProp-PR-capabilities.ipynb').read_text())['cells'][1]['source'])
 
 
 def test_dependency_failure_does_not_claim_setup_or_write_restart_receipt(tmp_path,monkeypatch,capsys):

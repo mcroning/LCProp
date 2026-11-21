@@ -36,3 +36,6 @@ src/lc_reference/
 !/records/CAPABILITIES.md
 !/records/LIMITS.md
 !/records/qualification/
+
+/delivery-v5/*.whl
+/delivery-v5/*.zip

@@ -9,7 +9,7 @@ import prepare_pr_frontend_tests as preparation
 
 
 def kit():
-    path=Path(os.environ.get('PR_CAPABILITY_KIT',str(ROOT/'delivery-v4/LCProp-PR-capabilities-setup.zip')))
+    path=Path(os.environ.get('PR_CAPABILITY_KIT',str(ROOT/'delivery-v5/LCProp-PR-capabilities-setup.zip')))
     if not path.is_file():pytest.skip('Explicit local kit required; see frontend/README.md')
     return path
 

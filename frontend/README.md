@@ -20,7 +20,7 @@ python tools/stage_pr_capabilities.py --input-kit /path/to/supplied-kit.zip --in
 
 Alternatively use `--engine-wheel /path/to/lcprop-0.5.0rc3-py3-none-any.whl`. No sibling checkout, absolute project path or original LaunchPlane wheel is needed. The unchanged headless LaunchPlane source subset and license are included in `frontend/launchplane`; `PROVENANCE.json` pins every upstream file. The build validates these files and the engine, refuses to overwrite an existing destination, and creates the notebook, setup ZIP, unchanged wheel, PINS.json and SHA256SUMS deterministically. It never installs software or runs a solver.
 
-Current tracked candidate notebook and manifest are under `delivery-v4/`. Setup ZIP and engine binaries remain **local supplied artifacts**, ignored by Git; they are not silently published with a source PR. Build to a new directory, verify its hashes against the tracked manifest, and set `PR_CAPABILITY_KIT` to that new ZIP. A source edit requires a newly identified kit; preserve older deliveries and their acceptance records.
+Current tracked candidate notebook and manifest are under `delivery-v5/`. Setup ZIP and engine binaries remain **local supplied artifacts**, ignored by Git; they are not silently published with a source PR. Build to a new directory, verify its hashes against the tracked manifest, and set `PR_CAPABILITY_KIT` to that new ZIP. A source edit requires a newly identified kit; preserve older deliveries and their acceptance records.
 
 ## Local tests without scientific work
 
