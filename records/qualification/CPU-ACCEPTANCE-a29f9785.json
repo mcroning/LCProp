@@ -1,0 +1,195 @@
+{
+  "scope": "Exact a29f9785 frontend CPU acceptance; not scientific qualification",
+  "identities": {
+    "kit_sha256": "a29f9785324948b897a1b497758c5521c466358889d0fa0d86acf4da80850f85",
+    "notebook_sha256": "5623a06a892937986a29db07b2f10e80b6d56dc3a43dee0f787f1f472aa26e0f",
+    "engine_sha256": "ce9153666272780d3eac63f2c56d2777ae821a260bca6619e26852049cb78edd",
+    "frontend_sha256": "2d92f4217bd0eb443e7b8ff386e343c05885d5679f0b37ffae3f148f839fd9f9"
+  },
+  "runtime": {
+    "fresh_cpu": true,
+    "python": "3.13.18",
+    "dependencies": {
+      "ipympl": "0.10.0",
+      "ipython-genutils": "0.2.0",
+      "ipywidgets": "7.7.1",
+      "jupyterlab_widgets": "1.1.11",
+      "matplotlib": "3.11.2",
+      "widgetsnbextension": "3.6.10"
+    },
+    "pip_check": "No broken requirements found.",
+    "documented_restart_count": 1
+  },
+  "checks": {
+    "three_beam_numeric_edits_and_rendering": true,
+    "four_route_draft_preservation": true,
+    "completed_result_preserved": true,
+    "plane_aspect_draws": 18,
+    "unexpected_dispatches": []
+  },
+  "saved_files": {
+    "batch4-pr1000-cupy.zip": {
+      "all_nine_match": true,
+      "member_sha256": {
+        "output/RESULT_READY.json": "ddc0670309f6cdb59e5c288c601c894849551843aaf9cfeab42ecfd9c6e8b5c2",
+        "output/checksums.sha256": "1e0c51ebb46ad24699ce72a2b8587c47e344c881208644a8f4052c30c2ad8f91",
+        "output/manifest.json": "693cf66e582b3a0821fb1d96a7a003e4cb0deb0e9c0490953dbdcd29fdff792d",
+        "output/result.json": "0d4a611117db174e1adc70c9bd91bd4ac33700b54f5945f3585074c9736669ce",
+        "output/result_arrays.npz": "3d9ef68cdb4f8f67d2d95bcf49299bcfc3b11163d3d7c7d9f87f14b69e93da0f",
+        "request/READY.json": "d35412687255b6f92206a64e79bb03e7cf5ce52b6632dbd773b1a1e9d65f39e2",
+        "request/checksums.sha256": "83f70eed3dc3ff6a2b7cf830e24fefb65145dcfe0e6792cba494c3de671352f8",
+        "request/manifest.json": "702a7a5fcf3a9daec51c58279844543aa0bc118b65f7ca75e98f639b58ea8129",
+        "request/request.json": "164aa189afd6259ed63d3c5cf4bdbcb22f8ec312d08b2f149411a9a30b70d7b6"
+      },
+      "route": "pr",
+      "run_id": "2e746f4f0e97476896d1979efc40a0f2",
+      "sha256": "ea18cc394e34dd54d1c4afe21baff88205098b83605678963269e645ba31be57",
+      "view": "Completed",
+      "views": [
+        {
+          "aspect": "Physical",
+          "field": "initial_E_stack",
+          "plane": "x\u2013y"
+        },
+        {
+          "aspect": "Square",
+          "field": "initial_E_stack",
+          "plane": "x\u2013y"
+        },
+        {
+          "aspect": "Physical",
+          "field": "initial_E_stack",
+          "plane": "x\u2013z"
+        },
+        {
+          "aspect": "Square",
+          "field": "initial_E_stack",
+          "plane": "x\u2013z"
+        },
+        {
+          "aspect": "Physical",
+          "field": "initial_E_stack",
+          "plane": "y\u2013z"
+        },
+        {
+          "aspect": "Square",
+          "field": "initial_E_stack",
+          "plane": "y\u2013z"
+        }
+      ]
+    },
+    "saved-full-xy-static.zip": {
+      "all_nine_match": true,
+      "member_sha256": {
+        "output/RESULT_READY.json": "1ea2e793c3b9aa5cba4e2f869359fac9978d9c7bdd5712c42f776104e06a56a1",
+        "output/checksums.sha256": "8a61f6fa1ac2d6b5ac9b4f8314046328227cc68c081924ef09510e1118963500",
+        "output/manifest.json": "fa0a2cd8f2b935a19e2e7600d2c193b88903cbba1dfda2d9d1707f1501b83710",
+        "output/result.json": "4e54f9182463d5538dcaefc123a38c05afb34fa136ea9be886469314bae8527b",
+        "output/result_arrays.npz": "e66e4b2be79c7e9366d1cc57471c437de32da743bac26a9811a0540fc8753241",
+        "request/READY.json": "bd37df9d9bc567890fa0c01d2d0a9ee2cd04e8c21519d513020d2e4cd362331b",
+        "request/checksums.sha256": "7927492aa1c527064dc85606256322d7444100d3bc1bee6fd6798814e36b6a18",
+        "request/manifest.json": "2101ec4501e5de973a43fb4c7676e38b1bd87ebe7a7de3cdb41908120ef9ae1c",
+        "request/request.json": "4c0fc8ec569880053571966f90a3e689af91f063799c195f6827b26c0d4ece05"
+      },
+      "route": "pr_xy_static",
+      "run_id": "96c22f7ebaf34708aca6b67f4a169513",
+      "sha256": "7bb6ec3ee8083c90a86d440b1460c76e6b0fd8a648434e45a10e0fbe5779e049",
+      "view": "Completed",
+      "views": [
+        {
+          "aspect": "Physical",
+          "field": "psi",
+          "plane": "x\u2013y"
+        },
+        {
+          "aspect": "Square",
+          "field": "psi",
+          "plane": "x\u2013y"
+        },
+        {
+          "aspect": "Physical",
+          "field": "psi",
+          "plane": "x\u2013z"
+        },
+        {
+          "aspect": "Square",
+          "field": "psi",
+          "plane": "x\u2013z"
+        },
+        {
+          "aspect": "Physical",
+          "field": "psi",
+          "plane": "y\u2013z"
+        },
+        {
+          "aspect": "Square",
+          "field": "psi",
+          "plane": "y\u2013z"
+        }
+      ]
+    },
+    "saved-reduced-static.zip": {
+      "all_nine_match": true,
+      "member_sha256": {
+        "output/RESULT_READY.json": "0ba072fe326de8586182fed964a6300ffa33e7be3915574255c6b551920a5de5",
+        "output/checksums.sha256": "460cb10b47390746a546db87d9b42cebb8f435cc92faf952d67872d62c482088",
+        "output/manifest.json": "138d5669d6f48c0ff3179141c64a918aea7ea9cbb6bcc86b7782b4a08b9c530f",
+        "output/result.json": "80553443b1575a1c31c09e57bf8e989eaafd9d2ba60c5655ada8e1c01d960086",
+        "output/result_arrays.npz": "47ba6e2ccf551dcfae92f36cc27a258f41cf9b80629ae8c79e0f7bd918c81365",
+        "request/READY.json": "db60d8d020112b3e2118918c952128736256c3490d5be0a6e2ae2d9838dbd616",
+        "request/checksums.sha256": "325fa549903b15d39cf284a7b58559b5a3d636329daeaa6d6193e0a8c8d68fb6",
+        "request/manifest.json": "5d63644ac0a8edb8a51b5ec13854822ed64a1f89502e3c48358d8dc928d07757",
+        "request/request.json": "fd6b646d641de6e7edafd42857dd33fdbd0bef495498aa4fe2b2cce320b23ce2"
+      },
+      "route": "pr_static",
+      "run_id": "8b1e569a58b64c9089a29701d82389d8",
+      "sha256": "4649c43a9bf4500c11c784f7d0789a2cd3f6ca9eef70afec17f64d874db2af0a",
+      "view": "Completed",
+      "views": [
+        {
+          "aspect": "Physical",
+          "field": "initial_E_stack",
+          "plane": "x\u2013y"
+        },
+        {
+          "aspect": "Square",
+          "field": "initial_E_stack",
+          "plane": "x\u2013y"
+        },
+        {
+          "aspect": "Physical",
+          "field": "initial_E_stack",
+          "plane": "x\u2013z"
+        },
+        {
+          "aspect": "Square",
+          "field": "initial_E_stack",
+          "plane": "x\u2013z"
+        },
+        {
+          "aspect": "Physical",
+          "field": "initial_E_stack",
+          "plane": "y\u2013z"
+        },
+        {
+          "aspect": "Square",
+          "field": "initial_E_stack",
+          "plane": "y\u2013z"
+        }
+      ]
+    }
+  },
+  "unverified": [
+    "Browser Move/Tilt dragging: automation blocked fractional iframe input coordinates",
+    "Internal plot scrolling: scrollbar click blocked by the same tool guard",
+    "No saved full-transverse TD numerical fixture in this session",
+    "No new GPU or scientific numerical qualification"
+  ],
+  "evidence": {
+    "local_report_sha256": "f9c103e66f594f4562eeaeac1958cc4344b8c2dc854bc4cdd40573347a2b0d61",
+    "summary_sha256": "3e23616b8809f7ba0120b0d31df48e0e7bc154ee4c3e831645a5462f9b785151",
+    "receipt_sha256": "3d2a079333fbad6eeb6820d6bf1f7c74c42ee926496127b82dccdb209c9b662e",
+    "three_beam_figure_sha256": "59d548edc357d35ff4654ef1c849a554392e6e86bef7f850ff0c852bc957908b"
+  },
+  "historical_failed_verdict": "old3706de1c third-beam crash preserved; new kit does not erase failed attempt"
+}

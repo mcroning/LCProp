@@ -1,0 +1,10 @@
+{
+  "source_wheel_sha256": "2c6310bb2dff18d0fbbd0978fc37ff11f9de55079af302e399722f01370d40f6",
+  "scope": "Unchanged headless LaunchPlane source subset; no installed GUI distribution",
+  "files": {
+    "LICENSE": "e183326555a90089b9a0387967598815c4b0dc512b4fe902799e57bc7afe3868",
+    "__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "model.py": "51473190050d19e2fecd0a86c2a2359d1f23751410563daf5a90f9debb8a2cb7",
+    "serialization.py": "602f224c8244a9eebbc08beee203324c028c626e56ee9e57dc7191175d0bafb7"
+  }
+}
