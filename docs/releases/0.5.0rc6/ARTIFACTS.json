@@ -1,0 +1,35 @@
+{
+  "assembly_version": "0.5.0rc6",
+  "base": "e96a79319819d905851dcba294aed6af316dd0ed",
+  "merge_pr": 31,
+  "engine_distribution_version": "0.5.0rc3",
+  "engine_sha256": "ce9153666272780d3eac63f2c56d2777ae821a260bca6619e26852049cb78edd",
+  "frontend_sha256": "e48b5bb4adf069403671ad7c73f8541a154492f07ded2b7ca7c87e7042268f09",
+  "assets": {
+    "CANDIDATE-NOTES.md": "c9367d9d4148d42057b53f9afe7cd2681875a4ce2f4e78719ffb68f20a7aa718",
+    "lcprop-0.5.0rc3-py3-none-any.whl": "ce9153666272780d3eac63f2c56d2777ae821a260bca6619e26852049cb78edd",
+    "LCProp-PR-capabilities-setup.zip": "656488191be5d3e0e2f9ff37a615a148ae73fba4f099df8c5ecfccf62b8603bb",
+    "LCProp-PR-capabilities-0.5.0rc6-candidate.ipynb": "f8a75c4c5683e3443cf3f1cf183ff3818d9a9557e48ce3a4bde0a035bfe27338",
+    "SHA256SUMS": "3a0b6b0f7dffe9cb8957846ea6301e03e42364f06ebc9adbd2e0b1245e7e4b44"
+  },
+  "acceptance_records": {
+    "focused_65648819": {
+      "REPORT.md": "9fd99cc4a712b76660db402475656570e709b97936a4856bce77080f108f60ea",
+      "SUMMARY.json": "0b758109f5b38f197a6f2aa8589a44a78841dbe7b20cf0b1eac479587a6d7d7e"
+    },
+    "earlier_a29f9785": {
+      "REPORT.md": "f9c103e66f594f4562eeaeac1958cc4344b8c2dc854bc4cdd40573347a2b0d61",
+      "SUMMARY.json": "3e23616b8809f7ba0120b0d31df48e0e7bc154ee4c3e831645a5462f9b785151"
+    }
+  },
+  "exact_accepted_opening_code_and_payloads": true,
+  "deterministic_two_builds": true,
+  "verified_members": 27,
+  "wrong_input_and_overwrite_guards": true,
+  "unverified_interactions": [
+    "actual browser Move/Tilt dragging",
+    "complete internal plot scrolling"
+  ],
+  "new_hosted_or_numerical_qualification": false,
+  "metadata_boundary": "Frontend assembly rc6; no relabelled/new rc6 engine or PyPI distribution"
+}
