@@ -39,3 +39,6 @@ src/lc_reference/
 
 /delivery-v5/*.whl
 /delivery-v5/*.zip
+
+# Local rc6 candidate binaries are preserved outside source control.
+/candidate/
